@@ -24,7 +24,7 @@ request/response hooks to test their services on our machines.
 
 ### User Goals
 - Authors write a workflow once in C#, unit-test it offline, and have it live within 60 s of merge.
-- Operators trigger, schedule, cancel, and re-run with confidence and see live state within 1 s.
+- Operators trigger, schedule, abort, and re-run with confidence and see live state within 1 s.
 - Viewers find any workflow in ≤ 3 interactions via team → type → metadata.
 - Service teams get perf and parity verdicts with reports, without owning any infrastructure.
 
@@ -40,7 +40,7 @@ request/response hooks to test their services on our machines.
 
 ## 3. User Personas
 - **Workflow Author**: engineer writing single-file C# workflows with the SDK; high technical level.
-- **Operator**: triggers, schedules, cancels, retries runs; watches live state; medium–high.
+- **Operator**: triggers, schedules, aborts, retries runs; watches live state; medium–high.
 - **Viewer / Lead**: browses by team/type/metadata, reads history, trends, and reports; low–medium.
 - **Platform Admin**: core team; manages engine, machines, retention, deployments; high.
 - **Service Team Engineer (phase 2)**: writes C# request/response hooks, picks machines, runs tests; high.
@@ -49,7 +49,7 @@ request/response hooks to test their services on our machines.
 | Role | Permissions | Key Actions |
 |------|-------------|-------------|
 | Author | Register/version/clone workflows in owned team types | Write script, run tests, merge, view versions |
-| Operator | Trigger/cancel/re-run; manage user-defined schedules in permitted types | Run now, schedule, cancel, re-run |
+| Operator | Trigger/abort/re-run; manage user-defined schedules in permitted types | Run now, schedule, abort, re-run |
 | Viewer | Read-only within permitted teams | Browse, filter, view runs, logs, reports, trends |
 | Admin | Full, all teams | Machines, retention, rollback, audit, deployments |
 | Service Team | Register own hooks; reserve machines from permitted pools; run phase 2 tests | Write hooks, run perf/parity tests |
@@ -64,13 +64,13 @@ presentation, needed for team isolation), FR-112 (perf thresholds).
 | ID | Requirement | Priority | Problem it solves | Milestones | Est. AI |
 |----|-------------|----------|-------------------|------------|---------|
 | REQ-001 | Authors define workflows as single-file C# scripts with the SDK | Must | No common way to express multi-step, dependency-aware goals in code | M-001.1, M-001.2 | 05:35 |
-| REQ-002 | Durable, fast, fault-tolerant execution engine on Windows and Linux agents | Must | Runs get stuck, lost, or slow; no dependency handling | M-002.1, M-002.2, M-002.3 | 09:00 |
+| REQ-002 | Durable, fast, fault-tolerant execution engine on Windows and Linux agents | Must | Runs get stuck, lost, or slow; no dependency handling | M-002.1, M-002.2, M-002.3 | 09:15 |
 | REQ-003 | On-demand and recurring triggers (code-defined and user-defined) | Must | Runs cannot be started with chosen variables or on a reliable schedule | M-003.1, M-003.2, M-003.3 | 05:25 |
 | REQ-004 | Every workflow/config issue is caught by unit tests before check-in | Must | Errors found only at registration or at runtime | M-004.1, M-004.2 | 03:30 |
 | REQ-005 | Semantic versioning, automatic registration, instant activation, cloning | Must | Changes are untraceable and slow to go live | M-005.1, M-005.2 | 03:20 |
 | REQ-006 | Live status of runs, stages, nodes, tasks, and logs | Must | Users cannot see progress without refreshing or digging into machines | M-006.1, M-006.2 | 03:35 |
 | REQ-007 | Team-isolated catalogue organised by type and metadata | Must | Types duplicate, teams' content mixes, workflows are hard to find | M-007.1, M-007.2 | 03:25 |
-| REQ-008 | Run history and execution metrics | Must | No auditable history; no data to find slow or failing parts | M-008.1, M-008.2 | 03:25 |
+| REQ-008 | Run history and execution metrics | Must | No auditable history; no data to find slow or failing parts | M-008.1, M-008.2 | 03:30 |
 | REQ-009 | Multiple reports per run and large artifacts | Must | Task results cannot be reviewed in the UI; raw data has nowhere to go | M-009.1, M-009.2 | 04:15 |
 | REQ-010 | SSO, team-scoped RBAC, secrets, audit, public API | Must | Anyone could operate anything; secrets could leak; changes untraceable | M-010.1, M-010.2 | 03:20 |
 | REQ-011 | Zero-downtime operations, local/cloud parity, retention | Must | Deploys interrupt users/runs; cloud not reproducible locally; storage grows unbounded | M-011.1, M-011.2, M-011.3 | 04:35 |
@@ -87,7 +87,7 @@ presentation, needed for team isolation), FR-112 (perf thresholds).
 | REQ-022 | Per-team quotas on machines and load rate (phase 2) | Could | One team can monopolise shared machines | M-022.1 | 00:50 |
 | REQ-023 | Step-load "find max" mode (phase 2) | Could | A service's max sustainable rate is unknown | M-023.1 | 00:55 |
 | REQ-024 | Recorded live traffic as a request source (phase 2) | Could | Synthetic/file requests may not reflect real traffic | M-024.1 | 01:00 |
-| **Total** | | | | | **76:30** |
+| **Total** | | | | | **76:50** |
 
 ### Won't Have
 - Drag-and-drop workflow editor — _Rationale: code-first by design._
@@ -117,7 +117,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
   - [ ] A node's tasks run in declared order (series) or concurrently (parallel) with an optional max-parallelism.
   - [ ] Node and task keys are unique within a workflow; duplicates fail with the duplicate key.
 - **US-002** — **As an** Author **I want** lifecycle stages (system init → pre-setup → tasks → post-process → system post-process) **So that** setup and cleanup are structured (`Est. AI: 00:30`)
-  - [ ] Stages execute in that order; post-process and system post-process run even when earlier stages fail or the run is cancelled.
+  - [ ] Stages execute in that order; post-process and system post-process run even when earlier stages fail or the run is aborted.
   - [ ] Each stage's state is reported like a node (FR-033).
 
 ##### FEAT-001.1.2: Variables, metadata, and type
@@ -177,34 +177,39 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 ### REQ-002: Durable, fast, fault-tolerant execution engine (Must Have)
 - **Outcome**: Runs execute their DAG on Windows and Linux agents with dispatch p95 ≤ 50 ms, survive the loss of any single component, and always reach exactly one terminal status.
 - **Traces**: FR-012–015, FR-017, FR-037, FR-102; NFR-003, NFR-004, NFR-028–NFR-034.
-- **Est. AI**: 09:00
+- **Est. AI**: 09:15
 
 #### Milestone M-002.1: Dependency-aware execution core
-- **Problem solved**: No deterministic engine executes a DAG with policies, retries, timeouts, and cancellation.
-- **Est. AI**: 02:40
+- **Problem solved**: No deterministic engine executes a DAG with policies, retries, timeouts, and abort.
+- **Est. AI**: 02:55
 
 ##### FEAT-002.1.1: Event-sourced run state machine
 - **Est. AI**: 01:20
 
-- **US-010** — **As an** Operator **I want** every run to end in exactly one of Succeeded, Failed, Cancelled, TimedOut **So that** outcomes are unambiguous (`Est. AI: 00:40`)
+- **US-010** — **As an** Operator **I want** every run to end in exactly one of Succeeded, Failed, Aborted, TimedOut **So that** outcomes are unambiguous (`Est. AI: 00:40`)
   - [ ] Every state change is an appended event with a per-run sequence number; current state is rebuildable from events.
   - [ ] No entity can move from a terminal state; invalid transitions are rejected and logged.
 - **US-011** — **As an** Author **I want** nodes to start only when their dependencies satisfy the dependency condition **So that** order is respected (`Est. AI: 00:40`)
   - [ ] Independent branches run concurrently; downstream of a hard failure is Skipped; `always` nodes still run.
   - [ ] A 200-node workflow of no-op tasks completes in ≤ 3 s end to end on the engine core (NFR-030).
 
-##### FEAT-002.1.2: Retries, timeouts, cancellation
-- **Est. AI**: 01:05
+##### FEAT-002.1.2: Retries, timeouts, abort
+- **Est. AI**: 01:20
 
 - **US-012** — **As an** Author **I want** retries (count, fixed/exponential backoff) and timeouts per task and node **So that** transient failures self-heal and hangs end (`Est. AI: 00:35`)
   - [ ] Each attempt is recorded; Retrying state is visible; timeout ends the entity TimedOut and applies its failure policy.
   - [ ] Run-level timeout ends the run TimedOut after post-process stages run.
-- **US-013** — **As an** Operator **I want** to cancel a run **So that** I stop wasted work (`Est. AI: 00:30`)
-  - [ ] Running tasks receive a cancellation signal (CancellationToken; for processes: graceful signal then kill after grace period, default 30 s).
-  - [ ] Post-process stages and `always` nodes run; run ends Cancelled.
+- **US-013** — **As an** Operator **I want** to abort a queued or running run with a reason **So that** I stop wasted work and everyone knows who stopped it and why (`Est. AI: 00:45`)
+  - [ ] Abort is available from the UI, the API (`POST /runs/{id}/abort`) and the CLI (`wf abort <runId> --reason "…"`); the reason is mandatory (1–500 chars); requires Operator on the workflow's type or Admin, otherwise 403.
+  - [ ] The run records who aborted it (principal id and display name), when (UTC, time accepted), the reason, and the source (UI/API/CLI/kill switch); the record is immutable and is written to the run event log and the audit trail.
+  - [ ] The run moves to `Aborting` immediately (visible live ≤ 1 s); running tasks receive a cancellation signal (CancellationToken; for processes: graceful signal then kill after grace period, default 30 s); not-started nodes become Skipped.
+  - [ ] Post-process stages and `always` nodes still run (bounded by their timeouts) and can read the abort details from the context; reservations are released; the run ends `Aborted` with `ended_at` = actual stop time.
+  - [ ] A queued run goes straight to `Aborted` with no tasks dispatched.
+  - [ ] Idempotent: a second abort while `Aborting` returns 202 with the original record (first abort wins); aborting a terminal run returns 409 with its status; an abort survives engine failover.
+  - [ ] Aborting a scheduled run does not pause its schedule; an aborted run can be re-run.
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
-- [ ] **Unit tests**: state machine transition table fully covered (100% of transitions, property-based tests over random DAGs ≤ 200 nodes: every run reaches one terminal state).
+- [ ] **Unit tests**: state machine transition table fully covered (100% of transitions, property-based tests over random DAGs ≤ 200 nodes: every run reaches one terminal state; aborts injected at random points (queued, mid-task, during post-process, twice) always end `Aborted` with exactly one abort record).
 - [ ] **Performance**: BenchmarkDotNet engine-core benchmark: per-node overhead p95 ≤ 10 ms; 200-node no-op workflow ≤ 3 s; result stored as CI baseline (regression > 10% fails build).
 - [ ] **Unit tests (cross-OS)**: green on Windows and Linux.
 
@@ -538,23 +543,24 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 ### REQ-008: Run history and execution metrics (Must Have)
 - **Outcome**: Full history per workflow and run series, and timing, failure, latency, CPU, and RAM metrics for every run, stage, node, task, agent, and engine component.
 - **Traces**: FR-023, FR-046; NFR-010.
-- **Est. AI**: 03:25
+- **Est. AI**: 03:30
 
 #### Milestone M-008.1: Run history
 - **Problem solved**: No auditable history per workflow or recurring series.
-- **Est. AI**: 01:20
+- **Est. AI**: 01:25
 
 ##### FEAT-008.1.1: History per workflow and run series
-- **Est. AI**: 01:05
+- **Est. AI**: 01:10
 
-- **US-050** — **As a** Viewer **I want** run history per workflow and per series with status, duration, trigger, variables, version **So that** I can audit outcomes (`Est. AI: 00:35`)
+- **US-050** — **As a** Viewer **I want** run history per workflow and per series with status, duration, trigger, variables, version **So that** I can audit outcomes (`Est. AI: 00:40`)
   - [ ] Series history shows skipped/missed fires with reasons; paged, sortable, filterable.
+  - [ ] Aborted runs show an `Aborted` badge with who, when, and reason in run lists, history and series views, and a banner on the run page; history filters by `Aborted` and by who aborted. The run page Abort button (Operator/Admin only) opens a confirm dialog with a required reason field.
 - **US-051** — **As an** Operator **I want** a run detail timeline (stages, nodes, tasks, attempts, agent) **So that** I see exactly what happened (`Est. AI: 00:30`)
   - [ ] Gantt-style timeline with queue wait vs execution time per task.
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
 - [ ] **Integration tests**: history API paging/filter tests on 100k runs.
-- [ ] **UI / E2E tests**: US-050, US-051 flows; **Accessibility**: zero axe critical/serious.
+- [ ] **UI / E2E tests**: US-050 (including abort: confirm with reason → banner and history show who/when/reason), US-051 flows; **Accessibility**: zero axe critical/serious.
 
 #### Milestone M-008.2: Execution metrics
 - **Problem solved**: There is no data to find slow, failing, or resource-hungry parts.
@@ -564,7 +570,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - **Est. AI**: 01:20
 
 - **US-052** — **As a** Viewer **I want** queue wait, start/end/duration, retries, terminal status, and failure category per run/stage/node/task **So that** I can improve workflows (`Est. AI: 00:40`)
-  - [ ] Failure categories: TaskError, Timeout, Cancelled, AgentLost, ResourceLimit, ValidationError, PlatformError.
+  - [ ] Failure categories: TaskError, Timeout, Aborted, AgentLost, ResourceLimit, ValidationError, PlatformError.
 - **US-053** — **As a** Viewer **I want** CPU and RAM per task process and per machine **So that** I can right-size work (`Est. AI: 00:40`)
   - [ ] Sampled every ≤ 5 s; summary (avg/max CPU, peak RAM) stored per task; series viewable per task.
 
@@ -864,7 +870,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - **Est. AI**: 01:10
 
 - **US-081** — **As a** Service Team engineer **I want** machines reserved exclusively for my test **So that** results are not skewed (`Est. AI: 00:45`)
-  - [ ] Reserved machines run only that run's tasks; released on success, failure, cancellation, engine failover, or reservation timeout; 0 leaked reservations.
+  - [ ] Reserved machines run only that run's tasks; released on success, failure, abort, engine failover, or reservation timeout; 0 leaked reservations.
 - **US-082** — **As an** Operator **I want** to queue or reject (configurable) a run when machines are unavailable **So that** behaviour is predictable (`Est. AI: 00:25`)
   - [ ] Queued runs show position and the blocking reservation.
 
@@ -980,7 +986,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - **US-093** — **As a** Service Team engineer **I want** constant, ramp, step, and spike shapes with a target rate split across machines by capacity **So that** I test realistic load (`Est. AI: 00:45`)
   - [ ] Open-model scheduling (no coordinated omission); achieved rate within ±5% of target at steady state; generator overhead < 1 ms p99 per request.
 - **US-094** — **As an** Operator **I want** a kill switch **So that** I stop load immediately (`Est. AI: 00:25`)
-  - [ ] All generators for the run stop sending within 1 s; run ends Cancelled with reason.
+  - [ ] All generators for the run stop sending within 1 s; run is aborted with source `KillSwitch` and who/when/reason recorded as in US-013.
 
 ##### FEAT-018.1.2: Saturation detection
 - **Est. AI**: 00:35
@@ -1163,6 +1169,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 | Invalid variables | Trigger with wrong type | Inline error, no run created | User fixes and retries |
 | Engine failover | Leader killed mid-run | Runs resume ≤ 30 s; UI reconnects and resyncs | No lost or duplicated state |
 | Agent lost | Machine disconnects | Attempt ends `AgentLost`; retried elsewhere or failed with reason; reservation released | Run reaches terminal state |
+| Abort | Operator aborts a running run with a reason | Run shows Aborting; tasks signalled; post stages run; who/when/reason recorded | Run ends Aborted; details visible everywhere |
 | Overlap | Schedule fires while previous run active | Policy applied (default skip), recorded | History shows reason |
 | Missed fires | Scheduler outage | Misses recorded; latest-only catch-up | No silent gaps |
 | Report too large | Publish > 10 MB | Publish call fails; failure policy applies | Clear error in task log |
@@ -1203,12 +1210,12 @@ Design detail lives in the technical design doc; constraints that shape requirem
 - Phase 2 onboarding: 0 core PRs per new service; ≤ 1 day to onboard — _onboarding log_.
 
 ## 9. Delivery Sequence
-Milestones in build order across all requirements. Phase 1 = 54:15; phase 2 = 22:15.
+Milestones in build order across all requirements. Phase 1 = 54:35; phase 2 = 22:15.
 
 | Order | Milestone | Requirement | Priority | Est. AI | Depends on | Exit criteria met |
 |-------|-----------|-------------|----------|---------|------------|-------------------|
 | 1 | M-001.1 Express a workflow in code | REQ-001 | Must | 03:30 | — | [ ] |
-| 2 | M-002.1 Dependency-aware execution core | REQ-002 | Must | 02:40 | M-001.1 | [ ] |
+| 2 | M-002.1 Dependency-aware execution core | REQ-002 | Must | 02:55 | M-001.1 | [ ] |
 | 3 | M-001.2 Run locally with built-in tasks | REQ-001 | Must | 02:05 | M-002.1 | [ ] |
 | 4 | M-004.1 Shared validator | REQ-004 | Must | 02:05 | M-001.1 | [ ] |
 | 5 | M-004.2 Dry-run test harness | REQ-004 | Must | 01:25 | M-002.1, M-004.1 | [ ] |
@@ -1221,7 +1228,7 @@ Milestones in build order across all requirements. Phase 1 = 54:15; phase 2 = 22
 | 12 | M-006.2 Task logs and outputs | REQ-006 | Must | 01:15 | M-002.2 | [ ] |
 | 13 | M-007.1 Team and type registry | REQ-007 | Must | 01:50 | M-004.1 | [ ] |
 | 14 | M-007.2 Browse and filter | REQ-007 | Must | 01:35 | M-007.1, M-006.1 | [ ] |
-| 15 | M-008.1 Run history | REQ-008 | Must | 01:20 | M-003.1 | [ ] |
+| 15 | M-008.1 Run history | REQ-008 | Must | 01:25 | M-003.1 | [ ] |
 | 16 | M-003.2 User-defined schedules | REQ-003 | Must | 02:15 | M-003.1 | [ ] |
 | 17 | M-003.3 Code-defined schedules | REQ-003 | Must | 01:55 | M-003.2, M-005.1 | [ ] |
 | 18 | M-005.2 Version history and cloning | REQ-005 | Must | 01:25 | M-005.1 | [ ] |
@@ -1251,7 +1258,7 @@ Milestones in build order across all requirements. Phase 1 = 54:15; phase 2 = 22
 | 42 | M-022.1 Quota enforcement | REQ-022 | Could | 00:50 | M-015.2 | [ ] |
 | 43 | M-023.1 Find max sustainable rate | REQ-023 | Could | 00:55 | M-018.1 | [ ] |
 | 44 | M-024.1 Traffic recording source | REQ-024 | Could | 01:00 | M-017.2 | [ ] |
-| **Total** | | | | **76:30** | | |
+| **Total** | | | | **76:50** | | |
 
 ## 10. Open Questions
 - [ ] None blocking. Assumptions carried from discovery (validate during build): ≥ 1,000 workflow definitions and ≥ 200 concurrent tasks (NFR-003); Entra ID for SSO (NFR-007); Bond packages available from the internal feed.

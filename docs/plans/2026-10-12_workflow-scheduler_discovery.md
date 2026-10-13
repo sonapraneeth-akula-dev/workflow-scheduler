@@ -1,5 +1,5 @@
 # Discovery: Workflow Scheduler (+ Phase 2: Perf & Response-Parity Testing)
-**Date**: 2026-10-12 | **Status**: Approved | **Owner**: soakula
+**Date**: 2026-10-12 | **Status**: Approved | **Owner**: soakula | **Revised**: 2026-10-13 — run abort with who/when/reason (FR-015, scenario A2)
 
 > Produced in autopilot: interview answers below are **assumed defaults** (marked _Assumed_).
 > Every assumption is listed in §9 and §12 for stakeholder confirmation before status → Approved.
@@ -32,7 +32,7 @@ service team owns **only request/response-specific logic** via a narrow hook sur
 | Role | Needs | Technical level | Permissions |
 |------|-------|-----------------|-------------|
 | Workflow Author | Write workflow scripts using the SDK; define nodes, tasks, variables, metadata, type | High (engineer) | Create/edit definitions in owned types |
-| Operator | Trigger, schedule, cancel, retry runs; watch live status | Medium–High | Run/cancel/retry on permitted workflows |
+| Operator | Trigger, schedule, abort, retry runs; watch live status | Medium–High | Run/abort/retry on permitted workflows |
 | Viewer / Lead | Browse by type & metadata, see status and history/trends | Low–Medium | Read-only |
 | Platform Admin (core team) | Manage engine, machines, quotas, connectors, retention | High | Full |
 | Service Team (phase 2) | Supply request/response hooks for their service (request shaping, response normalisation, comparator extensions); pick machines; run tests | High | Register hooks for own service only; reserve machines from permitted pools |
@@ -40,7 +40,7 @@ service team owns **only request/response-specific logic** via a narrow hook sur
 
 ## 4. Goals & Success Criteria
 - **Goal**: Extremely reliable dependency-aware execution — **Measured by**: 100% of runs reach a terminal state
-  (Succeeded/Failed/Cancelled/TimedOut) with no orphaned/stuck nodes over 30 days; ≤ 0.01% of runs fail for platform (non-workflow) reasons.
+  (Succeeded/Failed/Aborted/TimedOut) with no orphaned/stuck nodes over 30 days; ≤ 0.01% of runs fail for platform (non-workflow) reasons.
 - **Goal**: Agile / fast execution — **Measured by**: platform overhead (scheduling + dispatch + state persistence) adds ≤ 5% to a run's wall-clock time vs running the same tasks directly (NFR-028–NFR-030).
 - **Goal**: Lean on CPU and RAM — **Measured by**: engine and agent footprint targets in NFR-031/NFR-032 met under peak load.
 - **Goal**: Live visibility — **Measured by**: node state change visible in UI p95 ≤ 1 s after it occurs (NFR-001).
@@ -66,9 +66,9 @@ service team owns **only request/response-specific logic** via a narrow hook sur
 - Zero-downtime platform deployments; workflow and schedule config changes go live immediately after check-in without redeploying.
 - Runs on Azure (VMs or managed services) and fully locally (single-machine dev setup); Windows + Linux for
   engine, agents, and SDK.
-- Run lifecycle: queued → running → succeeded/failed/cancelled/timed-out; per node and per task.
+- Run lifecycle: queued → running → (aborting) → succeeded/failed/aborted/timed-out; per node and per task.
 - Live status of workflow, nodes, tasks; logs/outputs per task.
-- Retries, timeouts, cancellation, re-run (whole or from failed node).
+- Retries, timeouts, abort of a started run (who, when, reason recorded), re-run (whole or from failed node).
 - History: all runs, grouped by schedule ("run series"), filterable, with trends.
 - UI: separate views per workflow type; group/filter/search by metadata.
 - Extensibility: task executors are pluggable (core ships a few generic ones, e.g. HTTP call, script/container).
@@ -103,6 +103,12 @@ Smoke → post-process (publish report) → system post-process (cleanup). Autho
 registers it. Operator triggers it with `env=staging, version=1.4`. UI shows the graph; nodes turn
 running/succeeded live; Deploy-US fails after 2 retries → Smoke skipped → run ends Failed. Operator fixes the
 cause and re-runs from Deploy-US; Build/Deploy-EU results are reused.
+
+### A2. Abort a started run
+Mid-run, the operator notices the wrong `version` was passed and clicks Abort, entering the reason "wrong build
+version". Running tasks are signalled to stop, not-started nodes are skipped, post-process still publishes a
+partial report, and the run ends Aborted. The run page, history, series view, notifications and audit log all
+show who aborted it, when, and why. Aborting again or aborting a finished run changes nothing.
 
 ### B. Recurring parameterised schedule and its history
 A schedule config file (separate from the workflow script) defines default variables grouped by category
@@ -157,10 +163,10 @@ sample diffs; below threshold → run Failed.
 | FR-012 | The system shall execute a node only after its dependencies complete per their failure policy (FR-038); downstream nodes of a hard-failed node are marked Skipped. | Must | Independent branches continue. |
 | FR-013 | The system shall support per-node dependency conditions: on-success (default), on-failure, always. | Should | Enables cleanup nodes (release machines, stop load). |
 | FR-014 | The system shall support configurable retries (count, backoff) and timeouts per task and per node. | Must | |
-| FR-015 | The system shall let operators cancel a running workflow; running tasks receive a cancellation signal and the run ends Cancelled. | Must | |
+| FR-015 | The system shall let operators abort a queued or running workflow run from the UI, API, or CLI with a mandatory reason. The system shall record who aborted it, when, the reason, and the source (UI/API/CLI/kill switch); running tasks receive a cancellation signal, not-started nodes are skipped, post-process stages and `always` nodes still run, and the run ends Aborted. Abort details are shown on the run, in history, live, in notifications, and in the audit trail. | Must | First abort wins (idempotent); aborting a finished run is rejected. |
 | FR-016 | The system shall let operators re-run a failed run from failed node(s), reusing outputs of succeeded nodes. | Should | |
-| FR-017 | The system shall expose a terminal status for each run: Succeeded, Failed, Cancelled, TimedOut. | Must | |
-| FR-018 | The system shall push live state changes for runs, nodes, and tasks (queued, running, retrying, succeeded, failed, soft-failed, skipped, cancelled) to clients; clients load one snapshot then apply deltas, and resync from a sequence number after reconnect. | Must | No periodic polling. |
+| FR-017 | The system shall expose a terminal status for each run: Succeeded, Failed, Aborted, TimedOut. | Must | |
+| FR-018 | The system shall push live state changes for runs, nodes, and tasks (queued, running, retrying, aborting, succeeded, failed, soft-failed, skipped, cancelled, aborted) to clients; clients load one snapshot then apply deltas, and resync from a sequence number after reconnect. | Must | No periodic polling. |
 | FR-019 | The system shall capture logs and structured outputs per task, viewable during and after execution. | Must | |
 | FR-020 | The system shall let node outputs be consumed as inputs by dependent nodes. | Should | |
 | FR-021 | The system shall organise the UI as team → workflow type → workflows; each team's types and workflows appear only under that team's area and never mix with another team's. | Must | Team isolation in UI. |
@@ -169,7 +175,7 @@ sample diffs; below threshold → run Failed.
 | FR-024 | The system shall show trends for a run series (success rate, duration over time). | Should | |
 | FR-025 | The system shall provide built-in task types (HTTP call, script/command, SDK function) usable from workflow scripts. | Must | Phase 2 tasks build on these. |
 | FR-026 | The system shall enforce role-based permissions (Author, Operator, Viewer, Admin) scoped by team and workflow type. | Must | |
-| FR-027 | The system shall keep an audit trail of who triggered, cancelled, edited, or scheduled what and when. | Must | |
+| FR-027 | The system shall keep an audit trail of who triggered, aborted (with reason), edited, or scheduled what and when. | Must | |
 | FR-028 | The system shall notify subscribers (email/Teams/webhook) on run completion or failure. | Should | |
 | FR-029 | The system shall reference secrets by name from a secret store and never persist or display secret values in definitions, params, metadata, or logs. | Must | |
 | FR-030 | The system shall apply a configurable retention period to run history, logs, and outputs. | Should | Default 90 days. |
@@ -209,7 +215,7 @@ sample diffs; below threshold → run Failed.
 |----|-------------|----------|-------|
 | FR-101 | The system shall maintain a registry of machines (agents) with labels, capacity, health, and pool membership. | Must | |
 | FR-102 | The system shall let a run or node target machines explicitly (by ID) or by label selector and count. | Must | |
-| FR-103 | The system shall reserve selected machines exclusively for a test and release them on completion, failure, cancellation, or reservation timeout. | Must | No leaked reservations. |
+| FR-103 | The system shall reserve selected machines exclusively for a test and release them on completion, failure, abort, or reservation timeout. | Must | No leaked reservations. |
 | FR-104 | The system shall queue or reject (configurable) a run when requested machines are unavailable. | Must | |
 | FR-105 | The system shall expose to service teams only a versioned C# request/response hook contract: request shaping/transformation, response normalisation, and comparator override/extension. | Must | Everything else is core-owned. |
 | FR-106 | The system shall let service teams register and version their hooks without changes to core code. | Must | |

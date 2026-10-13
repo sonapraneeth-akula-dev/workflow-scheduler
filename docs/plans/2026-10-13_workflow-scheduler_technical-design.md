@@ -199,18 +199,29 @@ Data between tasks flows through outputs (≤ 64 KB via the engine) and artifact
 stateDiagram-v2
   [*] --> Queued
   Queued --> Running: first stage starts
-  Queued --> Cancelled: cancel
+  Queued --> Aborted: abort (nothing dispatched)
   Running --> Succeeded: all done, no hard failure
   Running --> Failed: hard failure / reservation unavailable (reject)
-  Running --> Cancelled: cancel (post stages still run)
+  Running --> Aborting: abort (who, when, reason recorded)
+  Aborting --> Aborted: running tasks stopped, post stages done
   Running --> TimedOut: run timeout (post stages still run)
   Succeeded --> [*]
   Failed --> [*]
-  Cancelled --> [*]
+  Aborted --> [*]
   TimedOut --> [*]
 ```
 Node/task states: `Pending → Ready → Dispatched → Running → (Retrying → Dispatched)* → Succeeded | SoftFailed | Failed | TimedOut | Cancelled | Skipped | Reused`.
 Terminal states are absorbing; the transition table is the single source of truth (property-tested, §10).
+Node/task `Cancelled` means "stopped by an abort or by a hard-failed sibling"; the run-level outcome is `Aborted`.
+
+### Run abort (FR-015)
+- **Who and how**: Operator on the workflow's type, or Admin, from the UI (confirm dialog), `POST /api/v1/runs/{id}/abort`, or `wf abort <runId> --reason "…"`. The phase 2 kill switch is an abort with source `KillSwitch`.
+- **Abort record**: `aborted_by` (principal id), `aborted_by_name`, `aborted_at` (UTC, when the api accepted it), `abort_reason` (required, 1–500 chars; kill switch defaults to "Kill switch"), `abort_source` (UI/API/CLI/KillSwitch). The api sets it with a conditional update (`WHERE aborted_at IS NULL AND status IN (Queued, Running)`) in the same transaction as the `Abort` command and the `audit_log` row, so the first abort wins and the record is immutable. The engine copies it into a `RunAbortRequested` event, so live clients, history, notifications and the run page all read the same data.
+- **Flow**: engine applies the command → `Running → Aborting` (pushed live) → `Cancel{attempt, graceMs, reason}` to every running attempt (CancellationToken; processes get CTRL_BREAK / SIGTERM, then are killed after `graceMs`, default 30 s) → running nodes end `Cancelled`, not-started nodes `Skipped` → post-process, system post-process and `always` nodes run with `ctx.Abort` set (bounded by their own timeouts) → reservations released → `Aborted`, `ended_at` = actual stop time.
+- **Queued runs** go straight to `Aborted`; nothing is dispatched.
+- **Repeat / late aborts**: while `Aborting`, a repeat returns 202 with the stored record; on a terminal run → 409 with the current status. A task that completes between the abort and its `Cancel` keeps its real result.
+- **Failover**: the record and command are durable in PG; a new leader that finds `aborted_at` set on a `Running` run resumes the abort.
+- **Not an abort**: run timeout ends `TimedOut`, a hard failure ends `Failed`. Aborting a scheduled run does not pause its schedule; an aborted run can be re-run.
 
 ### Applicable standards
 OpenTelemetry semantic conventions (NFR-010) · WCAG 2.2 AA (NFR-009) · RFC 9457 Problem Details (API errors) ·
@@ -440,6 +451,7 @@ Conventions:
 | | trigger, triggered_by | smallint, text | N | | Manual/Schedule/Api/Rerun/CatchUp |
 | | variables, metadata | jsonb | N | GIN(metadata jsonb_path_ops) | metadata copied from definition |
 | | status, failure_category, status_reason | smallint, smallint, text | N,Y,Y | partial idx(status) WHERE active | |
+| | aborted_by, aborted_by_name, aborted_at, abort_reason, abort_source | text, text, timestamptz, text, smallint | Y | idx(aborted_by, aborted_at) WHERE aborted_at IS NOT NULL | set once (FR-015); reason ≤ 500 chars; source UI/API/CLI/KillSwitch |
 | | parent_run_id | uuid | Y | | re-run lineage |
 | | placement | jsonb | Y | | trigger-time override, e.g. `{singleMachine:true, machine:"lab-07"}` |
 | | created_at, started_at, ended_at | timestamptz | N,Y,Y | | |
@@ -460,7 +472,7 @@ Conventions:
 | | cpu_avg_pct, cpu_max_pct, ram_peak_mb | real, real, int | Y | | summary; series in blob |
 | | log_uri, resource_series_uri | text | Y | | |
 | commands | id | uuid | N | PK | api → engine inbox |
-| | kind, run_id, payload | smallint, uuid, jsonb | N,Y,N | partial idx WHERE processed_at IS NULL | Trigger/Cancel/Rerun/KillLoad/RunNow/Activate |
+| | kind, run_id, payload | smallint, uuid, jsonb | N,Y,N | partial idx WHERE processed_at IS NULL | Trigger/Abort/Rerun/KillLoad/RunNow/Activate |
 | | idempotency_key | text | Y | UQ | 24 h dedupe window |
 | | created_by, created_at, processed_at | | N,N,Y | | |
 | agents | id | uuid | N | PK | |
@@ -526,12 +538,12 @@ agents. Within v1 only additive changes are allowed; breaking changes go to `/ap
 | POST | /api/v1/workflows/{id}/versions/{v}/clone | Author(type) | `newName, targetType` | zip scaffold (script with `ClonedFrom`, schedules stub, tests) | 400, 409 |
 | POST | /api/v1/registrations | Registrar (CI) | manifest, schedules, registry, source, package ref, git info | 201 version | 400 (validation problem), 409 (SemVer) |
 | POST | /api/v1/runs | Operator | `workflowId, version?, variables, seriesId?, placement?` + Idempotency-Key | 202 `{runId}` | 400 (variables, unsatisfiable placement), 403, 409 |
-| GET | /api/v1/runs | Viewer | `workflowId, seriesId, status, meta.*, from, to, cursor` | page of runs | 400 |
-| GET | /api/v1/runs/{id} | Viewer | — | snapshot (run, nodes, tasks, reports index) + `lastSeq` | 404 |
+| GET | /api/v1/runs | Viewer | `workflowId, seriesId, status, abortedBy, meta.*, from, to, cursor` | page of runs (abort record inline) | 400 |
+| GET | /api/v1/runs/{id} | Viewer | — | snapshot (run incl. abort record, nodes, tasks, reports index) + `lastSeq` | 404 |
 | GET | /api/v1/runs/{id}/events | Viewer | `afterSeq` | events (≤ 5,000) | 409 (too far behind → reload) |
-| POST | /api/v1/runs/{id}/cancel | Operator | reason | 202 | 409 (terminal) |
+| POST | /api/v1/runs/{id}/abort | Operator | `reason` (required, ≤ 500) + Idempotency-Key | 202 abort record `{by, byName, at, reason, source}` | 400 (reason missing/too long), 403, 409 (terminal; body has status) |
 | POST | /api/v1/runs/{id}/rerun | Operator | `fromNodes?` | 202 `{runId}` | 409 |
-| POST | /api/v1/runs/{id}/kill-load | Operator | — | 202 | 409 |
+| POST | /api/v1/runs/{id}/kill-load | Operator | `reason?` | 202 (abort with source `KillSwitch`) | 409 |
 | GET | /api/v1/runs/{id}/tasks/{task}/{attempt}/logs | Viewer | `offset, length` or `search` | log chunk / matches | 404 |
 | GET | /api/v1/runs/{id}/reports | Viewer | `kind, tag` | report index | 404 |
 | GET | /api/v1/reports/{id}/content | Viewer | — | 302 to short-lived SAS on report origin | 404 |
@@ -571,7 +583,7 @@ service LiveFeed     { rpc Subscribe(LiveFilter) returns (stream LiveBatch); } /
 //   | TaskStarted | TaskCompleted{key,attempt,status,outputs,error,resourceSummary} | LogLines
 //   | ResourceSample | PerfSample{hdrDelta,count,errors} | Ack{seq}
 // ControlMessage: Dispatch{run,version,packageUri,sha,taskKey,attempt,inputs,limits,secretsRefs,grants}
-//   | Cancel{attempt,graceMs} | Drain | MirrorLogs{attempt,on} | Calibrate{profile}
+//   | Cancel{attempt,graceMs,reason} | Drain | MirrorLogs{attempt,on} | Calibrate{profile}
 //   | UploadGrant{kind,uploadUri,maxBytes} | NotLeader{leaderHint} | Ack{seq}
 ```
 Both directions carry sequence numbers and acks, and the agent journals unacked results to disk, giving at-least-once
@@ -610,6 +622,7 @@ return await Workflow.Define("payments/release-validation/deploy-check", "1.4.0"
   - `--describe`: emit the manifest;
   - `--task-host --socket <path>`: serve tasks to the agent;
   - `--dry-run <mocks.json>`: harness.
+- `ctx.CancellationToken` fires on abort, timeout, or hard-failure cancellation. `ctx.Abort` is null unless the run is being aborted; post stages and `always` nodes can read `By`, `At`, `Reason` (e.g. to include them in the summary report).
 - Task delegates are resolved by stable keys (`node/task`), never by reflection over the assembly, so they are trim/AOT-safe.
 
 **Testing workflows** (verified on SDK 10.0.401: a regular test project **cannot** compile a file-based script, error
@@ -653,7 +666,7 @@ The frontend is a separate repo folder (`frontend/`) and a separate build. It is
 | `/t/$team/$type` | Type view: grouped/filtered workflow list | Viewer | workflows (search params = filters, `groupBy=meta.<k>`) | virtualised; filters in URL (shareable) |
 | `/t/$team/$type/w/$wf` | Workflow: tabs Runs · Schedules · Versions · Trends | Viewer | workflow, runs, schedules, versions | trigger dialog (typed variables form) |
 | `/t/$team/$type/w/$wf/versions/$v` | Version detail, diff vs previous, clone | Viewer | version, diff | Monaco diff (lazy) |
-| `/runs/$runId` | Run: Graph · Timeline · Tasks · Logs · Reports · Artifacts · Metrics | Viewer | snapshot + live `run` | cancel/re-run/kill-load buttons by role |
+| `/runs/$runId` | Run: Graph · Timeline · Tasks · Logs · Reports · Artifacts · Metrics | Viewer | snapshot + live `run` | abort (confirm dialog, reason required)/re-run/kill-load buttons by role; `Aborted` banner with who, when, reason |
 | `/runs/$runId/reports/$reportId` | Full-page report viewer | Viewer | report content | renderer per kind |
 | `/schedules/$id` | Schedule detail/edit (user) or read-only (code) | Viewer/Operator | schedule, fires | |
 | `/series/$id` | Series history: runs table, trends, re-trigger | Viewer | series runs, trends | FR-041/043 |
@@ -721,7 +734,7 @@ Status colours always pair with an icon and label (never colour alone). Typograp
   - Code is trusted (reviewed on check-in) but runs least-privilege: a dedicated OS user (`wfrun`), a per-run working directory, and Job Object/cgroup CPU/RAM limits.
   - Network is unrestricted by design (load tests); no admin rights.
 - **Transport**: TLS 1.2+ everywhere; agent ↔ task host uses Unix domain sockets with OS file permissions (owner only); PG via Entra auth.
-- **Audit**: every mutating API call, registration, activation, reservation and kill switch writes to `audit_log` (≥ 1 year).
+- **Audit**: every mutating API call, registration, activation, reservation, abort (with reason) and kill switch writes to `audit_log` (≥ 1 year).
 - **OWASP Top 10 coverage**:
   - A01 scope policies.
   - A02 TLS/KV.
@@ -847,7 +860,7 @@ Rollback = shift traffic back.
 
 **Observability**: OTel traces/metrics/logs from every component go to the profile's backend (Aspire dashboard, Prometheus/Grafana/Loki/Tempo, or Azure Monitor). Key metrics:
 - Latency: `wf_dispatch_latency_ms`, `wf_engine_overhead_ms`, `wf_group_commit_ms`, `wf_live_lag_ms`.
-- Scheduling: `wf_schedule_fire_delay_ms`, `wf_runs_active`, `wf_task_queue_wait_ms`, `wf_placement_wait_ms`.
+- Scheduling: `wf_schedule_fire_delay_ms`, `wf_runs_active`, `wf_task_queue_wait_ms`, `wf_placement_wait_ms`, `wf_runs_aborted_total`, `wf_abort_stop_ms` (abort accepted → run terminal).
 - Health: `wf_agent_connected`, `wf_engine_is_leader`, process CPU/RAM.
 
 Alerts fire on:
@@ -859,14 +872,14 @@ Alerts fire on:
 ## 10. Testing Strategy
 | Type | Tooling | Scope | Gate |
 |------|---------|-------|------|
-| Unit | xUnit v3, FsCheck | Engine core state machine (property tests: any event order → valid state, terminal reached, no lost tasks), validator, SemVer rules, schedule math (Cronos, DST), comparison engine, codecs | PR; ≥ 85% line coverage on `Wf.Engine.Core`, `Wf.Validation`, `Wf.Parity` |
+| Unit | xUnit v3, FsCheck | Engine core state machine (property tests: any event order → valid state, terminal reached, no lost tasks; aborts at any point → one abort record, `Aborted`), validator, SemVer rules, schedule math (Cronos, DST), comparison engine, codecs | PR; ≥ 85% line coverage on `Wf.Engine.Core`, `Wf.Validation`, `Wf.Parity` |
 | Workflow tests | `Wf.Sdk.Testing` (out-of-process dry-run) + xUnit | Each workflow: DAG shape, failure policies, variables, schedules file, SemVer baseline | PR in workflows repo (must pass before check-in, FR-034) |
 | Integration | Testcontainers PG (Linux) / service PG (Windows), WebApplicationFactory, in-proc agent | API contracts, registration, scheduler exactly-once, lease handover, recovery, retention | PR, both OS |
 | Chaos | Toxiproxy, process kill | Kill engine/agent/task host mid-run, PG disconnect, network partition → every run terminal, no duplicate effects (NFR-033) | Nightly |
 | Contract | OpenAPI drift check; proto breaking-change check (`buf breaking`) | API + agent protocol back-compat | PR |
 | Performance | BenchmarkDotNet; k6-style harness via `Wf.Load` | Engine overhead/node, 200-node no-op ≤ 3 s, dispatch p95 ≤ 50 ms, group commit, codecs, load gen 20k rps on reference VM | PR (micro, 10% gate); nightly (macro) |
 | Frontend unit | Vitest + Testing Library | Live store, renderers, forms | PR |
-| E2E | Playwright (Chromium, Firefox, WebKit) | Catalogue → trigger → live graph → reports; schedules CRUD; re-run; machines | PR (smoke), nightly (full) |
+| E2E | Playwright (Chromium, Firefox, WebKit) | Catalogue → trigger → live graph → reports; abort with reason; schedules CRUD; re-run; machines | PR (smoke), nightly (full) |
 | Accessibility | axe-core in Playwright | Every route, light + dark | PR, zero serious/critical |
 | Security | CodeQL, Dependabot, secret scanning, `dotnet list package --vulnerable`, `bun audit` | All code | PR, no high/critical |
 | Cross-OS | Matrix (windows-latest, ubuntu-latest) | Agent, task host, SDK, resource limits | PR |
@@ -889,7 +902,7 @@ workflow-scheduler/
 │  │  ├─ Wf.Validation           # manifest/schedule/team/SemVer validators
 │  │  ├─ Wf.ControlPlane         # one app, roles: api | engine | all (local)
 │  │  ├─ Wf.Agent                # Native AOT agent (Win service / systemd)
-│  │  ├─ Wf.Cli                  # wf validate|publish|clone|baseline|run [--single-machine] (dotnet tool)
+│  │  ├─ Wf.Cli                  # wf validate|publish|clone|baseline|run [--single-machine]|abort (dotnet tool)
 │  │  ├─ Wf.Hooks.Abstractions   # IServiceHooks, ComparisonRules (service-team facing)
 │  │  ├─ Wf.Hooks.Testing        # hook test helpers for service teams
 │  │  ├─ Wf.Load                 # load generator, rate control, HdrHistogram
@@ -988,4 +1001,5 @@ teams/<team>/<type>/<workflow>/tests/*.cs    # workflow tests (xUnit + Wf.Sdk.Te
 | Expand/contract | Schema migration pattern keeping old and new app versions compatible |
 | Deployment profile | Local, Self-hosted (bare metal / Azure VMs) or Azure PaaS; same artefacts, different adapters and deploy tooling |
 | Placement | Run-time choice of which agent runs a task attempt |
+| Abort | Operator-requested stop of a started run with a required reason; who/when/why recorded; run ends `Aborted` |
 | Selector / Affinity | Constraint on eligible machines (`RunsOn`) / rule keeping tasks on the same machine (`Node`, `Run`, `SameMachineAs`) |
