@@ -793,6 +793,7 @@ The reference dev machine has these prerequisites (verified): Windows 11, 16 cor
 
 - **Docker is optional**: if `ConnectionStrings:wf` is set (e.g. native PG via `winget install PostgreSQL.PostgreSQL.17`), the AppHost skips the container.
 - **Submit to the local stack**: `dotnet run workflow.cs -- --engine http://localhost:5000` runs a script on the local stack exactly as in production.
+- **Secrets locally**: `Secrets:Provider=Local` (user-secrets or DPAPI-protected file) by default. There is no Key Vault emulator. To use shared dev secrets, set `Secrets:Provider=KeyVault` and `Secrets:VaultUri`; `DefaultAzureCredential` signs in with the developer's `az login` / Visual Studio identity, so no secret is stored on disk.
 - **Data location**: `%LOCALAPPDATA%\wf` (Windows) / `${XDG_DATA_HOME:-~/.local/share}/wf` (Linux) holds blobs, the agent journal and task-host work dirs. `wf reset` wipes them.
 - **Footprint target**: idle ≤ 600 MB total (PG ≈ 200 MB, `wf-host` ≈ 250 MB, agent ≤ 100 MB), excluding Vite and the dashboard.
 - **Local perf tests**: these run against the sample services on the same box and are functional only. The machine's capacity is marked `Unverified` until calibrated (FR-125).
