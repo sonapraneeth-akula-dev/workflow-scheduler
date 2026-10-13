@@ -178,6 +178,22 @@ Data between tasks flows through outputs (≤ 64 KB via the engine) and artifact
 
 **Local**: one machine means one agent. The same algorithm runs and everything lands on that machine. Simulated agents (§9.2) exercise spreading.
 
+**Single-machine runs (testing override)**: any run can be forced onto one worker **without changing the workflow**. This is useful for testing, debugging, reproducing a failure, or validating a new machine.
+- **How to trigger**:
+  - UI trigger/re-run dialog: "Run on a single machine" toggle + machine picker, which lists only eligible machines.
+  - API: `placement: { singleMachine: true, machine?: "<name>" }` on `POST /runs` and `/rerun`.
+  - CLI: `wf run <wf> --single-machine [--machine <name>]` or `dotnet run workflow.cs -- --engine <url> --single-machine`.
+- **Semantics**: equivalent to `Affinity.Run` with the selector narrowed to that machine.
+  - Without `machine`, the engine picks one at first dispatch that satisfies the union of all node/task selectors.
+  - Parallel tasks still run in parallel up to the machine's `max_tasks` slots; the rest queue (visible as `WaitingForMachine`).
+  - Stages, retries and policies are unchanged. On agent loss, the run's tasks are re-placed together on another eligible machine, or fail with `Placement` if a named machine was requested.
+- **Validation at trigger (400 with the conflicting nodes)**:
+  - Some node's selector (OS, labels) can't be met by the chosen machine.
+  - The machine is reserved, draining or unhealthy.
+  - A phase 2 node reserves more than one machine; the fix is to set its count variable to 1.
+- **Visibility**: the override is stored on the run (`runs.placement`), shown as a badge, and kept by re-run unless changed.
+- **Distinct from the other test paths**: dry-run (§6.1) mocks tasks, and `dotnet run workflow.cs` runs in-process with no agent. Single-machine runs use real agents and real tasks.
+
 ### Run state machine
 ```mermaid
 stateDiagram-v2
@@ -425,6 +441,7 @@ Conventions:
 | | variables, metadata | jsonb | N | GIN(metadata jsonb_path_ops) | metadata copied from definition |
 | | status, failure_category, status_reason | smallint, smallint, text | N,Y,Y | partial idx(status) WHERE active | |
 | | parent_run_id | uuid | Y | | re-run lineage |
+| | placement | jsonb | Y | | trigger-time override, e.g. `{singleMachine:true, machine:"lab-07"}` |
 | | created_at, started_at, ended_at | timestamptz | N,Y,Y | | |
 | | last_seq, snapshot_seq | int | N | | resync + recovery |
 | run_events ⧉ | run_day, run_id, seq | date, uuid, int | N | PK | append-only |
@@ -508,7 +525,7 @@ agents. Within v1 only additive changes are allowed; breaking changes go to `/ap
 | POST | /api/v1/workflows/{id}/versions/{v}/activate | Admin | — | 200 active version | 404, 409 |
 | POST | /api/v1/workflows/{id}/versions/{v}/clone | Author(type) | `newName, targetType` | zip scaffold (script with `ClonedFrom`, schedules stub, tests) | 400, 409 |
 | POST | /api/v1/registrations | Registrar (CI) | manifest, schedules, registry, source, package ref, git info | 201 version | 400 (validation problem), 409 (SemVer) |
-| POST | /api/v1/runs | Operator | `workflowId, version?, variables, seriesId?` + Idempotency-Key | 202 `{runId}` | 400 (variables), 403, 409 |
+| POST | /api/v1/runs | Operator | `workflowId, version?, variables, seriesId?, placement?` + Idempotency-Key | 202 `{runId}` | 400 (variables, unsatisfiable placement), 403, 409 |
 | GET | /api/v1/runs | Viewer | `workflowId, seriesId, status, meta.*, from, to, cursor` | page of runs | 400 |
 | GET | /api/v1/runs/{id} | Viewer | — | snapshot (run, nodes, tasks, reports index) + `lastSeq` | 404 |
 | GET | /api/v1/runs/{id}/events | Viewer | `afterSeq` | events (≤ 5,000) | 409 (too far behind → reload) |
@@ -872,7 +889,7 @@ workflow-scheduler/
 │  │  ├─ Wf.Validation           # manifest/schedule/team/SemVer validators
 │  │  ├─ Wf.ControlPlane         # one app, roles: api | engine | all (local)
 │  │  ├─ Wf.Agent                # Native AOT agent (Win service / systemd)
-│  │  ├─ Wf.Cli                  # wf validate|publish|clone|baseline|run (dotnet tool)
+│  │  ├─ Wf.Cli                  # wf validate|publish|clone|baseline|run [--single-machine] (dotnet tool)
 │  │  ├─ Wf.Hooks.Abstractions   # IServiceHooks, ComparisonRules (service-team facing)
 │  │  ├─ Wf.Hooks.Testing        # hook test helpers for service teams
 │  │  ├─ Wf.Load                 # load generator, rate control, HdrHistogram

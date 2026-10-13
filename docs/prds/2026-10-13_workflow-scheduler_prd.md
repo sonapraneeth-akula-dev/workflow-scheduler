@@ -64,7 +64,7 @@ presentation, needed for team isolation), FR-112 (perf thresholds).
 | ID | Requirement | Priority | Problem it solves | Milestones | Est. AI |
 |----|-------------|----------|-------------------|------------|---------|
 | REQ-001 | Authors define workflows as single-file C# scripts with the SDK | Must | No common way to express multi-step, dependency-aware goals in code | M-001.1, M-001.2 | 05:35 |
-| REQ-002 | Durable, fast, fault-tolerant execution engine on Windows and Linux agents | Must | Runs get stuck, lost, or slow; no dependency handling | M-002.1, M-002.2, M-002.3 | 08:50 |
+| REQ-002 | Durable, fast, fault-tolerant execution engine on Windows and Linux agents | Must | Runs get stuck, lost, or slow; no dependency handling | M-002.1, M-002.2, M-002.3 | 09:00 |
 | REQ-003 | On-demand and recurring triggers (code-defined and user-defined) | Must | Runs cannot be started with chosen variables or on a reliable schedule | M-003.1, M-003.2, M-003.3 | 05:25 |
 | REQ-004 | Every workflow/config issue is caught by unit tests before check-in | Must | Errors found only at registration or at runtime | M-004.1, M-004.2 | 03:30 |
 | REQ-005 | Semantic versioning, automatic registration, instant activation, cloning | Must | Changes are untraceable and slow to go live | M-005.1, M-005.2 | 03:20 |
@@ -87,7 +87,7 @@ presentation, needed for team isolation), FR-112 (perf thresholds).
 | REQ-022 | Per-team quotas on machines and load rate (phase 2) | Could | One team can monopolise shared machines | M-022.1 | 00:50 |
 | REQ-023 | Step-load "find max" mode (phase 2) | Could | A service's max sustainable rate is unknown | M-023.1 | 00:55 |
 | REQ-024 | Recorded live traffic as a request source (phase 2) | Could | Synthetic/file requests may not reflect real traffic | M-024.1 | 01:00 |
-| **Total** | | | | | **76:20** |
+| **Total** | | | | | **76:30** |
 
 ### Won't Have
 - Drag-and-drop workflow editor — _Rationale: code-first by design._
@@ -177,7 +177,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 ### REQ-002: Durable, fast, fault-tolerant execution engine (Must Have)
 - **Outcome**: Runs execute their DAG on Windows and Linux agents with dispatch p95 ≤ 50 ms, survive the loss of any single component, and always reach exactly one terminal status.
 - **Traces**: FR-012–015, FR-017, FR-037, FR-102; NFR-003, NFR-004, NFR-028–NFR-034.
-- **Est. AI**: 08:50
+- **Est. AI**: 09:00
 
 #### Milestone M-002.1: Dependency-aware execution core
 - **Problem solved**: No deterministic engine executes a DAG with policies, retries, timeouts, and cancellation.
@@ -210,7 +210,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 
 #### Milestone M-002.2: Distributed execution on agents
 - **Problem solved**: Tasks must run on remote Windows/Linux machines quickly and without starving each other.
-- **Est. AI**: 03:20
+- **Est. AI**: 03:30
 
 ##### FEAT-002.2.1: Agent service
 - **Est. AI**: 01:05
@@ -232,16 +232,17 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
   - [ ] Idle agent ≤ 1% CPU, ≤ 100 MB RAM; per-task harness overhead ≤ 50 MB (NFR-032).
 
 ##### FEAT-002.2.3: Run-time task placement
-- **Est. AI**: 00:35
+- **Est. AI**: 00:45
 
-- **US-107** — **As an** Author **I want** each task placed on a suitable machine at run time, with optional selectors (OS, labels, pool, machine names, variable-driven) and affinity (none, same node, whole run, same machine as another node) **So that** runs use the fleet in parallel yet tasks that share local state stay together (`Est. AI: 00:35`)
+- **US-107** — **As an** Author **I want** each task placed on a suitable machine at run time, with optional selectors (OS, labels, pool, machine names, variable-driven) and affinity (none, same node, whole run, same machine as another node) **So that** runs use the fleet in parallel yet tasks that share local state stay together (`Est. AI: 00:45`)
   - [ ] Default: each task attempt goes to a healthy, non-draining, selector-matching agent with a free slot, preferring one with a warm host for the run, then the least loaded.
   - [ ] Affinity pins hold for the run; after agent loss the task is re-placed and the pin moves.
   - [ ] No eligible machine → task shows `WaitingForMachine` live; after the placement timeout (default 10 min) it fails with category `Placement`.
+  - [ ] Testing override: a run or re-run can be forced onto a single machine (auto-picked or named) from the UI, API, or CLI without changing the workflow; unsatisfiable selectors or multi-machine reservations are rejected at trigger with the conflicting nodes listed; the override is shown on the run.
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
 - [ ] **Integration tests**: control plane + 2 agents (1 Windows, 1 Linux) run scenario A end to end; agent drain test fails 0 tasks.
-- [ ] **Integration tests**: US-107 placement suite on 3 simulated agents: selectors, each affinity mode, reservation exclusion, `WaitingForMachine` → `Placement` timeout, re-placement after agent kill: all green.
+- [ ] **Integration tests**: US-107 placement suite on 3 simulated agents: selectors, each affinity mode, reservation exclusion, `WaitingForMachine` → `Placement` timeout, re-placement after agent kill, single-machine override (all tasks on one agent; unsatisfiable trigger → 400): all green.
 - [ ] **Performance**: dispatch latency p95 ≤ 50 ms / p99 ≤ 200 ms over 10k dispatches; run start p95 ≤ 1 s; agent footprint within NFR-032.
 - [ ] **Unit tests**: resource-limit enforcement tests green on both OSes.
 
@@ -1202,7 +1203,7 @@ Design detail lives in the technical design doc; constraints that shape requirem
 - Phase 2 onboarding: 0 core PRs per new service; ≤ 1 day to onboard — _onboarding log_.
 
 ## 9. Delivery Sequence
-Milestones in build order across all requirements. Phase 1 = 54:05; phase 2 = 22:15.
+Milestones in build order across all requirements. Phase 1 = 54:15; phase 2 = 22:15.
 
 | Order | Milestone | Requirement | Priority | Est. AI | Depends on | Exit criteria met |
 |-------|-----------|-------------|----------|---------|------------|-------------------|
@@ -1213,7 +1214,7 @@ Milestones in build order across all requirements. Phase 1 = 54:05; phase 2 = 22
 | 5 | M-004.2 Dry-run test harness | REQ-004 | Must | 01:25 | M-002.1, M-004.1 | [ ] |
 | 6 | M-011.1 One-command local stack | REQ-011 | Must | 01:05 | M-002.1 | [ ] |
 | 7 | M-010.1 Authentication and RBAC | REQ-010 | Must | 01:30 | M-011.1 | [ ] |
-| 8 | M-002.2 Distributed execution on agents | REQ-002 | Must | 03:20 | M-002.1, M-011.1 | [ ] |
+| 8 | M-002.2 Distributed execution on agents | REQ-002 | Must | 03:30 | M-002.1, M-011.1 | [ ] |
 | 9 | M-005.1 Automatic registration, hot activation | REQ-005 | Must | 01:55 | M-004.1, M-002.2 | [ ] |
 | 10 | M-003.1 On-demand triggering | REQ-003 | Must | 01:15 | M-005.1, M-010.1 | [ ] |
 | 11 | M-006.1 Live state push | REQ-006 | Must | 02:20 | M-003.1 | [ ] |
@@ -1250,7 +1251,7 @@ Milestones in build order across all requirements. Phase 1 = 54:05; phase 2 = 22
 | 42 | M-022.1 Quota enforcement | REQ-022 | Could | 00:50 | M-015.2 | [ ] |
 | 43 | M-023.1 Find max sustainable rate | REQ-023 | Could | 00:55 | M-018.1 | [ ] |
 | 44 | M-024.1 Traffic recording source | REQ-024 | Could | 01:00 | M-017.2 | [ ] |
-| **Total** | | | | **76:20** | | |
+| **Total** | | | | **76:30** | | |
 
 ## 10. Open Questions
 - [ ] None blocking. Assumptions carried from discovery (validate during build): ≥ 1,000 workflow definitions and ≥ 200 concurrent tasks (NFR-003); Entra ID for SSO (NFR-007); Bond packages available from the internal feed.
