@@ -148,8 +148,29 @@ graph LR
 ```
 - **Run actor**: a pure state machine (`Wf.Engine.Core`) per active run, driven by a single-threaded channel. It decides transitions; effects (dispatch, publish) run only after the event is durable. The **same `Wf.Engine.Core`** runs inside the SDK's local engine and dry-run harness, so local behaviour equals hosted behaviour (FR-036, FR-040).
 - **Group commit**: events from all actors are batched into one multi-row `INSERT` (binary COPY for large batches) per ≤ 2 ms window, then acknowledged to their actors.
+- **Memory is a cache, PG is the truth**: a run actor's state changes only when its event is committed, and effects (dispatch, publish, timers) run only after commit. Anything in engine memory can be rebuilt from PG, so a crash loses nothing that was acknowledged.
 - **Recovery**: on leadership acquisition, the engine loads active runs (`status in (Queued, Running)`) from snapshot tables plus events after `snapshot_seq`, re-arms timers, and waits ≤ 10 s for agents to reconnect and report their in-flight attempts before marking missing ones `AgentLost`.
 - **Leader lease**: row in `leases` (`engine`, holder, expires_at), renewed every 3 s, TTL 10 s. Fencing: every engine write includes the lease epoch (`WHERE epoch = $current`) so a paused ex-leader cannot write. Agents find the leader as follows. On ACA, the standby's readiness probe fails until it holds the lease, so ingress routes agents only to the leader. Self-hosted agents hold an endpoint list; a standby answers `NotLeader{leaderHint}` and closes the stream.
+
+### Crash and restart recovery (NFR-033, FR-061)
+Tasks execute on agents, never inside the engine or api, so control-plane failures do not stop work.
+
+| Failure | What keeps running | How it recovers | Effect on a 4 h load test |
+|---------|--------------------|-----------------|---------------------------|
+| Engine leader crash, restart or deploy | All tasks on agents; agents journal results and perf samples to disk | Standby takes the lease ≤ 10 s (planned handover ≤ 3 s), rebuilds run actors from PG, re-arms `deadline_at` / `retry_at` / schedules; agents reconnect, report in-flight attempts and replay their journals (idempotent) | None. Load continues; live charts pause and resync |
+| api node crash or deploy | Everything (api is stateless) | Clients reconnect to another node and resync from `afterSeq` | None |
+| DB failover | Agents keep executing and journalling; engine buffers and retries commits | Commits resume when the new primary is up (R-1 for PaaS timing) | None |
+| Agent process crash, restart or update | **Task hosts keep running** (they are not children that die with the agent, see below) and spool results, logs and perf samples in the attempt directory | Restarted agent re-adopts live hosts within 10 s and reports them in `Hello.inflight`; the engine keeps the attempts `Running`. Attempts stay `Running` for `agentGrace` (default 60 s) after a disconnect before becoming `AgentLost` | None |
+| Task host crash, machine reboot, machine lost | Other tasks and shards | Attempt ends `AgentLost`/`TaskError` → platform or author retry; the new attempt resumes from the task's **last checkpoint** | The shard resumes from its last checkpoint (≤ 10 s of load lost); the gap is shown in the report |
+
+**Task hosts outlive the agent.** On Windows each host is in its own named job object (limits applied, no kill-on-close tied to the agent); on Linux each host has its own cgroup under the agent's delegated slice and the unit uses `KillMode=process`, so restarting the agent stops only the agent process. Each attempt directory holds `attempt.json` (pid, process start time, socket path, last acked seq). On start, the agent scans attempt directories, verifies pid + start time (guards against pid reuse), reconnects to the host's socket, and resumes forwarding from the last acked seq. Because hosts survive, agent binary updates do not need a drain; drain is for machine maintenance.
+
+**Checkpoints for long tasks.** `await ctx.Checkpoint.SaveAsync(state)` serialises JSON state (≤ 1 MB, at most once per 5 s) to blob and records it in `task_checkpoints` through the engine (last write wins, keyed by run + task). A later attempt of the same task gets it from `ctx.Checkpoint.TryLoad<T>()`, and `ctx.Attempt.ResumedFrom` says from when. Without checkpoints a retried task starts from the beginning. Built-in long tasks checkpoint automatically:
+- **Load shard**: every 10 s: position in the load shape, request-source offset, cumulative counts. Resume rejoins the shape at the current time (the ramp is not replayed); the missing interval is recorded and shown in the perf report.
+- **Parity**: request-source offset, category tallies, and samples written so far.
+- **Request-source download**: resumes by byte offset (HTTP range, Blob/Files ranges, Cosmos continuation token).
+
+**Engine unreachable for long.** Normal tasks just continue. Load shards continue on their precomputed schedule but apply a local safety guard (stop if the shard's own error rate exceeds the test's abort threshold for 10 s, or if the engine has been unreachable longer than `orphanTimeout`, default 10 min), because the central saturation check and kill switch cannot reach them.
 
 ### Task placement (decided at run time)
 A workflow is **not** pinned to one machine. The unit of placement is the **task attempt**. Each time a task becomes Ready, the dispatcher picks an agent from the machines connected at that moment. Stages (`$init`, `$pre`, `$post`, `$sys-post`) are placed like any task.
@@ -172,7 +193,7 @@ Data between tasks flows through outputs (≤ 64 KB via the engine) and artifact
 1. Filter: Healthy, not draining, matches selector/OS, not reserved by another run, free slot available (`max_tasks`, default = cores), RAM headroom ≥ the task's memory limit.
 2. Prefer an agent that already has a **warm task host for this run** (no cold start), then the least-loaded agent (slots used / max), then round-robin.
 3. No candidate → the task stays Ready with reason `WaitingForMachine` (visible live in the UI). After `placementTimeout` (default 10 min) it fails with category `Placement` and its failure policy applies.
-4. Retry after `AgentLost` → re-placed. For `Node`/`Run` affinity the pin moves to the new machine, and the task's retry policy decides whether this is allowed.
+4. Retry after `AgentLost` → re-placed (platform retry, see "Retries and timeouts"). For `Node`/`Run` affinity the pin moves to the new machine unless the task is `.NoAutoRetry()`.
 
 **Warm hosts**: each agent keeps a small pool of pre-spawned, unbound task hosts per active version. The first dispatch of a run to an agent binds one, with no process start. Pool size follows recent placement on that agent. An empty pool costs one cold start (≈ 150–300 ms) and is counted in `wf_task_queue_wait_ms`.
 
@@ -222,6 +243,25 @@ Node/task `Cancelled` means "stopped by an abort or by a hard-failed sibling"; t
 - **Repeat / late aborts**: while `Aborting`, a repeat returns 202 with the stored record; on a terminal run → 409 with the current status. A task that completes between the abort and its `Cancel` keeps its real result.
 - **Failover**: the record and command are durable in PG; a new leader that finds `aborted_at` set on a `Running` run resumes the abort.
 - **Not an abort**: run timeout ends `TimedOut`, a hard failure ends `Failed`. Aborting a scheduled run does not pause its schedule; an aborted run can be re-run.
+
+### Retries and timeouts (FR-014)
+- **Where set**: in the script at workflow (`.Defaults(...)`), node, or task level; the innermost wins, like `RunsOn`. The resolved policy per task is written into the manifest, so the engine never re-evaluates script code.
+- **Defaults**: 0 retries; attempt timeout 1 h; no node timeout; run timeout 24 h; init/pre stages use the task defaults; post-process and system post-process 15 min each, so abort and timeout always finish.
+- **Timeouts** (three levels):
+  - *Attempt*: one try. The engine stores `deadline_at` on the attempt; the agent also enforces it locally, so a partitioned agent still stops the task.
+  - *Node*: all of the node's tasks including retries and backoff. Expiry stops the node's running attempts.
+  - *Run*: whole run; expiry → running work stopped, post stages run, run ends `TimedOut`.
+  - Stopping = `Cancel{attempt, graceMs}` → CancellationToken / CTRL_BREAK or SIGTERM → kill after `graceMs` (default 30 s). The attempt ends `TimedOut` with category `Timeout`.
+- **Retry decision** (engine core, on each failed attempt):
+  1. Category in the retry set (default `TaskError`, `Timeout`), retries left, and the task did not throw `NonRetryableException` / call `ctx.Fail(retryable: false)`. Command tasks can also list retryable exit codes; SDK-function tasks can add a predicate `RetryOn(ex => ex is HttpRequestException)`.
+  2. Never retried: `ValidationError`, `Cancelled` (abort or hard-failed sibling), `ResourceLimit`, `Placement`.
+  3. Delay = fixed or `base × 2^(n-1)`, capped at `maxDelay` (≤ 10 min), ±20% jitter. If the next attempt cannot start before the node or run deadline, no retry is scheduled.
+  4. Otherwise the task is `Retrying` with `retry_at` stored; the sweeper dispatches it when due. Backoff holds no agent slot; placement runs again (affinity pins respected).
+  5. Retries exhausted → the task's failure policy applies (hard → node/run fails, dependents skipped; soft → `SoftFailed`, run continues).
+- **Platform retries**: `AgentLost` and `PlatformError` attempts are re-placed up to 2 times without using the author's retries (this is what keeps platform-caused failures ≤ 0.01%). `.NoAutoRetry()` turns this off for non-idempotent tasks; they then follow the author's policy only.
+- **Durability**: `deadline_at` and `retry_at` are in PG, so a new leader restores every timer from one indexed query at startup. Abort clears pending `retry_at` immediately.
+- **Visibility**: each attempt is its own row (agent, times, category, error); the UI shows "attempt 2/4, next in 12 s" live. Metrics: `wf_task_retries_total{category}`, `wf_task_timeouts_total{level}`.
+- **Validation and tests**: the validator rejects retries > 10, `maxDelay` > 10 min, or an attempt timeout above its node/run timeout, and warns when worst-case time (attempts × timeout + backoff) exceeds the run timeout. Dry-run uses a virtual clock, so timeout and backoff tests run instantly.
 
 ### Applicable standards
 OpenTelemetry semantic conventions (NFR-010) · WCAG 2.2 AA (NFR-009) · RFC 9457 Problem Details (API errors) ·
@@ -326,7 +366,7 @@ sequenceDiagram
 The engine publishes every event to `run:{id}` groups. It publishes coalesced run summaries (≤ 1 per run per 250 ms) to
 `type:{id}` / `series:{id}` / `team:{id}` groups for list views. Logs are interest-based: opening a log view
 sends `MirrorLogs(attempt)` to the agent, which then streams lines (batched ≤ 4/s) until unsubscribed. Stored logs
-are always uploaded to blob in chunks.
+are always uploaded to blob in chunks (§4.7).
 
 ### 4.5 Phase 2 perf test across reserved machines (FR-102–FR-108, FR-117, FR-125, FR-126)
 ```mermaid
@@ -353,6 +393,7 @@ sequenceDiagram
   E->>E: "always" node releases reservations; results artifact + summary report
 ```
 Clock skew: each agent measures its offset to the engine on connect (NTP-style ping exchange). `T0` is sent in engine time and converted locally.
+Durability: agents journal `PerfSample` deltas until acked, and the engine appends the merged per-second histograms to blob every 5 s, so an engine failover or agent restart loses no perf data. Shard checkpoints and resume are described in §3 "Crash and restart recovery".
 
 ### 4.6 Phase 2 parity (FR-109–FR-111)
 For each request (generated or replayed), the task host:
@@ -364,6 +405,17 @@ For each request (generated or replayed), the task host:
 
 Mismatch counts are tallied by category; up to N samples per category are kept as artifacts. An optional first pass runs baseline vs baseline to
 learn noisy paths, which are auto-added to ignore rules (Diffy approach).
+
+### 4.7 Task logs, including very large ones (FR-019)
+Logs never pass through PostgreSQL or the engine and are never held whole in memory.
+1. **Capture**: the task host sends stdout/stderr and `ctx.Log(...)` lines to the agent over the existing local socket. Each line gets a timestamp, stream and level. The agent appends them to a spool file per attempt in its work dir (sequential write, 64 KB buffer).
+2. **Chunking**: the agent seals a chunk every 8 MB or 10 s, whichever comes first. It gzip-compresses the chunk (stdlib, fastest level; text typically shrinks 5–10×) and uploads it through an `UploadGrant` to `logs/{runId}/{taskKey}/{attempt}/{n:D6}.log.gz`. A small `index.json` lists each chunk's first/last line number, byte range and time range. The spool file is deleted only after upload is acknowledged.
+3. **Database**: `task_attempts` stores only `log_uri` (the prefix), `log_bytes`, `log_lines` and `log_truncated`.
+4. **Size cap**: the default cap is 2 GB uncompressed per attempt, configurable per task (`.Limits(maxLogBytes: …)`), and admins set a hard ceiling per type. Beyond the cap the agent keeps the first 256 MB plus a rolling last 256 MB, inserts a marker with the dropped line count, and sets `log_truncated`. The task keeps running.
+5. **Back-pressure**: if blob storage is unreachable, chunks stay spooled on disk and upload with retry. If the agent's spool quota (default 20 GB) fills, it switches to head-and-tail mode as in step 4. A log problem never fails or slows the task.
+6. **Viewing**: the UI opens at the tail and reads only the chunks covering the visible line range, located through the index. The list is virtualised, so a 2 GB log scrolls like a small one. Live tail uses `MirrorLogs`, which runs only while someone is watching.
+7. **Search and download**: `?search=` streams the chunks through a decompressor on the api, with a regex time limit of 10 s and at most 1,000 matches returned with line numbers. Download streams the concatenated chunks without buffering them.
+8. **Retention**: logs follow run retention (90 days) and the blob lifecycle (cool tier after 30 days). Log bytes are metered separately from the 5 GB artifact budget and exposed as `wf_log_bytes_total` and `wf_log_truncated_total`.
 
 ## 5. Data Model
 ### 5.1 High-Level (entities & relationships)
@@ -469,8 +521,12 @@ Conventions:
 | | agent_id | uuid | Y | idx(agent_id, started_at) | |
 | | status, failure_category, error | smallint, smallint, text | N,Y,Y | | error ≤ 4 KB |
 | | queued_at, started_at, ended_at, queue_wait_ms | | Y | | FR-046 |
+| | deadline_at, retry_at | timestamptz | Y | partial idx(deadline_at) WHERE running; partial idx(retry_at) WHERE retry_at IS NOT NULL | attempt timeout; next retry due (FR-014), restored on failover |
 | | cpu_avg_pct, cpu_max_pct, ram_peak_mb | real, real, int | Y | | summary; series in blob |
-| | log_uri, resource_series_uri | text | Y | | |
+| | log_uri, resource_series_uri | text | Y | | `log_uri` = chunk prefix (§4.7) |
+| | log_bytes, log_lines, log_truncated | bigint, bigint, bool | Y | | uncompressed totals; head+tail kept when capped |
+| task_checkpoints ⧉ | run_day, run_id, task_key | | N | PK | latest checkpoint per task (FR-061) |
+| | attempt, seq, blob_uri, size_bytes, saved_at | smallint, int, text, int, timestamptz | N | | ≤ 1 MB; deleted with the run |
 | commands | id | uuid | N | PK | api → engine inbox |
 | | kind, run_id, payload | smallint, uuid, jsonb | N,Y,N | partial idx WHERE processed_at IS NULL | Trigger/Abort/Rerun/KillLoad/RunNow/Activate |
 | | idempotency_key | text | Y | UQ | 24 h dedupe window |
@@ -599,6 +655,8 @@ using Wf.Sdk;
 return await Workflow.Define("payments/release-validation/deploy-check", "1.4.0", w => w
     .Metadata("area", "checkout")
     .RunsOn(Pool("default"))                                   // workflow-level selector; nodes/tasks may override
+    .RunTimeout(4.Hours())
+    .Defaults(d => d.Timeout(30.Minutes()).Retry(1, Backoff.Fixed(10.Seconds())))  // every task; nodes/tasks override
     .Variables(v => v
         .String("env", required: true, allowed: ["dev", "staging", "prod"])
         .String("version", required: true)
@@ -608,7 +666,8 @@ return await Workflow.Define("payments/release-validation/deploy-check", "1.4.0"
     .Node("build", n => n.RunsOn(Os.Linux, Label("dotnet")).Affinity(Affinity.Node)
         .Task("restore", Tasks.Command("dotnet", "restore")).Task("compile", Tasks.Command("dotnet", "build -c Release --no-restore"))
         .Retry(2, Backoff.Exponential(5.Seconds())))
-    .Node("deploy-eu", n => n.DependsOn("build").Task("deploy", Tasks.Http(HttpMethod.Post, "https://deploy/eu")))
+    .Node("deploy-eu", n => n.DependsOn("build").Task("deploy", Tasks.Http(HttpMethod.Post, "https://deploy/eu"),
+        t => t.Timeout(2.Minutes()).Retry(3, Backoff.Exponential(2.Seconds(), max: 1.Minutes()), on: [Failure.Timeout, Failure.TaskError])))
     .Node("deploy-us", n => n.DependsOn("build").Task("deploy", Tasks.Http(HttpMethod.Post, "https://deploy/us")).Timeout(10.Minutes()))
     .Node("smoke", n => n.DependsOn("deploy-eu", "deploy-us").Parallel(maxParallel: 4)
         .Task("api", Smoke.Api).Task("ui", Smoke.Ui).Task("perf-probe", Smoke.Perf, failure: Failure.Soft))
@@ -622,6 +681,7 @@ return await Workflow.Define("payments/release-validation/deploy-check", "1.4.0"
   - `--describe`: emit the manifest;
   - `--task-host --socket <path>`: serve tasks to the agent;
   - `--dry-run <mocks.json>`: harness.
+- `ctx.Checkpoint.SaveAsync(state)` / `TryLoad<T>()` and `ctx.Attempt.ResumedFrom` let long tasks resume after machine loss (§3 "Crash and restart recovery").
 - `ctx.CancellationToken` fires on abort, timeout, or hard-failure cancellation. `ctx.Abort` is null unless the run is being aborted; post stages and `always` nodes can read `By`, `At`, `Reason` (e.g. to include them in the summary report).
 - Task delegates are resolved by stable keys (`node/task`), never by reflection over the assembly, so they are trim/AOT-safe.
 
@@ -861,7 +921,7 @@ Rollback = shift traffic back.
 
 **Observability**: OTel traces/metrics/logs from every component go to the profile's backend (Aspire dashboard, Prometheus/Grafana/Loki/Tempo, or Azure Monitor). Key metrics:
 - Latency: `wf_dispatch_latency_ms`, `wf_engine_overhead_ms`, `wf_group_commit_ms`, `wf_live_lag_ms`.
-- Scheduling: `wf_schedule_fire_delay_ms`, `wf_runs_active`, `wf_task_queue_wait_ms`, `wf_placement_wait_ms`, `wf_runs_aborted_total`, `wf_abort_stop_ms` (abort accepted → run terminal).
+- Scheduling: `wf_schedule_fire_delay_ms`, `wf_runs_active`, `wf_task_queue_wait_ms`, `wf_placement_wait_ms`, `wf_runs_aborted_total`, `wf_abort_stop_ms` (abort accepted → run terminal), `wf_task_retries_total{category}`, `wf_task_timeouts_total{level}`.
 - Health: `wf_agent_connected`, `wf_engine_is_leader`, process CPU/RAM.
 
 Alerts fire on:
@@ -873,10 +933,10 @@ Alerts fire on:
 ## 10. Testing Strategy
 | Type | Tooling | Scope | Gate |
 |------|---------|-------|------|
-| Unit | xUnit v3, FsCheck | Engine core state machine (property tests: any event order → valid state, terminal reached, no lost tasks; aborts at any point → one abort record, `Aborted`), validator, SemVer rules, schedule math (Cronos, DST), comparison engine, codecs | PR; ≥ 85% line coverage on `Wf.Engine.Core`, `Wf.Validation`, `Wf.Parity` |
+| Unit | xUnit v3, FsCheck | Engine core state machine (property tests: any event order → valid state, terminal reached, no lost tasks; aborts at any point → one abort record, `Aborted`), retry/timeout policy on a virtual clock (inheritance, backoff + jitter bounds, retry-on kinds, platform retries, deadlines restored after failover), validator, SemVer rules, schedule math (Cronos, DST), comparison engine, codecs | PR; ≥ 85% line coverage on `Wf.Engine.Core`, `Wf.Validation`, `Wf.Parity` |
 | Workflow tests | `Wf.Sdk.Testing` (out-of-process dry-run) + xUnit | Each workflow: DAG shape, failure policies, variables, schedules file, SemVer baseline | PR in workflows repo (must pass before check-in, FR-034) |
 | Integration | Testcontainers PG (Linux) / service PG (Windows), WebApplicationFactory, in-proc agent | API contracts, registration, scheduler exactly-once, lease handover, recovery, retention | PR, both OS |
-| Chaos | Toxiproxy, process kill | Kill engine/agent/task host mid-run, PG disconnect, network partition → every run terminal, no duplicate effects (NFR-033) | Nightly |
+| Chaos | Toxiproxy, process kill, VM reboot | Kill engine/agent/task host mid-run, restart agent for update, reboot a machine during a 1 h checkpointing task and a load test, PG disconnect, network partition → every run terminal, no duplicate effects, agent restart loses 0 s of work, reboot resumes from the last checkpoint, perf histograms complete (NFR-033, FR-061) | Nightly |
 | Contract | OpenAPI drift check; proto breaking-change check (`buf breaking`) | API + agent protocol back-compat | PR |
 | Performance | BenchmarkDotNet; k6-style harness via `Wf.Load` | Engine overhead/node, 200-node no-op ≤ 3 s, dispatch p95 ≤ 50 ms, group commit, codecs, load gen 20k rps on reference VM | PR (micro, 10% gate); nightly (macro) |
 | Frontend unit | Vitest + Testing Library | Live store, renderers, forms | PR |
@@ -965,6 +1025,7 @@ teams/<team>/<type>/<workflow>/tests/*.cs    # workflow tests (xUnit + Wf.Sdk.Te
 | AD-022 | Self-hosted leader discovery | Agent endpoint list + `NotLeader{leaderHint}` redirect | Mandatory LB with leader health probe; DNS update on failover | No extra component on the agent path; LB probe stays optional. DNS TTLs slow failover. |
 | AD-023 | Self-hosted PG HA | Patroni + etcd, sync replication, Npgsql multi-host | pg_auto_failover, repmgr, Windows failover clustering, single PG | Most widely used PG HA. Failover ≈ 10–20 s meets NFR-033. Multi-host connection strings avoid a proxy tier. |
 | AD-024 | Self-hosted blob | Filesystem store on shared storage (SMB/NFS); uploads via api grant endpoint | MinIO/S3 now; DB large objects | No new dependency or service. An S3 adapter is added only if a site lacks shared storage. |
+| AD-026 | Long-task survival | Task hosts outlive the agent process + opt-in task checkpoints (automatic for load/parity) | Restart tasks from scratch; host as agent child (dies with agent); process snapshotting (CRIU) | Agent restarts and updates become invisible to tasks. Checkpoints bound the loss on machine failure to seconds. CRIU is Linux-only and fragile with sockets. |
 | AD-025 | Self-hosted packaging | Versioned release folders + `current` symlink/junction; one PowerShell 7 deploy script | Containers on VMs; Ansible; MSI/deb packages | Works on Windows and Linux without a container runtime. Rollback = re-point the link. Fits Autopilot-style deployment tooling. |
 
 ## 13. Risks & Open Questions
@@ -1002,5 +1063,7 @@ teams/<team>/<type>/<workflow>/tests/*.cs    # workflow tests (xUnit + Wf.Sdk.Te
 | Expand/contract | Schema migration pattern keeping old and new app versions compatible |
 | Deployment profile | Local, Self-hosted (bare metal / Azure VMs) or Azure PaaS; same artefacts, different adapters and deploy tooling |
 | Placement | Run-time choice of which agent runs a task attempt |
+| Checkpoint | Small state a long task saves so a retry on another machine resumes instead of restarting |
+| Attempt | One try of a task; retries create new attempts, each with its own agent, timing, and outcome |
 | Abort | Operator-requested stop of a started run with a required reason; who/when/why recorded; run ends `Aborted` |
 | Selector / Affinity | Constraint on eligible machines (`RunsOn`) / rule keeping tasks on the same machine (`Node`, `Run`, `SameMachineAs`) |
