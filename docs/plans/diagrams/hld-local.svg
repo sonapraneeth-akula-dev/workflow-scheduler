@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1354" height="1004" viewBox="0 0 1354 1004">
+
+<foreignObject x="0" y="0" width="1354" height="1004">
+<style xmlns="http://www.w3.org/1999/xhtml">:root { --canvas: #ffffff; --surface: #f8fafc; --ink: #0f172a; --ink-2: #475569; --ink-3: #94a3b8; --edge: #cbd5e1; --sync: #2563eb; --async: #7c3aed; --data: #0d9488; --telemetry: #94a3b8; --bulk: #b45309; --fail: #dc2626; --c-client: #0369a1; --c-edge: #7c3aed; --c-compute: #2563eb; --c-data: #0d9488; --c-async: #c2410c; --c-observe: #64748b; }
+* { box-sizing: border-box; }
+body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; }
+.sd-root { width: 1564px; padding: 32px; background: var(--canvas); border: 1px solid var(--edge); border-radius: 8px; }
+.sd-head { margin-bottom: 24px; }
+.sd-head h1 { margin: 0px 0px 6px; font-size: 24px; font-weight: 650; letter-spacing: 0px; }
+.sd-head p { margin: 0px; font-size: 14px; color: var(--ink-2); }
+.sd-canvas { position: relative; width: 1500px; height: 600px; }
+.sd-links { position: absolute; inset: 0px; width: 1500px; height: 600px; z-index: 0; }
+.zone { position: absolute; left: var(--x); top: var(--y); width: var(--w); height: var(--h); border: 1.5px dashed var(--edge); border-radius: 10px; background: rgba(148, 163, 184, 0.06); z-index: 0; }
+.zone-label { position: absolute; left: calc(var(--x) + 14px); top: calc(var(--y) - 11px); display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; background: var(--canvas); border: 1px solid var(--edge); border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-2); z-index: 2; }
+.zone-label .sd-icon { width: 13px; height: 13px; }
+.node { position: absolute; left: var(--x); top: var(--y); width: 180px; height: 92px; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 10px 14px; background: var(--canvas); border-top-color: ; border-top-style: ; border-top-width: ; border-right-color: ; border-right-style: ; border-right-width: ; border-bottom-color: ; border-bottom-style: ; border-bottom-width: ; border-image-source: ; border-image-slice: ; border-image-width: ; border-image-outset: ; border-image-repeat: ; border-left: 4px solid var(--accent, var(--edge)); border-radius: 8px; box-shadow: rgba(15, 23, 42, 0.06) 0px 1px 2px; z-index: 1; }
+.node-icon { color: var(--accent); line-height: 0; margin-bottom: 4px; }
+.sd-icon { width: 24px; height: 24px; fill: none; stroke: currentcolor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.node-title { font-size: 14px; font-weight: 620; line-height: 1.2; }
+.node-sub { font-size: 11px; color: var(--ink-2); line-height: 1.3; }
+.n-client { --accent: var(--c-client); }
+.n-edge { --accent: var(--c-edge); }
+.n-compute { --accent: var(--c-compute); }
+.n-data { --accent: var(--c-data); }
+.n-async { --accent: var(--c-async); }
+.n-observe { --accent: var(--c-observe); }
+.link { fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.c-sync { stroke: var(--sync); }
+.c-duplex { stroke: var(--data); }
+.c-async { stroke: var(--async); stroke-dasharray: 7, 5; }
+.c-telemetry { stroke: var(--telemetry); stroke-dasharray: 1, 5; stroke-width: 2; }
+.c-replicate { stroke: var(--data); stroke-dasharray: 11, 4, 2, 4; }
+.c-bulk { stroke: var(--bulk); stroke-width: 3.5; }
+.c-fail { stroke: var(--fail); }
+.link-label { font-family: "Segoe UI", -apple-system, sans-serif; font-size: 11px; font-weight: 550; fill: var(--ink-2); paint-order: stroke; stroke: var(--canvas); stroke-width: 5px; stroke-linejoin: round; }
+.seq circle { fill: var(--canvas); stroke: var(--sync); stroke-width: 1.5; }
+.seq text { font-family: "Segoe UI", sans-serif; font-size: 11px; font-weight: 700; fill: var(--sync); text-anchor: middle; dominant-baseline: central; }
+.legend { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--edge); display: grid; grid-template-columns: repeat(4, max-content); gap: 44px; }
+.legend h2 { margin: 0px 0px 11px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.legend ul { margin: 0px; padding: 0px; list-style: none; display: grid; gap: 8px; }
+.legend ul.split { grid-template-columns: repeat(2, max-content); column-gap: 26px; }
+.legend li { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--ink-2); }
+.legend .sd-icon { width: 17px; height: 17px; flex: 0 0 auto; color: var(--ink-3); }
+.lg-line { flex: 0 0 auto; overflow: visible; }
+.swatch { flex: 0 0 auto; width: 15px; height: 15px; border-radius: 3px; background: var(--surface); border-top-color: ; border-top-style: ; border-top-width: ; border-right-color: ; border-right-style: ; border-right-width: ; border-bottom-color: ; border-bottom-style: ; border-bottom-width: ; border-image-source: ; border-image-slice: ; border-image-width: ; border-image-outset: ; border-image-repeat: ; border-left: 4px solid var(--accent); }
+.lg-zone { flex: 0 0 auto; width: 22px; height: 15px; border-radius: 4px; border: 1.5px dashed var(--edge); background: rgba(148, 163, 184, 0.06); }
+.lg-sub { flex: 0 0 auto; width: 22px; font-size: 10px; color: var(--ink-3); }
+:root { --c-ext: #be185d; }
+.n-ext { --accent: var(--c-ext); }
+.node { border-top-color: ; border-top-style: ; border-top-width: ; border-right-color: ; border-right-style: ; border-right-width: ; border-bottom-color: ; border-bottom-style: ; border-bottom-width: ; border-left-color: ; border-left-style: ; border-image-source: ; border-image-slice: ; border-image-width: ; border-image-outset: ; border-image-repeat: ; border-left-width: 5px; box-shadow: rgba(15, 23, 42, 0.14) 0px 1px 4px; }
+.zone { border-color: rgb(148, 163, 184); }
+.node.tbl { width: var(--w); height: var(--h); justify-content: flex-start; padding: 8px 12px; gap: 1px; }
+.tbl .node-title { font-family: Consolas, "Cascadia Mono", monospace; font-size: 13px; margin-bottom: 3px; }
+.tbl .col { font-family: Consolas, "Cascadia Mono", monospace; font-size: 11px; color: var(--ink-2); line-height: 15px; white-space: nowrap; }
+.tbl .k { display: inline-block; width: 30px; font-weight: 700; color: var(--accent); }
+.zone-label.right { left: auto; right: calc(100% - var(--x) - var(--w) + 14px); }
+.sd-root { width: 1354px; }
+.sd-canvas, .sd-links { width: 1290px; height: 640px; }</style>
+<div class="sd-root" data-diagram-root="" aria-label="Local profile: browser and wf CLI talk to wf-host, which runs api and engine roles in one process, backed by PostgreSQL, filesystem blobs and local secrets; local agents run task hosts that load the sample services." xmlns="http://www.w3.org/1999/xhtml">
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="sd-batch-job" viewBox="0 0 24 24">
+    <path d="M3 6.6h11M3 11h11M3 15.4h7"/>
+    <path d="m16.4 12.4 5 2.9-5 2.9z"/>
+  </symbol>
+  <symbol id="sd-browser" viewBox="0 0 24 24">
+    <rect x="2.5" y="4" width="19" height="16" rx="2.5"/>
+    <path d="M2.5 8.6h19"/>
+    <path d="M5.6 6.3h.01M8.1 6.3h.01M10.6 6.3h.01"/>
+  </symbol>
+  <symbol id="sd-container" viewBox="0 0 24 24">
+    <path d="M12 2.6 20.6 7v10L12 21.4 3.4 17V7z"/>
+    <path d="M3.4 7 12 11.4 20.6 7"/>
+    <path d="M12 11.4v10"/>
+  </symbol>
+  <symbol id="sd-dashboard" viewBox="0 0 24 24">
+    <rect x="2.5" y="3.5" width="19" height="17" rx="2.5"/>
+    <path d="M2.5 9h19M10 9v11.5"/>
+  </symbol>
+  <symbol id="sd-database" viewBox="0 0 24 24">
+    <ellipse cx="12" cy="5.6" rx="8" ry="3.1"/>
+    <path d="M4 5.6v12.8c0 1.7 3.6 3.1 8 3.1s8-1.4 8-3.1V5.6"/>
+    <path d="M20 12c0 1.7-3.6 3.1-8 3.1S4 13.7 4 12"/>
+  </symbol>
+  <symbol id="sd-desktop" viewBox="0 0 24 24">
+    <rect x="2.5" y="4" width="19" height="12.5" rx="2.5"/>
+    <path d="M9 20.5h6M12 16.5v4"/>
+  </symbol>
+  <symbol id="sd-external" viewBox="0 0 24 24">
+    <path d="M13.5 4.5H5.5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8"/>
+    <path d="M21 12H10.5"/>
+    <path d="m17.6 8.6 3.4 3.4-3.4 3.4"/>
+  </symbol>
+  <symbol id="sd-file-storage" viewBox="0 0 24 24">
+    <path d="M3 6.4a2 2 0 0 1 2-2h4l2.2 2.8H19a2 2 0 0 1 2 2v9.4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+  </symbol>
+  <symbol id="sd-monolith" viewBox="0 0 24 24">
+    <rect x="6" y="2.5" width="12" height="19" rx="2"/>
+    <path d="M6 8.2h12M6 13h12M6 17.8h12"/>
+  </symbol>
+  <symbol id="sd-proxy" viewBox="0 0 24 24">
+    <rect x="9.4" y="3.5" width="5.2" height="17" rx="1.8"/>
+    <path d="M2.6 8.4h5.4M5.4 5.6 2.6 8.4l2.8 2.8"/>
+    <path d="M21.4 15.6H16m2.8-2.8 2.6 2.8-2.6 2.8"/>
+  </symbol>
+  <symbol id="sd-vault" viewBox="0 0 24 24">
+    <rect x="2.5" y="3.5" width="19" height="17" rx="2.5"/>
+    <circle cx="12" cy="12" r="4.2"/>
+    <path d="M12 7.8V6M12 18v-1.8M16.2 12H18M6 12h1.8"/>
+  </symbol>
+  <symbol id="sd-worker" viewBox="0 0 24 24">
+    <rect x="2.6" y="2.6" width="18.8" height="18.8" rx="3.5"/>
+    <circle cx="12" cy="12" r="2.6"/>
+    <path d="M12 6.6v2M12 15.4v2M6.6 12h2M15.4 12h2M8.2 8.2l1.4 1.4M14.4 14.4l1.4 1.4M15.8 8.2l-1.4 1.4M9.6 14.4l-1.4 1.4"/>
+  </symbol>
+</svg>
+<header class="sd-head"><h1>HLD 1: Local profile (single machine)</h1><p>Developer workstation or small demo box (Windows 11 or Linux), started with `aspire run`. No Kubernetes; Docker is optional and used only for PostgreSQL.</p></header>
+<div class="sd-canvas">
+<svg xmlns="http://www.w3.org/2000/svg" class="sd-links" viewBox="0 0 1290 640" aria-hidden="true">
+<defs>
+<marker id="m-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10 2.6 5z" fill="context-stroke"/></marker>
+<marker id="m-bulk" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="3.6" markerHeight="3.6" orient="auto-start-reverse"><path d="M0 0 10 5 0 10 2.6 5z" fill="context-stroke"/></marker>
+</defs>
+<path class="link c-sync" d="M204,232 L288,232" marker-end="url(#m-arrow)"/>
+<path class="link c-duplex" d="M204,262 L288,262" marker-start="url(#m-arrow)" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M468,232 L552,232" marker-end="url(#m-arrow)"/>
+<path class="link c-duplex" d="M468,262 L552,262" marker-start="url(#m-arrow)" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M204,406 H600 V292" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M732,216 H774 V86 L816,86" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M732,246 L816,246" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M732,276 H784 V406 L816,406" marker-end="url(#m-arrow)"/>
+<path class="link c-duplex" d="M660,292 L660,520" marker-start="url(#m-arrow)" marker-end="url(#m-arrow)"/>
+<path class="link c-duplex" d="M732,566 L816,566" marker-start="url(#m-arrow)" marker-end="url(#m-arrow)"/>
+<path class="link c-bulk" d="M996,566 L1080,566" marker-end="url(#m-bulk)"/>
+<path class="link c-bulk" d="M906,520 L906,452" marker-end="url(#m-bulk)"/>
+<path class="link c-telemetry" d="M620,200 V26 H1170 V40" marker-end="url(#m-arrow)"/>
+<text class="link-label" x="246" y="222" text-anchor="middle">HTTP</text>
+<text class="link-label" x="246" y="280" text-anchor="middle">WebSocket</text>
+<text class="link-label" x="510" y="222" text-anchor="middle">REST</text>
+<text class="link-label" x="510" y="280" text-anchor="middle">SignalR</text>
+<text class="link-label" x="380" y="396" text-anchor="middle">REST: publish · run</text>
+<text class="link-label" x="810" y="76" text-anchor="end">secrets</text>
+<text class="link-label" x="774" y="236" text-anchor="middle">SQL · NOTIFY</text>
+<text class="link-label" x="778" y="340" text-anchor="end">blob I/O</text>
+<text class="link-label" x="668" y="440" text-anchor="start">gRPC stream</text>
+<text class="link-label" x="774" y="556" text-anchor="middle">UDS</text>
+<text class="link-label" x="1038" y="556" text-anchor="middle">HTTP load</text>
+<text class="link-label" x="914" y="490" text-anchor="start">logs · artifacts</text>
+<text class="link-label" x="906" y="18" text-anchor="middle">OTLP · all processes</text>
+</svg>
+<div class="zone" style="--x:8px; --y:14px; --w:1274px; --h:618px"></div>
+<div class="zone-label right" style="--x:8px; --y:14px; --w:1274px"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon" aria-hidden="true"><use href="#sd-desktop"/></svg>This machine · Windows 11 or Linux</div>
+<div class="zone" style="--x:804px; --y:188px; --w:204px; --h:116px"></div>
+<div class="zone-label right" style="--x:804px; --y:188px; --w:204px"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon" aria-hidden="true"><use href="#sd-container"/></svg>Docker (optional)</div>
+<div class="node n-client" style="--x:24px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-browser"/></svg></span><span class="node-title">Browser</span><span class="node-sub">React SPA · author / operator</span></div>
+<div class="node n-client" style="--x:24px; --y:360px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-desktop"/></svg></span><span class="node-title">wf CLI / workflow.cs</span><span class="node-sub">dotnet run · publish · run</span></div>
+<div class="node n-edge" style="--x:288px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-proxy"/></svg></span><span class="node-title">Vite dev server</span><span class="node-sub">HMR · proxies /api, /hub</span></div>
+<div class="node n-compute" style="--x:552px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-monolith"/></svg></span><span class="node-title">wf-host</span><span class="node-sub">api + engine · in-proc SignalR</span></div>
+<div class="node n-data" style="--x:816px; --y:40px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-vault"/></svg></span><span class="node-title">Local secrets</span><span class="node-sub">user-secrets / DPAPI file</span></div>
+<div class="node n-data" style="--x:816px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-database"/></svg></span><span class="node-title">PostgreSQL 17</span><span class="node-sub">container or native · volume</span></div>
+<div class="node n-data" style="--x:816px; --y:360px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-file-storage"/></svg></span><span class="node-title">Filesystem blobs</span><span class="node-sub">%LOCALAPPDATA%\wf\blobs</span></div>
+<div class="node n-observe" style="--x:1080px; --y:40px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-dashboard"/></svg></span><span class="node-title">Aspire dashboard</span><span class="node-sub">OTLP logs · metrics · traces</span></div>
+<div class="node n-compute" style="--x:552px; --y:520px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-worker"/></svg></span><span class="node-title">wf-agent ×1..N</span><span class="node-sub">native + Linux agent (WSL)</span></div>
+<div class="node n-compute" style="--x:816px; --y:520px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-batch-job"/></svg></span><span class="node-title">Task hosts</span><span class="node-sub">one child process per task</span></div>
+<div class="node n-ext" style="--x:1080px; --y:520px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-external"/></svg></span><span class="node-title">Sample services</span><span class="node-sub">Service A / B · Bond types</span></div>
+</div>
+<div class="legend">
+<section><h2>Connections</h2><ul><li><svg xmlns="http://www.w3.org/2000/svg" class="lg-line" width="44" height="12" aria-hidden="true"><path class="link c-sync" d="M1,6 H36" marker-end="url(#m-arrow)"/></svg> Synchronous call (HTTPS, SQL)</li><li><svg xmlns="http://www.w3.org/2000/svg" class="lg-line" width="44" height="12" aria-hidden="true"><path class="link c-duplex" d="M6,6 H36" marker-start="url(#m-arrow)" marker-end="url(#m-arrow)"/></svg> Bidirectional stream (gRPC, WebSocket, UDS)</li><li><svg xmlns="http://www.w3.org/2000/svg" class="lg-line" width="44" height="12" aria-hidden="true"><path class="link c-bulk" d="M1,6 H36" marker-end="url(#m-bulk)"/></svg> Bulk data (uploads, load traffic)</li><li><svg xmlns="http://www.w3.org/2000/svg" class="lg-line" width="44" height="12" aria-hidden="true"><path class="link c-telemetry" d="M1,6 H36" marker-end="url(#m-arrow)"/></svg> Telemetry (logs, metrics, traces)</li></ul></section>
+<section><h2>Component roles</h2><ul><li><span class="swatch" style="--accent:var(--c-client)"></span> Client / actor</li><li><span class="swatch" style="--accent:var(--c-edge)"></span> Edge &amp; identity</li><li><span class="swatch" style="--accent:var(--c-compute)"></span> Compute / process</li><li><span class="swatch" style="--accent:var(--c-data)"></span> Data store</li><li><span class="swatch" style="--accent:var(--c-observe)"></span> Observability</li><li><span class="swatch" style="--accent:var(--c-ext)"></span> External system</li></ul></section>
+<section><h2>Shape language</h2><ul class="split"><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-batch-job"/></svg> Job: task host / one-shot job</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-browser"/></svg> Window: browser</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-dashboard"/></svg> Panel: dashboard</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-database"/></svg> Cylinder: database / table</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-desktop"/></svg> Monitor: developer tooling</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-external"/></svg> Plug: system outside the platform</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-file-storage"/></svg> Folder: file-system storage</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-monolith"/></svg> Block: combined process</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-proxy"/></svg> Relay: dev proxy</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-vault"/></svg> Vault: secrets store</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-worker"/></svg> Gear: agent</li></ul></section>
+<section><h2>Notation</h2><ul><li><span class="lg-zone"></span> Boundary: hosts, network, region or domain</li><li><span class="lg-sub">abc</span> Sub-label: count, product or key property</li></ul></section>
+</div>
+</div>
+</foreignObject>
+</svg>

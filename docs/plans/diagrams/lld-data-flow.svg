@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1614" height="1014" viewBox="0 0 1614 1014">
+
+<foreignObject x="0" y="0" width="1614" height="1014">
+<style xmlns="http://www.w3.org/1999/xhtml">:root { --canvas: #ffffff; --surface: #f8fafc; --ink: #0f172a; --ink-2: #475569; --ink-3: #94a3b8; --edge: #cbd5e1; --sync: #2563eb; --async: #7c3aed; --data: #0d9488; --telemetry: #94a3b8; --bulk: #b45309; --fail: #dc2626; --c-client: #0369a1; --c-edge: #7c3aed; --c-compute: #2563eb; --c-data: #0d9488; --c-async: #c2410c; --c-observe: #64748b; }
+* { box-sizing: border-box; }
+body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; }
+.sd-root { width: 1564px; padding: 32px; background: var(--canvas); border: 1px solid var(--edge); border-radius: 8px; }
+.sd-head { margin-bottom: 24px; }
+.sd-head h1 { margin: 0px 0px 6px; font-size: 24px; font-weight: 650; letter-spacing: 0px; }
+.sd-head p { margin: 0px; font-size: 14px; color: var(--ink-2); }
+.sd-canvas { position: relative; width: 1500px; height: 600px; }
+.sd-links { position: absolute; inset: 0px; width: 1500px; height: 600px; z-index: 0; }
+.zone { position: absolute; left: var(--x); top: var(--y); width: var(--w); height: var(--h); border: 1.5px dashed var(--edge); border-radius: 10px; background: rgba(148, 163, 184, 0.06); z-index: 0; }
+.zone-label { position: absolute; left: calc(var(--x) + 14px); top: calc(var(--y) - 11px); display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; background: var(--canvas); border: 1px solid var(--edge); border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-2); z-index: 2; }
+.zone-label .sd-icon { width: 13px; height: 13px; }
+.node { position: absolute; left: var(--x); top: var(--y); width: 180px; height: 92px; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 10px 14px; background: var(--canvas); border-top-color: ; border-top-style: ; border-top-width: ; border-right-color: ; border-right-style: ; border-right-width: ; border-bottom-color: ; border-bottom-style: ; border-bottom-width: ; border-image-source: ; border-image-slice: ; border-image-width: ; border-image-outset: ; border-image-repeat: ; border-left: 4px solid var(--accent, var(--edge)); border-radius: 8px; box-shadow: rgba(15, 23, 42, 0.06) 0px 1px 2px; z-index: 1; }
+.node-icon { color: var(--accent); line-height: 0; margin-bottom: 4px; }
+.sd-icon { width: 24px; height: 24px; fill: none; stroke: currentcolor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.node-title { font-size: 14px; font-weight: 620; line-height: 1.2; }
+.node-sub { font-size: 11px; color: var(--ink-2); line-height: 1.3; }
+.n-client { --accent: var(--c-client); }
+.n-edge { --accent: var(--c-edge); }
+.n-compute { --accent: var(--c-compute); }
+.n-data { --accent: var(--c-data); }
+.n-async { --accent: var(--c-async); }
+.n-observe { --accent: var(--c-observe); }
+.link { fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.c-sync { stroke: var(--sync); }
+.c-duplex { stroke: var(--data); }
+.c-async { stroke: var(--async); stroke-dasharray: 7, 5; }
+.c-telemetry { stroke: var(--telemetry); stroke-dasharray: 1, 5; stroke-width: 2; }
+.c-replicate { stroke: var(--data); stroke-dasharray: 11, 4, 2, 4; }
+.c-bulk { stroke: var(--bulk); stroke-width: 3.5; }
+.c-fail { stroke: var(--fail); }
+.link-label { font-family: "Segoe UI", -apple-system, sans-serif; font-size: 11px; font-weight: 550; fill: var(--ink-2); paint-order: stroke; stroke: var(--canvas); stroke-width: 5px; stroke-linejoin: round; }
+.seq circle { fill: var(--canvas); stroke: var(--sync); stroke-width: 1.5; }
+.seq text { font-family: "Segoe UI", sans-serif; font-size: 11px; font-weight: 700; fill: var(--sync); text-anchor: middle; dominant-baseline: central; }
+.legend { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--edge); display: grid; grid-template-columns: repeat(4, max-content); gap: 44px; }
+.legend h2 { margin: 0px 0px 11px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.legend ul { margin: 0px; padding: 0px; list-style: none; display: grid; gap: 8px; }
+.legend ul.split { grid-template-columns: repeat(2, max-content); column-gap: 26px; }
+.legend li { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--ink-2); }
+.legend .sd-icon { width: 17px; height: 17px; flex: 0 0 auto; color: var(--ink-3); }
+.lg-line { flex: 0 0 auto; overflow: visible; }
+.swatch { flex: 0 0 auto; width: 15px; height: 15px; border-radius: 3px; background: var(--surface); border-top-color: ; border-top-style: ; border-top-width: ; border-right-color: ; border-right-style: ; border-right-width: ; border-bottom-color: ; border-bottom-style: ; border-bottom-width: ; border-image-source: ; border-image-slice: ; border-image-width: ; border-image-outset: ; border-image-repeat: ; border-left: 4px solid var(--accent); }
+.lg-zone { flex: 0 0 auto; width: 22px; height: 15px; border-radius: 4px; border: 1.5px dashed var(--edge); background: rgba(148, 163, 184, 0.06); }
+.lg-sub { flex: 0 0 auto; width: 22px; font-size: 10px; color: var(--ink-3); }
+:root { --c-ext: #be185d; }
+.n-ext { --accent: var(--c-ext); }
+.node { border-top-color: ; border-top-style: ; border-top-width: ; border-right-color: ; border-right-style: ; border-right-width: ; border-bottom-color: ; border-bottom-style: ; border-bottom-width: ; border-left-color: ; border-left-style: ; border-image-source: ; border-image-slice: ; border-image-width: ; border-image-outset: ; border-image-repeat: ; border-left-width: 5px; box-shadow: rgba(15, 23, 42, 0.14) 0px 1px 4px; }
+.zone { border-color: rgb(148, 163, 184); }
+.node.tbl { width: var(--w); height: var(--h); justify-content: flex-start; padding: 8px 12px; gap: 1px; }
+.tbl .node-title { font-family: Consolas, "Cascadia Mono", monospace; font-size: 13px; margin-bottom: 3px; }
+.tbl .col { font-family: Consolas, "Cascadia Mono", monospace; font-size: 11px; color: var(--ink-2); line-height: 15px; white-space: nowrap; }
+.tbl .k { display: inline-block; width: 30px; font-weight: 700; color: var(--accent); }
+.zone-label.right { left: auto; right: calc(100% - var(--x) - var(--w) + 14px); }
+.sd-root { width: 1614px; }
+.sd-canvas, .sd-links { width: 1550px; height: 650px; }</style>
+<div class="sd-root" data-diagram-root="" aria-label="Data flow: registration writes registry tables and packages; commands go through the commands table and NOTIFY to the engine, which group-commits run events and snapshot tables; agents return results that become pointer rows; task hosts upload logs, artifacts, reports and checkpoints to blob storage; the scheduler records fires exactly once." xmlns="http://www.w3.org/1999/xhtml">
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="sd-batch-job" viewBox="0 0 24 24">
+    <path d="M3 6.6h11M3 11h11M3 15.4h7"/>
+    <path d="m16.4 12.4 5 2.9-5 2.9z"/>
+  </symbol>
+  <symbol id="sd-browser" viewBox="0 0 24 24">
+    <rect x="2.5" y="4" width="19" height="16" rx="2.5"/>
+    <path d="M2.5 8.6h19"/>
+    <path d="M5.6 6.3h.01M8.1 6.3h.01M10.6 6.3h.01"/>
+  </symbol>
+  <symbol id="sd-cicd" viewBox="0 0 24 24">
+    <path d="M20.6 12a8.6 8.6 0 1 1-2.6-6.1"/>
+    <path d="M18.2 3v3.6h-3.6"/>
+    <path d="m8.4 12 2.6 2.6 4.6-5.2"/>
+  </symbol>
+  <symbol id="sd-database" viewBox="0 0 24 24">
+    <ellipse cx="12" cy="5.6" rx="8" ry="3.1"/>
+    <path d="M4 5.6v12.8c0 1.7 3.6 3.1 8 3.1s8-1.4 8-3.1V5.6"/>
+    <path d="M20 12c0 1.7-3.6 3.1-8 3.1S4 13.7 4 12"/>
+  </symbol>
+  <symbol id="sd-db-cluster" viewBox="0 0 24 24">
+    <ellipse cx="4.6" cy="6.4" rx="3" ry="1.7"/>
+    <path d="M1.6 6.4v10.4c0 .9 1.3 1.7 3 1.7s3-.8 3-1.7V6.4"/>
+    <ellipse cx="12" cy="6.4" rx="3" ry="1.7"/>
+    <path d="M9 6.4v10.4c0 .9 1.3 1.7 3 1.7s3-.8 3-1.7V6.4"/>
+    <ellipse cx="19.4" cy="6.4" rx="3" ry="1.7"/>
+    <path d="M16.4 6.4v10.4c0 .9 1.3 1.7 3 1.7s3-.8 3-1.7V6.4"/>
+  </symbol>
+  <symbol id="sd-desktop" viewBox="0 0 24 24">
+    <rect x="2.5" y="4" width="19" height="12.5" rx="2.5"/>
+    <path d="M9 20.5h6M12 16.5v4"/>
+  </symbol>
+  <symbol id="sd-lock" viewBox="0 0 24 24">
+    <rect x="4.4" y="10.4" width="15.2" height="10.2" rx="2.5"/>
+    <path d="M8 10.4V7.6a4 4 0 0 1 8 0v2.8"/>
+    <path d="M12 14.4v2.6"/>
+  </symbol>
+  <symbol id="sd-object-storage" viewBox="0 0 24 24">
+    <path d="M3.8 4.6h16.4l-1.7 15.2a2 2 0 0 1-2 1.8H7.5a2 2 0 0 1-2-1.8z"/>
+    <path d="M4.5 10.8h15"/>
+  </symbol>
+  <symbol id="sd-scheduler" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="8.6"/>
+    <path d="M12 6.8V12l3.4 2.1"/>
+  </symbol>
+  <symbol id="sd-service" viewBox="0 0 24 24">
+    <path d="M12 2.6 20.6 7.3v9.4L12 21.4 3.4 16.7V7.3z"/>
+    <circle cx="12" cy="12" r="2.4"/>
+  </symbol>
+  <symbol id="sd-stream-log" viewBox="0 0 24 24">
+    <rect x="2.5" y="5.6" width="19" height="5.4" rx="1.4"/>
+    <rect x="2.5" y="13" width="19" height="5.4" rx="1.4"/>
+    <path d="M7.2 5.6V11M11.9 5.6V11M16.6 5.6V11M7.2 13v5.4M11.9 13v5.4M16.6 13v5.4"/>
+  </symbol>
+  <symbol id="sd-worker" viewBox="0 0 24 24">
+    <rect x="2.6" y="2.6" width="18.8" height="18.8" rx="3.5"/>
+    <circle cx="12" cy="12" r="2.6"/>
+    <path d="M12 6.6v2M12 15.4v2M6.6 12h2M15.4 12h2M8.2 8.2l1.4 1.4M14.4 14.4l1.4 1.4M15.8 8.2l-1.4 1.4M9.6 14.4l-1.4 1.4"/>
+  </symbol>
+</svg>
+<header class="sd-head"><h1>LLD 2: Write paths and storage mapping</h1><p>Who writes which tables and blob prefixes. The engine is the only writer of run state; every effect happens after its event is committed.</p></header>
+<div class="sd-canvas">
+<svg xmlns="http://www.w3.org/2000/svg" class="sd-links" viewBox="0 0 1550 650" aria-hidden="true">
+<defs>
+<marker id="m-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10 2.6 5z" fill="context-stroke"/></marker>
+<marker id="m-bulk" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="3.6" markerHeight="3.6" orient="auto-start-reverse"><path d="M0 0 10 5 0 10 2.6 5z" fill="context-stroke"/></marker>
+</defs>
+<path class="link c-sync" d="M204,86 L288,86" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M468,86 L552,86" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M732,86 L816,86" marker-end="url(#m-arrow)"/>
+<path class="link c-bulk" d="M642,40 V26 H1170 V40" marker-end="url(#m-bulk)"/>
+<path class="link c-async" d="M906,132 L906,200" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M204,246 L288,246" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M468,246 L552,246" marker-end="url(#m-arrow)"/>
+<path class="link c-async" d="M732,246 L816,246" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M996,246 L1080,246" marker-end="url(#m-arrow)"/>
+<path class="link c-replicate" d="M1260,246 L1344,246" marker-end="url(#m-arrow)"/>
+<path class="link c-duplex" d="M860,292 V330 H642 V360" marker-start="url(#m-arrow)" marker-end="url(#m-arrow)"/>
+<path class="link c-duplex" d="M552,406 L468,406" marker-start="url(#m-arrow)" marker-end="url(#m-arrow)"/>
+<path class="link c-bulk" d="M288,406 L204,406" marker-end="url(#m-bulk)"/>
+<path class="link c-sync" d="M996,276 H1038 V406 L1080,406" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M940,520 L940,292" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M996,566 L1080,566" marker-end="url(#m-arrow)"/>
+<text class="link-label" x="246" y="76" text-anchor="middle">manifest</text>
+<text class="link-label" x="510" y="76" text-anchor="middle">register</text>
+<text class="link-label" x="774" y="76" text-anchor="middle">upsert tx</text>
+<text class="link-label" x="906" y="16" text-anchor="middle">package (grant)</text>
+<text class="link-label" x="914" y="170" text-anchor="start">NOTIFY reload</text>
+<text class="link-label" x="246" y="236" text-anchor="middle">HTTPS</text>
+<text class="link-label" x="510" y="236" text-anchor="middle">INSERT</text>
+<text class="link-label" x="774" y="236" text-anchor="middle">NOTIFY</text>
+<text class="link-label" x="1038" y="236" text-anchor="middle">append</text>
+<text class="link-label" x="1302" y="236" text-anchor="middle">project</text>
+<text class="link-label" x="751" y="322" text-anchor="middle">Dispatch ⇄ Result</text>
+<text class="link-label" x="510" y="396" text-anchor="middle">UDS</text>
+<text class="link-label" x="246" y="396" text-anchor="middle">SAS chunks</text>
+<text class="link-label" x="1044" y="340" text-anchor="start">blob_uri</text>
+<text class="link-label" x="948" y="470" text-anchor="start">start run</text>
+<text class="link-label" x="1038" y="556" text-anchor="middle">ON CONFLICT</text>
+</svg>
+<div class="zone" style="--x:8px; --y:14px; --w:1012px; --h:134px"></div>
+<div class="zone-label" style="--x:8px; --y:14px; --w:1012px"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon" aria-hidden="true"><use href="#sd-cicd"/></svg>Registration · on merge</div>
+<div class="zone" style="--x:1064px; --y:174px; --w:474px; --h:134px"></div>
+<div class="zone-label right" style="--x:1064px; --y:174px; --w:474px"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon" aria-hidden="true"><use href="#sd-lock"/></svg>Same transaction</div>
+<div class="node n-client" style="--x:24px; --y:40px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-desktop"/></svg></span><span class="node-title">workflow.cs + SDK</span><span class="node-sub">describe → manifest.json</span></div>
+<div class="node n-client" style="--x:288px; --y:40px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-cicd"/></svg></span><span class="node-title">wf publish (CI)</span><span class="node-sub">validate · test · package</span></div>
+<div class="node n-compute" style="--x:552px; --y:40px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-service"/></svg></span><span class="node-title">api · /register</span><span class="node-sub">schema + metadata checks</span></div>
+<div class="node n-data" style="--x:816px; --y:40px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-db-cluster"/></svg></span><span class="node-title">Registry tables</span><span class="node-sub">versions · schedules</span></div>
+<div class="node n-data" style="--x:1080px; --y:40px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-object-storage"/></svg></span><span class="node-title">packages/</span><span class="node-sub">{sha256}.zip · immutable</span></div>
+<div class="node n-client" style="--x:24px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-browser"/></svg></span><span class="node-title">UI / API / CLI</span><span class="node-sub">Trigger · Abort · Rerun</span></div>
+<div class="node n-compute" style="--x:288px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-service"/></svg></span><span class="node-title">api · commands</span><span class="node-sub">authorize · idempotency key</span></div>
+<div class="node n-data" style="--x:552px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-database"/></svg></span><span class="node-title">commands</span><span class="node-sub">INSERT + NOTIFY, one tx</span></div>
+<div class="node n-compute" style="--x:816px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-scheduler"/></svg></span><span class="node-title">engine leader</span><span class="node-sub">run actors · single writer</span></div>
+<div class="node n-data" style="--x:1080px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-stream-log"/></svg></span><span class="node-title">run_events ⧉</span><span class="node-sub">append-only · protobuf · seq</span></div>
+<div class="node n-data" style="--x:1344px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-db-cluster"/></svg></span><span class="node-title">Snapshot tables ⧉</span><span class="node-sub">runs · node_runs · attempts</span></div>
+<div class="node n-data" style="--x:24px; --y:360px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-object-storage"/></svg></span><span class="node-title">Run blobs</span><span class="node-sub">logs/ artifacts/ reports/ ckpt/</span></div>
+<div class="node n-compute" style="--x:288px; --y:360px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-batch-job"/></svg></span><span class="node-title">task host</span><span class="node-sub">ctx: outputs · checkpoint</span></div>
+<div class="node n-compute" style="--x:552px; --y:360px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-worker"/></svg></span><span class="node-title">agent</span><span class="node-sub">disk journal until acked</span></div>
+<div class="node n-data" style="--x:1080px; --y:360px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-database"/></svg></span><span class="node-title">Pointer rows ⧉</span><span class="node-sub">reports · artifacts · ckpt · perf</span></div>
+<div class="node n-compute" style="--x:816px; --y:520px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-scheduler"/></svg></span><span class="node-title">scheduler (in engine)</span><span class="node-sub">heap on next_fire_at</span></div>
+<div class="node n-data" style="--x:1080px; --y:520px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-database"/></svg></span><span class="node-title">schedule_fires</span><span class="node-sub">PK(schedule_id, fire_at)</span></div>
+</div>
+<div class="legend">
+<section><h2>Connections</h2><ul><li><svg xmlns="http://www.w3.org/2000/svg" class="lg-line" width="44" height="12" aria-hidden="true"><path class="link c-sync" d="M1,6 H36" marker-end="url(#m-arrow)"/></svg> Synchronous call (HTTPS, SQL)</li><li><svg xmlns="http://www.w3.org/2000/svg" class="lg-line" width="44" height="12" aria-hidden="true"><path class="link c-duplex" d="M6,6 H36" marker-start="url(#m-arrow)" marker-end="url(#m-arrow)"/></svg> Bidirectional stream (gRPC, WebSocket, UDS)</li><li><svg xmlns="http://www.w3.org/2000/svg" class="lg-line" width="44" height="12" aria-hidden="true"><path class="link c-async" d="M1,6 H36" marker-end="url(#m-arrow)"/></svg> Asynchronous signal (NOTIFY, push)</li><li><svg xmlns="http://www.w3.org/2000/svg" class="lg-line" width="44" height="12" aria-hidden="true"><path class="link c-replicate" d="M1,6 H36" marker-end="url(#m-arrow)"/></svg> Replication / backup / projection</li><li><svg xmlns="http://www.w3.org/2000/svg" class="lg-line" width="44" height="12" aria-hidden="true"><path class="link c-bulk" d="M1,6 H36" marker-end="url(#m-bulk)"/></svg> Bulk data (uploads, load traffic)</li></ul></section>
+<section><h2>Component roles</h2><ul><li><span class="swatch" style="--accent:var(--c-client)"></span> Client / actor</li><li><span class="swatch" style="--accent:var(--c-compute)"></span> Compute / process</li><li><span class="swatch" style="--accent:var(--c-data)"></span> Data store</li></ul></section>
+<section><h2>Shape language</h2><ul class="split"><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-batch-job"/></svg> Job: task host / one-shot job</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-browser"/></svg> Window: browser</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-cicd"/></svg> Loop: CI/CD</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-database"/></svg> Cylinder: database / table</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-db-cluster"/></svg> Stacked cylinders: replicated DB / table group</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-desktop"/></svg> Monitor: developer tooling</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-object-storage"/></svg> Bucket: blob / object storage</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-scheduler"/></svg> Clock: orchestrator / scheduler</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-service"/></svg> Hexagon: service</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-stream-log"/></svg> Segments: append-only log</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-worker"/></svg> Gear: agent</li></ul></section>
+<section><h2>Notation</h2><ul><li><span class="lg-zone"></span> Boundary: hosts, network, region or domain</li><li><span class="lg-sub">abc</span> Sub-label: count, product or key property</li></ul></section>
+</div>
+</div>
+</foreignObject>
+</svg>

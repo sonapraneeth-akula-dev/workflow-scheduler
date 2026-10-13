@@ -260,7 +260,7 @@ sample diffs; below threshold → run Failed.
 | NFR-013 | Isolation (phase 2) | A failing/crashing C# hook fails only its task, never the engine or other runs | Run hooks out-of-process on agents |
 | NFR-014 | Data retention | Runs, logs, reports, artifacts, metrics: 90 days (confirmed), configurable per type | Artifacts may need shorter retention for cost (see risk) |
 | NFR-015 | Portability | Engine, agents, SDK, UI pass the same test suite on Windows and Linux | CI matrix |
-| NFR-016 | Local dev | Full stack starts locally with one command in ≤ 2 min, no Azure dependency (local stand-ins for storage/queues/secrets) | |
+| NFR-016 | Local dev | Full stack starts locally with one command in ≤ 2 min, no Azure dependency (local stand-ins for storage/queues/secrets). An optional prod-like PPE mode runs production builds of every component in containers behind the local HTTPS edge at `https://ppe.kardia.sonapraneeth.in` (GrihaSetu platform pattern), so other machines can join | |
 | NFR-022 | Pre-check-in validation | Full validation + dry-run test suite for a typical workflow and its schedule file completes in < 10 s locally; 100% of registration-time rejection rules are reproducible offline | |
 | NFR-023 | Report viewing | Reports ≤ 5 MB render in < 1 s; larger reports load progressively (paged tables, streamed text) without freezing the UI | |
 | NFR-024 | Report & artifact volume | Reports: ≤ 10 per run, ≤ 10 MB each; report index loads p95 < 300 ms. Artifacts: ≤ 5 GB per run, upload/download streamed at ≥ 100 MB/s within Azure region. Payloads stored in blob (Azure) / disk (local), never in the main DB | Confirmed limits |

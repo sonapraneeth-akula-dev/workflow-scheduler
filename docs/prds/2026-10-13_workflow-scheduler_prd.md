@@ -73,7 +73,7 @@ presentation, needed for team isolation), FR-112 (perf thresholds).
 | REQ-008 | Run history and execution metrics | Must | No auditable history; no data to find slow or failing parts | M-008.1, M-008.2 | 03:30 |
 | REQ-009 | Multiple reports per run and large artifacts | Must | Task results cannot be reviewed in the UI; raw data has nowhere to go | M-009.1, M-009.2 | 04:15 |
 | REQ-010 | SSO, team-scoped RBAC, secrets, audit, public API | Must | Anyone could operate anything; secrets could leak; changes untraceable | M-010.1, M-010.2 | 03:20 |
-| REQ-011 | Zero-downtime operations, local/cloud parity, retention | Must | Deploys interrupt users/runs; cloud not reproducible locally; storage grows unbounded | M-011.1, M-011.2, M-011.3 | 04:35 |
+| REQ-011 | Zero-downtime operations, local/cloud parity, retention | Must | Deploys interrupt users/runs; cloud not reproducible locally; storage grows unbounded | M-011.1, M-011.2, M-011.3 | 05:15 |
 | REQ-012 | Recovery: re-run from failed node, config rollback, missed-fire catch-up | Should | Long workflows re-run end to end; bad changes and outages need manual repair | M-012.1, M-012.2, M-012.3 | 02:20 |
 | REQ-013 | Trends and metric dashboards | Should | Slow or flaky parts are invisible over time | M-013.1 | 01:35 |
 | REQ-014 | Run completion notifications | Should | Users must watch the UI to learn outcomes | M-014.1 | 00:55 |
@@ -87,7 +87,7 @@ presentation, needed for team isolation), FR-112 (perf thresholds).
 | REQ-022 | Per-team quotas on machines and load rate (phase 2) | Could | One team can monopolise shared machines | M-022.1 | 00:50 |
 | REQ-023 | Step-load "find max" mode (phase 2) | Could | A service's max sustainable rate is unknown | M-023.1 | 00:55 |
 | REQ-024 | Recorded live traffic as a request source (phase 2) | Could | Synthetic/file requests may not reflect real traffic | M-024.1 | 01:00 |
-| **Total** | | | | | **78:40** |
+| **Total** | | | | | **79:20** |
 
 ### Won't Have
 - Drag-and-drop workflow editor — _Rationale: code-first by design._
@@ -709,22 +709,27 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 ### REQ-011: Zero-downtime operations, local/cloud parity, retention (Must Have)
 - **Outcome**: The full stack runs locally with one command; deployments cause 0 s downtime and 0 failed runs and roll back in ≤ 5 min; data is retained 90 days (configurable per type).
 - **Traces**: FR-030, FR-037; NFR-005, NFR-014–NFR-017 (extended to bare metal, 2026-10-13), NFR-025, NFR-026.
-- **Est. AI**: 04:35
+- **Est. AI**: 05:15
 
 #### Milestone M-011.1: One-command local stack
 - **Problem solved**: Developers cannot reproduce the cloud setup locally.
-- **Est. AI**: 01:05
+- **Est. AI**: 01:45
 
 ##### FEAT-011.1.1: Local stack
-- **Est. AI**: 00:50
+- **Est. AI**: 01:30
 
 - **US-067** — **As a** developer **I want** one command to start the full stack locally **So that** I can develop and test without Azure (`Est. AI: 00:50`)
   - [ ] Starts DB, control plane, one agent, UI in ≤ 2 min on Windows and Linux; local stand-ins for blob, secrets, telemetry.
   - [ ] Docker optional: an existing/native PostgreSQL is used when a connection string is configured.
   - [ ] Options start extra simulated agents (distinct names/labels) and a Linux agent (container or WSL) on the same machine.
+- **US-111** — **As a** developer **I want** an optional prod-like local PPE mode with production builds of every component in containers behind the local HTTPS edge at `https://ppe.kardia.sonapraneeth.in` **So that** I can catch TLS, cookie, OIDC, WebSocket and failover issues locally and let other machines join (`Est. AI: 00:40`)
+  - [ ] `wf local up` / `wf local down` start and stop Release builds of api, two engines, PG, Linux agent(s), sample services, dashboard and a gateway Caddy in Docker, generated from the same AppHost and published only on `127.2.6.7`; a Windows agent can join natively.
+  - [ ] `https://ppe.kardia.sonapraneeth.in` is served by the GrihaSetu edge with its mkcert umbrella certificate and opens without a certificate warning on this machine and on LAN clients that trust the mkcert root.
+  - [ ] UI, API and SignalR share one HTTPS origin; agents reach only the engine leader over gRPC/TLS; killing the leader container resumes runs on the standby.
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
 - [ ] **Integration tests**: CI job on Windows and Linux starts the stack and runs scenario A green in ≤ 2 min startup.
+- [ ] **Integration tests**: nightly Linux job runs `wf local up`, runs scenario A against the gateway, kills the engine leader, and the run completes.
 
 #### Milestone M-011.2: Zero-downtime deploy and rollback
 - **Problem solved**: Deployments interrupt users and running workflows.
@@ -1229,7 +1234,7 @@ Design detail lives in the technical design doc; constraints that shape requirem
 - Phase 2 onboarding: 0 core PRs per new service; ≤ 1 day to onboard — _onboarding log_.
 
 ## 9. Delivery Sequence
-Milestones in build order across all requirements. Phase 1 = 56:15; phase 2 = 22:25.
+Milestones in build order across all requirements. Phase 1 = 56:55; phase 2 = 22:25.
 
 | Order | Milestone | Requirement | Priority | Est. AI | Depends on | Exit criteria met |
 |-------|-----------|-------------|----------|---------|------------|-------------------|
@@ -1238,7 +1243,7 @@ Milestones in build order across all requirements. Phase 1 = 56:15; phase 2 = 22
 | 3 | M-001.2 Run locally with built-in tasks | REQ-001 | Must | 02:05 | M-002.1 | [ ] |
 | 4 | M-004.1 Shared validator | REQ-004 | Must | 02:05 | M-001.1 | [ ] |
 | 5 | M-004.2 Dry-run test harness | REQ-004 | Must | 01:25 | M-002.1, M-004.1 | [ ] |
-| 6 | M-011.1 One-command local stack | REQ-011 | Must | 01:05 | M-002.1 | [ ] |
+| 6 | M-011.1 One-command local stack | REQ-011 | Must | 01:45 | M-002.1 | [ ] |
 | 7 | M-010.1 Authentication and RBAC | REQ-010 | Must | 01:30 | M-011.1 | [ ] |
 | 8 | M-002.2 Distributed execution on agents | REQ-002 | Must | 03:30 | M-002.1, M-011.1 | [ ] |
 | 9 | M-005.1 Automatic registration, hot activation | REQ-005 | Must | 01:55 | M-004.1, M-002.2 | [ ] |
@@ -1277,7 +1282,7 @@ Milestones in build order across all requirements. Phase 1 = 56:15; phase 2 = 22
 | 42 | M-022.1 Quota enforcement | REQ-022 | Could | 00:50 | M-015.2 | [ ] |
 | 43 | M-023.1 Find max sustainable rate | REQ-023 | Could | 00:55 | M-018.1 | [ ] |
 | 44 | M-024.1 Traffic recording source | REQ-024 | Could | 01:00 | M-017.2 | [ ] |
-| **Total** | | | | **78:40** | | |
+| **Total** | | | | **79:20** | | |
 
 ## 10. Open Questions
 - [ ] None blocking. Assumptions carried from discovery (validate during build): ≥ 1,000 workflow definitions and ≥ 200 concurrent tasks (NFR-003); Entra ID for SSO (NFR-007); Bond packages available from the internal feed.

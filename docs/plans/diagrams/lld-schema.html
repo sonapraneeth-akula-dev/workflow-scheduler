@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LLD 1: PostgreSQL schema map</title>
+<style>
+  :root {
+    --canvas: #ffffff;
+    --surface: #f8fafc;
+    --ink: #0f172a;
+    --ink-2: #475569;
+    --ink-3: #94a3b8;
+    --edge: #cbd5e1;
+
+    --sync: #2563eb;
+    --async: #7c3aed;
+    --data: #0d9488;
+    --telemetry: #94a3b8;
+    --bulk: #b45309;
+    --fail: #dc2626;
+
+    --c-client: #0369a1;
+    --c-edge: #7c3aed;
+    --c-compute: #2563eb;
+    --c-data: #0d9488;
+    --c-async: #c2410c;
+    --c-observe: #64748b;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #eef2f6;
+    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sd-root {
+    width: 1564px;
+    padding: 32px;
+    background: var(--canvas);
+    border: 1px solid var(--edge);
+    border-radius: 8px;
+  }
+
+  .sd-head { margin-bottom: 24px; }
+  .sd-head h1 { margin: 0 0 6px; font-size: 24px; font-weight: 650; letter-spacing: 0; }
+  .sd-head p  { margin: 0; font-size: 14px; color: var(--ink-2); }
+
+  /* ── Fixed coordinate canvas ─────────────────────────────────── */
+  .sd-canvas { position: relative; width: 1500px; height: 600px; }
+  .sd-links  { position: absolute; inset: 0; width: 1500px; height: 600px; z-index: 0; }
+
+  /* ── Boundaries ──────────────────────────────────────────────── */
+  .zone {
+    position: absolute;
+    left: var(--x); top: var(--y); width: var(--w); height: var(--h);
+    border: 1.5px dashed var(--edge);
+    border-radius: 10px;
+    background: rgba(148, 163, 184, .06);
+    z-index: 0;
+  }
+  .zone-label {
+    position: absolute;
+    left: calc(var(--x) + 14px); top: calc(var(--y) - 11px);
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 2px 10px;
+    background: var(--canvas);
+    border: 1px solid var(--edge);
+    border-radius: 999px;
+    font-size: 11px; font-weight: 600; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--ink-2);
+    z-index: 2;
+  }
+  .zone-label .sd-icon { width: 13px; height: 13px; }
+
+  /* ── Nodes ───────────────────────────────────────────────────── */
+  .node {
+    position: absolute;
+    left: var(--x); top: var(--y);
+    width: 180px; height: 92px;
+    display: flex; flex-direction: column; justify-content: center;
+    gap: 2px;
+    padding: 10px 14px;
+    background: var(--canvas);
+    border: 1.5px solid var(--edge);
+    border-left: 4px solid var(--accent, var(--edge));
+    border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .06);
+    z-index: 1;
+  }
+  .node-icon { color: var(--accent); line-height: 0; margin-bottom: 4px; }
+  .sd-icon {
+    width: 24px; height: 24px;
+    fill: none; stroke: currentColor;
+    stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
+  }
+  .node-title { font-size: 14px; font-weight: 620; line-height: 1.2; }
+  .node-sub   { font-size: 11px; color: var(--ink-2); line-height: 1.3; }
+
+  .n-client  { --accent: var(--c-client); }
+  .n-edge    { --accent: var(--c-edge); }
+  .n-compute { --accent: var(--c-compute); }
+  .n-data    { --accent: var(--c-data); }
+  .n-async   { --accent: var(--c-async); }
+  .n-observe { --accent: var(--c-observe); }
+
+  /* ── Connectors ──────────────────────────────────────────────── */
+  .link { fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .c-sync      { stroke: var(--sync); }
+  .c-duplex    { stroke: var(--data); }
+  .c-async     { stroke: var(--async); stroke-dasharray: 7 5; }
+  .c-telemetry { stroke: var(--telemetry); stroke-dasharray: 1 5; stroke-width: 2; }
+  .c-replicate { stroke: var(--data); stroke-dasharray: 11 4 2 4; }
+  .c-bulk      { stroke: var(--bulk); stroke-width: 3.5; }
+  .c-fail      { stroke: var(--fail); }
+
+  .link-label {
+    font-family: "Segoe UI", -apple-system, sans-serif;
+    font-size: 11px; font-weight: 550; fill: var(--ink-2);
+    paint-order: stroke; stroke: var(--canvas); stroke-width: 5px; stroke-linejoin: round;
+  }
+  .seq circle { fill: var(--canvas); stroke: var(--sync); stroke-width: 1.5; }
+  .seq text {
+    font-family: "Segoe UI", sans-serif; font-size: 11px; font-weight: 700;
+    fill: var(--sync); text-anchor: middle; dominant-baseline: central;
+  }
+
+  /* ── Vocabulary legend ────────────────────────────────── */
+  .legend {
+    margin-top: 28px; padding-top: 20px;
+    border-top: 1px solid var(--edge);
+    display: grid; grid-template-columns: repeat(4, max-content); gap: 44px;
+  }
+  .legend h2 {
+    margin: 0 0 11px; font-size: 11px; font-weight: 700;
+    letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3);
+  }
+  .legend ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+  .legend ul.split { grid-template-columns: repeat(2, max-content); column-gap: 26px; }
+  .legend li { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--ink-2); }
+  .legend .sd-icon { width: 17px; height: 17px; flex: none; color: var(--ink-3); }
+  .lg-line { flex: none; overflow: visible; }
+  .swatch {
+    flex: none; width: 15px; height: 15px; border-radius: 3px;
+    background: var(--surface); border: 1px solid var(--edge);
+    border-left: 4px solid var(--accent);
+  }
+  .lg-zone {
+    flex: none; width: 22px; height: 15px; border-radius: 4px;
+    border: 1.5px dashed var(--edge); background: rgba(148, 163, 184, .06);
+  }
+  .lg-sub { flex: none; width: 22px; font-size: 10px; color: var(--ink-3); }
+
+  :root { --c-ext: #be185d; }
+  .n-ext { --accent: var(--c-ext); }
+  .node { border: 1.5px solid var(--accent); border-left-width: 5px; box-shadow: 0 1px 4px rgba(15, 23, 42, .14); }
+  .zone { border-color: #94a3b8; }
+  .node.tbl { width: var(--w); height: var(--h); justify-content: flex-start; padding: 8px 12px; gap: 1px; }
+  .tbl .node-title { font-family: Consolas, "Cascadia Mono", monospace; font-size: 13px; margin-bottom: 3px; }
+  .tbl .col { font-family: Consolas, "Cascadia Mono", monospace; font-size: 11px; color: var(--ink-2); line-height: 15px; white-space: nowrap; }
+  .tbl .k { display: inline-block; width: 30px; font-weight: 700; color: var(--accent); }
+  .zone-label.right { left: auto; right: calc(100% - var(--x) - var(--w) + 14px); }
+
+  .sd-root { width: 1624px; }
+  .sd-canvas, .sd-links { width: 1560px; height: 790px; }
+</style>
+</head>
+<body>
+<div class="sd-root" data-diagram-root aria-label="Schema map: registry, workflow and schedule tables feed runs; runs own events, node runs, task attempts and checkpoints; agents own reservations; results, ops and audit tables reference runs.">
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="sd-logs" viewBox="0 0 24 24">
+    <rect x="3.5" y="2.5" width="17" height="19" rx="2.5"/>
+    <path d="M7 7.4h10M7 11h10M7 14.6h10M7 18.2h5"/>
+  </symbol>
+  <symbol id="sd-object-storage" viewBox="0 0 24 24">
+    <path d="M3.8 4.6h16.4l-1.7 15.2a2 2 0 0 1-2 1.8H7.5a2 2 0 0 1-2-1.8z"/>
+    <path d="M4.5 10.8h15"/>
+  </symbol>
+  <symbol id="sd-registry" viewBox="0 0 24 24">
+    <rect x="3" y="3.5" width="18" height="17" rx="2.5"/>
+    <path d="M6.6 8.2h4M6.6 12h4M6.6 15.8h4M13.4 8.2h4M13.4 12h4M13.4 15.8h4"/>
+  </symbol>
+  <symbol id="sd-scheduler" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="8.6"/>
+    <path d="M12 6.8V12l3.4 2.1"/>
+  </symbol>
+  <symbol id="sd-server" viewBox="0 0 24 24">
+    <rect x="2.5" y="3.5" width="19" height="7" rx="2"/>
+    <rect x="2.5" y="13.5" width="19" height="7" rx="2"/>
+    <path d="M6 7h.01M6 17h.01"/>
+    <path d="M9.6 7h5.4M9.6 17h5.4"/>
+  </symbol>
+  <symbol id="sd-stream-log" viewBox="0 0 24 24">
+    <rect x="2.5" y="5.6" width="19" height="5.4" rx="1.4"/>
+    <rect x="2.5" y="13" width="19" height="5.4" rx="1.4"/>
+    <path d="M7.2 5.6V11M11.9 5.6V11M16.6 5.6V11M7.2 13v5.4M11.9 13v5.4M16.6 13v5.4"/>
+  </symbol>
+</svg>
+<header class="sd-head"><h1>LLD 1: PostgreSQL schema map</h1><p>Key columns, keys and indexes per table, grouped by owner. ⧉ = range-partitioned monthly on run_day (derived from the UUID v7 run id). Full column list in §5.2.</p></header>
+<div class="sd-canvas">
+<svg class="sd-links" viewBox="0 0 1560 790" aria-hidden="true">
+<defs>
+<marker id="m-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10 2.6 5z" fill="context-stroke"/></marker>
+<marker id="m-bulk" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="3.6" markerHeight="3.6" orient="auto-start-reverse"><path d="M0 0 10 5 0 10 2.6 5z" fill="context-stroke"/></marker>
+</defs>
+<path class="link c-sync" d="M132,139 L132,173" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M132,290 L132,324" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M392,169 L392,203" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M392,501 L392,535" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M652,188 L652,154" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M652,335 L652,369" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M652,471 L652,505" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M652,637 L652,671" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M912,199 L912,233" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M240,231.5 H262 V110.5 L284,110.5" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M284,130.5 H266 V435 L284,435" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M500,455 H514 V699.5 L500,699.5" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M500,269 H526 V241.5 L544,241.5" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M500,687.5 H538 V281.5 L544,281.5" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M804,155.5 H782 V571 L760,571" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M760,291.5 H770 V284 L804,284" marker-end="url(#m-arrow)"/>
+<text class="link-label" x="140" y="160" text-anchor="start">1:N</text>
+<text class="link-label" x="140" y="311" text-anchor="start">1:N</text>
+<text class="link-label" x="400" y="190" text-anchor="start">1:N</text>
+<text class="link-label" x="400" y="522" text-anchor="start">1:N</text>
+<text class="link-label" x="660" y="175" text-anchor="start">1:N</text>
+<text class="link-label" x="660" y="356" text-anchor="start">1:N</text>
+<text class="link-label" x="660" y="492" text-anchor="start">1:N</text>
+<text class="link-label" x="660" y="658" text-anchor="start">1:1</text>
+<text class="link-label" x="920" y="220" text-anchor="start">1:N</text>
+<text class="link-label" x="259" y="160" text-anchor="end">1:N</text>
+<text class="link-label" x="260" y="282.75" text-anchor="end">1:N</text>
+<text class="link-label" x="520" y="577.25" text-anchor="start">1:1</text>
+<text class="link-label" x="520" y="261" text-anchor="end">1:N</text>
+<text class="link-label" x="534" y="480" text-anchor="end">1:N</text>
+<text class="link-label" x="771" y="492" text-anchor="middle">1:N</text>
+<text class="link-label" x="800" y="276" text-anchor="end">1:N</text>
+</svg>
+<div class="zone" style="--x:14px; --y:30px; --w:236px; --h:529px"></div>
+<div class="zone-label" style="--x:14px; --y:30px; --w:236px"><svg class="sd-icon" aria-hidden="true"><use href="#sd-registry"/></svg>Registry &amp; access</div>
+<div class="zone" style="--x:274px; --y:30px; --w:236px; --h:725px"></div>
+<div class="zone-label" style="--x:274px; --y:30px; --w:236px"><svg class="sd-icon" aria-hidden="true"><use href="#sd-scheduler"/></svg>Workflows &amp; schedules</div>
+<div class="zone" style="--x:534px; --y:30px; --w:236px; --h:740px"></div>
+<div class="zone-label" style="--x:534px; --y:30px; --w:236px"><svg class="sd-icon" aria-hidden="true"><use href="#sd-stream-log"/></svg>Run state ⧉</div>
+<div class="zone" style="--x:794px; --y:30px; --w:236px; --h:574px"></div>
+<div class="zone-label" style="--x:794px; --y:30px; --w:236px"><svg class="sd-icon" aria-hidden="true"><use href="#sd-server"/></svg>Machines &amp; control</div>
+<div class="zone" style="--x:1054px; --y:30px; --w:236px; --h:665px"></div>
+<div class="zone-label" style="--x:1054px; --y:30px; --w:236px"><svg class="sd-icon" aria-hidden="true"><use href="#sd-object-storage"/></svg>Results ⧉</div>
+<div class="zone" style="--x:1314px; --y:30px; --w:236px; --h:408px"></div>
+<div class="zone-label" style="--x:1314px; --y:30px; --w:236px"><svg class="sd-icon" aria-hidden="true"><use href="#sd-logs"/></svg>Ops &amp; audit</div>
+<div class="node tbl n-data" style="--x:24px; --y:52px; --w:216px; --h:87px"><span class="node-title">teams</span><span class="col"><span class="k">PK</span>id (slug)</span><span class="col"><span class="k"></span>name</span><span class="col"><span class="k"></span>presentation jsonb</span></div>
+<div class="node tbl n-data" style="--x:24px; --y:173px; --w:216px; --h:117px"><span class="node-title">workflow_types</span><span class="col"><span class="k">PK</span>id  team/type</span><span class="col"><span class="k">FK</span>team_id → teams</span><span class="col"><span class="k">UQ</span>team_id, normalized_name</span><span class="col"><span class="k"></span>metadata_schema jsonb</span><span class="col"><span class="k"></span>retention_days, limits</span></div>
+<div class="node tbl n-data" style="--x:24px; --y:324px; --w:216px; --h:102px"><span class="node-title">role_bindings</span><span class="col"><span class="k">PK</span>team_id, type_id,</span><span class="col"><span class="k"></span>  role, principal_id</span><span class="col"><span class="k">idx</span>principal_id</span><span class="col"><span class="k"></span>null scope = global</span></div>
+<div class="node tbl n-data" style="--x:24px; --y:460px; --w:216px; --h:87px"><span class="node-title">registry_snapshots</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k"></span>git_commit</span><span class="col"><span class="k"></span>content jsonb</span></div>
+<div class="node tbl n-data" style="--x:284px; --y:52px; --w:216px; --h:117px"><span class="node-title">workflows</span><span class="col"><span class="k">PK</span>id  team/type/name</span><span class="col"><span class="k">FK</span>type_id → types</span><span class="col"><span class="k">FK</span>active_version_id</span><span class="col"><span class="k">FK</span>cloned_from_version_id</span><span class="col"><span class="k"></span>deleted_at (soft)</span></div>
+<div class="node tbl n-data" style="--x:284px; --y:203px; --w:216px; --h:132px"><span class="node-title">workflow_versions</span><span class="col"><span class="k">PK</span>id uuid</span><span class="col"><span class="k">UQ</span>workflow_id, major,</span><span class="col"><span class="k"></span>  minor, patch</span><span class="col"><span class="k"></span>manifest jsonb (DAG)</span><span class="col"><span class="k"></span>package_uri, sha256</span><span class="col"><span class="k"></span>git_commit, registered_by</span></div>
+<div class="node tbl n-data" style="--x:284px; --y:369px; --w:216px; --h:132px"><span class="node-title">schedules</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k">FK</span>workflow_id</span><span class="col"><span class="k"></span>origin Code | User</span><span class="col"><span class="k"></span>cron | interval_s</span><span class="col"><span class="k">idx</span>next_fire_at</span><span class="col"><span class="k"></span>row_version (ETag)</span></div>
+<div class="node tbl n-data" style="--x:284px; --y:535px; --w:216px; --h:87px"><span class="node-title">schedule_fires</span><span class="col"><span class="k">PK</span>schedule_id, fire_at</span><span class="col"><span class="k"></span>outcome, run_id</span><span class="col"><span class="k"></span>exactly-once key</span></div>
+<div class="node tbl n-data" style="--x:284px; --y:656px; --w:216px; --h:87px"><span class="node-title">run_series</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k">UQ</span>schedule_id</span><span class="col"><span class="k">FK</span>workflow_id</span></div>
+<div class="node tbl n-data" style="--x:544px; --y:52px; --w:216px; --h:102px"><span class="node-title">run_events ⧉</span><span class="col"><span class="k">PK</span>run_day, run_id, seq</span><span class="col"><span class="k"></span>kind, entity_key, attempt</span><span class="col"><span class="k"></span>payload bytea (protobuf)</span><span class="col"><span class="k"></span>append-only</span></div>
+<div class="node tbl n-data" style="--x:544px; --y:188px; --w:216px; --h:147px"><span class="node-title">runs ⧉</span><span class="col"><span class="k">PK</span>run_day, id</span><span class="col"><span class="k">FK</span>version_id, series_id</span><span class="col"><span class="k">idx</span>status WHERE active</span><span class="col"><span class="k">GIN</span>metadata</span><span class="col"><span class="k"></span>variables, placement</span><span class="col"><span class="k"></span>aborted_by/at/reason</span><span class="col"><span class="k"></span>last_seq, snapshot_seq</span></div>
+<div class="node tbl n-data" style="--x:544px; --y:369px; --w:216px; --h:102px"><span class="node-title">node_runs ⧉</span><span class="col"><span class="k">PK</span>run_day, run_id, node_key</span><span class="col"><span class="k"></span>status, attempts</span><span class="col"><span class="k"></span>outputs jsonb ≤ 64 KB</span><span class="col"><span class="k"></span>pinned_agent_id</span></div>
+<div class="node tbl n-data" style="--x:544px; --y:505px; --w:216px; --h:132px"><span class="node-title">task_attempts ⧉</span><span class="col"><span class="k">PK</span>run_day, run_id,</span><span class="col"><span class="k"></span>  task_key, attempt</span><span class="col"><span class="k">idx</span>agent_id, started_at</span><span class="col"><span class="k">idx</span>deadline_at, retry_at</span><span class="col"><span class="k"></span>status, failure_category</span><span class="col"><span class="k"></span>log_uri, log_bytes</span></div>
+<div class="node tbl n-data" style="--x:544px; --y:671px; --w:216px; --h:87px"><span class="node-title">task_checkpoints ⧉</span><span class="col"><span class="k">PK</span>run_day, run_id, task_key</span><span class="col"><span class="k"></span>attempt, seq</span><span class="col"><span class="k"></span>blob_uri ≤ 1 MB</span></div>
+<div class="node tbl n-data" style="--x:804px; --y:52px; --w:216px; --h:147px"><span class="node-title">agents</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k">UQ</span>name</span><span class="col"><span class="k"></span>os, arch, cores, ram_mb</span><span class="col"><span class="k">GIN</span>labels text[]</span><span class="col"><span class="k"></span>pool, max_tasks</span><span class="col"><span class="k"></span>capacity_rps (FR-125)</span><span class="col"><span class="k"></span>status, last_heartbeat_at</span></div>
+<div class="node tbl n-data" style="--x:804px; --y:233px; --w:216px; --h:102px"><span class="node-title">reservations</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k"></span>run_id, node_key</span><span class="col"><span class="k">UQ</span>agent_id WHERE active</span><span class="col"><span class="k"></span>expires_at, released_at</span></div>
+<div class="node tbl n-data" style="--x:804px; --y:369px; --w:216px; --h:87px"><span class="node-title">leases</span><span class="col"><span class="k">PK</span>name = &#x27;engine&#x27;</span><span class="col"><span class="k"></span>holder, epoch (fencing)</span><span class="col"><span class="k"></span>expires_at</span></div>
+<div class="node tbl n-data" style="--x:804px; --y:490px; --w:216px; --h:102px"><span class="node-title">commands</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k"></span>kind, run_id, payload</span><span class="col"><span class="k">idx</span>WHERE processed_at IS NULL</span><span class="col"><span class="k">UQ</span>idempotency_key (24 h)</span></div>
+<div class="node tbl n-data" style="--x:1064px; --y:52px; --w:216px; --h:102px"><span class="node-title">reports ⧉</span><span class="col"><span class="k">PK</span>run_day, id</span><span class="col"><span class="k">idx</span>run_id</span><span class="col"><span class="k"></span>kind, title, tags</span><span class="col"><span class="k"></span>blob_uri, sha256</span></div>
+<div class="node tbl n-data" style="--x:1064px; --y:188px; --w:216px; --h:102px"><span class="node-title">artifacts ⧉</span><span class="col"><span class="k">PK</span>run_day, id</span><span class="col"><span class="k">idx</span>run_id</span><span class="col"><span class="k"></span>name, size_bytes</span><span class="col"><span class="k"></span>≤ 5 GB per run</span></div>
+<div class="node tbl n-data" style="--x:1064px; --y:324px; --w:216px; --h:102px"><span class="node-title">perf_results ⧉</span><span class="col"><span class="k">PK</span>run_day, run_id, node_key</span><span class="col"><span class="k"></span>target / achieved rps</span><span class="col"><span class="k"></span>p50/p95/p99, error_rate</span><span class="col"><span class="k"></span>histogram_uri</span></div>
+<div class="node tbl n-data" style="--x:1064px; --y:460px; --w:216px; --h:102px"><span class="node-title">parity_results ⧉</span><span class="col"><span class="k">PK</span>run_day, run_id, node_key</span><span class="col"><span class="k"></span>total, matched, parity_pct</span><span class="col"><span class="k"></span>categories jsonb</span><span class="col"><span class="k"></span>samples_uri</span></div>
+<div class="node tbl n-data" style="--x:1064px; --y:596px; --w:216px; --h:87px"><span class="node-title">daily_rollups</span><span class="col"><span class="k">PK</span>day, workflow_id, node_key</span><span class="col"><span class="k"></span>runs, failures, p50, p95</span><span class="col"><span class="k"></span>refreshed every 5 min</span></div>
+<div class="node tbl n-data" style="--x:1324px; --y:52px; --w:216px; --h:102px"><span class="node-title">audit_log ⧉ (ts)</span><span class="col"><span class="k">PK</span>ts, id</span><span class="col"><span class="k">idx</span>target_kind, target_id, ts</span><span class="col"><span class="k">idx</span>actor, ts</span><span class="col"><span class="k"></span>13 monthly partitions</span></div>
+<div class="node tbl n-data" style="--x:1324px; --y:188px; --w:216px; --h:102px"><span class="node-title">subscriptions</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k">idx</span>scope_kind, scope_id</span><span class="col"><span class="k"></span>events, channel</span><span class="col"><span class="k"></span>secret_ref</span></div>
+<div class="node tbl n-data" style="--x:1324px; --y:324px; --w:216px; --h:102px"><span class="node-title">notification_outbox</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k">FK</span>subscription_id, run_id</span><span class="col"><span class="k">idx</span>WHERE delivered_at IS NULL</span><span class="col"><span class="k"></span>attempts, next_attempt_at</span></div>
+</div>
+<div class="legend">
+<section><h2>Connections</h2><ul><li><svg class="lg-line" width="44" height="12" aria-hidden="true"><path class="link c-sync" d="M1,6 H36" marker-end="url(#m-arrow)"/></svg> Synchronous call (HTTPS, SQL)</li></ul></section>
+<section><h2>Component roles</h2><ul><li><span class="swatch" style="--accent:var(--c-data)"></span> Data store</li></ul></section>
+
+<section><h2>Notation</h2><ul><li><span class="lg-zone"></span> Boundary: hosts, network, region or domain</li><li><span class="lg-sub">abc</span> Sub-label: count, product or key property</li><li><span class="lg-sub">PK</span> Primary key</li><li><span class="lg-sub">FK</span> References another table</li><li><span class="lg-sub">UQ</span> Unique constraint</li><li><span class="lg-sub">idx</span> Index (partial where shown)</li><li><span class="lg-sub">GIN</span> GIN index (jsonb / array)</li><li><span class="lg-sub">⧉</span> Monthly partition on run_day</li><li><span class="lg-sub">1:N</span> Cardinality, arrow parent → child</li></ul></section>
+</div>
+</div>
+</body>
+</html>
