@@ -42,6 +42,7 @@ are not implied by local task completion.
 | 2.1.2.1.3 | Complete | Virtual-clock timeout suite completes in under 1 s; cancellation/kill grace and retry times survive snapshot restoration, proposals wait for committed apply, stale actions rejected. PG migration persists run/node/attempt deadlines and retry/cancel/kill timestamps. |
 | 2.1.2.1.4 | Complete | Task-named errors cover retry/delay limits and node/run timeout bounds, including stages and inherited manifest policies; worst-case warnings include capped maximum jitter and enabled platform retries. Boundary, overflow and manifest integration cases pass. |
 | 2.1.2.2.2 | Complete | Queued/running/backoff/post/always abort cases pass; first accepted identity/reason/source survives duplicate requests and replay. Active attempts drain, later cleanup receives `ctx.Abort`, and `EndedAt` records actual stop. Real function cancellation/registry integration passes. |
+| 2.1.1.1.3 | Complete | FsCheck-generated DAGs and explicit 200-node boundaries exercise all dependency/failure policies, series/parallel tasks, timeouts and queued/running/backoff/post/duplicate aborts. Every entity has exactly one terminal event, no tasks are lost, and full/snapshot-tail replay matches. Windows passes; Linux execution remains CI verification. |
 
 ## Summary Rollup
 
