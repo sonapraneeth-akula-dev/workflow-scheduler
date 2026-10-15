@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
+using Wf.Contracts.Definition;
 
 namespace Wf.Sdk;
 
@@ -77,5 +78,6 @@ public sealed class NodeOutputs
 [JsonSerializable(typeof(ImmutableArray<string>))]
 [JsonSerializable(typeof(JsonElement))]
 [JsonSerializable(typeof(HttpResponseOutput))]
+[JsonSerializable(typeof(SecretReference))]
 [JsonSerializable(typeof(ImmutableDictionary<string, JsonElement>))]
 internal partial class OutputJsonContext : JsonSerializerContext;

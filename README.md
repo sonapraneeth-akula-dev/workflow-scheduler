@@ -21,3 +21,9 @@ workflow tasks. Execution, built-in tasks and other authoring features follow
 in their individual backlog items. Unit tests cover the SDK; integration tests
 cover definition-to-delegate resolution. CI runs both suites on Windows and Linux.
 Frontend tests will accompany the frontend implementation.
+
+Task delegates resolve by stable `node/task` keys through `TaskRegistry`; no
+assembly scanning. Contexts expose `Var<T>`, AOT-safe `VarEnum<T>`, declared
+`Input<T>`, bounded `Outputs`, cancellation, logging and injected report/artifact
+publishers. Publishing without a configured host publisher fails explicitly.
+Native AOT/trim analyzers run for the SDK and shared contracts.

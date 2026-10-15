@@ -44,7 +44,7 @@ public sealed class VariablesBuilder
         IEnumerable<string>? allowed = null)
     {
         var schema = new VariableSchema(key, type, required,
-            defaultValue is null ? null : JsonSerializer.SerializeToElement(defaultValue),
+            defaultValue is null ? null : JsonSerializer.SerializeToElement(defaultValue, OutputJsonContext.Default.Object),
             allowed?.ToImmutableArray() ?? []);
         if (variables.Any(v => v.Key == key))
             throw new ArgumentException($"Duplicate variable key '{key}'.", nameof(key));
