@@ -192,7 +192,11 @@ public sealed class RunRecovery(NpgsqlDataSource dataSource, RunStore runs, Leas
                     if (!IsReady) await RecoverAsync(stoppingToken);
                     else
                     {
-                        await using var pending = dataSource.CreateCommand("SELECT EXISTS(SELECT 1 FROM commands WHERE processed_at IS NULL)");
+                        await using var pending = dataSource.CreateCommand("""
+                            SELECT EXISTS(SELECT 1 FROM commands WHERE processed_at IS NULL)
+                                OR EXISTS(SELECT 1 FROM runs WHERE status IN (0,1,2) AND NOT (id=ANY($1)))
+                            """);
+                        pending.Parameters.AddWithValue(Volatile.Read(ref state).Runs.Keys.ToArray());
                         if ((bool)(await pending.ExecuteScalarAsync(stoppingToken) ?? false))
                             await RecoverAsync(stoppingToken);
                     }

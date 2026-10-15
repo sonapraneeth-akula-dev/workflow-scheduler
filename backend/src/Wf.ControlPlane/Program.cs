@@ -10,6 +10,7 @@ using Wf.ControlPlane.Engine.Events;
 using Wf.ControlPlane.Engine.Leadership;
 using Wf.ControlPlane.Engine.Recovery;
 using Wf.ControlPlane.Engine.Registry;
+using Wf.ControlPlane.Engine.Scheduler;
 using Wf.ControlPlane.Engine.Sweeper;
 using Wf.ControlPlane.Hosting;
 using Wf.ControlPlane.Live;
@@ -65,6 +66,8 @@ builder.Services.AddSingleton<RunStore>();
 builder.Services.AddSingleton<CommandInbox>();
 builder.Services.AddSingleton<RunRecovery>();
 builder.Services.AddHostedService<RunRecovery>(services => services.GetRequiredService<RunRecovery>());
+builder.Services.AddSingleton<ScheduleFireService>();
+builder.Services.AddHostedService<ScheduleFireService>(services => services.GetRequiredService<ScheduleFireService>());
 builder.Services.AddSingleton<GroupCommitAppender>();
 builder.Services.AddSingleton<PlacementEngine>();
 builder.Services.AddSingleton<Dispatcher>();
@@ -83,7 +86,7 @@ app.MapRunsEndpoints();
 app.MapSchedulesEndpoints();
 app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
 app.MapGet("/healthz", () => Results.Ok()).AllowAnonymous();
-app.MapGet("/healthz/leader", (LeaseManager leadership, RunRecovery recovery, ActiveVersionCache versions) =>
-    leadership.IsLeader && recovery.IsReady && versions.IsReady
+app.MapGet("/healthz/leader", (LeaseManager leadership, RunRecovery recovery, ActiveVersionCache versions, ScheduleFireService schedules) =>
+    leadership.IsLeader && recovery.IsReady && versions.IsReady && schedules.IsReady
         ? Results.Ok() : Results.StatusCode(StatusCodes.Status503ServiceUnavailable)).AllowAnonymous();
 await app.RunAsync();

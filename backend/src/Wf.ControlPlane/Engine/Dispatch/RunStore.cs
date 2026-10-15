@@ -42,15 +42,17 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
     }
 
     internal static async Task CreateAsync(NpgsqlConnection connection, RunState run, string workflowId, Guid versionId,
-        DateTimeOffset deadline, DateTimeOffset createdAt, string createdBy, CancellationToken cancellationToken, Guid? seriesId = null)
+        DateTimeOffset deadline, DateTimeOffset createdAt, string createdBy, CancellationToken cancellationToken,
+        Guid? seriesId = null, bool scheduled = false)
     {
         await ExecuteAsync(connection, "SELECT ensure_run_partitions(uuid_v7_run_day($1))", cancellationToken, run.Snapshot.RunId);
         await ExecuteAsync(connection, """
             INSERT INTO runs(run_day,id,workflow_id,version_id,series_id,trigger,triggered_by,variables,metadata,status,created_at,deadline_at)
-            VALUES(uuid_v7_run_day($1),$1,$2,$3,$9,0,$8,$6::jsonb,$7::jsonb,0,$4,$5)
+            VALUES(uuid_v7_run_day($1),$1,$2,$3,$9,$10,$8,$6::jsonb,$7::jsonb,0,$4,$5)
             """, cancellationToken, run.Snapshot.RunId, workflowId, versionId, createdAt, deadline,
             JsonSerializer.Serialize(run.Snapshot.Variables, RunStoreJson.Default.ImmutableDictionaryStringJsonElement),
-            JsonSerializer.Serialize(run.Snapshot.Metadata, RunStoreJson.Default.WorkflowMetadata), createdBy, (object?)seriesId ?? DBNull.Value);
+            JsonSerializer.Serialize(run.Snapshot.Metadata, RunStoreJson.Default.WorkflowMetadata), createdBy,
+            (object?)seriesId ?? DBNull.Value, scheduled ? (short)1 : (short)0);
         await WriteSnapshotAsync(connection, run, cancellationToken);
         foreach (var node in run.Snapshot.Nodes)
             await ExecuteAsync(connection, """

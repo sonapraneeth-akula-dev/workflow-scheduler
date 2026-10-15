@@ -4,7 +4,6 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Features;
 using Npgsql;
-using Wf.Contracts.Manifest;
 using Wf.Contracts.Registry;
 using Wf.Contracts.Runs;
 using Wf.ControlPlane.Auth;
@@ -12,7 +11,6 @@ using Wf.ControlPlane.Engine.Recovery;
 using Wf.ControlPlane.Engine.Registry;
 using Wf.Engine.Core;
 using Wf.Validation;
-using Wf.Validation.SemVer;
 
 namespace Wf.ControlPlane.Api;
 
@@ -73,75 +71,24 @@ public static class RunsEndpoints
         var actor = authorized.Actor;
         if (authorized.ScheduleDeleted) return Results.Problem(statusCode: 404, title: "Schedule not found");
         if (!versions.IsReady) return Unavailable();
-        Guid versionId;
-        WorkflowManifest manifest;
-        if (request.Version is null)
+        SelectedWorkflowVersion selected;
+        try
         {
-            try
-            {
-                var selected = versions.GetActive(request.WorkflowId);
-                (versionId, manifest) = (selected.VersionId, selected.Manifest);
-            }
-            catch (KeyNotFoundException) { return NotFound(); }
-            catch (InvalidOperationException) { return Unavailable(); }
+            selected = await WorkflowVersionResolver.ResolveAsync(versions, source, request.WorkflowId,
+                request.Version, authorized.SeriesId is not null, context.RequestAborted);
         }
-        else
+        catch (KeyNotFoundException) { return NotFound(); }
+        catch (InvalidOperationException) { return Unavailable(); }
+        catch (ArgumentException) { return Invalid("$.version", "Use an exact workflow version UUID or SemVer 2.0.0."); }
+        catch (FormatException)
         {
-            var isId = Guid.TryParseExact(request.Version, "D", out var id);
-            if (!isId)
-            {
-                try
+            return Results.Problem(statusCode: 400, title: "Invalid schedule version pin",
+                extensions: new Dictionary<string, object?>
                 {
-                    if (request.Version.Length > 256) throw new ArgumentException("Version is too long.");
-                    _ = new ApiBaseline(request.Version, [], []);
-                }
-                catch (ArgumentException)
-                {
-                    if (authorized.SeriesId is null)
-                        return Invalid("$.version", "Use an exact workflow version UUID or SemVer 2.0.0.");
-                    VersionConstraint constraint;
-                    try { constraint = VersionConstraint.Parse(request.Version); }
-                    catch (FormatException)
-                    {
-                        return Results.Problem(statusCode: 400, title: "Invalid schedule version pin",
-                            extensions: new Dictionary<string, object?>
-                            {
-                                ["errors"] = new[] { RuleCatalog.ScheduleVersionPin.CreateError("schedule", "$.schedule.versionPin") }
-                            });
-                    }
-                    var candidates = new Dictionary<string, Guid>(StringComparer.Ordinal);
-                    await using (var versionsQuery = source.CreateCommand("""
-                        SELECT v.id,v.semver FROM workflow_versions v JOIN workflows w ON w.id=v.workflow_id
-                        WHERE w.id=$1 AND w.deleted_at IS NULL
-                        """))
-                    {
-                        versionsQuery.Parameters.AddWithValue(request.WorkflowId);
-                        await using var versionsReader = await versionsQuery.ExecuteReaderAsync(context.RequestAborted);
-                        while (await versionsReader.ReadAsync(context.RequestAborted))
-                            candidates.Add(versionsReader.GetString(1), versionsReader.GetGuid(0));
-                    }
-                    var selected = constraint.SelectHighest(candidates.Keys);
-                    if (selected is null) return NotFound();
-                    id = candidates[selected];
-                    isId = true;
-                }
-            }
-            await using var query = source.CreateCommand($"""
-                SELECT v.id,v.semver,v.manifest::text FROM workflow_versions v
-                JOIN workflows w ON w.id=v.workflow_id
-                WHERE w.id=$1 AND w.deleted_at IS NULL AND {(isId ? "v.id=$2" : "v.semver_key=split_part($2,'+',1)")}
-                """);
-            query.Parameters.AddWithValue(request.WorkflowId);
-            if (isId) query.Parameters.AddWithValue(id);
-            else query.Parameters.AddWithValue(request.Version);
-            await using var reader = await query.ExecuteReaderAsync(context.RequestAborted);
-            if (!await reader.ReadAsync(context.RequestAborted)) return NotFound();
-            versionId = reader.GetGuid(0);
-            manifest = JsonSerializer.Deserialize(reader.GetString(2), WorkflowManifestJsonContext.Default.WorkflowManifest)
-                ?? throw new InvalidDataException("The selected workflow manifest is null.");
-            if (manifest.Name != request.WorkflowId || manifest.Version != reader.GetString(1))
-                throw new InvalidDataException("The selected workflow manifest does not match its stored identity.");
+                    ["errors"] = new[] { RuleCatalog.ScheduleVersionPin.CreateError("schedule", "$.schedule.versionPin") }
+                });
         }
+        var (versionId, manifest) = selected;
         var variables = VariableBinder.Resolve(manifest.Variables, request.Variables,
             path: authorized.SeriesId is null ? "$.variables" : "$.schedule.variables", cancellationToken: context.RequestAborted);
         if (!variables.IsValid)

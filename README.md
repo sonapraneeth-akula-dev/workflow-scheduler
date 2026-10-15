@@ -423,7 +423,8 @@ and <= 1,644.3 ms through recovery readiness across three stop phases, with all
 measurements do not override the existing bounded appender drain failure/timeout
 behavior; hard-kill takeover still waits for lease expiry. Windows tests use
 `IHost.StopAsync`, not an actual Unix SIGTERM signal.
-`/healthz/leader` returns 503 on standby or until recovery completes; gRPC sends `NotLeader` with the known
+`/healthz/leader` returns 503 on standby or until recovery, active versions and
+the scheduler cursor snapshot are ready; gRPC sends `NotLeader` with the known
 leader hint and uses the actual epoch on commands/ACKs. Configure `Engine:Port`
 (default 5000) and `Engine:PublicEndpoint` for multiple instances. Standalone
 persistence test/benchmark modules may omit the lease manager; hosted DI always
@@ -437,8 +438,9 @@ rebuilds `DeadlineTracker` entries from absolute run/node/attempt deadlines,
 retry timestamps and persisted cancellation/kill phases. An outage never resets
 the retry time or cancellation grace. Command effects and `processed_at` commit
 together; failed or fenced recovery never publishes a ready cache. New commands
-are drained while leadership remains current, and reacquisition rebuilds the
-bootstrap state. `RecoveredRuns` supplies this state and due-timer proposals to
+and directly committed scheduled runs are discovered while leadership remains
+current, and reacquisition rebuilds the bootstrap state. `RecoveredRuns` supplies
+this state and due-timer proposals to
 the hosted orchestration actor; dispatch/cancel/kill effects are not executed by
 the recovery loader. Full hosted workflow/agent coordination remains separate.
 The event appender buffers transient database failures within its bounded queue
@@ -638,8 +640,8 @@ registration of those exact bytes. New workflow registrations also revalidate
 the retained schedule file against the active workflow's variables and refresh
 effective defaults, without creating a schedule config for unchanged file bytes.
 Every file/config/series mutation shares the registry/version/audit/NOTIFY
-transaction. Version pins and execution policies are retained for the dependent
-trigger/scheduler implementation; apply-under-load firing verification is separate.
+transaction. Run-now and recurring fires resolve retained version pins and
+effective variables; apply-under-load firing verification is separate.
 
 `ActiveVersionCache` is a hosted service shared by future trigger handlers.
 It listens to `registry` before loading the initial atomic immutable snapshot,
@@ -810,15 +812,16 @@ preview (five by default). Cron uses Cronos DST semantics: fixed times in a
 spring gap move to the first valid instant, fixed fall-fold times fire once,
 and interval-like cron preserves distinct UTC occurrences across both offsets.
 Elapsed intervals must advance from the last intended fire, not scheduler poll
-time. Hosts need ICU/timezone data; schedule persistence, APIs and the leader
-scheduler remain separate tasks.
+time. Hosts need ICU/timezone data. The hosted scheduler uses this same expression
+implementation for persisted cron and interval cursors.
 
 `Wf.Engine.Core.Scheduling.OverlapPolicy.Decide(activeRuns, policy)` reuses the
 schedule contract's Skip/Queue/Concurrent values. With no other nonterminal run
 in the same series it returns Start; otherwise default Skip, Queue, or Start
 for Concurrent. Count queued runs too, excluding the candidate itself.
-Decisions are pure and reject invalid policies/counts. Durable skipped-fire
-history and FIFO queued-run release belong to the leader scheduler tasks.
+Decisions are pure and reject invalid policies/counts. The hosted scheduler
+records skipped fires transactionally; series UI and FIFO queued-run release
+remain separate tasks.
 
 `Wf.Engine.Core.Scheduling.SchedulerLoop` plans from a persisted next-fire cursor,
 a next-occurrence delegate (for example `ScheduleExpression.GetNextOccurrence`),
@@ -830,8 +833,8 @@ Never insert a second `schedule_fires` row for the catch-up action: retain the
 missed slot's identity and link the run to its source. The returned next cursor
 preserves interval phase and UTC/DST identity. Commit cursor advancement,
 missed history and run creation atomically; repeated planning alone is not
-exactly-once execution. Database persistence, overlap enforcement and hosted
-leader scheduling remain separate tasks.
+exactly-once execution. Applying this beyond-grace policy in the hosted scheduler
+remains task 3.2.2.1.3.
 
 Migration `0014_schedule_fires.sql` stores fire history with an exact-once
 `(schedule_id, fire_at)` key; claim with `ON CONFLICT DO NOTHING` and create a
@@ -840,6 +843,27 @@ Started=0, Skipped=1, Missed=2, CaughtUp=3. History references existing schedule
 (soft-delete them); optional run IDs remain history references after run
 retention removes the corresponding run. Timestamps must be finite, and all
 callers must use PostgreSQL's microsecond precision for slot identity.
+
+`ScheduleFireService` owns the leader's `ScheduleTimerHeap`. Each due candidate
+rechecks the current unpaused/non-deleted schedule under a row lock and fences
+the lease inside the same transaction as the fire claim, overlap decision,
+initial run/snapshot/node rows and next intended cursor. Scheduled runs retain
+the permanent series, selected version UUID, metadata and bound effective
+variables; `trigger=Schedule`, `triggered_by=scheduler`. Replayed slots never
+replace fire history or create another run. Cursor advancement does not change
+the configuration's optimistic row version.
+
+The service listens to `registry` and `schedules` before taking its snapshot,
+reloads after committed notifications and on takeover/reconnect, and refreshes
+every five seconds as a backstop. Edits are read again at admission, not copied
+from stale heap entries. Shared `WorkflowVersionResolver` handles trigger/run-now
+and recurring exact/range pins; a recurring unpinned fire reads the current
+active pointer in its transaction, independently of notification ordering.
+Invalid pins/values log a rejection and retain the due cursor, without starving
+other schedules. Transient storage failures disable scheduler readiness until
+resynchronization; fatal corrupt state fails explicitly. Beyond-grace catch-up,
+queued-run FIFO release, skipped-fire UI and the one-hour/1,000-schedule chaos
+gate remain their dependent tasks, not implied by basic exactly-once firing.
 
 `Wf.Agent.Secrets.SecretMasker` takes resolved secret values, never reference
 names. `Redact` masks complete text; create a separate text stream for each

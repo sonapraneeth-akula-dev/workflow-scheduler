@@ -60,6 +60,13 @@ public sealed class RegistrationHostTests(RegistrationHostDatabase database) : I
                 catch (TaskCanceledException) when (!deadline.IsCancellationRequested) { }
                 await Task.Delay(50, deadline.Token);
             }
+            while (true)
+            {
+                using var leaderReady = await client.GetAsync("/healthz/leader", deadline.Token);
+                if (leaderReady.IsSuccessStatusCode) break;
+                Assert.Equal(HttpStatusCode.ServiceUnavailable, leaderReady.StatusCode);
+                await Task.Delay(50, deadline.Token);
+            }
             var team = "actual-host-" + Guid.NewGuid().ToString("N");
             var registry = new TeamRegistry(team, [new(team, "release", "description", new([]))]);
             using var registered = await client.PostAsJsonAsync("/api/v1/registrations",
