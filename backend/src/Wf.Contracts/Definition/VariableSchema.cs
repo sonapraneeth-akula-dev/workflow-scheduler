@@ -6,16 +6,6 @@ namespace Wf.Contracts.Definition;
 
 public enum VariableType { String, Int, Long, Double, Bool, Enum, StringList, Duration, Secret }
 
-public sealed record SecretReference
-{
-    public string Name { get; }
-    public SecretReference(string name)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        Name = name;
-    }
-}
-
 public sealed record VariableSchema
 {
     public string Key { get; }
@@ -60,9 +50,7 @@ public sealed record VariableSchema
                 value.EnumerateArray().All(v => v.ValueKind == JsonValueKind.String),
             VariableType.Duration => value.ValueKind == JsonValueKind.String &&
                 TimeSpan.TryParseExact(value.GetString(), "c", CultureInfo.InvariantCulture, out _),
-            VariableType.Secret => value.ValueKind == JsonValueKind.Object &&
-                value.EnumerateObject().Count() == 1 && value.TryGetProperty("Name", out var name) &&
-                name.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(name.GetString()),
+            VariableType.Secret => SecretReference.IsValidValue(value),
             _ => false
         };
         if (!valid)

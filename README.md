@@ -24,6 +24,20 @@ timeouts and aborts return 1. Ctrl+C requests an abort and allows cleanup.
 durations and secret-reference names use plain text, other types use JSON.
 All policies and variables validate before tasks start.
 
+Secret variables accept `secret://<store>/<name>` through the existing
+`SecretReference` contract and `.Secret("token", "secret://local/deploy-token")`.
+`SecretReference.Parse` requires a qualified reference; `Store` and `SecretName`
+are computed, not serialized. Existing safe bare/hierarchical names remain
+local-store references for compatibility. Store aliases use 1-63 lowercase
+letters/digits/hyphens; secret names use 1-200 ASCII letters/digits, `.`, `_`, `-`
+and safe slash-separated segments. Credentials, query strings, fragments,
+percent escapes, whitespace and traversal segments are rejected without echoing
+the input. Manifests still store exactly `{"Name":"reference"}`; literal string
+secret defaults and extra value fields fail shared WFV008 validation. A
+name-looking string inside `Name` cannot be distinguished from an intended
+reference; never put resolved values there. Resolution and value masking follow
+in their own agent tasks.
+
 `await workflow.RunAsync(args)` selects local execution by default, `--describe`,
 `--engine <origin>`, `--task-host --socket <absolute-path>`, or
 `--dry-run <mocks.json>`. Modes are exclusive; repeated `--var key=value` pairs
