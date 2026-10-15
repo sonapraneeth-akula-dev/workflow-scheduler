@@ -75,6 +75,33 @@ Unit and integration tests cover authoring, real task execution and PostgreSQL
 event replay. CI runs on Windows and Linux. Frontend tests will accompany the
 frontend implementation.
 
+Provision the PostgreSQL database/schema and configure
+`ConnectionStrings__Workflow`, then run the explicit deployment-only migration
+mode before starting the control plane:
+
+```powershell
+dotnet run --project backend\src\Wf.ControlPlane -- --migrate
+```
+
+This exits after applying embedded, ordinally ordered scripts; it starts no
+server or leader. DbUp PostgreSQL 7.0.1 journals each successful script in
+`schema_versions` in the connection's current schema. A schema-scoped advisory
+lock serializes deployers; each script and journal entry share one transaction,
+with a 60-second command/lock bound. Existing outer BEGIN/COMMIT wrappers are
+removed for this runner; variable substitution is disabled for PostgreSQL dollar
+quotes. Failed scripts roll back and fail the process; rerunning skips committed
+scripts. Existing manually provisioned, unjournaled schemas require a reviewed
+baseline/adoption procedure, not an automatic assumption that all scripts ran.
+
+`MigrationLint` rejects DROP/RENAME/TRUNCATE and added NOT NULL constraints
+without a non-null default declared in that script, ignoring comments and
+quoted values while checking explicit function/DO-body DDL. It is a static
+compatibility check, not a SQL sandbox or proof about dynamic SQL/default
+expressions; review those and release contract changes separately, at least one
+release later. Initial migration `0003` now supplies the default needed by old
+writers; `0013` supplies it to existing schemas without changing existing
+deadlines. Normal run creation still writes its resolved policy deadline.
+
 Task delegates resolve by stable `node/task` keys through `TaskRegistry`; no
 assembly scanning. Contexts expose `Var<T>`, AOT-safe `VarEnum<T>`, declared
 `Input<T>`, bounded `Outputs`, cancellation, logging and injected report/artifact

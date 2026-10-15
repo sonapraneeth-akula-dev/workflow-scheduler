@@ -1,6 +1,6 @@
 BEGIN;
 
-ALTER TABLE runs ADD COLUMN deadline_at timestamptz;
+ALTER TABLE runs ADD COLUMN deadline_at timestamptz DEFAULT (now() + interval '24 hours');
 UPDATE runs SET deadline_at = created_at + interval '24 hours';
 ALTER TABLE runs ALTER COLUMN deadline_at SET NOT NULL;
 

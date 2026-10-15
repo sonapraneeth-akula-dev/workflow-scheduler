@@ -1,6 +1,7 @@
 using System.Net;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Npgsql;
+using Wf.ControlPlane.Data;
 using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Events;
@@ -9,14 +10,23 @@ using Wf.ControlPlane.Engine.Recovery;
 using Wf.ControlPlane.Engine.Sweeper;
 using Wf.Engine.Core.Placement;
 
-var builder = WebApplication.CreateBuilder(args);
+if (args.Count(argument => argument == "--migrate") > 1)
+    throw new ArgumentException("--migrate cannot be repeated.", nameof(args));
+var migrate = args.Contains("--migrate", StringComparer.Ordinal);
+var builder = WebApplication.CreateBuilder(args.Where(argument => argument != "--migrate").ToArray());
 var port = builder.Configuration.GetValue("Engine:Port", 5000);
 if (port is < 1 or > 65535) throw new InvalidOperationException("Engine:Port must be between 1 and 65535.");
 builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, port,
     listen => listen.Protocols = HttpProtocols.Http2));
 builder.Services.AddGrpc(options => options.MaxReceiveMessageSize = 1024 * 1024);
 var connectionString = builder.Configuration.GetConnectionString("Workflow")
-    ?? throw new InvalidOperationException("ConnectionStrings:Workflow is required; apply backend/db/migrations before starting.");
+    ?? throw new InvalidOperationException("ConnectionStrings:Workflow is required; run --migrate before starting the host.");
+if (migrate)
+{
+    using var logging = LoggerFactory.Create(options => options.AddConsole());
+    Migrator.Upgrade(connectionString, logging.CreateLogger("Wf.Migrations"));
+    return;
+}
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(new LeaseOptions(Guid.NewGuid().ToString("N"),
