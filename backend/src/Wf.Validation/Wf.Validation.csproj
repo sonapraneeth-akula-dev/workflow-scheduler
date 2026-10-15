@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <PackageReference Include="Cronos" />
     <ProjectReference Include="..\Wf.Contracts\Wf.Contracts.csproj" />
   </ItemGroup>
 </Project>

@@ -165,6 +165,19 @@ UUID/configuration as a Windows LocalService service (elevated PowerShell).
 `--validate-only` makes no changes. Both refuse to overwrite an existing install.
 CI installs, starts, checks and removes services on its disposable runners.
 
+## Schedule expressions
+
+`Wf.Validation.Schedules.ScheduleExpression.Create(cron, interval, timeZoneId)`
+accepts exactly one standard five-field cron expression (or supported macro) or
+positive elapsed interval, plus an explicit IANA timezone. UTC results are
+strictly after the supplied cursor; `GetNextOccurrences` returns an immutable
+preview (five by default). Cron uses Cronos DST semantics: fixed times in a
+spring gap move to the first valid instant, fixed fall-fold times fire once,
+and interval-like cron preserves distinct UTC occurrences across both offsets.
+Elapsed intervals must advance from the last intended fire, not scheduler poll
+time. Hosts need ICU/timezone data; schedule persistence, APIs and the leader
+scheduler remain separate tasks.
+
 ## Benchmarks
 
 ```powershell
