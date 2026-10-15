@@ -20,6 +20,7 @@ public sealed class TeamRegistrySchemaTests
         Assert.Equal("https://json-schema.org/draft/2020-12/schema", schema["$schema"]!.GetValue<string>());
         AssertShape(schema, TeamRegistryJsonContext.Default.TeamRegistry, ["team", "types"]);
         var definitions = schema["$defs"]!;
+        AssertShape(definitions["presentation"]!, TeamRegistryJsonContext.Default.TeamPresentation, []);
         AssertShape(definitions["workflowType"]!, TeamRegistryJsonContext.Default.WorkflowTypeDefinition,
             ["team", "name", "description", "metadataSchema"]);
         AssertShape(definitions["metadataSchema"]!, TeamRegistryJsonContext.Default.MetadataSchema, ["keys"]);

@@ -23,6 +23,14 @@ public sealed class TeamRegistryValidatorIntegrationTests
             ValidatorFixture.Token);
         Assert.True(valid.IsValid);
         Assert.NotNull(valid.Build);
+        var presented = ValidTeam.Replace("\"keys\":[]",
+            "\"keys\":[{\"key\":\"environment\",\"allowedValues\":[\"dev\",\"ppe\"]}]", StringComparison.Ordinal)
+            .Replace("\"team\":\"demo\",\"types\":",
+                "\"team\":\"demo\",\"presentation\":{\"groupingKeys\":[\"environment\"],\"defaultFilters\":{\"environment\":\"dev\"}},\"types\":",
+                StringComparison.Ordinal);
+        await File.WriteAllTextAsync(team, presented, ValidatorFixture.Token);
+        Assert.True((await Validator.ValidateAsync(fixture.Source, fixture.Cache, fixture.AdditionalInputs,
+            ValidatorFixture.Token)).IsValid);
         var invalidCases = new[] {
             "not-json",
             ValidTeam.Replace("\"name\":\"release\"", "\"name\":\"other\"", StringComparison.Ordinal),
@@ -37,6 +45,10 @@ public sealed class TeamRegistryValidatorIntegrationTests
             """,
             """
             {"team":"demo","roleBindings":[{"role":"Viewer","groupId":"00000000-0000-0000-0000-000000000000"}],
+              "types":[{"team":"demo","name":"release","description":"Release","metadataSchema":{"keys":[]}}]}
+            """,
+            """
+            {"team":"demo","presentation":{"groupingKeys":["unknown"]},
               "types":[{"team":"demo","name":"release","description":"Release","metadataSchema":{"keys":[]}}]}
             """
         };

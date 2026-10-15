@@ -241,6 +241,19 @@ group may hold different roles or appear at both scopes. Sample UUIDs are
 placeholders, not deployed groups. Registration/RBAC synchronization follows
 separately; declaring a map does not itself grant access to the running API.
 
+Optional team `presentation` config supplies ordered `typeOrder`, `groupingKeys`
+and metadata `listColumns`, plus metadata-keyed `defaultFilters` and display
+`labels`; the demo `team.json` includes an example. Type names and metadata keys
+are exact/ordinal. Partial type order is allowed without mutating registry
+declaration order. Metadata references must exist in at least one declared
+type's schema, even when free-form workflow metadata is allowed. A default
+filter value must satisfy at least one declaring type's allowed values (or an
+unconstrained declaration), allowing defaults to select a subset of types.
+Unknown/repeated references, invalid filter values and empty labels return
+WFV024 with precise paths but no echoed values. Missing/null presentation and
+empty config preserve existing defaults. Shared validation and editor schema
+cover the contract; applying it in team views remains a separate UI task.
+
 `TypeNameSimilarity` supplies the shared registry normalization and bounded
 Levenshtein helper: invariant lowercase letters/digits only, then remove one
 trailing plural `s` when more than one character remains. `WithinTwoEdits`

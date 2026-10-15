@@ -144,6 +144,8 @@ public static class TeamRegistryRules
             else
                 CheckSchema(type.MetadataSchema, path + ".metadataSchema", file, errors, cancellationToken);
         }
+        if (errors.Count == 0)
+            errors.AddRange(PresentationValidator.Validate(registry, file, cancellationToken));
     }
 
     private static void CheckRoleBindings(ImmutableArray<RegistryRoleBinding> bindings, string path, string file,

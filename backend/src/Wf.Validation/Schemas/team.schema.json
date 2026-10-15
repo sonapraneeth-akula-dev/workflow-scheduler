@@ -15,9 +15,42 @@
       "type": "array",
       "uniqueItems": true,
       "items": { "$ref": "#/$defs/roleBinding" }
-    }
+    },
+    "presentation": { "$ref": "#/$defs/presentation" }
   },
   "$defs": {
+    "presentation": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "typeOrder": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonemptyText" }
+        },
+        "groupingKeys": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonemptyText" }
+        },
+        "listColumns": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonemptyText" }
+        },
+        "defaultFilters": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/nonemptyText" },
+          "additionalProperties": { "$ref": "#/$defs/nonemptyText" }
+        },
+        "labels": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/nonemptyText" },
+          "additionalProperties": { "$ref": "#/$defs/nonemptyText" }
+        }
+      }
+    },
     "nonemptyText": {
       "type": "string",
       "minLength": 1,

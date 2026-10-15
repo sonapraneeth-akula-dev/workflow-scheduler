@@ -76,5 +76,5 @@ public static class RuleCatalog
             ScheduleVariable, ScheduleIdentity, TeamRegistryRules.RegistryShape, TeamRegistryRules.DuplicateType,
             TeamRegistryRules.TypeQuota, TeamRegistryRules.InvalidMetadataSchema, TeamRegistryRules.UnknownType,
             TeamRegistryRules.InvalidMetadata, HttpOperationRules.InvalidContract, HttpOperationRules.UnsafeRetry,
-            HttpOperationRules.InsufficientRetention];
+            HttpOperationRules.InsufficientRetention, PresentationValidator.InvalidPresentation];
 }

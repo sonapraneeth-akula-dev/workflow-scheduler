@@ -1,6 +1,13 @@
 {
   "$schema": "../../../../src/Wf.Validation/Schemas/team.schema.json",
   "team": "demo",
+  "presentation": {
+    "typeOrder": ["release"],
+    "groupingKeys": ["environment"],
+    "listColumns": ["environment", "component"],
+    "defaultFilters": { "environment": "dev" },
+    "labels": { "environment": "Environment", "component": "Component" }
+  },
   "roleBindings": [
     { "role": "Viewer", "groupId": "11111111-1111-1111-1111-111111111111" }
   ],
