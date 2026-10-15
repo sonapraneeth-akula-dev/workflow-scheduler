@@ -88,6 +88,18 @@ stay unchanged between runs. Affinity supports `None`, `Node`, `Run` and
 In-process local execution binds selectors but does not create or dispatch to
 named agents; machine matching belongs to distributed placement.
 
+`Wf.Engine.Core.Placement.PlacementEngine` filters health, drain, selectors,
+reservations, slots and RAM, then prefers warm hosts, lower slot utilization and
+stable round-robin ties. `Propose` changes nothing; `Apply` follows the durable
+dispatch event and rejects stale/foreign decisions. Capacity supplied by the
+dispatcher must include committed dispatches not yet reflected in heartbeats.
+Warm-package sets describe the bounded host pool, not every downloaded package.
+Node references use the first committed placement; platform re-placement moves
+affected pins without spending an author's retries, while `NoAutoRetry` blocks
+platform placement. Snapshots restore pins and rotation; `ForgetRun` releases
+terminal-run state. Placement timeout and API single-machine overrides follow
+in their own backlog task.
+
 ## Agent
 
 The Native AOT agent runs in a console, as Windows Service `wf-agent`, or under

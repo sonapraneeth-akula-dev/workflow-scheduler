@@ -16,6 +16,7 @@ using Testcontainers.PostgreSql;
 using Wf.Agent;
 using Wf.Contracts.Agent.V1;
 using Wf.ControlPlane.Engine.Agents;
+using Wf.Engine.Core.Placement;
 
 namespace Wf.Integration.Tests.Agents;
 
@@ -228,6 +229,30 @@ public sealed class RegistrationTests(AgentDatabase database) : IClassFixture<Ag
             if (File.Exists(config)) File.Delete(config);
             Directory.Delete(directory);
         }
+    }
+
+    [Fact]
+    public async Task Placement_uses_durable_registry_capacity_and_excludes_stale_or_draining_agents()
+    {
+        var clock = new ManualClock();
+        using var registry = new AgentRegistry(database.DataSource, clock);
+        var session = await registry.RegisterAsync(Hello(), TestContext.Current.CancellationToken);
+        var request = new PlacementRequest(Guid.NewGuid(), "node", "task", 1, new string('a', 64), RequiredRamMb: 512);
+        var placement = new PlacementEngine();
+        Assert.Equal(session.AgentId, placement.Propose(request, [registry.Find(session.AgentId)!.Capacity(clock.GetUtcNow())]).Agent!.Id);
+        var heartbeat = Heartbeat();
+        heartbeat.RamUsedMb = 7900;
+        await registry.HeartbeatAsync(session, heartbeat, TestContext.Current.CancellationToken);
+        Assert.Null(placement.Propose(request, [registry.Find(session.AgentId)!.Capacity(clock.GetUtcNow())]).Agent);
+        await registry.HeartbeatAsync(session, Heartbeat(), TestContext.Current.CancellationToken);
+        clock.Advance(TimeSpan.FromSeconds(15));
+        Assert.Null(placement.Propose(request, [registry.Find(session.AgentId)!.Capacity(clock.GetUtcNow())]).Agent);
+        await using var command = database.DataSource.CreateCommand("UPDATE agents SET status=2 WHERE id=$1");
+        command.Parameters.AddWithValue(session.AgentId);
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        await registry.LoadAsync(TestContext.Current.CancellationToken);
+        await registry.HeartbeatAsync(session, Heartbeat(), TestContext.Current.CancellationToken);
+        Assert.Null(placement.Propose(request, [registry.Find(session.AgentId)!.Capacity(clock.GetUtcNow())]).Agent);
     }
 
     private static async Task WaitUntil(Func<bool> condition, Task running)

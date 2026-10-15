@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Wf.Engine.Core.Placement;
 
 namespace Wf.ControlPlane.Engine.Agents;
 
@@ -14,6 +15,12 @@ public sealed record AgentRecord(
 {
     public bool IsDispatchable(DateTimeOffset now) =>
         Status == AgentStatus.Healthy && now - LastHeartbeatAt < AgentRegistry.HeartbeatTimeout;
+
+    public PlacementAgent Capacity(DateTimeOffset now, ImmutableHashSet<Guid>? warmRuns = null,
+        ImmutableHashSet<string>? warmPackages = null) =>
+        new(Id, Name, Os == AgentOs.Windows ? "windows" : "linux", Pool, SlotsUsed, MaxTasks,
+            Math.Max(0, RamMb - RamUsedMb), IsDispatchable(now), Status == AgentStatus.Draining,
+            Labels, warmRuns, warmPackages);
 }
 
 public readonly record struct AgentSession(Guid AgentId, Guid SessionId);
