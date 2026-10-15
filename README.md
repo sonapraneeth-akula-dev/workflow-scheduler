@@ -276,6 +276,17 @@ CPU count, physical RAM, labels and binary version. Five-second heartbeats repor
 machine CPU/RAM/disk and slots. Disconnects retry configured engines within one
 second; leader hints are followed only when they match a configured endpoint.
 
+`CapacityProfile` identifies measured/manual requests-per-second capacity by
+transport, codec, payload-size class and ordinally sorted string load settings.
+Its source-generated compact JSON `ProfileKey` preserves exact identifier/value
+case and escaping; settings order does not change identity. Keys are bounded to
+2,000 UTF-8 bytes for the PostgreSQL composite index. `AgentCapacity` requires a
+positive whole-number rate; only Calibrated values carry a UTC calibration time.
+Migration `0012_agent_capacities.sql` adds per-agent/profile rows with foreign-key,
+source and timestamp checks without changing existing agents. No row means
+unverified, not zero capacity. Manual override APIs and calibration dispatch
+remain separate tasks; no Bond codec profiles or load executor are included.
+
 HTTPS is required off loopback. `Agent__AllowInsecureTransport=true` is only for
 an isolated internal container network; TLS certificate validation stays enabled.
 Agent-role token acquisition is a separate authentication backlog item.
