@@ -1,2 +1,3 @@
 *.proto text eol=lf
 infra/agent/*.sh text eol=lf
+frontend/** text=auto eol=lf
