@@ -70,11 +70,15 @@ public static class RuleCatalog
         "A schedule instance ID is empty, duplicated, or contains control characters.",
         "Give every instance a nonempty, stable, unique ID without control characters.");
 
+    public static readonly ValidationRule TriggerVariable = new("WFV025",
+        "A run variable is unknown, invalid, or required but missing.",
+        "Use a declared variable key and its JSON type and allowed values; supply required values without defaults. Values cannot contain NUL characters.");
+
     public static ImmutableArray<ValidationRule> All { get; } =
         [DirectoryNotFound, WorkflowNotFound, BuildFailed, DescribeFailed, DependencyCycle, UnknownDependency,
             DuplicateKey, VariableType, VariableRequired, VersionBump, ScheduleShape, ScheduleExpression,
             ScheduleVariable, ScheduleIdentity, TeamRegistryRules.RegistryShape, TeamRegistryRules.DuplicateType,
             TeamRegistryRules.TypeQuota, TeamRegistryRules.InvalidMetadataSchema, TeamRegistryRules.UnknownType,
             TeamRegistryRules.InvalidMetadata, HttpOperationRules.InvalidContract, HttpOperationRules.UnsafeRetry,
-            HttpOperationRules.InsufficientRetention, PresentationValidator.InvalidPresentation];
+            HttpOperationRules.InsufficientRetention, PresentationValidator.InvalidPresentation, TriggerVariable];
 }

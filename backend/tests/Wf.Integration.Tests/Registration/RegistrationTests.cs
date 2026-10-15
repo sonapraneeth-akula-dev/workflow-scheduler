@@ -25,7 +25,10 @@ using Wf.Contracts.Manifest;
 using Wf.Contracts.Registration;
 using Wf.Contracts.Registry;
 using Wf.ControlPlane.Auth;
+using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Data;
+using Wf.ControlPlane.Engine.Recovery;
+using Wf.ControlPlane.Engine.Registry;
 using Wf.ControlPlane.Registration;
 using Wf.ControlPlane.Storage;
 using Wf.Integration.Tests.Agents;
@@ -481,7 +484,7 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
 
     private static string Team(RegistrationRequest request) => request.Registry!.Value.GetProperty("team").GetString()!;
 
-    private static JsonElement Manifest(string id, string version, bool invalidMetadata = false)
+    internal static JsonElement Manifest(string id, string version, bool invalidMetadata = false)
     {
         var workflow = Workflow.Define(id, version, builder =>
         {
@@ -492,7 +495,7 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
         return document.RootElement.Clone();
     }
 
-    private static async Task<RegistrationRequest> Request(Server server)
+    internal static async Task<RegistrationRequest> Request(Server server)
     {
         var team = "registration-" + Guid.NewGuid().ToString("N");
         var id = team + "/release/workflow";
@@ -509,7 +512,7 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
 
     private static PackageReference Reference(byte[] bytes) => new(Convert.ToHexStringLower(SHA256.HashData(bytes)), bytes.Length);
 
-    private static async Task<JsonElement> Json(HttpResponseMessage response)
+    internal static async Task<JsonElement> Json(HttpResponseMessage response)
     {
         using var document = JsonDocument.Parse(await response.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken));
         return document.RootElement.Clone();
@@ -529,7 +532,7 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
         await query.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
     }
 
-    private sealed class Server(WebApplication app, HttpClient client, RSA rsa, RsaSecurityKey key, string root, Clock clock,
+    internal sealed class Server(WebApplication app, HttpClient client, RSA rsa, RsaSecurityKey key, string root, Clock clock,
         ConcurrentQueue<Exception> failures) : IAsyncDisposable
     {
         private const string Tenant = "ef8a05a0-451c-4479-9c8d-391b6bc7ee1a";
@@ -539,9 +542,10 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
         public string Root => root;
         public Clock Clock => clock;
         public IBlobStore Blobs => app.Services.GetRequiredService<IBlobStore>();
+        public ActiveVersionCache Versions => app.Services.GetRequiredService<ActiveVersionCache>();
         public ConcurrentQueue<Exception> Failures => failures;
 
-        public static async Task<Server> Start(NpgsqlDataSource source)
+        public static async Task<Server> Start(NpgsqlDataSource source, bool runs = false)
         {
             var root = Path.Combine(Path.GetTempPath(), "wf-registration-" + Guid.NewGuid().ToString("N"));
             var rsa = RSA.Create(2048);
@@ -558,6 +562,13 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
             builder.Services.AddSingleton(source);
             builder.Services.AddSingleton<TimeProvider>(clock);
             builder.Services.AddWorkflowRegistrations(builder.Configuration);
+            if (runs)
+            {
+                builder.Services.AddTeamAuthorization();
+                builder.Services.AddSingleton<CommandInbox>();
+                builder.Services.AddSingleton<ActiveVersionCache>();
+                builder.Services.AddHostedService<ActiveVersionCache>(services => services.GetRequiredService<ActiveVersionCache>());
+            }
             var metadata = new OpenIdConnectConfiguration { Issuer = Issuer };
             metadata.SigningKeys.Add(key);
             var manager = new StaticConfigurationManager<OpenIdConnectConfiguration>(metadata);
@@ -579,12 +590,14 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
             app.UseAuthentication();
             app.UseAuthorization();
             app.MapRegistrationEndpoints();
+            if (runs) app.MapRunsEndpoints();
             await app.StartAsync(TestContext.Current.CancellationToken);
             var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
             return new(app, new HttpClient { BaseAddress = new(address), Timeout = TimeSpan.FromSeconds(20) }, rsa, key, root, clock, failures);
         }
 
-        public string Token(string role = "Registrar", string identity = "app", string? scope = null, bool includeActor = true)
+        public string Token(string role = "Registrar", string identity = "app", string? scope = null, bool includeActor = true,
+            Guid[]? groups = null)
         {
             var claims = new List<Claim>
             {
@@ -593,6 +606,7 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
             };
             if (includeActor) claims.Add(new("oid", Actor.ToString()));
             if (scope is not null) claims.Add(new("scp", scope));
+            if (groups is not null) claims.AddRange(groups.Select(group => new Claim("groups", group.ToString("D"))));
             return new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(Issuer, Audience, claims,
                 DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow.AddMinutes(20), new SigningCredentials(key, SecurityAlgorithms.RsaSha256)));
         }
@@ -628,7 +642,7 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
         }
     }
 
-    private sealed class Clock : TimeProvider
+    internal sealed class Clock : TimeProvider
     {
         public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
         public override DateTimeOffset GetUtcNow() => Now;

@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using System.Text.Json.Serialization;
+using Wf.Contracts.Runs;
 using Wf.Sdk.Local;
 using Wf.Validation;
 
@@ -114,26 +114,18 @@ public static class RunModeDispatcher
         var client = httpClient ?? owned!;
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(origin, "/api/v1/runs"))
         {
-            Content = JsonContent.Create(new SubmitRunRequest(workflow.Name, workflow.Version, variables),
-                RunModeJsonContext.Default.SubmitRunRequest)
+            Content = JsonContent.Create(new TriggerRunRequest(workflow.Name, workflow.Version) { Variables = variables },
+                RunJsonContext.Default.TriggerRunRequest)
         };
         request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("D"));
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode != HttpStatusCode.Accepted)
             throw new HttpRequestException($"Run submission returned HTTP {(int)response.StatusCode}; expected 202 Accepted.", null, response.StatusCode);
         await response.Content.LoadIntoBufferAsync(64 * 1024, cancellationToken).ConfigureAwait(false);
-        var accepted = await response.Content.ReadFromJsonAsync(RunModeJsonContext.Default.SubmitRunResponse, cancellationToken).ConfigureAwait(false);
+        var accepted = await response.Content.ReadFromJsonAsync(RunJsonContext.Default.TriggerRunResponse, cancellationToken).ConfigureAwait(false);
         if (accepted is null || accepted.RunId == Guid.Empty)
             throw new InvalidDataException("Engine accepted the run without returning a non-empty runId.");
         await output.WriteLineAsync(accepted.RunId.ToString("D").AsMemory(), cancellationToken).ConfigureAwait(false);
         return 0;
     }
 }
-
-internal sealed record SubmitRunRequest(string WorkflowId, string Version, ImmutableDictionary<string, JsonElement> Variables);
-internal sealed record SubmitRunResponse(Guid RunId);
-
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
-[JsonSerializable(typeof(SubmitRunRequest))]
-[JsonSerializable(typeof(SubmitRunResponse))]
-internal sealed partial class RunModeJsonContext : JsonSerializerContext;

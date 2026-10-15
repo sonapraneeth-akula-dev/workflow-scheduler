@@ -416,6 +416,20 @@ sequenceDiagram
 Workflow versions and schedule configs are registered independently: a schedule-file-only change inserts a `schedule_config_versions` row and updates code schedules, with no workflow SemVer bump and no new workflow version. The response is `201 { workflowVersion?, scheduleConfigVersion?, registrySnapshot? }`, listing only what changed; a schedule-only change returns `scheduleConfigVersion` and leaves the active workflow version unchanged.
 
 ### 4.2 Trigger and execute (NFR-028 ≤ 50 ms dispatch, NFR-029 ≤ 1 s start, NFR-030 ≤ 10 ms/node)
+
+Implemented acceptance (`3.1.1.1.1`): `POST /api/v1/runs` uses the shared strict
+request/response contract, scoped Operator authorization (or scoped/global
+Admin), authenticated actor object ID, and shared JSON variable resolution
+including workflow defaults. Active selections use the hosted cache; explicit
+SemVer/build-independent keys or version UUIDs are restricted to the same
+undeleted workflow. Cache unavailability returns 503. Each accepted request
+captures a UUIDv7, immutable initial snapshot and run-timeout deadline, then
+inserts the command and `pg_notify('commands', runId)` in one PostgreSQL
+statement; no API-side run row is created. Invalid values return structured
+400 errors with variable paths/hints; JSON bodies are capped at 1 MiB.
+Idempotency enforcement, placement overrides, pending-command reads and full
+execution dispatch below remain their dependent tasks.
+
 ```mermaid
 sequenceDiagram
   participant U as Browser

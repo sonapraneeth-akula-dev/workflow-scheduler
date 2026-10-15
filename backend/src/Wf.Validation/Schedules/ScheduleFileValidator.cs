@@ -137,7 +137,7 @@ public static class ScheduleFileValidator
         {
             try
             {
-                if (ContainsNul(value))
+                if (VariableBinder.ContainsNul(value))
                     throw new ArgumentException("Schedule values cannot contain NUL characters.");
                 schema.Validate(value);
                 return true;
@@ -150,15 +150,6 @@ public static class ScheduleFileValidator
         errors.Add(RuleCatalog.ScheduleVariable.CreateError(file, path));
         return false;
     }
-
-    private static bool ContainsNul(JsonElement value) => value.ValueKind switch
-    {
-        JsonValueKind.String => value.GetString()!.Contains('\0'),
-        JsonValueKind.Array => value.EnumerateArray().Any(ContainsNul),
-        JsonValueKind.Object => value.EnumerateObject().Any(property =>
-            property.Name.Contains('\0') || ContainsNul(property.Value)),
-        _ => false
-    };
 
     private static string Property(string parent, string key) => $"{parent}[\"{JsonEncodedText.Encode(key)}\"]";
 }

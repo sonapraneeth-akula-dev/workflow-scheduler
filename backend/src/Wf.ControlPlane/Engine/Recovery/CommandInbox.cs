@@ -49,9 +49,11 @@ public sealed class CommandInbox(NpgsqlDataSource dataSource, TimeProvider time)
         if (string.IsNullOrWhiteSpace(createdBy) || createdBy.Length > 200)
             throw new ArgumentException("A command requires a principal of at most 200 characters.", nameof(createdBy));
         await using var command = dataSource.CreateCommand("""
-            INSERT INTO commands(id,kind,run_id,payload,created_by,created_at)
-            VALUES($1,$2,$3,$4::jsonb,$5,$6)
-            ON CONFLICT(run_id,kind) DO UPDATE SET run_id=commands.run_id RETURNING id
+            WITH inserted AS (
+                INSERT INTO commands(id,kind,run_id,payload,created_by,created_at)
+                VALUES($1,$2,$3,$4::jsonb,$5,$6)
+                ON CONFLICT(run_id,kind) DO UPDATE SET run_id=commands.run_id RETURNING id,run_id)
+            SELECT id,pg_notify('commands',run_id::text) FROM inserted
             """);
         command.Parameters.AddWithValue(Guid.CreateVersion7());
         command.Parameters.AddWithValue(kind);

@@ -64,7 +64,28 @@ Remote mode validates variables and POSTs `workflowId`, exact `version` and
 overrides to `/api/v1/runs` with an idempotency key, then prints the accepted
 run UUID. It does not upload/register the workflow or wait for completion.
 Non-loopback HTTP, redirects, invalid/oversized replies and rejection statuses
-fail explicitly; the full hosted trigger API remains its own backlog task.
+fail explicitly.
+
+`POST /api/v1/runs` accepts `workflowId`, optional exact `version` (SemVer or
+version UUID), and optional `variables` (an empty object by default). A delegated
+Operator or scoped Admin must own the workflow's team/type; Author and Viewer
+alone cannot trigger. Global Admin also works for development/service calls.
+The authenticated `oid`, never a request field, supplies the triggering actor.
+Omitted versions resolve through the hosted active-version cache; explicit
+versions must belong to the same undeleted workflow. Selected UUIDs remain
+pinned through later activations. An unavailable cache returns 503 rather than
+using stale data.
+
+All nine variable types and workflow defaults resolve through shared
+`Wf.Validation`; invalid/unknown/missing-required values return 400
+`application/problem+json` with `errors[]` paths and hints, without echoing values.
+Malformed, duplicate, null-required or unknown request fields fail closed;
+placement overrides remain unsupported until their own task. Bodies above
+1 MiB return 413 and non-JSON content returns 415. Acceptance atomically inserts
+the immutable initial snapshot/deadline command and emits PostgreSQL `commands`
+NOTIFY, then returns `202 {"runId":"<UUIDv7>"}`. Only leader recovery creates
+the durable run rows. Idempotency-key enforcement and the run-detail endpoint
+remain separate tasks; sending a key does not yet deduplicate HTTP retries.
 
 The all-mode entrypoint requires ordinary, untrimmed IL because it includes the
 gRPC task-host server. File-based workflows use `#:property PublishAot=false`,
