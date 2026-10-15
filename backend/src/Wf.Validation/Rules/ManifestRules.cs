@@ -35,6 +35,7 @@ public static class ManifestRules
         {
             CheckNodes(manifest, file, errors, cancellationToken);
             CheckVariables(manifest, file, errors, cancellationToken);
+            errors.AddRange(HttpOperationRules.Validate(manifest, file, cancellationToken));
         }
         cancellationToken.ThrowIfCancellationRequested();
         return errors.OrderBy(error => error.RuleId, StringComparer.Ordinal)
@@ -205,7 +206,9 @@ public static class ManifestRules
                         .Replace("'", "\\'", StringComparison.Ordinal) + "']";
                 if (!names.Add(property.Name))
                     errors.Add(RuleCatalog.DuplicateKey.CreateError(file, propertyPath));
-                CheckProperties(property.Value, propertyPath, file, errors, cancellationToken);
+                // Remote contracts report a fixed path: arbitrary property names may contain secrets.
+                if (property.Name != "httpOperation")
+                    CheckProperties(property.Value, propertyPath, file, errors, cancellationToken);
             }
         }
         else if (element.ValueKind == JsonValueKind.Array)

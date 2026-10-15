@@ -12,4 +12,5 @@ public sealed record WorkflowManifest(string SdkVersion, string Name, string Ver
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     UseStringEnumConverter = true, WriteIndented = true)]
 [JsonSerializable(typeof(WorkflowManifest))]
+[JsonSerializable(typeof(HttpOperationDefinition))]
 public partial class WorkflowManifestJsonContext : JsonSerializerContext;

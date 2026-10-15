@@ -66,6 +66,7 @@ public sealed class HttpTaskTests : IAsyncLifetime
         var response = context.Outputs.Get<HttpResponseOutput>("response")!;
         Assert.Equal(202, response.StatusCode);
         Assert.Equal("accepted", response.Body);
+        Assert.Equal(1, requestCount);
     }
 
     [Fact]

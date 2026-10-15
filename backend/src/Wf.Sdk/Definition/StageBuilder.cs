@@ -40,4 +40,17 @@ public sealed class StageBuilder
         node.Task(key, execute, configure, failure);
         return this;
     }
+
+    public StageBuilder Task(string key, HttpOperationTask operation, FailurePolicy failure = FailurePolicy.Hard)
+    {
+        node.Task(key, operation, failure);
+        return this;
+    }
+
+    public StageBuilder Task(string key, HttpOperationTask operation, Action<PolicyBuilder> configure,
+        FailurePolicy failure = FailurePolicy.Hard)
+    {
+        node.Task(key, operation, configure, failure);
+        return this;
+    }
 }

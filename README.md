@@ -38,6 +38,23 @@ name-looking string inside `Name` cannot be distinguished from an intended
 reference; never put resolved values there. Resolution and value masking follow
 in their own agent tasks.
 
+`Tasks.HttpOperation(...)` declares an opt-in long-running HTTP operation:
+submission URL, status/state mapping and retention, optional cancel URL,
+deduplication header/retention, lookup-by-key contract, trusted origins and secret
+reference. Attach the returned `HttpOperationTask` directly with `.Task(...)` so
+its metadata reaches the manifest; passing its delegate alone loses that contract.
+Shared WFV021-WFV023 rules reject unsafe URLs/templates and require both
+`.NoAutoRetry()` and zero author retries without deduplication or lookup. Retry
+contracts must retain remote identity through the entire run timeout. Ordinary
+`Tasks.Http` remains one-shot, including 202 responses.
+
+Only authoring/manifest/validation is available yet: attempting to execute an
+HTTP operation explicitly fails with nonretryable
+`HttpOperationRuntimeUnsupportedException`, without sending a request. Durable
+checkpointed submission, polling, reconciliation, remote cancellation and System
+Events follow in their prerequisite tasks. A lookup miss alone must never
+authorize resubmission without a service deduplication guarantee.
+
 `await workflow.RunAsync(args)` selects local execution by default, `--describe`,
 `--engine <origin>`, `--task-host --socket <absolute-path>`, or
 `--dry-run <mocks.json>`. Modes are exclusive; repeated `--var key=value` pairs

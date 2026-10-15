@@ -75,5 +75,6 @@ public static class RuleCatalog
             DuplicateKey, VariableType, VariableRequired, VersionBump, ScheduleShape, ScheduleExpression,
             ScheduleVariable, ScheduleIdentity, TeamRegistryRules.RegistryShape, TeamRegistryRules.DuplicateType,
             TeamRegistryRules.TypeQuota, TeamRegistryRules.InvalidMetadataSchema, TeamRegistryRules.UnknownType,
-            TeamRegistryRules.InvalidMetadata];
+            TeamRegistryRules.InvalidMetadata, HttpOperationRules.InvalidContract, HttpOperationRules.UnsafeRetry,
+            HttpOperationRules.InsufficientRetention];
 }
