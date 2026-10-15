@@ -13,6 +13,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Content Include="wf-workflow\**\*" Exclude="wf-workflow\**\bin\**;wf-workflow\**\obj\**"
-             Pack="true" PackagePath="content" />
+             Pack="true" PackagePath="content\wf-workflow" />
+    <Content Include="workflows-repo\**\*" Exclude="workflows-repo\**\bin\**;workflows-repo\**\obj\**"
+             Pack="true" PackagePath="content\workflows-repo" />
   </ItemGroup>
 </Project>

@@ -369,6 +369,33 @@ checks and unchanged workflow-cache integrity. Local Windows measurement:
 16.547 s separately. Cold download/compilation is not claimed below 10 s.
 Windows/Linux CI runs the same integration; local Linux results remain unverified.
 
+The same package includes `dotnet new wf-repo` (`--cliVersion` defaults to
+`1.0.0`), which scaffolds a workflows-repository PR gate and local `wf` tool
+manifest. Require the **Workflow PR gate** check. It selects changed workflow
+directories from the full base/head diff, then runs actual `wf validate` and
+`dotnet test`; validation, test and restore failures fail the check. Shared
+changes select affected workflows conservatively; deletions, renames and
+special-character file names are covered by selection tests.
+
+The repository needs .NET 10, Python 3.9+, full Git history and readable NuGet
+sources for tool package `wf` and pinned SDK/testing dependencies. No repository
+variables or secrets are required; do not expose feed credentials to PR code.
+From a generated repository, run the same gate locally:
+
+```powershell
+$env:PR_BASE_SHA = '<full base SHA>'
+$env:PR_HEAD_SHA = '<full PR head SHA>'
+$env:PR_CHECKOUT_SHA = git rev-parse HEAD
+python .github\scripts\pr_gate.py
+```
+
+`--list` prints selection-only JSON. Local integration verifies valid, invalid
+DAG, failing-test and restore-failure outcomes against real generated workflows.
+Windows MSBuild currently rejects apostrophe/ampersand directory names
+(`MSB3094`); selection handles them safely, while executable directory scenarios
+cover Unicode and spaces. Hosted required-check behavior remains unverified
+until a permitted push/PR.
+
 ## Validation CLI and packages
 
 ```powershell

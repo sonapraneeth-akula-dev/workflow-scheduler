@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "isRoot": true,
+  "tools": {
+    "wf": {
+      "version": "CLI_PACKAGE_VERSION",
+      "commands": ["wf"]
+    }
+  }
+}
