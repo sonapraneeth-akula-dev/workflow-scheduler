@@ -571,6 +571,19 @@ for Concurrent. Count queued runs too, excluding the candidate itself.
 Decisions are pure and reject invalid policies/counts. Durable skipped-fire
 history and FIFO queued-run release belong to the leader scheduler tasks.
 
+`Wf.Engine.Core.Scheduling.SchedulerLoop` plans from a persisted next-fire cursor,
+a next-occurrence delegate (for example `ScheduleExpression.GetNextOccurrence`),
+an explicit nonnegative grace period and a `TimeProvider`. Every slot older than
+grace remains `Missed`; slots exactly at grace remain due for a normal start.
+Default Latest also emits one separate `CaughtUp` run action, trigger `catch-up`,
+referencing the newest missed slot. None suppresses only that action, not history.
+Never insert a second `schedule_fires` row for the catch-up action: retain the
+missed slot's identity and link the run to its source. The returned next cursor
+preserves interval phase and UTC/DST identity. Commit cursor advancement,
+missed history and run creation atomically; repeated planning alone is not
+exactly-once execution. Database persistence, overlap enforcement and hosted
+leader scheduling remain separate tasks.
+
 ## Workflow project template
 
 Pack `backend\src\Wf.Templates\Wf.Templates.csproj`, install the resulting NuGet
