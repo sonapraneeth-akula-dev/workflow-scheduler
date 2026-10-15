@@ -597,14 +597,14 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
         }
 
         public string Token(string role = "Registrar", string identity = "app", string? scope = null, bool includeActor = true,
-            Guid[]? groups = null)
+            Guid[]? groups = null, Guid? actor = null)
         {
             var claims = new List<Claim>
             {
                 new("tid", Tenant), new("ver", "2.0"), new("roles", role), new("idtyp", identity),
                 new("azp", "60d24b19-f65a-4ed4-96cc-9174bfcacabc")
             };
-            if (includeActor) claims.Add(new("oid", Actor.ToString()));
+            if (includeActor) claims.Add(new("oid", (actor ?? Actor).ToString()));
             if (scope is not null) claims.Add(new("scp", scope));
             if (groups is not null) claims.AddRange(groups.Select(group => new Claim("groups", group.ToString("D"))));
             return new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(Issuer, Audience, claims,
@@ -625,11 +625,12 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
         }
 
         public async Task<HttpResponseMessage> Send(HttpMethod method, string path, HttpContent content,
-            string? token = null, bool useDefaultToken = true)
+            string? token = null, bool useDefaultToken = true, IEnumerable<string>? idempotencyKeys = null)
         {
             using var request = new HttpRequestMessage(method, path) { Content = content };
             token ??= useDefaultToken ? Token() : null;
             if (token is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            if (idempotencyKeys is not null) request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKeys);
             return await client.SendAsync(request, TestContext.Current.CancellationToken);
         }
 

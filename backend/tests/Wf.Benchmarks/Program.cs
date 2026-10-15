@@ -3,6 +3,18 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using Wf.Benchmarks;
 
+#if !ENGINE_BASELINE
+if (args.Length > 0 && args[0] == "--trigger-api-bench")
+{
+    if (args.Length != 1)
+    {
+        Console.Error.WriteLine("Usage: --trigger-api-bench");
+        return 1;
+    }
+    return await TriggerApiBench.RunAsync();
+}
+#endif
+
 if (args.Length > 0 && args[0] == "--compare")
 {
     if (args.Length != 3)

@@ -18,7 +18,7 @@ using static Wf.Integration.Tests.Registration.RegistrationTests;
 
 namespace Wf.Integration.Tests.Registration;
 
-public sealed class TriggerRunTests(RegistrationDatabase database) : IClassFixture<RegistrationDatabase>
+public sealed partial class TriggerRunTests(RegistrationDatabase database) : IClassFixture<RegistrationDatabase>
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
@@ -306,6 +306,7 @@ public sealed class TriggerRunTests(RegistrationDatabase database) : IClassFixtu
         Assert.Equal(expected.Ticks / 10, actual.Ticks / 10);
         var loaded = await store.LoadAsync(runId, Token);
         Assert.Equal(recovered.Nodes, loaded.Snapshot.Nodes);
+        await leader.StopAsync(Token);
         Assert.Empty(server.Failures);
     }
 

@@ -16,19 +16,23 @@ using Wf.Validation.SemVer;
 
 namespace Wf.ControlPlane.Api;
 
+internal sealed record AuthorizedRunRequest(TriggerRunRequest Request, Guid Actor);
+
 public static class RunsEndpoints
 {
     private const long MaximumRequestBytes = 1024 * 1024;
 
     public static IEndpointRouteBuilder MapRunsEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapPost("/api/v1/runs", Trigger).RequireAuthorization();
+        endpoints.MapPost("/api/v1/runs", Trigger).RequireAuthorization()
+            .AddEndpointFilter(AuthorizeRequest)
+            .AddEndpointFilter<IdempotencyFilter>();
         return endpoints;
     }
 
-    private static async Task<IResult> Trigger(HttpContext context, IAuthorizationService authorization,
-        ActiveVersionCache versions, NpgsqlDataSource source, CommandInbox inbox, TimeProvider time)
+    private static async ValueTask<object?> AuthorizeRequest(EndpointFilterInvocationContext invocation, EndpointFilterDelegate next)
     {
+        var context = invocation.HttpContext;
         if (!context.Request.HasJsonContentType())
             return Results.Problem(statusCode: 415, title: "A JSON request content type is required");
         if (context.Request.ContentLength > MaximumRequestBytes) return TooLarge();
@@ -48,13 +52,23 @@ public static class RunsEndpoints
         if (identity.Length != 3 || identity.Any(part => string.IsNullOrWhiteSpace(part) || part.EnumerateRunes().Take(129).Count() > 128 ||
             part is "." or ".." || part.Any(character => char.IsControl(character) || character == '\\')))
             return Invalid("$.workflowId", "Use an exact team/type/name identity, with at most 128 Unicode characters per segment.");
-        var allowed = await authorization.AuthorizeAsync(context.User,
+        var allowed = await context.RequestServices.GetRequiredService<IAuthorizationService>().AuthorizeAsync(context.User,
             new TeamResource(TeamResourceKind.Type, identity[0] + "/" + identity[1], context.RequestAborted),
             TeamAuthorizationExtensions.Policy(RegistryRole.Operator));
         if (!allowed.Succeeded)
             return Results.Problem(TeamAuthorizationExtensions.Forbidden());
         if (!Guid.TryParse(context.User.FindFirstValue("oid"), out var actor) || actor == Guid.Empty)
             return Results.Problem(statusCode: 403, title: "Forbidden", detail: "A triggering principal object ID is required.");
+        context.Features.Set(new AuthorizedRunRequest(request, actor));
+        return await next(invocation);
+    }
+
+    private static async Task<IResult> Trigger(HttpContext context,
+        ActiveVersionCache versions, NpgsqlDataSource source, CommandInbox inbox, TimeProvider time)
+    {
+        var authorized = context.Features.Get<AuthorizedRunRequest>()
+            ?? throw new InvalidOperationException("A run request must be authorized before acceptance.");
+        var (request, actor) = authorized;
         if (!versions.IsReady) return Unavailable();
         Guid versionId;
         WorkflowManifest manifest;
@@ -103,8 +117,11 @@ public static class RunsEndpoints
         var now = time.GetUtcNow();
         var runId = Guid.CreateVersion7(now);
         var run = new RunState(runId, manifest.Nodes, manifest.Metadata, _ => { }, variables.Values);
-        await inbox.TriggerAsync(new(run.Snapshot, request.WorkflowId, versionId, now.Add(manifest.RunTimeout)),
-            actor.ToString("D"), context.RequestAborted);
+        var command = new TriggerRunCommand(run.Snapshot, request.WorkflowId, versionId, now.Add(manifest.RunTimeout));
+        if (context.Features.Get<NpgsqlTransaction>() is { } transaction)
+            await inbox.TriggerAsync(command, actor.ToString("D"), transaction, context.RequestAborted);
+        else
+            await inbox.TriggerAsync(command, actor.ToString("D"), context.RequestAborted);
         return Results.Json(new TriggerRunResponse(runId), RunJsonContext.Default.TriggerRunResponse, statusCode: 202);
     }
 

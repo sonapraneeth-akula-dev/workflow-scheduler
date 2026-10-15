@@ -84,8 +84,29 @@ placement overrides remain unsupported until their own task. Bodies above
 1 MiB return 413 and non-JSON content returns 415. Acceptance atomically inserts
 the immutable initial snapshot/deadline command and emits PostgreSQL `commands`
 NOTIFY, then returns `202 {"runId":"<UUIDv7>"}`. Only leader recovery creates
-the durable run rows. Idempotency-key enforcement and the run-detail endpoint
-remain separate tasks; sending a key does not yet deduplicate HTTP retries.
+the durable run rows. The run-detail endpoint remains a separate task.
+
+Optional `Idempotency-Key` accepts one 1-200-character visible ASCII key,
+without whitespace. PostgreSQL deduplicates for 24 hours per authenticated
+principal and route, across concurrent API hosts and restarts. A matching retry
+returns the original 202/run ID, even after activation or while the active cache
+is unavailable; scoped authorization is checked again on every retry.
+Whitespace, JSON object order and omitted request defaults do not change the
+fingerprint; array order and supplied values do. Reusing an unexpired key for
+a different request returns 409 without echoing either body. Missing keys
+leave submissions independent; at expiry the key can identify a new request.
+Reservation, command, response and NOTIFY commit together, so validation or
+persistence failures cannot leave an orphan run command or consume the key.
+Expired rows stop deduplicating immediately; general physical retention
+cleanup remains a maintenance task.
+
+`dotnet run --project backend\tests\Wf.Benchmarks -c Release -- --trigger-api-bench`
+starts an isolated real API/PostgreSQL benchmark: 50 warmups, then 500 fresh-key
+submissions at open-loop 50 requests/second. JSON output includes HTTP latency,
+dispatch lag, offered/achieved rates and durable row counts; exit is nonzero
+unless every request succeeds and p95 is strictly below 100 ms. Database and
+host setup stay outside measurements. `WF_TEST_POSTGRES` uses a unique disposable
+schema; otherwise the benchmark creates and removes its own PostgreSQL container.
 
 The all-mode entrypoint requires ordinary, untrimmed IL because it includes the
 gRPC task-host server. File-based workflows use `#:property PublishAot=false`,

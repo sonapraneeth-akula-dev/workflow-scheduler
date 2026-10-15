@@ -427,8 +427,19 @@ captures a UUIDv7, immutable initial snapshot and run-timeout deadline, then
 inserts the command and `pg_notify('commands', runId)` in one PostgreSQL
 statement; no API-side run row is created. Invalid values return structured
 400 errors with variable paths/hints; JSON bodies are capped at 1 MiB.
-Idempotency enforcement, placement overrides, pending-command reads and full
-execution dispatch below remain their dependent tasks.
+Idempotency enforcement (`3.1.1.1.2`) adds an inner endpoint filter after fresh
+scoped authorization. Optional visible-ASCII keys are limited to 200 characters
+and scoped by authenticated principal plus route. Canonical JSON fingerprints
+normalize object ordering, whitespace and omitted request defaults, while
+preserving array order and supplied values. A changed request under a live key
+returns 409; a matching retry returns the original response, without reselecting
+the active version. PostgreSQL key insertion/row locking serializes concurrent
+hosts, and the key, command, response and NOTIFY share one transaction.
+Unsuccessful acceptance rolls back the reservation; exact 24-hour expiry allows
+reuse. Cache outages do not invalidate an already accepted response, but revoked
+scope access prevents replay. Expiry is logical on lookup; physical expired-row
+purging remains part of maintenance. Placement overrides, pending-command
+reads and full execution dispatch below remain their dependent tasks.
 
 ```mermaid
 sequenceDiagram
