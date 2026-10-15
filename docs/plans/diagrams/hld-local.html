@@ -231,7 +231,7 @@
     <path d="M12 6.6v2M12 15.4v2M6.6 12h2M15.4 12h2M8.2 8.2l1.4 1.4M14.4 14.4l1.4 1.4M15.8 8.2l-1.4 1.4M9.6 14.4l-1.4 1.4"/>
   </symbol>
 </svg>
-<header class="sd-head"><h1>HLD 1: Local profile (single machine)</h1><p>Developer workstation or small demo box (Windows 11 or Linux), started with `aspire run`. No Kubernetes; Docker is optional and used only for PostgreSQL.</p></header>
+<header class="sd-head"><h1>HLD 1: Local profile (single machine)</h1><p>Developer workstation or small demo box (Windows 11 or Linux), started with `aspire run`. No Kubernetes; Docker is optional and used only for PostgreSQL. No domain name: UI at http://localhost:5173 (Vite), API and agents at http://localhost:5000; `--lan` adds https://&lt;raw-ip&gt;:5001 for LAN agents.</p></header>
 <div class="sd-canvas">
 <svg class="sd-links" viewBox="0 0 1290 640" aria-hidden="true">
 <defs>
@@ -291,6 +291,7 @@
 <summary>Glossary: terms in this diagram</summary>
 <dl>
 <dt>HLD / local profile</dt><dd>High-level design: the main parts and their connections. This profile runs them on one developer machine.</dd>
+<dt><code>localhost</code> / raw IP / <code>--lan</code></dt><dd><code>localhost</code> means this same computer, so no domain name is needed. A raw IP is the computer's numeric network address; <code>--lan</code> lets other machines on the local network connect to it over an encrypted (HTTPS) link.</dd>
 <dt><code>aspire run</code> / Aspire dashboard</dt><dd>Aspire starts the local application parts together; its dashboard shows their logs, measurements and request traces.</dd>
 <dt>Docker / WSL</dt><dd>Docker runs an application in an isolated container. Windows Subsystem for Linux (WSL) runs Linux on a Windows machine.</dd>
 <dt><code>wf</code> CLI / <code>workflow.cs</code></dt><dd>The workflow command-line interface (CLI) publishes or runs a workflow; <code>workflow.cs</code> is its C# definition file.</dd>

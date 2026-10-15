@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>HLD 1b: Local prod-like (Docker + Caddy)</title>
+<title>HLD 1b: Local Docker Compose (per environment)</title>
 <style>
   :root {
     --canvas: #ffffff;
@@ -174,7 +174,7 @@
 </style>
 </head>
 <body>
-<div class="sd-root" data-diagram-root aria-label="Prod-like local: browser, CLI, a native Windows agent and LAN machines reach the host-native GrihaSetu edge Caddy at ppe.kardia.sonapraneeth.in over TLS; it forwards to the gateway Caddy container on 127.2.6.7, which routes to wf-api and the engine leader; engines use PostgreSQL and a blob volume; a Linux agent container runs task hosts that load the sample service containers.">
+<div class="sd-root" data-diagram-root aria-label="Local Docker Compose mode, ppe environment shown (each environment type has its own stack, loopback address and domain): browser, CLI, a native Windows agent and LAN machines reach the host-native GrihaSetu edge Caddy at ppe.kardia.sonapraneeth.in over TLS; it forwards to the gateway Caddy container on 127.2.6.7, which routes to wf-api and the engine leader; engines use PostgreSQL and a blob volume; a Linux agent container runs task hosts that load the sample service containers.">
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
   <symbol id="sd-batch-job" viewBox="0 0 24 24">
     <path d="M3 6.6h11M3 11h11M3 15.4h7"/>
@@ -237,7 +237,7 @@
     <path d="M12 6.6v2M12 15.4v2M6.6 12h2M15.4 12h2M8.2 8.2l1.4 1.4M14.4 14.4l1.4 1.4M15.8 8.2l-1.4 1.4M9.6 14.4l-1.4 1.4"/>
   </symbol>
 </svg>
-<header class="sd-head"><h1>HLD 1b: Local prod-like (Docker + Caddy)</h1><p>Optional `wf local up` (PPE only): production builds of every Linux component run in Docker behind a gateway Caddy on 127.2.6.7. The GrihaSetu edge Caddy serves https://ppe.kardia.sonapraneeth.in on the LAN with its mkcert umbrella certificate. The Windows agent stays native; `aspire run` remains the inner loop.</p></header>
+<header class="sd-head"><h1>HLD 1b: Local Docker Compose (per environment)</h1><p>Optional `wf local up --env &lt;env&gt;`: production builds of every Linux component run in Docker behind a gateway Caddy on 127.2.6.&lt;E&gt;, one stack per environment type. The GrihaSetu edge Caddy serves https://&lt;env&gt;.kardia.sonapraneeth.in (prod: https://kardia.sonapraneeth.in) on the LAN with its mkcert umbrella certificate. Shown: the default ppe stack (127.2.6.7). The Windows agent stays native; pure local `aspire run` on localhost remains the inner loop.</p></header>
 <div class="sd-canvas">
 <svg class="sd-links" viewBox="0 0 1554 650" aria-hidden="true">
 <defs>
@@ -278,7 +278,7 @@
 <div class="zone" style="--x:8px; --y:140px; --w:1538px; --h:500px"></div>
 <div class="zone-label" style="--x:8px; --y:140px; --w:1538px"><svg class="sd-icon" aria-hidden="true"><use href="#sd-desktop"/></svg>This machine · Windows 11 or Linux</div>
 <div class="zone" style="--x:536px; --y:172px; --w:1000px; --h:456px"></div>
-<div class="zone-label right" style="--x:536px; --y:172px; --w:1000px"><svg class="sd-icon" aria-hidden="true"><use href="#sd-container"/></svg>Compose project kardia-ppe</div>
+<div class="zone-label right" style="--x:536px; --y:172px; --w:1000px"><svg class="sd-icon" aria-hidden="true"><use href="#sd-container"/></svg>Compose project kardia-ppe (one per environment)</div>
 <div class="node n-client" style="--x:288px; --y:16px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-users"/></svg></span><span class="node-title">LAN machines</span><span class="node-sub">agents · teammates</span></div>
 <div class="node n-client" style="--x:24px; --y:200px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-browser"/></svg></span><span class="node-title">Browser</span><span class="node-sub">ppe.kardia.sonapraneeth.in</span></div>
 <div class="node n-client" style="--x:24px; --y:360px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-desktop"/></svg></span><span class="node-title">wf CLI / workflow.cs</span><span class="node-sub">native · REST over TLS</span></div>
@@ -303,11 +303,11 @@
 <details class="glossary" open>
 <summary>Glossary: terms in this diagram</summary>
 <dl>
-<dt>HLD / prod-like / PPE</dt><dd>High-level design of a production-shaped local test setup. PPE is the named local test environment, not the deployed production system.</dd>
-<dt><code>wf local up</code> / <code>aspire run</code></dt><dd>The first command starts release builds in Docker for integration testing; the second starts the quicker development setup.</dd>
+<dt>HLD / environment type / PPE</dt><dd>High-level design of a production-shaped local setup. Each environment type (demo, local, test, stresstest, integration, ppe, prod) is a separate copy with its own web address; PPE (pre-production) is the default copy shown here, not a deployed production system.</dd>
+<dt><code>wf local up --env</code> / <code>aspire run</code></dt><dd>The first command starts release builds in Docker for the chosen environment; the second starts the quicker development setup on <code>localhost</code> with no domain name.</dd>
 <dt>Docker Compose / container / native</dt><dd>Compose starts a group of isolated containers. Native means a program runs directly on the host operating system instead.</dd>
 <dt>Edge Caddy / gateway Caddy / GrihaSetu</dt><dd>Caddy is a web traffic router. The shared GrihaSetu edge accepts LAN traffic; the gateway inside Compose forwards it to the appropriate workflow service.</dd>
-<dt>LAN / loopback / <code>127.2.6.7:80</code></dt><dd>LAN is the local network. Loopback means traffic stays on this computer; this address and port identify the private gateway, not a public internet address.</dd>
+<dt>LAN / loopback / <code>127.2.6.7:80</code></dt><dd>LAN is the local network. Loopback means traffic stays on this computer; this address and port identify the private ppe gateway, not a public internet address. Its last number is the environment's ID, so each environment has its own address.</dd>
 <dt>mkcert / certificate / TLS / HTTPS</dt><dd>mkcert creates locally trusted certificates. A certificate identifies the site; Transport Layer Security (TLS) encrypts web traffic, making HTTP into HTTPS.</dd>
 <dt><code>wf</code> CLI / <code>workflow.cs</code></dt><dd>The workflow command-line interface (CLI) publishes and starts runs; <code>workflow.cs</code> is a C# workflow definition.</dd>
 <dt><code>wf-api</code> / REST / <code>/api</code> / <code>/hubs</code></dt><dd>The application programming interface (API) accepts commands and serves data using web requests (REST). <code>/api</code> is for those requests; <code>/hubs</code> carries live updates.</dd>

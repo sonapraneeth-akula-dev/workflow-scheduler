@@ -726,7 +726,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 
 ### REQ-011: Zero-downtime operations, local/cloud parity, retention (Must Have)
 - **Outcome**: The full stack runs locally with one command; hosted production deployments cause 0 s downtime and 0 failed runs and roll back in ≤ 5 min; data is retained 90 days (configurable per type).
-- **Traces**: FR-030, FR-037; NFR-005, NFR-014–NFR-017 (extended to bare metal, 2026-10-13), NFR-025, NFR-026.
+- **Traces**: FR-030, FR-037; NFR-005, NFR-014–NFR-017 (extended to bare metal, 2026-10-13; single-machine build target is pure local + Docker Compose, 2026-10-15), NFR-025, NFR-026.
 - **Est. AI**: 05:15
 
 #### Milestone M-011.1: One-command local stack
@@ -740,14 +740,15 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
   - [ ] Starts DB, control plane, one agent, UI in ≤ 2 min on Windows and Linux; local stand-ins for blob, secrets, telemetry.
   - [ ] Docker optional: an existing/native PostgreSQL is used when a connection string is configured.
   - [ ] Options start extra simulated agents (distinct names/labels) and a Linux agent (container or WSL) on the same machine.
-- **US-111** — **As a** developer **I want** an optional prod-like local PPE mode with production builds of all Linux/server components in containers (the Windows agent runs natively) behind the local HTTPS edge at `https://ppe.kardia.sonapraneeth.in` **So that** I can catch TLS, cookie, OIDC, WebSocket and failover issues locally and let other machines join (`Est. AI: 00:40`)
-  - [ ] `wf local up` / `wf local down` start and stop Release builds of api, two engines, PG, Linux agent(s), sample services, dashboard and a gateway Caddy in Docker, generated from the same AppHost and published only on `127.2.6.7`; a Windows agent can join natively.
-  - [ ] `https://ppe.kardia.sonapraneeth.in` is served by the GrihaSetu edge with its mkcert umbrella certificate and opens without a certificate warning on this machine and on LAN clients that trust the mkcert root.
+  - [ ] No domain name: the stack is reached at `http://localhost:<port>`. With `--lan`, it also listens on the machine's raw IP over HTTPS (mkcert certificate with that IP as a SAN), so LAN agents can join at `https://<raw-ip>:<port>`.
+- **US-111** — **As a** developer **I want** an optional prod-like Docker Compose mode, one stack per environment type, with production builds of all Linux/server components in containers (the Windows agent runs natively) behind the local HTTPS edge at a per-environment domain URL **So that** I can catch TLS, cookie, OIDC, WebSocket and failover issues locally and let other machines join (`Est. AI: 00:40`)
+  - [ ] `wf local up --env <env>` / `wf local down --env <env>` (default `ppe`; also `demo`, `local`, `test`, `stresstest`, `integration`, `prod`) start and stop Release builds of api, two engines, PG, Linux agent(s), sample services, dashboard and a gateway Caddy in Docker, generated from the same AppHost as compose project `kardia-<env>` and published only on `127.2.6.<envId>` (GrihaSetu environment ID); a Windows agent can join natively. Several environments can run side by side.
+  - [ ] `https://<env>.kardia.sonapraneeth.in` (prod: `https://kardia.sonapraneeth.in`) is served by the GrihaSetu edge with its mkcert umbrella certificate and opens without a certificate warning on this machine and on LAN clients that trust the mkcert root.
   - [ ] UI, API and SignalR share one HTTPS origin; agents reach only the engine leader; native and LAN agents use gRPC/TLS, in-compose agents may use h2c on the isolated gateway network; killing the leader container resumes runs on the standby.
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
 - [ ] **Integration tests**: CI job on Windows and Linux starts the stack and runs scenario A green in ≤ 2 min startup.
-- [ ] **Integration tests**: nightly Linux job runs `wf local up`, runs scenario A against the gateway, kills the engine leader, and the run completes.
+- [ ] **Integration tests**: nightly Linux job runs `wf local up --env test`, runs scenario A against the gateway, kills the engine leader, and the run completes; a second job starts `ppe` beside `test` and checks both answer on their own loopback addresses.
 
 #### Milestone M-011.2: Zero-downtime deploy and rollback
 - **Problem solved**: Deployments interrupt users and running workflows.
@@ -763,6 +764,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - **US-108** — **As an** Admin **I want** to run and upgrade the platform on bare metal or Azure VMs (Windows/Linux services, no containers) **So that** labs and VM fleets get the same zero-downtime behaviour as Azure PaaS (`Est. AI: 00:45`)
   - [ ] Rolling script upgrades api nodes one at a time (drain via health endpoint), engine standby first then leader handover ≤ 3 s, agents in waves; rollback re-points the release folder.
   - [ ] Agents reach the leader via an endpoint list with `NotLeader` redirect; PG failover (Patroni, ≈ 10–20 s) resumes runs ≤ the failover time + 30 s.
+  - [ ] Bare-metal support ships in code and scripts but is not built on the first (single) machine; it is verified only by the self-hosted lab test below.
 
 ##### FEAT-011.2.2: Backward-compatible migrations and clients
 - **Est. AI**: 00:35

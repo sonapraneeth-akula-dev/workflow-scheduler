@@ -14,8 +14,8 @@ library (SDK)**, which defines lifecycle stages: system init → workflow pre-se
 post-process → system post-process. Each workflow takes a **set of variables**; a run is triggered for a
 given variable set. Recurring schedules come in two kinds: **code-defined** (system-scheduled recurring
 tests, read-only in UI) and **user-defined** (created and modified only in the UI). We build **our own
-engine** in **C#** (backend, SDK, hooks), hosted on Azure VMs/services, fully reproducible **locally**, on
-**Windows and Linux**. Backend and frontend must be **extremely performant and reactive**.
+engine** in **C#** (backend, SDK, hooks), hosted on Azure VMs/services or bare metal, fully reproducible **locally**
+on one machine (built first), on **Windows and Linux**. Backend and frontend must be **extremely performant and reactive**.
 **Phase 2**: a separate service team uses our infra to run **performance** and **response-parity** tests on
 selected machines. We own everything (load generation, source connectors, parity framework, storage); the
 service team owns **only request/response-specific logic** via a narrow hook surface.
@@ -64,8 +64,10 @@ service team owns **only request/response-specific logic** via a narrow hook sur
 - Metrics for monitoring/improvement: timing, failure statuses, latency, CPU, RAM.
 - Task-generated reports (Markdown, HTML, tables, charts, images, diffs, etc.) viewable in the UI; many reports of mixed kinds per run.
 - Zero-downtime platform deployments; workflow and schedule config changes go live immediately after check-in without redeploying.
-- Runs on Azure (VMs or managed services) and fully locally (single-machine dev setup); Windows + Linux for
-  engine, agents, and SDK.
+- Runs fully locally on one machine (pure local on `localhost` / raw IP, or Docker Compose with per-environment
+  domain URLs), on Azure (VMs or managed services), and on bare metal; Windows + Linux for engine, agents, and SDK.
+  The first build targets this single machine (pure local + Docker Compose); bare-metal and Azure deployments use
+  the same code and are verified in CI/lab, not on this machine.
 - Run lifecycle: queued → running → (aborting) → succeeded/failed/aborted/timed-out. Node/task lifecycle: pending → ready → dispatched → running → (retrying) → succeeded/soft-failed/failed/timed-out/cancelled/skipped/reused.
 - Live status of workflow, nodes, tasks; logs/outputs per task.
 - Retries, timeouts, abort of a started run (who, when, reason recorded), re-run (whole or from failed node).
@@ -274,8 +276,8 @@ sample diffs; below threshold → run Failed.
 | NFR-013 | Isolation (phase 2) | A failing/crashing C# hook fails only its task, never the engine or other runs | Hook-invoking tasks run in a dedicated task-host process per task attempt on agents; a hook crash fails the task with category TaskError, code HookError |
 | NFR-014 | Data retention | Runs, logs, reports, artifacts, metrics: 90 days (confirmed), configurable per type | Artifacts may need shorter retention for cost (see risk) |
 | NFR-015 | Portability | Engine, agents, SDK, UI pass the same test suite on Windows and Linux | CI matrix |
-| NFR-016 | Local dev | The everyday dev stack starts locally with one command in ≤ 2 min, no Azure dependency (local stand-ins for storage/queues/secrets). The optional prod-like PPE mode may take longer to build/start: it runs production builds of all Linux/server components in containers (the Windows agent runs natively) behind the local HTTPS edge at `https://ppe.kardia.sonapraneeth.in` (GrihaSetu platform pattern), so other machines can join | |
-| NFR-017 | Deployability | The same versioned application code and per-OS binaries deploy to Azure VMs or managed services; hosting packages differ (service folders versus container images), while environment-specific adapters are selected by config | |
+| NFR-016 | Local dev | Two single-machine modes, both without Azure dependencies (local stand-ins for storage/queues/secrets). **Pure local**: the everyday dev stack starts with one command in ≤ 2 min and is reached at `http://localhost:<port>` (or the machine's raw IP over HTTPS for LAN agents); no domain name. **Docker Compose** (prod-like, may take longer to build/start): production builds of all Linux/server components in containers (the Windows agent runs natively), one stack per environment type, each behind the local HTTPS edge at its own domain URL (`https://<env>.kardia.sonapraneeth.in`; prod `https://kardia.sonapraneeth.in`; GrihaSetu platform pattern), so other machines can join | |
+| NFR-017 | Deployability | The same versioned application code and per-OS binaries deploy locally, to bare metal, to Azure VMs, or to managed services; hosting packages differ (service folders versus container images), while environment-specific adapters are selected by config | Bare metal is supported by the code but not built on this machine |
 | NFR-018 | Backend API latency | Read APIs p95 < 50 ms, p99 < 150 ms; trigger-run API p95 < 100 ms | Excluding long queries |
 | NFR-019 | Event throughput | Engine sustains ≥ 10k state events/s fan-out to ≥ 500 concurrent UI clients without dropping updates | Coalesce per entity |
 | NFR-020 | Frontend reactivity | First load (cold) < 2 s, route change < 200 ms, 60 fps while live-updating a 200-node graph at 100 events/s; JS bundle < 300 KB gz for initial route | |
@@ -296,7 +298,7 @@ sample diffs; below threshold → run Failed.
 
 ## 9. Constraints & Assumptions
 - **Constraint**: We build and own the engine, SDK, load generation, source connectors, parity framework, storage, and machine management. Service team owns only request/response hooks.
-- **Constraint**: Hosted on Azure VMs or Azure managed services; must be fully replicable locally.
+- **Constraint**: Hosted on Azure VMs, Azure managed services, or bare metal; must be fully replicable locally. The first build targets this single machine (pure local + Docker Compose), which is not a bare-metal server.
 - **Constraint**: Engine machines and test machines may be Windows or Linux; everything must work on both. Sole exception: automatic DB failover needs Linux database hosts or a managed database, so Windows-only self-hosted sites fail the database over manually (NFR-033).
 - **Constraint**: Third-party orchestrators are not used (decision: build our own).
 - **Constraint**: C# for all backend code, SDK, libraries, and service hooks (.NET, cross-platform).
@@ -354,7 +356,7 @@ Decision: **we build our own engine**. Existing engines below are listed as refe
 
 ## 12. Risks & Open Questions
 - [x] ~~Build vs adopt engine~~ → build our own.
-- [x] ~~Hosting~~ → Azure VMs or managed services; full local replica.
+- [x] ~~Hosting~~ → Azure VMs, managed services, or bare metal; full local replica (pure local on localhost / raw IP, Docker Compose per environment with domain URLs). First build: this single machine.
 - [x] ~~Machine OS~~ → Windows and Linux, both supported.
 - [x] ~~SDK language~~ → C# everything (backend, SDK, hooks).
 - [x] ~~Code vs UI schedules~~ → two kinds: code-defined (read-only in UI), user-defined (UI-only).
