@@ -2,6 +2,15 @@
 
 Implementation follows `docs/plans/2026-10-15_workflow-scheduler_azure-task-list.md`.
 
+## Frontend
+
+`frontend` contains the React/TypeScript schedule-management SPA: create, edit,
+pause, resume, delete, timezone selection and server-calculated next-five-fire
+preview. Bun manages dependencies and scripts; Vite proxies API traffic to the
+control plane. See `frontend\README.md` for local/Entra configuration, generated
+public/internal clients, actual PostgreSQL/browser tests and current hosting
+boundaries.
+
 ## Backend
 
 Requires the .NET 10 SDK. PostgreSQL integration tests require Docker with Linux

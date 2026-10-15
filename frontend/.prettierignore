@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+test-results/
+playwright-report/
+src/routeTree.gen.ts
+src/lib/api/schema.d.ts
+src/lib/api/ui-schema.d.ts

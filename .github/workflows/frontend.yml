@@ -1,0 +1,36 @@
+name: Frontend
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  schedule-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run build
+      - run: bun run test
+      - run: dotnet build ../backend/src/Wf.ControlPlane --configuration Release
+      - run: bunx playwright install --with-deps chromium firefox webkit
+      - run: bun run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: frontend-playwright-traces
+          path: frontend/test-results
