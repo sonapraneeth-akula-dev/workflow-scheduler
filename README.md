@@ -121,6 +121,42 @@ invalid pins before code schedules are registered. Invalid effective values
 or unavailable pins fail without creating a command; run-now does not create
 a scheduled-fire row or apply recurring overlap decisions.
 
+User-defined schedule management is UI-only: `POST /api/v1/schedules`,
+`PUT /api/v1/schedules/{id}`, `POST .../{id}/pause`, `POST .../{id}/resume`,
+`DELETE .../{id}`, and `POST /api/v1/schedules/preview`. Production must configure
+`AzureAd:SpaClientId` (`AzureAd__SpaClientId`); absence disables these routes with
+403 while leaving other API authentication unchanged. Only authenticated
+delegated user tokens with `scp`, a nonempty actor UUID and the exact SPA `azp`
+pass this gate; app-only tokens, other clients and `appid` fallback do not,
+including global Admins. Team/type Operator or Admin authorization still applies.
+Explicit `--dev` authentication supplies a local delegated identity only on these
+UI routes, preserving existing local Registrar/Agent behavior elsewhere.
+
+The request contains `workflowId`, `name`, `timezone`, exactly one `cron` or
+whole-second `interval`, optional `versionPin`, `overlap`, `catchUp`, and variable
+overrides. Validation uses the selected version's schema and shared schedule
+rules. Effective defaults are persisted. Preview returns the next five UTC
+instants with the same IANA/DST calculator without writing anything. Bodies are
+strict JSON capped at 1 MiB; names allow at most 128 Unicode code points.
+`GET /api/v1/schedules/{id}` remains a public authenticated Viewer read and
+returns the current strong ETag. Reads and `run-now` have no SPA-client restriction.
+
+Every edit/pause/resume/delete requires exactly one strong numeric `If-Match`
+ETag: missing is 428, malformed/weak/wildcard/multiple is 400, stale is 412.
+Create returns 201 with `Location` and ETag; edit returns 200, pause/resume 202,
+delete 204. Code-origin mutations return 409. A schedule cannot move workflows;
+its permanent series survives deletion. Unchanged expressions keep their
+intended fire cursor, expression edits recompute it, pause clears it, and resume
+starts at the next occurrence after now instead of catching up an intentional
+pause. Semantic no-ops retain ETag/cursor/audit state. Mutations, sanitized audit
+attribution and scheduler notifications commit atomically.
+
+Authenticated OpenAPI 3.1 documents use `Microsoft.AspNetCore.OpenApi`:
+`/openapi/v1.json` includes public reads and `run-now`, never UI-only mutations;
+`/openapi/ui.json` contains only the SPA schedule-management routes. Request
+types for those routes live in the control-plane assembly, not the SDK or CLI.
+The full public/generated TypeScript client and drift-check task remains separate.
+
 `dotnet run --project backend\tests\Wf.Benchmarks -c Release -- --trigger-api-bench`
 starts an isolated real API/PostgreSQL benchmark: 50 warmups, then 500 fresh-key
 submissions at open-loop 50 requests/second. JSON output includes HTTP latency,

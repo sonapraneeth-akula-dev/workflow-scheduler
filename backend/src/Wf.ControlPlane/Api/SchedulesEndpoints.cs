@@ -68,10 +68,10 @@ public static class SchedulesEndpoints
             seriesId = reader.IsDBNull(3) ? null : reader.GetGuid(3);
             deleted = reader.GetBoolean(4);
         }
-        var separator = workflowId.LastIndexOf('/');
-        if (separator < 1) throw new InvalidDataException("The schedule has an invalid workflow identity.");
+        if (!WorkflowIdentity.TryGetTypeScope(workflowId, out var typeScope))
+            throw new InvalidDataException("The schedule has an invalid workflow identity.");
         var allowed = await context.RequestServices.GetRequiredService<IAuthorizationService>().AuthorizeAsync(context.User,
-            new TeamResource(TeamResourceKind.Type, workflowId[..separator], context.RequestAborted),
+            new TeamResource(TeamResourceKind.Type, typeScope, context.RequestAborted),
             TeamAuthorizationExtensions.Policy(RegistryRole.Operator));
         if (!allowed.Succeeded) return Results.Problem(TeamAuthorizationExtensions.Forbidden());
         if (!Guid.TryParse(context.User.FindFirstValue("oid"), out var actor) || actor == Guid.Empty)

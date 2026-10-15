@@ -50,6 +50,8 @@ if (developmentAuth) builder.Configuration["Authentication:Mode"] = "Development
 builder.Services.AddWorkflowAuthentication(builder.Configuration, builder.Environment);
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
 builder.Services.AddTeamAuthorization();
+builder.Services.AddUserSchedules(builder.Configuration);
+builder.Services.AddWorkflowOpenApi();
 builder.Services.AddSignalR();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddWorkflowRegistrations(builder.Configuration);
@@ -86,6 +88,8 @@ app.MapRegistryEndpoints();
 app.MapRegistrationEndpoints();
 app.MapRunsEndpoints();
 app.MapSchedulesEndpoints();
+app.MapUserSchedulesEndpoints();
+app.MapWorkflowOpenApi();
 app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
 app.MapGet("/healthz", () => Results.Ok()).AllowAnonymous();
 app.MapGet("/healthz/leader", (LeaseManager leadership, RunRecovery recovery, ActiveVersionCache versions, ScheduleFireService schedules) =>

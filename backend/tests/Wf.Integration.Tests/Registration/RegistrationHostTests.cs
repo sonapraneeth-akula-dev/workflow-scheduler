@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Wf.Contracts.Registration;
 using Wf.Contracts.Registry;
+using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Data;
 using Wf.Integration.Tests.Agents;
 
@@ -84,6 +85,25 @@ public sealed class RegistrationHostTests(RegistrationHostDatabase database) : I
             issuedGrant = grant!.UploadUri!.Split('/')[^1];
             using var uploaded = await client.PutAsync(grant.UploadUri, new ByteArrayContent(package), deadline.Token);
             Assert.Equal(HttpStatusCode.Created, uploaded.StatusCode);
+            var workflow = team + "/release/local-ui";
+            using var workflowRegistered = await client.PostAsJsonAsync("/api/v1/registrations",
+                new RegistrationRequest(new('b', 40), "Host integration", workflow, RegistrationTests.Manifest(workflow, "1.0.0"),
+                    new(Convert.ToHexStringLower(SHA256.HashData(package)), package.Length), "// local UI integration"),
+                RegistrationJsonContext.Default.RegistrationRequest, deadline.Token);
+            Assert.Equal(HttpStatusCode.Created, workflowRegistered.StatusCode);
+            using var scheduleCreated = await client.PostAsJsonAsync("/api/v1/schedules",
+                new UserScheduleRequest(workflow, "Local development", "Etc/UTC", Interval: TimeSpan.FromMinutes(1)),
+                UserScheduleJson.Default.UserScheduleRequest, deadline.Token);
+            Assert.Equal(HttpStatusCode.Created, scheduleCreated.StatusCode);
+            Assert.Equal("\"1\"", scheduleCreated.Headers.ETag!.Tag);
+            using var publicDocument = await client.GetAsync("/openapi/v1.json", deadline.Token);
+            Assert.Equal(HttpStatusCode.OK, publicDocument.StatusCode);
+            using var publicJson = JsonDocument.Parse(await publicDocument.Content.ReadAsByteArrayAsync(deadline.Token));
+            Assert.False(publicJson.RootElement.GetProperty("paths").TryGetProperty("/api/v1/schedules", out _));
+            using var internalDocument = await client.GetAsync("/openapi/ui.json", deadline.Token);
+            Assert.Equal(HttpStatusCode.OK, internalDocument.StatusCode);
+            using var internalJson = JsonDocument.Parse(await internalDocument.Content.ReadAsByteArrayAsync(deadline.Token));
+            Assert.True(internalJson.RootElement.GetProperty("paths").GetProperty("/api/v1/schedules").TryGetProperty("post", out _));
             using var engineRequest = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{enginePort}/healthz")
             {
                 Version = HttpVersion.Version20,

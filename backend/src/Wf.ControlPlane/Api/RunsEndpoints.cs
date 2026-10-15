@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Features;
@@ -47,12 +46,10 @@ public static class RunsEndpoints
         catch (BadHttpRequestException error) when (error.StatusCode == 413) { return TooLarge(); }
         if (request is null) return Invalid("$", "Supply a run request.");
         if (request.Variables is null) return Invalid("$.variables", "Supply a JSON object of variable values, or omit variables.");
-        var identity = request.WorkflowId.Split('/');
-        if (identity.Length != 3 || identity.Any(part => string.IsNullOrWhiteSpace(part) || part.EnumerateRunes().Take(129).Count() > 128 ||
-            part is "." or ".." || part.Any(character => char.IsControl(character) || character == '\\')))
+        if (!WorkflowIdentity.TryGetTypeScope(request.WorkflowId, out var typeScope))
             return Invalid("$.workflowId", "Use an exact team/type/name identity, with at most 128 Unicode characters per segment.");
         var allowed = await context.RequestServices.GetRequiredService<IAuthorizationService>().AuthorizeAsync(context.User,
-            new TeamResource(TeamResourceKind.Type, identity[0] + "/" + identity[1], context.RequestAborted),
+            new TeamResource(TeamResourceKind.Type, typeScope, context.RequestAborted),
             TeamAuthorizationExtensions.Policy(RegistryRole.Operator));
         if (!allowed.Succeeded)
             return Results.Problem(TeamAuthorizationExtensions.Forbidden());

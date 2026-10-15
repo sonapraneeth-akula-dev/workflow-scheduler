@@ -545,8 +545,9 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
         public ActiveVersionCache Versions => app.Services.GetRequiredService<ActiveVersionCache>();
         public ConcurrentQueue<Exception> Failures => failures;
 
-        public static async Task<Server> Start(NpgsqlDataSource source, bool runs = false)
+        public static async Task<Server> Start(NpgsqlDataSource source, bool runs = false, bool userSchedules = false)
         {
+            runs |= userSchedules;
             var root = Path.Combine(Path.GetTempPath(), "wf-registration-" + Guid.NewGuid().ToString("N"));
             var rsa = RSA.Create(2048);
             var key = new RsaSecurityKey(rsa) { KeyId = "registration-test" };
@@ -556,6 +557,12 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
             builder.WebHost.UseUrls("http://127.0.0.1:0");
             builder.Configuration["AzureAd:TenantId"] = Tenant;
             builder.Configuration["AzureAd:ClientId"] = Audience;
+            if (userSchedules)
+            {
+                builder.Configuration["AzureAd:SpaClientId"] = "60d24b19-f65a-4ed4-96cc-9174bfcacabc";
+                builder.Services.AddUserSchedules(builder.Configuration);
+                builder.Services.AddWorkflowOpenApi();
+            }
             builder.Configuration["Storage:UploadHmacKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
             builder.Configuration["Storage:Root"] = root;
             builder.Services.AddWorkflowAuthentication(builder.Configuration, builder.Environment);
@@ -595,19 +602,26 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
                 app.MapRunsEndpoints();
                 app.MapSchedulesEndpoints();
             }
+            if (userSchedules)
+            {
+                app.MapUserSchedulesEndpoints();
+                app.MapWorkflowOpenApi();
+            }
             await app.StartAsync(TestContext.Current.CancellationToken);
             var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
             return new(app, new HttpClient { BaseAddress = new(address), Timeout = TimeSpan.FromSeconds(20) }, rsa, key, root, clock, failures);
         }
 
         public string Token(string role = "Registrar", string identity = "app", string? scope = null, bool includeActor = true,
-            Guid[]? groups = null, Guid? actor = null)
+            Guid[]? groups = null, Guid? actor = null, string? authorizedClient = "60d24b19-f65a-4ed4-96cc-9174bfcacabc",
+            bool includeIdentity = true)
         {
             var claims = new List<Claim>
             {
-                new("tid", Tenant), new("ver", "2.0"), new("roles", role), new("idtyp", identity),
-                new("azp", "60d24b19-f65a-4ed4-96cc-9174bfcacabc")
+                new("tid", Tenant), new("ver", "2.0"), new("roles", role)
             };
+            if (includeIdentity) claims.Add(new("idtyp", identity));
+            if (authorizedClient is not null) claims.Add(new("azp", authorizedClient));
             if (includeActor) claims.Add(new("oid", (actor ?? Actor).ToString()));
             if (scope is not null) claims.Add(new("scp", scope));
             if (groups is not null) claims.AddRange(groups.Select(group => new Claim("groups", group.ToString("D"))));
@@ -629,12 +643,14 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
         }
 
         public async Task<HttpResponseMessage> Send(HttpMethod method, string path, HttpContent content,
-            string? token = null, bool useDefaultToken = true, IEnumerable<string>? idempotencyKeys = null)
+            string? token = null, bool useDefaultToken = true, IEnumerable<string>? idempotencyKeys = null,
+            IEnumerable<string>? ifMatch = null)
         {
             using var request = new HttpRequestMessage(method, path) { Content = content };
             token ??= useDefaultToken ? Token() : null;
             if (token is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             if (idempotencyKeys is not null) request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKeys);
+            if (ifMatch is not null) request.Headers.TryAddWithoutValidation("If-Match", ifMatch);
             return await client.SendAsync(request, TestContext.Current.CancellationToken);
         }
 

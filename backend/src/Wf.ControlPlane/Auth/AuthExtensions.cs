@@ -89,15 +89,22 @@ public static class AuthExtensions
     {
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {
+            var spa = Context.GetEndpoint()?.Metadata.GetMetadata<UserScheduleRoute>() is not null
+                ? Context.RequestServices.GetService<UserScheduleClient>() : null;
             var identity = new ClaimsIdentity(
             [
                 new Claim("oid", "00000000-0000-0000-0000-000000000001"),
                 new Claim("name", "Local development"),
-                new Claim("idtyp", "app"),
+                new Claim("idtyp", spa is null ? "app" : "user"),
                 new Claim("roles", Admin),
                 new Claim("roles", Registrar),
                 new Claim("roles", Agent)
             ], Scheme.Name, "name", "roles");
+            if (spa is not null)
+            {
+                identity.AddClaim(new("azp", spa.ClientId.ToString("D")));
+                identity.AddClaim(new("scp", "wf.read"));
+            }
             return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme.Name)));
         }
     }
