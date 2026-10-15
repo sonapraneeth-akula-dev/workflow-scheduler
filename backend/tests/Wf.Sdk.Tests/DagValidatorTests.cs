@@ -7,7 +7,7 @@ public sealed class DagValidatorTests
     [Fact]
     public void AcceptsForwardReferencesDisconnectedNodesAndDiamond()
     {
-        var workflow = Workflow.Define("dag", "1", w => w
+        var workflow = Workflow.Define("dag", "1", w => w.Type("test")
             .Node("end", n => n.DependsOn("left", "right"))
             .Node("left", n => n.DependsOn("start"))
             .Node("right", n => n.DependsOn("start"))
@@ -21,7 +21,7 @@ public sealed class DagValidatorTests
     [InlineData("missing")]
     public void UnknownDependencyNamesReaderAndMissingKey(string dependency)
     {
-        var error = Assert.Throws<ArgumentException>(() => Workflow.Define("dag", "1", w => w
+        var error = Assert.Throws<ArgumentException>(() => Workflow.Define("dag", "1", w => w.Type("test")
             .Node("reader", n => n.DependsOn(dependency))));
         Assert.Contains("reader", error.Message);
         Assert.Contains(dependency, error.Message);
@@ -30,7 +30,7 @@ public sealed class DagValidatorTests
     [Fact]
     public void DuplicateNodeNamesKeyEvenWithoutTasks()
     {
-        var error = Assert.Throws<ArgumentException>(() => Workflow.Define("dag", "1", w => w
+        var error = Assert.Throws<ArgumentException>(() => Workflow.Define("dag", "1", w => w.Type("test")
             .Node("duplicate", _ => { }).Node("duplicate", _ => { })));
         Assert.Contains("duplicate", error.Message);
     }
@@ -38,7 +38,7 @@ public sealed class DagValidatorTests
     [Fact]
     public void DuplicateTaskNamesNodeAndKey()
     {
-        var error = Assert.Throws<ArgumentException>(() => Workflow.Define("dag", "1", w => w
+        var error = Assert.Throws<ArgumentException>(() => Workflow.Define("dag", "1", w => w.Type("test")
             .Node("node", n => n.Task("duplicate", _ => { }).Task("duplicate", _ => { }))));
         Assert.Contains("node", error.Message);
         Assert.Contains("duplicate", error.Message);
@@ -47,7 +47,7 @@ public sealed class DagValidatorTests
     [Fact]
     public void CycleNamesEveryMemberButNotDownstreamNodes()
     {
-        var error = Assert.Throws<ArgumentException>(() => Workflow.Define("dag", "1", w => w
+        var error = Assert.Throws<ArgumentException>(() => Workflow.Define("dag", "1", w => w.Type("test")
             .Node("downstream", n => n.DependsOn("a"))
             .Node("a", n => n.DependsOn("b"))
             .Node("b", n => n.DependsOn("c"))
@@ -59,7 +59,7 @@ public sealed class DagValidatorTests
     [Fact]
     public void SelfCycleIsRejected()
     {
-        var error = Assert.Throws<ArgumentException>(() => Workflow.Define("dag", "1", w => w
+        var error = Assert.Throws<ArgumentException>(() => Workflow.Define("dag", "1", w => w.Type("test")
             .Node("self", n => n.DependsOn("self"))));
         Assert.Contains("self -> self", error.Message);
     }
@@ -67,7 +67,7 @@ public sealed class DagValidatorTests
     [Fact]
     public void KeysAreOrdinalAndTaskKeysAreScopedToNode()
     {
-        var workflow = Workflow.Define("dag", "1", w => w
+        var workflow = Workflow.Define("dag", "1", w => w.Type("test")
             .Node("a", n => n.Task("same", _ => { }))
             .Node("A", n => n.DependsOn("a").Task("same", _ => { })));
         Assert.Equal(2, workflow.Tasks.Count);
@@ -78,6 +78,7 @@ public sealed class DagValidatorTests
     {
         var workflow = Workflow.Define("deep", "1", w =>
         {
+            w.Type("test");
             for (var i = 0; i < 10_000; i++)
             {
                 var dependency = i + 1;

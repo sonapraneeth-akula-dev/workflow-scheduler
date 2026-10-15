@@ -11,7 +11,7 @@ public sealed class ScenarioADefinitionTests
     {
         var calls = new List<string>();
         Action<TaskContext> work = _ => calls.Add("called");
-        var workflow = Workflow.Define("payments/release-validation/deploy-check", "1.4.0", w => w
+        var workflow = Workflow.Define("payments/release-validation/deploy-check", "1.4.0", w => w.Type("test")
             .Node("build", n => n.Task("restore", work).Task("compile", work))
             .Node("deploy-eu", n => n.DependsOn("build").Task("deploy", work))
             .Node("deploy-us", n => n.DependsOn("build").Task("deploy", work))
@@ -32,7 +32,7 @@ public sealed class ScenarioADefinitionTests
     public void InvalidDagIsRejectedBeforeAnyDelegateCanExecute()
     {
         var executed = false;
-        Assert.Throws<ArgumentException>(() => Workflow.Define("invalid", "1", w => w
+        Assert.Throws<ArgumentException>(() => Workflow.Define("invalid", "1", w => w.Type("test")
             .Node("a", n => n.DependsOn("b").Task("work", _ => executed = true))
             .Node("b", n => n.DependsOn("a"))));
         Assert.False(executed);
@@ -41,7 +41,7 @@ public sealed class ScenarioADefinitionTests
     [Fact]
     public void NodeContractRoundTripPreservesModesAndDeclaredOrder()
     {
-        var workflow = Workflow.Define("sample", "1", w => w.Node("node", n => n
+        var workflow = Workflow.Define("sample", "1", w => w.Type("test").Node("node", n => n
             .Parallel(3).Task("z", _ => { }).Task("a", _ => { })));
         var json = JsonSerializer.Serialize(workflow.Nodes[0]);
         var node = JsonSerializer.Deserialize<NodeDefinition>(json)!;
@@ -57,7 +57,7 @@ public sealed class ScenarioADefinitionTests
     {
         using var cancellation = new CancellationTokenSource();
         var tokens = new List<CancellationToken>();
-        var workflow = Workflow.Define("stages", "1", w => w
+        var workflow = Workflow.Define("stages", "1", w => w.Type("test")
             .SystemInit(ctx => { tokens.Add(ctx.CancellationToken); })
             .Node("node", n => n.Task("work", ctx => { tokens.Add(ctx.CancellationToken); }))
             .SystemPostProcess(ctx => { tokens.Add(ctx.CancellationToken); }));

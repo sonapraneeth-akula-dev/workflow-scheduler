@@ -24,6 +24,7 @@ are not implied by local task completion.
 | 1.1.1.2.1 | Complete | 8 stage authoring cases pass; reserved nodes, multiple named stage tasks, sync/async handlers and cancellation-context integration covered. Runtime ordering remains task 1.1.1.2.2, after its engine prerequisite. |
 | 1.1.2.1.1 | Complete | All nine variable types, defaults, required flags, allowed values, immutability and name-only secret references covered by unit tests; schema JSON round-trip integration passes. |
 | 1.1.2.1.2 | Complete | 26 binder cases pass; invalid/unknown/missing-required values rejected by name without value leakage; immutable typed values reach every stage/task through `ctx.Var`. Trigger/local-run call sites follow in their own tasks. |
+| 1.1.2.2.1 | Implemented; run verification pending | Exactly one explicit type required; immutable ordinal metadata and JSON round-trip tested. Metadata propagation to an actual run awaits LocalEngine (1.2.2.1.2); manifest propagation awaits 1.2.2.2.1. |
 
 ## Summary Rollup
 

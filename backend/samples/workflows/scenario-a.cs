@@ -3,6 +3,8 @@ using Wf.Sdk;
 
 // Authoring-only DAG sample; execution, built-in tasks and policies follow in their backlog items.
 var workflow = Workflow.Define("payments/release-validation/deploy-check", "1.4.0", w => w
+    .Type("release-validation")
+    .Metadata("area", "checkout")
     .Node("build", n => n.Task("restore", _ => { }).Task("compile", _ => { }))
     .Node("deploy-eu", n => n.DependsOn("build").Task("deploy", _ => { }))
     .Node("deploy-us", n => n.DependsOn("build").Task("deploy", _ => { }))

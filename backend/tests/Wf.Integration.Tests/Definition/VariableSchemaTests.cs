@@ -10,7 +10,7 @@ public sealed class VariableSchemaTests
     [Fact]
     public void SchemaJsonRoundTripRetainsTypesConstraintsAndNameOnlySecrets()
     {
-        var workflow = Workflow.Define("vars", "1", w => w.Variables(v => v
+        var workflow = Workflow.Define("vars", "1", w => w.Type("test").Variables(v => v
             .String("env", required: true, allowed: ["dev", "prod"])
             .Secret("token", "deployment-token").Duration("delay", TimeSpan.FromMinutes(2))));
         var json = JsonSerializer.Serialize(workflow.Variables);
@@ -27,7 +27,7 @@ public sealed class VariableSchemaTests
     {
         var seen = new List<int>();
         Action<TaskContext> capture = ctx => seen.Add(ctx.Var<int>("count"));
-        var workflow = Workflow.Define("vars", "1", w => w
+        var workflow = Workflow.Define("vars", "1", w => w.Type("test")
             .Variables(v => v.Int("count", 3, required: true))
             .SystemInit(capture).PreSetup(capture)
             .Node("node", n => n.Task("work", capture))

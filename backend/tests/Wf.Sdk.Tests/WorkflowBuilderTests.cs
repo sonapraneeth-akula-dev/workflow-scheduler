@@ -9,7 +9,7 @@ public sealed class WorkflowBuilderTests
     public void BuildsOrderedNodesTasksAndDependenciesWithoutExecutingTasks()
     {
         var executed = false;
-        var definition = Workflow.Define("payments/release/deploy", "1.0.0", w => w
+        var definition = Workflow.Define("payments/release/deploy", "1.0.0", w => w.Type("test")
             .Node("build", n => n.Task("restore", _ => executed = true).Task("compile", _ => { }))
             .Node("deploy", n => n.DependsOn("build").Parallel(2).Task("release", _ => Task.CompletedTask)));
 
@@ -31,6 +31,7 @@ public sealed class WorkflowBuilderTests
         NodeBuilder? node = null;
         var definition = Workflow.Define("sample", "1.0.0", w =>
         {
+            w.Type("test");
             workflow = w;
             w.Node("first", n => { node = n; n.Task("one", _ => { }); });
         });
@@ -48,7 +49,7 @@ public sealed class WorkflowBuilderTests
     public async Task RegistersSyncAndAsyncDelegatesWithStableNodeTaskKeys()
     {
         var calls = new List<string>();
-        var definition = Workflow.Define("sample", "1.0.0", w => w
+        var definition = Workflow.Define("sample", "1.0.0", w => w.Type("test")
             .Node("a", n => n.Task("work", _ => { calls.Add("sync"); }))
             .Node("b", n => n.Task("work", async ctx =>
             {
@@ -78,23 +79,23 @@ public sealed class WorkflowBuilderTests
     [InlineData("bad/key")]
     public void RejectsInvalidNodeTaskAndDependencyKeys(string? key)
     {
-        Assert.ThrowsAny<ArgumentException>(() => Workflow.Define("name", "1", w => w.Node(key!, _ => { })));
+        Assert.ThrowsAny<ArgumentException>(() => Workflow.Define("name", "1", w => w.Type("test").Node(key!, _ => { })));
         Assert.ThrowsAny<ArgumentException>(() => Workflow.Define("name", "1", w =>
-            w.Node("node", n => n.Task(key!, _ => { }))));
+            w.Type("test").Node("node", n => n.Task(key!, _ => { }))));
         Assert.ThrowsAny<ArgumentException>(() => Workflow.Define("name", "1", w =>
-            w.Node("node", n => n.DependsOn(key!))));
+            w.Type("test").Node("node", n => n.DependsOn(key!))));
     }
 
     [Fact]
     public void RejectsNullCallbacksAndDependencyArrays()
     {
         Assert.Throws<ArgumentNullException>(() => Workflow.Define("name", "1", null!));
-        Assert.Throws<ArgumentNullException>(() => Workflow.Define("name", "1", w => w.Node("node", null!)));
+        Assert.Throws<ArgumentNullException>(() => Workflow.Define("name", "1", w => w.Type("test").Node("node", null!)));
         Assert.Throws<ArgumentNullException>(() => Workflow.Define("name", "1", w =>
-            w.Node("node", n => n.Task("task", (Action<TaskContext>)null!))));
+            w.Type("test").Node("node", n => n.Task("task", (Action<TaskContext>)null!))));
         Assert.Throws<ArgumentNullException>(() => Workflow.Define("name", "1", w =>
-            w.Node("node", n => n.Task("task", (Func<TaskContext, Task>)null!))));
+            w.Type("test").Node("node", n => n.Task("task", (Func<TaskContext, Task>)null!))));
         Assert.Throws<ArgumentNullException>(() => Workflow.Define("name", "1", w =>
-            w.Node("node", n => n.DependsOn((string[])null!))));
+            w.Type("test").Node("node", n => n.DependsOn((string[])null!))));
     }
 }

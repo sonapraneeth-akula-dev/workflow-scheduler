@@ -11,7 +11,7 @@ public sealed class VariablesTests
     [Fact]
     public void SupportsEveryTypeWithDefaultsAndRequiredFlags()
     {
-        var workflow = Workflow.Define("vars", "1", w => w.Variables(v => v
+        var workflow = Workflow.Define("vars", "1", w => w.Type("test").Variables(v => v
             .String("env", "dev", required: true, allowed: ["dev", "prod"])
             .Int("count", 3).Long("size", long.MaxValue).Double("ratio", 0.5).Bool("enabled", false)
             .Enum("environment", Environment.Dev).StringList("targets", ["a", "b"])
@@ -34,7 +34,7 @@ public sealed class VariablesTests
     [Fact]
     public void MissingDefaultsStayAbsentForEveryType()
     {
-        var workflow = Workflow.Define("vars", "1", w => w.Variables(v => v.String("s").Int("i")
+        var workflow = Workflow.Define("vars", "1", w => w.Type("test").Variables(v => v.String("s").Int("i")
             .Long("l").Double("d").Bool("b").Enum<Environment>("e").StringList("a").Duration("t").Secret("r")));
         Assert.All(workflow.Variables, v => Assert.Null(v.Default));
     }
@@ -45,7 +45,7 @@ public sealed class VariablesTests
         string[] allowed = ["dev", "prod"];
         string[] defaults = ["a"];
         VariablesBuilder? retained = null;
-        var workflow = Workflow.Define("vars", "1", w => w.Variables(v =>
+        var workflow = Workflow.Define("vars", "1", w => w.Type("test").Variables(v =>
         {
             retained = v;
             v.String("env", "dev", allowed: allowed).StringList("targets", defaults);
@@ -62,9 +62,9 @@ public sealed class VariablesTests
     public void RejectsDuplicateKeysAcrossBuilderCalls()
     {
         Assert.Throws<ArgumentException>(() => Workflow.Define("vars", "1", w =>
-            w.Variables(v => v.Int("count").Bool("count"))));
+            w.Type("test").Variables(v => v.Int("count").Bool("count"))));
         Assert.Throws<ArgumentException>(() => Workflow.Define("vars", "1", w =>
-            w.Variables(v => v.Int("count")).Variables(v => v.Bool("count"))));
+            w.Type("test").Variables(v => v.Int("count")).Variables(v => v.Bool("count"))));
     }
 
     [Fact]

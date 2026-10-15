@@ -10,14 +10,18 @@ public sealed class WorkflowDefinition
     public ImmutableArray<NodeDefinition> Nodes { get; }
     public ImmutableDictionary<string, Func<TaskContext, Task>> Tasks { get; }
     public ImmutableArray<VariableSchema> Variables { get; }
+    public WorkflowMetadata Metadata { get; }
+    public string Type => Metadata.Type;
 
     internal WorkflowDefinition(string name, string version, ImmutableArray<NodeDefinition> nodes,
-        ImmutableDictionary<string, Func<TaskContext, Task>> tasks, ImmutableArray<VariableSchema> variables)
+        ImmutableDictionary<string, Func<TaskContext, Task>> tasks, ImmutableArray<VariableSchema> variables,
+        WorkflowMetadata metadata)
     {
         Name = name;
         Version = version;
         Nodes = nodes;
         Tasks = tasks;
         Variables = variables;
+        Metadata = metadata;
     }
 }

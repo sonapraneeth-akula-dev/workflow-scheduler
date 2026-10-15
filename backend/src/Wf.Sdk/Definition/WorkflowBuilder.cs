@@ -9,8 +9,28 @@ public sealed class WorkflowBuilder
     private readonly string version;
     private readonly List<NodeBuilder> nodes = [];
     private readonly List<VariableSchema> variables = [];
+    private readonly Dictionary<string, string> metadata = new(StringComparer.Ordinal);
+    private string? type;
 
     internal WorkflowBuilder(string name, string version) => (this.name, this.version) = (name, version);
+
+    public WorkflowBuilder Type(string value)
+    {
+        ValidateKey(value);
+        if (type is not null)
+            throw new ArgumentException("A workflow must declare exactly one type.", nameof(value));
+        type = value;
+        return this;
+    }
+
+    public WorkflowBuilder Metadata(string key, string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(value);
+        if (!metadata.TryAdd(key, value))
+            throw new ArgumentException($"Duplicate metadata key '{key}'.", nameof(key));
+        return this;
+    }
 
     public WorkflowBuilder Variables(Action<VariablesBuilder> configure)
     {
@@ -74,13 +94,16 @@ public sealed class WorkflowBuilder
 
     internal WorkflowDefinition Build()
     {
+        if (type is null)
+            throw new ArgumentException($"Workflow '{name}' must declare exactly one type.");
         var definitions = nodes.Select(n => n.Build()).ToImmutableArray();
         DagValidator.Validate(definitions);
         var tasks = ImmutableDictionary.CreateBuilder<string, Func<TaskContext, Task>>(StringComparer.Ordinal);
         foreach (var node in nodes)
             foreach (var task in node.Handlers)
                 tasks.Add($"{node.Key}/{task.Key}", task.Value);
-        return new(name, version, definitions, tasks.ToImmutable(), variables.ToImmutableArray());
+        return new(name, version, definitions, tasks.ToImmutable(), variables.ToImmutableArray(),
+            new(type, metadata.ToImmutableDictionary(StringComparer.Ordinal)));
     }
 
     internal static void ValidateKey(string key)

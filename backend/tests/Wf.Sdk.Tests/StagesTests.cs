@@ -8,7 +8,7 @@ public sealed class StagesTests
     public async Task StagesAreReservedNodesWithStableTaskKeysAndNoEagerExecution()
     {
         var calls = new List<string>();
-        var workflow = Workflow.Define("stages", "1", w => w
+        var workflow = Workflow.Define("stages", "1", w => w.Type("test")
             .SystemInit(_ => { calls.Add("init"); })
             .PreSetup(async _ => { await Task.Yield(); calls.Add("pre"); })
             .Node("work", n => n.Task("main", _ => { }))
@@ -31,21 +31,21 @@ public sealed class StagesTests
     public void UserCannotDeclareReservedNodeKeys(string key)
     {
         var error = Assert.Throws<ArgumentException>(() => Workflow.Define("stages", "1", w =>
-            w.Node(key, _ => { })));
+            w.Type("test").Node(key, _ => { })));
         Assert.Contains(key, error.Message);
     }
 
     [Fact]
     public void StageBuildersSupportAllStagesAndRejectDuplicates()
     {
-        var workflow = Workflow.Define("stages", "1", w => w
+        var workflow = Workflow.Define("stages", "1", w => w.Type("test")
             .SystemInit(s => s.Task("one", _ => { }))
             .PreSetup(s => s.Task("two", _ => { }))
             .PostProcess((Action<TaskContext>)(_ => { }))
             .SystemPostProcess(s => s.Task("four", _ => { })));
         Assert.Equal(4, workflow.Nodes.Length);
         var error = Assert.Throws<ArgumentException>(() => Workflow.Define("stages", "1", w =>
-            w.SystemInit((Action<TaskContext>)(_ => { })).SystemInit((Action<TaskContext>)(_ => { }))));
+            w.Type("test").SystemInit((Action<TaskContext>)(_ => { })).SystemInit((Action<TaskContext>)(_ => { }))));
         Assert.Contains("$init", error.Message);
     }
 
@@ -53,10 +53,10 @@ public sealed class StagesTests
     public void StageCallbacksAndTasksCannotBeNull()
     {
         Assert.Throws<ArgumentNullException>(() => Workflow.Define("stages", "1", w =>
-            w.SystemInit((Action<TaskContext>)null!)));
+            w.Type("test").SystemInit((Action<TaskContext>)null!)));
         Assert.Throws<ArgumentNullException>(() => Workflow.Define("stages", "1", w =>
-            w.PreSetup((Func<TaskContext, Task>)null!)));
+            w.Type("test").PreSetup((Func<TaskContext, Task>)null!)));
         Assert.Throws<ArgumentNullException>(() => Workflow.Define("stages", "1", w =>
-            w.PostProcess((Func<StageBuilder, StageBuilder>)null!)));
+            w.Type("test").PostProcess((Func<StageBuilder, StageBuilder>)null!)));
     }
 }

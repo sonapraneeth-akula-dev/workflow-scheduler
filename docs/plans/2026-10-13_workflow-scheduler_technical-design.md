@@ -818,6 +818,7 @@ Keepalive pings run every 20 s (below the ACA ingress idle timeout).
 using Wf.Sdk;
 
 return await Workflow.Define("payments/release-validation/deploy-check", "1.4.0", w => w
+    .Type("release-validation")
     .Metadata("area", "checkout")
     .RunsOn(Pool("default"))                                   // workflow-level selector; nodes/tasks may override
     .RunTimeout(4.Hours())

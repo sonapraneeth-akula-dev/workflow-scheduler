@@ -11,7 +11,7 @@ public sealed class NodeExecutionModeTests
     [InlineData(4)]
     public void ParallelPreservesOptionalLimitAndTaskOrder(int? limit)
     {
-        var node = Assert.Single(Workflow.Define("sample", "1", w => w.Node("node", n => n
+        var node = Assert.Single(Workflow.Define("sample", "1", w => w.Type("test").Node("node", n => n
             .Parallel(limit).Task("z", _ => { }).Task("a", _ => { }).Task("m", _ => { }))).Nodes);
         Assert.Equal(NodeExecutionMode.Parallel, node.Mode);
         Assert.Equal(limit, node.MaxParallel);
@@ -25,7 +25,7 @@ public sealed class NodeExecutionModeTests
     public void InvalidParallelLimitIsRejectedByBuilderAndContract(int limit)
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => Workflow.Define("sample", "1", w =>
-            w.Node("node", n => n.Parallel(limit))));
+            w.Type("test").Node("node", n => n.Parallel(limit))));
         Assert.Throws<ArgumentOutOfRangeException>(() => new NodeDefinition("node", [], [],
             NodeExecutionMode.Parallel, limit));
     }
@@ -33,7 +33,7 @@ public sealed class NodeExecutionModeTests
     [Fact]
     public void SeriesResetsPreviouslyDeclaredParallelLimit()
     {
-        var node = Assert.Single(Workflow.Define("sample", "1", w => w
+        var node = Assert.Single(Workflow.Define("sample", "1", w => w.Type("test")
             .Node("node", n => n.Parallel(2).Series())).Nodes);
         Assert.Equal(NodeExecutionMode.Series, node.Mode);
         Assert.Null(node.MaxParallel);
