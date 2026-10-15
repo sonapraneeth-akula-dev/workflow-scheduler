@@ -260,7 +260,14 @@ and version rules follow in separate backlog tasks.
 Ordinal ordering and source-generated JSON make equivalent manifests produce
 identical bytes. Strict parsing, stream read/write, cancellation and sanitized
 errors are covered, including a real SDK round-trip with reflection disabled.
-Breaking-change classification and version-bump enforcement follow separately.
+`BreakingChangeClassifier.Classify(previous, current)` returns required bump,
+deterministic changes and WFV010 errors with the required level in their hints.
+Removals/renames/type changes, narrowed constraints, changed defaults and newly
+required values without defaults require MAJOR; compatible additions/loosening
+require MINOR; implementation-only changes require PATCH. SemVer precedence
+ignores build metadata; same-core prerelease progression satisfies PATCH only.
+This is an explicit baseline-comparison step; registration wiring and schedule
+compatibility follow separately.
 
 ## Benchmarks
 

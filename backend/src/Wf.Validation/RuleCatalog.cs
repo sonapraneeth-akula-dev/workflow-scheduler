@@ -49,7 +49,11 @@ public static class RuleCatalog
         "A variable required constraint is not a boolean.",
         "Set required to true or false; required variables without defaults must be supplied when starting a run.");
 
+    public static readonly ValidationRule VersionBump = new("WFV010",
+        "The workflow version does not satisfy the required API compatibility bump.",
+        "Increase the version by the required MAJOR, MINOR or PATCH level.");
+
     public static ImmutableArray<ValidationRule> All { get; } =
         [DirectoryNotFound, WorkflowNotFound, BuildFailed, DescribeFailed, DependencyCycle, UnknownDependency,
-            DuplicateKey, VariableType, VariableRequired];
+            DuplicateKey, VariableType, VariableRequired, VersionBump];
 }
