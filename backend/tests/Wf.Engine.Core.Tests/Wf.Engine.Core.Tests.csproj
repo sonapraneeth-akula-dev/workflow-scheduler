@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Wf.Engine.Core\Wf.Engine.Core.csproj" />
+  </ItemGroup>
+</Project>

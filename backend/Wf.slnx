@@ -1,10 +1,12 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Wf.Contracts/Wf.Contracts.csproj" />
+    <Project Path="src/Wf.Engine.Core/Wf.Engine.Core.csproj" />
     <Project Path="src/Wf.Sdk/Wf.Sdk.csproj" />
     <Project Path="src/Wf.Validation/Wf.Validation.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Wf.Engine.Core.Tests/Wf.Engine.Core.Tests.csproj" />
     <Project Path="tests/Wf.Integration.Tests/Wf.Integration.Tests.csproj" />
     <Project Path="tests/Wf.Sdk.Tests/Wf.Sdk.Tests.csproj" />
     <Project Path="tests/Wf.Validation.Tests/Wf.Validation.Tests.csproj" />
