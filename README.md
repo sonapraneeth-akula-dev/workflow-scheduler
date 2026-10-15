@@ -584,6 +584,14 @@ missed history and run creation atomically; repeated planning alone is not
 exactly-once execution. Database persistence, overlap enforcement and hosted
 leader scheduling remain separate tasks.
 
+Migration `0014_schedule_fires.sql` stores fire history with an exact-once
+`(schedule_id, fire_at)` key; claim with `ON CONFLICT DO NOTHING` and create a
+run only when the insert succeeds in the same transaction. Stable outcomes:
+Started=0, Skipped=1, Missed=2, CaughtUp=3. History references existing schedules
+(soft-delete them); optional run IDs remain history references after run
+retention removes the corresponding run. Timestamps must be finite, and all
+callers must use PostgreSQL's microsecond precision for slot identity.
+
 ## Workflow project template
 
 Pack `backend\src\Wf.Templates\Wf.Templates.csproj`, install the resulting NuGet

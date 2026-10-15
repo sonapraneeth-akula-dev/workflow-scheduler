@@ -43,7 +43,7 @@ public sealed class MigratorTests(MigrationDatabase database) : IClassFixture<Mi
             """);
         seed.Parameters.AddWithValue(run);
         var deadline = await seed.ExecuteScalarAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(["0012_agent_capacities.sql", "0013_run_deadline_default.sql"],
+        Assert.Equal(scripts.Where(script => string.CompareOrdinal(script.Name, "0012") >= 0).Select(script => script.Name),
             Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance));
         await using var query = scope.DataSource.CreateCommand("""
             SELECT a.cores,r.deadline_at FROM agents a CROSS JOIN runs r

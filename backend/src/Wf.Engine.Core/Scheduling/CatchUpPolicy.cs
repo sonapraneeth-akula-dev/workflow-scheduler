@@ -3,7 +3,7 @@ using Wf.Contracts.Schedules;
 
 namespace Wf.Engine.Core.Scheduling;
 
-public enum ScheduleFireOutcome { Started, Missed, CaughtUp }
+public enum ScheduleFireOutcome { Started = 0, Skipped = 1, Missed = 2, CaughtUp = 3 }
 
 public sealed record ScheduleFireDecision(DateTimeOffset FireAt, ScheduleFireOutcome Outcome);
 
