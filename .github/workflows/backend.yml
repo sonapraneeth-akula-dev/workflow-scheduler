@@ -8,7 +8,11 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -24,5 +28,12 @@ jobs:
         shell: pwsh
         run: '"WF_TEST_POSTGRES=Host=localhost;Username=postgres;Database=postgres" >> $env:GITHUB_ENV'
       - run: dotnet build backend/Wf.slnx --configuration Release
+      - name: Publish native agent
+        run: dotnet publish backend/src/Wf.Agent --configuration Release -r ${{ matrix.rid }} -o "${{ runner.temp }}/wf-agent"
+      - name: Configure native executable smoke test
+        shell: pwsh
+        run: |
+          $suffix = if ($IsWindows) { ".exe" } else { "" }
+          "WF_AGENT_EXECUTABLE=${{ runner.temp }}/wf-agent/wf-agent$suffix" >> $env:GITHUB_ENV
       - run: dotnet test backend/Wf.slnx --configuration Release --no-build --collect:"XPlat Code Coverage"
       - run: dotnet run --file backend/samples/workflows/scenario-a.cs

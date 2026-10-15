@@ -8,6 +8,7 @@
     <ProjectReference Include="..\..\src\Wf.Sdk\Wf.Sdk.csproj" />
     <ProjectReference Include="..\..\src\Wf.Validation\Wf.Validation.csproj" />
     <ProjectReference Include="..\..\src\Wf.Engine.Core\Wf.Engine.Core.csproj" />
+    <ProjectReference Include="..\..\src\Wf.Agent\Wf.Agent.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\db\migrations\*.sql" Link="Migrations\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />

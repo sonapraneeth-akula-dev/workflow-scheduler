@@ -64,6 +64,40 @@ Timeouts/backoff advance virtual time with deterministic midpoint jitter and no
 real delays. The testing-library build cache and fluent assertions follow in
 their own backlog items.
 
+## Agent
+
+The Native AOT agent runs in a console, as Windows Service `wf-agent`, or under
+systemd. Service lifetime integration is built in; installers and the persistent
+engine registry follow in task 2.2.1.1.3.
+
+```powershell
+$env:Agent__Engines__0 = "http://localhost:5000"
+$env:Agent__Id = "worker-1"
+$env:Agent__Labels__dotnet = "10"
+dotnet run --project backend\src\Wf.Agent
+dotnet publish backend\src\Wf.Agent -c Release -r win-x64
+```
+
+Publish `linux-x64` on Linux with the Native AOT compiler prerequisites; Windows
+and Linux CI publish native executables and connect each to a real HTTP/2 test
+gateway. Run the native smoke test locally by setting `WF_AGENT_EXECUTABLE` to
+the published executable before `dotnet test`.
+
+`Agent__Engines__1`, etc. configure additional engine origins. Optional settings:
+`Agent__Name`, `Agent__Pool` (default `default`), `Agent__MaxTasks` (default CPU
+count), `Agent__Labels__<key>`. Identity defaults to the machine name; configure
+distinct IDs for multiple agents on one machine. Hello reports OS, architecture,
+CPU count, physical RAM, labels and binary version. Five-second heartbeats report
+machine CPU/RAM/disk and slots. Disconnects retry configured engines within one
+second; leader hints are followed only when they match a configured endpoint.
+
+HTTPS is required off loopback. `Agent__AllowInsecureTransport=true` is only for
+an isolated internal container network; TLS certificate validation stays enabled.
+Agent-role token acquisition is a separate authentication backlog item. This
+increment registers and heartbeats only: dispatch/drain commands fail explicitly
+until their task-host/coordinator implementations are installed, never claim
+successful execution. Results journaling and host re-adoption follow separately.
+
 ## Benchmarks
 
 ```powershell
