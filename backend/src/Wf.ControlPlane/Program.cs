@@ -9,6 +9,7 @@ using Wf.ControlPlane.Engine.Events;
 using Wf.ControlPlane.Engine.Leadership;
 using Wf.ControlPlane.Engine.Recovery;
 using Wf.ControlPlane.Engine.Sweeper;
+using Wf.ControlPlane.Hosting;
 using Wf.Engine.Core.Placement;
 
 if (args.Count(argument => argument == "--migrate") > 1)
@@ -39,6 +40,8 @@ builder.Services.AddSingleton(new LeaseOptions(Guid.NewGuid().ToString("N"),
     new Uri(builder.Configuration["Engine:PublicEndpoint"] ?? $"http://localhost:{port}", UriKind.Absolute)));
 builder.Services.AddSingleton<LeaseManager>();
 builder.Services.AddHostedService<LeaseManager>(services => services.GetRequiredService<LeaseManager>());
+builder.Services.Configure<HostOptions>(options => options.ServicesStopConcurrently = false);
+builder.Services.AddHostedService<EngineShutdownService>();
 builder.Services.AddSingleton<AgentRegistry>();
 builder.Services.AddSingleton<RunStore>();
 builder.Services.AddSingleton<CommandInbox>();

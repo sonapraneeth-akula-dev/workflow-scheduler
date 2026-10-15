@@ -15,12 +15,14 @@ public sealed class LeaseManager : BackgroundService
 {
     public static readonly TimeSpan RenewalPeriod = TimeSpan.FromSeconds(3);
     public static readonly TimeSpan TimeToLive = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan AcquisitionPeriod = TimeSpan.FromSeconds(1);
     private readonly NpgsqlDataSource dataSource;
     private readonly LeaseOptions options;
     private readonly TimeProvider time;
     private readonly ILogger<LeaseManager> logger;
     private readonly SemaphoreSlim changes = new(1, 1);
     private State state = new(null, 0, TimeSpan.Zero, "");
+    private int stopping;
 
     public LeaseManager(NpgsqlDataSource dataSource, LeaseOptions options, ILogger<LeaseManager> logger,
         TimeProvider? timeProvider = null)
@@ -57,6 +59,7 @@ public sealed class LeaseManager : BackgroundService
         await changes.WaitAsync(cancellationToken);
         try
         {
+            if (Volatile.Read(ref stopping) != 0) return false;
             var observedAt = time.GetTimestamp();
             await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
             await using (var command = new NpgsqlCommand("""
@@ -154,7 +157,7 @@ public sealed class LeaseManager : BackgroundService
                         var remaining = observed.Remaining - time.GetElapsedTime(observed.ObservedAt);
                         // The lease can expire between the failed acquisition and hint read; retry that gap immediately.
                         delay = TimeSpan.FromTicks(Math.Clamp(remaining.Ticks,
-                            TimeSpan.FromMilliseconds(1).Ticks, RenewalPeriod.Ticks));
+                            TimeSpan.FromMilliseconds(1).Ticks, AcquisitionPeriod.Ticks));
                     }
                 }
                 catch (Exception exception) when (exception is NpgsqlException { IsTransient: true } or TimeoutException or IOException)
@@ -170,6 +173,7 @@ public sealed class LeaseManager : BackgroundService
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
+        Interlocked.Exchange(ref stopping, 1);
         await base.StopAsync(cancellationToken);
         await ReleaseAsync(cancellationToken);
     }

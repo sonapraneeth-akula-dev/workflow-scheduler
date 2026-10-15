@@ -243,6 +243,17 @@ and group-commit transactions fence their captured epoch before persistence;
 PostgreSQL bounds fenced transactions to the lesser of 1 second or remaining
 lease lifetime, so a paused client cannot hold takeover indefinitely. A database
 authority failure disables writes until reacquisition.
+Standby acquisition retries every second; successful leader renewals remain
+every three seconds. Graceful host shutdown stops producers, closes and drains
+the group appender while renewal remains active, then stops renewal and releases
+the lease. Hosted services stop sequentially in reverse registration order;
+concurrent stop is explicitly disabled. A stopped lease manager cannot acquire
+again. Real two-host/PostgreSQL handover measured <= 992.7 ms to the next leader
+and <= 1,644.3 ms through recovery readiness across three stop phases, with all
+16 buffered runs preserved and completed per phase. These healthy-storage
+measurements do not override the existing bounded appender drain failure/timeout
+behavior; hard-kill takeover still waits for lease expiry. Windows tests use
+`IHost.StopAsync`, not an actual Unix SIGTERM signal.
 `/healthz/leader` returns 503 on standby or until recovery completes; gRPC sends `NotLeader` with the known
 leader hint and uses the actual epoch on commands/ACKs. Configure `Engine:Port`
 (default 5000) and `Engine:PublicEndpoint` for multiple instances. Standalone
