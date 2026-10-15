@@ -145,6 +145,24 @@ the in-process local engine cannot forcibly kill managed code. Distributed task
 hosts provide process isolation; built-in command cancellation also kills and
 reaps its own process tree.
 
+`RerunPlanner.Plan(newRunId, source, pinnedNodes, fromNodes)` creates a new
+Queued/sequence-zero core snapshot with the same version UUID, metadata and
+cloned variables, plus parent lineage. Unsuccessful nodes and their downstream
+closure reset to Pending; unaffected Succeeded/Reused body nodes and tasks
+become Reused with cloned original JSON outputs and `ReusedFromRunId`. Reusable
+nodes require an explicit persisted output object, including `{}` for no outputs;
+missing data fails instead of silently losing it. Selected successful nodes
+also invalidate downstream outputs for every dependency condition.
+
+New runs execute lifecycle stages again; invalidating a setup stage invalidates
+its implicit body dependents. A successful source with no selection means a
+full rerun; explicit selection must be nonempty, unique and declared. Source
+runs must be terminal and match the pinned acyclic node/task definition.
+Old abort, completion timestamps and attempt states do not carry over. Tests
+plan from actual failed SDK execution and replay the planned shared core;
+the HTTP rerun command, persistence of lineage/outputs and UI remain separate
+tasks, not an available hosted rerun endpoint.
+
 Dry-run executes the same core using explicit task mocks, without invoking any
 original task delegate or external service:
 
