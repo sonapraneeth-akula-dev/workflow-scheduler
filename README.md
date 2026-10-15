@@ -228,6 +228,14 @@ manifest's type and metadata against that registry; invalid registry and schedul
 errors accumulate rather than hiding one another. An absent registry remains
 allowed for standalone workflows; registration supplies its authoritative scope.
 
+`TypeNameSimilarity` supplies the shared registry normalization and bounded
+Levenshtein helper: invariant lowercase letters/digits only, then remove one
+trailing plural `s` when more than one character remains. `WithinTwoEdits`
+compares already-normalized strings with ordinary insertion/deletion/substitution
+distance <= 2; transposition counts as two edits. It checks a five-cell band per
+row, observes cancellation and handles empty-string boundaries without
+truncating long names. This is literal normalization, not linguistic stemming.
+
 The hosted control plane acquires the `0009_leases.sql` engine lease, renews
 every 3 seconds and expires after 10 seconds of database time. Each acquisition
 has a monotonically increasing epoch. All hosted registry/run/dispatch/result

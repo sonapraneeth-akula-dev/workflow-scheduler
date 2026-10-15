@@ -28,7 +28,13 @@ public sealed class TeamRegistryValidatorIntegrationTests
             ValidTeam.Replace("\"name\":\"release\"", "\"name\":\"other\"", StringComparison.Ordinal),
             ValidTeam.Replace("\"keys\":[]",
                 "\"keys\":[{\"key\":\"environment\",\"required\":true,\"allowedValues\":[\"dev\"]}]",
-                StringComparison.Ordinal)
+                StringComparison.Ordinal),
+            """
+            {"team":"demo","types":[
+              {"team":"demo","name":"Load-Test","description":"First","metadataSchema":{"keys":[]}},
+              {"team":"demo","name":"load_tests","description":"Conflicting","metadataSchema":{"keys":[]}}
+            ]}
+            """
         };
         foreach (var json in invalidCases)
         {
