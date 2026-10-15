@@ -134,4 +134,41 @@ public sealed class RunSchemaTests : IAsyncLifetime
         command.Parameters.AddWithValue(id);
         return await command.ExecuteScalarAsync(cancellation);
     }
+
+    [Fact]
+    public async Task DeadlineMigrationPersistsAbsoluteTimersForRecovery()
+    {
+        var cancellation = TestContext.Current.CancellationToken;
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellation);
+        var sql = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Migrations", "0003_attempt_timers.sql"),
+            cancellation);
+        await using var migration = new NpgsqlCommand(sql, connection);
+        await migration.ExecuteNonQueryAsync(cancellation);
+        var now = DateTimeOffset.UtcNow;
+        var id = Guid.CreateVersion7(now);
+        var deadline = now.AddHours(1);
+        var retry = now.AddSeconds(10);
+        await using var command = new NpgsqlCommand("""
+            INSERT INTO runs (run_day,id,workflow_id,version_id,trigger,triggered_by,variables,metadata,status,created_at,deadline_at)
+            VALUES (uuid_v7_run_day(@id),@id,'team/type/name',@id,0,'test','{}','{}',1,@now,@deadline);
+            INSERT INTO node_runs (run_day,run_id,node_key,status,deadline_at)
+            VALUES (uuid_v7_run_day(@id),@id,'node',3,@deadline);
+            INSERT INTO task_attempts (run_day,run_id,task_key,attempt,status,deadline_at,retry_at)
+            VALUES (uuid_v7_run_day(@id),@id,'node/task',1,4,@deadline,@retry);
+            """, connection);
+        command.Parameters.AddWithValue("id", id);
+        command.Parameters.AddWithValue("now", now);
+        command.Parameters.AddWithValue("deadline", deadline);
+        command.Parameters.AddWithValue("retry", retry);
+        await command.ExecuteNonQueryAsync(cancellation);
+        await using var read = new NpgsqlCommand("""
+            SELECT deadline_at,retry_at FROM task_attempts WHERE run_day=uuid_v7_run_day($1) AND run_id=$1
+            """, connection);
+        read.Parameters.AddWithValue(id);
+        await using var reader = await read.ExecuteReaderAsync(cancellation);
+        Assert.True(await reader.ReadAsync(cancellation));
+        Assert.True((deadline - reader.GetFieldValue<DateTimeOffset>(0)).Duration() < TimeSpan.FromMicroseconds(1));
+        Assert.True((retry - reader.GetFieldValue<DateTimeOffset>(1)).Duration() < TimeSpan.FromMicroseconds(1));
+    }
 }

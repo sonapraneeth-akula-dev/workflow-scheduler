@@ -39,6 +39,7 @@ are not implied by local task completion.
 | 1.2.1.1.2 | Complete | Real command tests cover exit code 3, retryable codes, raw/structured arguments, cwd/env snapshots, pre-start cancellation and process-tree cleanup; same cmd/sh suite wired to Windows/Linux CI. |
 | 1.2.1.1.3 | Complete | Stable registry dispatch carries task identity, variables, inputs/outputs, logging, cancellation and publisher ports; absent publishers fail explicitly. SDK/contracts Release build has zero trim/AOT warnings; stage-to-node integration passes. |
 | 2.1.2.1.2 | Complete | 19 retry cases plus real command/core integration pass; FsCheck covers jitter bounds, fixed/exponential overflow guards, author/platform budgets, forbidden categories, `NonRetryableException`, cancellation and earliest deadlines. |
+| 2.1.2.1.3 | Complete | Virtual-clock timeout suite completes in under 1 s; cancellation/kill grace and retry times survive snapshot restoration, proposals wait for committed apply, stale actions rejected. PG migration persists run/node/attempt deadlines and retry/cancel/kill timestamps. |
 
 ## Summary Rollup
 
