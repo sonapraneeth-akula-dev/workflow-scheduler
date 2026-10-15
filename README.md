@@ -255,6 +255,13 @@ description contracts propagate, not turn into validation success.
 Validation executes trusted workflow code; it is not a sandbox. Team, schedule
 and version rules follow in separate backlog tasks.
 
+`Wf.Validation.SemVer.ApiBaseline.FromManifest` generates the immutable
+`workflow.api.json` contract: SemVer version, variable schemas and node keys.
+Ordinal ordering and source-generated JSON make equivalent manifests produce
+identical bytes. Strict parsing, stream read/write, cancellation and sanitized
+errors are covered, including a real SDK round-trip with reflection disabled.
+Breaking-change classification and version-bump enforcement follow separately.
+
 ## Benchmarks
 
 ```powershell
