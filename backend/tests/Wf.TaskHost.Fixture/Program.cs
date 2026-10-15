@@ -7,7 +7,7 @@ using Wf.Sdk.Hosting;
 
 var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test")
     .Variables(v => v.Int("amount", 10))
-    .Node("source", n => n.Task("noop", _ => { }))
+    .Node("source", n => n.Task("noop", ctx => ctx.Outputs["value"] = 7))
     .Node("work", n => n.DependsOn("source").Input("source", "value")
         .Task("echo", ctx =>
         {

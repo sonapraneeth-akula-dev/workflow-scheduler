@@ -130,10 +130,12 @@ second; leader hints are followed only when they match a configured endpoint.
 
 HTTPS is required off loopback. `Agent__AllowInsecureTransport=true` is only for
 an isolated internal container network; TLS certificate validation stays enabled.
-Agent-role token acquisition is a separate authentication backlog item. This
-increment registers and heartbeats only: dispatch/drain commands fail explicitly
-until their task-host/coordinator implementations are installed, never claim
-successful execution. Results journaling and host re-adoption follow separately.
+Agent-role token acquisition is a separate authentication backlog item.
+Dispatch and cancel commands run asynchronously, so downloads and user tasks do
+not block heartbeats or stream reception. Replayed attempts are deduplicated
+within the agent process. Started/completed messages retain their sequence until
+acknowledged and replay on reconnect; this queue is in memory, not yet the durable
+result journal. Drain, restart recovery and host re-adoption follow separately.
 
 `TaskHostPool` prewarms compiled workflow processes and verifies their PID,
 protocol and workflow version over owner-only Unix domain sockets on Windows
@@ -143,14 +145,31 @@ The SDK server executes real registry delegates with typed variables, declared
 inputs and bounded outputs; completion waits for acknowledgement before exit.
 Cancellation is cooperative first, then kills that host's process tree after
 grace (default 30 seconds). Workflow hosts use ordinary, untrimmed .NET IL, not
-Native AOT, and require the ASP.NET Core runtime. Package download, coordinator
-dispatch wiring, resource-limit enforcement and durable result recovery remain
-their separate backlog items. The sample accepts `--task-host --socket <path>`;
-normal local execution is unchanged.
+Native AOT, and require the ASP.NET Core runtime. Resource-limit enforcement and
+durable result recovery remain separate backlog items. The sample accepts
+`--task-host --socket <path>`; normal local execution is unchanged.
+
+`PackageCache` downloads immutable ZIP packages into SHA-256-addressed directories.
+Set `Agent__PackageCache` to an absolute path to override the user's local
+`wf-agent\packages` directory. Packages contain published IL/dependencies plus
+`wf-package.json` with `version` and root-level `entryAssembly` DLL fields.
+HTTPS is required except on loopback. Hash, path, link, size and manifest checks
+precede atomic publication; warm hits verify archive and extracted-file integrity
+without HTTP or compilation. Cache failures are explicit attempt platform errors.
+Windows publication retries only bounded file-lock/access conflicts.
+
+`Dispatcher` accepts only database-committed Ready tasks in running runs.
+Dispatched event, attempt capacity reservation and dispatch outbox commit in one
+PostgreSQL transaction before the gateway sends anything. Committed pending
+attempts count against slots/RAM before heartbeats catch up. Streams have one
+writer; a new Hello fences the old session, pending commands replay, and task
+events are acknowledged only after durable, idempotent acceptance. Core readiness
+and node/run coordination are explicit caller responsibilities; this is not yet
+the full hosted run actor or HA leader loop.
 
 The control-plane agent gateway listens on loopback HTTP/2 port 5000. Configure
-`ConnectionStrings__Workflow`, apply `backend\db\migrations\0005_agents.sql` to
-the target PostgreSQL schema, then run `dotnet run --project
+`ConnectionStrings__Workflow`, apply the numbered scripts in
+`backend\db\migrations` to the target PostgreSQL schema, then run `dotnet run --project
 backend\src\Wf.ControlPlane`. This is a single local gateway, not the HA/auth
 control plane delivered by later tasks. Registration and heartbeat acknowledgements
 follow durable writes. Agents lose health at exactly 15 seconds without a

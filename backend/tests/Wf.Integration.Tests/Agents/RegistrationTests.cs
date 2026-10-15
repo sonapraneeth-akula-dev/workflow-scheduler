@@ -311,8 +311,9 @@ public sealed class RegistrationTests(AgentDatabase database) : IClassFixture<Ag
     }
 }
 
-public sealed class AgentDatabase : IAsyncLifetime
+public class AgentDatabase : IAsyncLifetime
 {
+    protected virtual IReadOnlyList<string> Migrations => ["0005_agents.sql"];
     private PostgreSqlContainer? postgres;
     private string? schema;
     private string connectionString = "";
@@ -338,9 +339,12 @@ public sealed class AgentDatabase : IAsyncLifetime
             await create.ExecuteNonQueryAsync(token);
         }
         DataSource = NpgsqlDataSource.Create(connectionString);
-        var migration = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Migrations", "0005_agents.sql"), token);
-        await using var command = DataSource.CreateCommand(migration);
-        await command.ExecuteNonQueryAsync(token);
+        foreach (var name in Migrations)
+        {
+            var migration = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Migrations", name), token);
+            await using var command = DataSource.CreateCommand(migration);
+            await command.ExecuteNonQueryAsync(token);
+        }
     }
 
     public async ValueTask DisposeAsync()

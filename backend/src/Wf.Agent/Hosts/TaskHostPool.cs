@@ -95,7 +95,7 @@ public sealed class TaskHostPool(ILogger<TaskHostPool> logger) : IAsyncDisposabl
         {
             using var call = host.Client.ExecuteAsync(new ExecuteRequest
             {
-                Dispatch = dispatch.Clone(), NodeOutputsJson = nodeOutputsJson ?? ByteString.Empty
+                Dispatch = dispatch.Clone(), NodeOutputsJson = nodeOutputsJson ?? dispatch.NodeOutputsJson
             });
             using var deadline = new CancellationTokenSource();
             var remaining = dispatch.DeadlineAt.ToDateTimeOffset() - DateTimeOffset.UtcNow;

@@ -1,16 +1,19 @@
 using Grpc.Core;
 using Npgsql;
+using System.Threading.Channels;
 using Wf.Contracts.Agent.V1;
+using Wf.ControlPlane.Engine.Dispatch;
 
 namespace Wf.ControlPlane.Engine.Agents;
 
-public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGatewayService> logger)
+public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGatewayService> logger, RunStore? runs = null)
     : AgentGateway.AgentGatewayBase
 {
     public override async Task Connect(IAsyncStreamReader<AgentMessage> requestStream,
         IServerStreamWriter<ControlMessage> responseStream, ServerCallContext context)
     {
-        var token = context.CancellationToken;
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
+        var token = stopping.Token;
         try
         {
             using var helloTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -20,39 +23,90 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
             if (first.Sequence == 0 || first.Hello is null) throw Invalid("The first agent message must be a sequenced Hello.");
             var session = await registry.RegisterAsync(first.Hello, token);
             logger.LogInformation("Agent {AgentId} registered.", session.AgentId);
-            ulong sequence = 0;
+            long sequence = 0;
             var received = first.Sequence;
-            await Acknowledge(received);
-            await foreach (var message in requestStream.ReadAllAsync(token))
+            var acknowledgements = Channel.CreateBounded<ulong>(32);
+            await acknowledgements.Writer.WriteAsync(received, token);
+            var sending = SendAsync();
+            var receiving = ReceiveAsync();
+            try
             {
-                if (message.Sequence == 0) throw Invalid("Agent sequence must be positive.");
-                if (message.Sequence <= received)
+                await Task.WhenAny(sending, receiving);
+                await stopping.CancelAsync();
+                await Task.WhenAll(sending, receiving);
+            }
+            catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested) { }
+
+            async Task ReceiveAsync()
+            {
+                try
                 {
-                    if (message.PayloadCase != AgentMessage.PayloadOneofCase.Ack) await Acknowledge(received);
-                    continue;
-                }
-                switch (message.PayloadCase)
-                {
-                    case AgentMessage.PayloadOneofCase.Heartbeat:
-                        if (!await registry.HeartbeatAsync(session, message.Heartbeat, token))
-                            throw new RpcException(new Status(StatusCode.FailedPrecondition, "Agent connection was superseded by a new Hello."));
+                    await foreach (var message in requestStream.ReadAllAsync(token))
+                    {
+                        if (message.Sequence == 0) throw Invalid("Agent sequence must be positive.");
+                        if (message.Sequence <= received)
+                        {
+                            if (message.PayloadCase != AgentMessage.PayloadOneofCase.Ack)
+                                await acknowledgements.Writer.WriteAsync(received, token);
+                            continue;
+                        }
+                        switch (message.PayloadCase)
+                        {
+                            case AgentMessage.PayloadOneofCase.Heartbeat:
+                                if (!await registry.HeartbeatAsync(session, message.Heartbeat, token))
+                                    throw new RpcException(new Status(StatusCode.FailedPrecondition, "Agent connection was superseded by a new Hello."));
+                                break;
+                            case AgentMessage.PayloadOneofCase.TaskStarted:
+                            case AgentMessage.PayloadOneofCase.TaskCompleted:
+                                if (runs is null)
+                                    throw new RpcException(new Status(StatusCode.Unimplemented, "Task dispatch persistence is not configured."));
+                                await runs.AcceptAsync(session, message, token);
+                                break;
+                            case AgentMessage.PayloadOneofCase.Ack:
+                                if (message.Ack.Sequence == 0 || message.Ack.Sequence > (ulong)Volatile.Read(ref sequence) ||
+                                    message.Ack.LeaderEpoch != 1)
+                                    throw Invalid("Invalid control acknowledgement.");
+                                received = message.Sequence;
+                                continue;
+                            default:
+                                throw Invalid("Unsupported agent payload after Hello.");
+                        }
                         received = message.Sequence;
-                        await Acknowledge(received);
-                        break;
-                    case AgentMessage.PayloadOneofCase.Ack:
-                        if (message.Ack.Sequence == 0 || message.Ack.Sequence > sequence || message.Ack.LeaderEpoch != 1)
-                            throw Invalid("Invalid control acknowledgement.");
-                        received = message.Sequence;
-                        break;
-                    default:
-                        throw new RpcException(new Status(StatusCode.Unimplemented, "This gateway currently accepts Hello, Heartbeat and Ack only."));
+                        await acknowledgements.Writer.WriteAsync(received, token);
+                    }
                 }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { }
             }
 
-            Task Acknowledge(ulong accepted) => responseStream.WriteAsync(new ControlMessage
+            async Task SendAsync()
             {
-                Sequence = ++sequence, LeaderEpoch = 1, Ack = new Ack { Sequence = accepted }
-            }, token);
+                var sent = new HashSet<long>();
+                try
+                {
+                    while (!token.IsCancellationRequested)
+                    {
+                        while (acknowledgements.Reader.TryRead(out var accepted))
+                            await responseStream.WriteAsync(new ControlMessage
+                            {
+                                Sequence = checked((ulong)Interlocked.Increment(ref sequence)), LeaderEpoch = 1,
+                                Ack = new Ack { Sequence = accepted }
+                            }, token);
+                        if (runs is not null)
+                            foreach (var (id, command) in await runs.PendingAsync(session, token))
+                                if (sent.Add(id))
+                                    await responseStream.WriteAsync(new ControlMessage
+                                    {
+                                        Sequence = checked((ulong)Interlocked.Increment(ref sequence)),
+                                        LeaderEpoch = 1, Dispatch = command
+                                    }, token);
+                        using var wait = CancellationTokenSource.CreateLinkedTokenSource(token);
+                        wait.CancelAfter(TimeSpan.FromMilliseconds(25));
+                        try { _ = await acknowledgements.Reader.WaitToReadAsync(wait.Token); }
+                        catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
+                    }
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+            }
         }
         catch (ArgumentException exception)
         {

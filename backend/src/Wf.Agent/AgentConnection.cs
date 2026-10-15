@@ -11,11 +11,9 @@ public interface IAgentCommandHandler
 }
 
 public sealed class AgentConnection(AgentOptions options, IAgentTelemetry telemetry,
-    IAgentCommandHandler commands, TimeProvider timeProvider, ILogger<AgentConnection> logger)
+    IAgentCommandHandler commands, TimeProvider timeProvider, ILogger<AgentConnection> logger, AgentOutbox? outbox = null)
 {
-    private long sequence;
-
-    private ulong NextSequence() => checked((ulong)Interlocked.Increment(ref sequence));
+    private readonly AgentOutbox outgoing = outbox ?? new AgentOutbox();
 
     public async Task RunAsync(CancellationToken stoppingToken)
     {
@@ -63,25 +61,40 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
         });
         using var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         using var call = new AgentGateway.AgentGatewayClient(channel).Connect(cancellationToken: session.Token);
-        await call.RequestStream.WriteAsync(new AgentMessage { Sequence = NextSequence(), Hello = telemetry.CreateHello(options) }, session.Token);
+        var hello = outgoing.CreateHello(telemetry.CreateHello(options));
+        await call.RequestStream.WriteAsync(hello, session.Token);
         logger.LogInformation("Agent Hello sent.");
-        var sending = SendHeartbeatsAsync();
+        var sending = SendAsync(hello.Sequence);
         var receiving = ReceiveAsync();
         await Task.WhenAny(sending, receiving);
         await session.CancelAsync();
         await Task.WhenAll(sending, receiving);
         return await receiving;
 
-        async Task SendHeartbeatsAsync()
+        async Task SendAsync(ulong sent)
         {
             try
             {
-                using var timer = new PeriodicTimer(options.HeartbeatInterval, timeProvider);
-                while (await timer.WaitForNextTickAsync(session.Token))
-                    await call.RequestStream.WriteAsync(new AgentMessage
+                var nextHeartbeat = timeProvider.GetUtcNow() + options.HeartbeatInterval;
+                while (!session.IsCancellationRequested)
+                {
+                    while (outgoing.NextAfter(sent) is { } message)
                     {
-                        Sequence = NextSequence(), Heartbeat = telemetry.Sample()
-                    }, session.Token);
+                        await call.RequestStream.WriteAsync(message, session.Token);
+                        sent = message.Sequence;
+                    }
+                    var remaining = nextHeartbeat - timeProvider.GetUtcNow();
+                    if (remaining <= TimeSpan.Zero)
+                    {
+                        outgoing.Enqueue(new AgentMessage { Heartbeat = telemetry.Sample() });
+                        nextHeartbeat = timeProvider.GetUtcNow() + options.HeartbeatInterval;
+                        continue;
+                    }
+                    using var wait = CancellationTokenSource.CreateLinkedTokenSource(session.Token);
+                    wait.CancelAfter(remaining);
+                    try { await outgoing.WaitForChangeAsync(wait.Token); }
+                    catch (OperationCanceledException) when (!session.IsCancellationRequested) { }
+                }
             }
             catch (OperationCanceledException) when (session.IsCancellationRequested) { }
             catch (RpcException exception) when (session.IsCancellationRequested && exception.StatusCode == StatusCode.Cancelled) { }
@@ -113,13 +126,12 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
                     received = message.Sequence;
                     if (message.PayloadCase == ControlMessage.PayloadOneofCase.Ack)
                     {
-                        if (message.Ack.Sequence == 0 || message.Ack.Sequence > (ulong)Volatile.Read(ref sequence) || message.Ack.LeaderEpoch != 0)
-                            throw new InvalidDataException("Invalid acknowledgement of agent messages.");
+                        outgoing.Acknowledge(message.Ack);
                         continue;
                     }
                     if (message.PayloadCase == ControlMessage.PayloadOneofCase.None)
                         throw new InvalidDataException("Control message has no supported payload.");
-                    await commands.HandleAsync(message, session.Token);
+                    await commands.HandleAsync(message, stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (session.IsCancellationRequested) { }

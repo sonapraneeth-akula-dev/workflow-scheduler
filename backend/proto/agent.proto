@@ -80,6 +80,8 @@ message Dispatch {
   repeated string secret_refs = 9;
   repeated UploadGrant grants = 10;
   bytes variables_json = 11;
+  // Outputs already committed by this node, keyed by declared output name.
+  bytes node_outputs_json = 12;
 }
 
 message ResourceLimits {

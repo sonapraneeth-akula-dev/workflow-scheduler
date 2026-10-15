@@ -12,7 +12,7 @@ public interface IAgentTelemetry
     Heartbeat Sample();
 }
 
-public sealed partial class AgentTelemetry(TimeProvider timeProvider) : IAgentTelemetry
+public sealed partial class AgentTelemetry(TimeProvider timeProvider, TaskCommands? tasks = null) : IAgentTelemetry
 {
     private (ulong Idle, ulong Total)? previousCpu;
 
@@ -27,7 +27,7 @@ public sealed partial class AgentTelemetry(TimeProvider timeProvider) : IAgentTe
             Arch = RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant(),
             Cores = (uint)Environment.ProcessorCount, RamMb = total / (1024 * 1024),
             Version = typeof(AgentTelemetry).Assembly.GetName().Version!.ToString(),
-            ProtocolVersion = 1, Labels = { options.Labels.ToDictionary() }
+            ProtocolVersion = 1, Labels = { options.Labels.ToDictionary() }, Inflight = { tasks?.Inflight ?? [] }
         };
     }
 
@@ -43,7 +43,7 @@ public sealed partial class AgentTelemetry(TimeProvider timeProvider) : IAgentTe
             At = Timestamp.FromDateTimeOffset(timeProvider.GetUtcNow()),
             CpuPercent = Math.Clamp(percent, 0, 100), RamUsedMb = (total - available) / (1024 * 1024),
             DiskFreeMb = (ulong)new DriveInfo(Path.GetPathRoot(AppContext.BaseDirectory)!).AvailableFreeSpace / (1024 * 1024),
-            SlotsUsed = 0
+            SlotsUsed = (uint)(tasks?.Inflight.Count ?? 0)
         };
     }
 

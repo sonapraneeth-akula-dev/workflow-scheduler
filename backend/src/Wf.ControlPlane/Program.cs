@@ -2,6 +2,8 @@ using System.Net;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Npgsql;
 using Wf.ControlPlane.Engine.Agents;
+using Wf.ControlPlane.Engine.Dispatch;
+using Wf.Engine.Core.Placement;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 5000,
@@ -12,6 +14,9 @@ var connectionString = builder.Configuration.GetConnectionString("Workflow")
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<AgentRegistry>();
+builder.Services.AddSingleton<RunStore>();
+builder.Services.AddSingleton<PlacementEngine>();
+builder.Services.AddSingleton<Dispatcher>();
 builder.Services.AddHostedService<AgentRegistryService>();
 var app = builder.Build();
 app.MapGrpcService<AgentGatewayService>();

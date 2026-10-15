@@ -1,0 +1,219 @@
+using System.Text;
+using System.Collections.Immutable;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Google.Protobuf;
+using Npgsql;
+using Wf.Contracts;
+using Wf.Contracts.Agent.V1;
+using Wf.Contracts.Events;
+using Wf.Contracts.Definition;
+using Wf.ControlPlane.Engine.Agents;
+using Wf.Engine.Core;
+using Wf.Engine.Core.StateMachine;
+using DispatchCommand = Wf.Contracts.Agent.V1.Dispatch;
+
+namespace Wf.ControlPlane.Engine.Dispatch;
+
+public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logger)
+{
+    public async Task CreateAsync(RunState run, string workflowId, Guid versionId, DateTimeOffset deadline,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workflowId);
+        if (run.Snapshot.LastSequence != 0 || versionId == Guid.Empty || deadline <= DateTimeOffset.UtcNow)
+            throw new ArgumentException("A new run requires an initial snapshot, version and future deadline.");
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await ExecuteAsync(connection, "SELECT ensure_run_partitions(uuid_v7_run_day($1))", cancellationToken, run.Snapshot.RunId);
+        await ExecuteAsync(connection, """
+            INSERT INTO runs(run_day,id,workflow_id,version_id,trigger,triggered_by,variables,metadata,status,created_at,deadline_at)
+            VALUES(uuid_v7_run_day($1),$1,$2,$3,0,'engine',$6::jsonb,$7::jsonb,0,$4,$5)
+            """, cancellationToken, run.Snapshot.RunId, workflowId, versionId, DateTimeOffset.UtcNow, deadline,
+            JsonSerializer.Serialize(run.Snapshot.Variables, RunStoreJson.Default.ImmutableDictionaryStringJsonElement),
+            JsonSerializer.Serialize(run.Snapshot.Metadata, RunStoreJson.Default.WorkflowMetadata));
+        await WriteSnapshotAsync(connection, run, cancellationToken);
+        foreach (var node in run.Snapshot.Nodes)
+            await ExecuteAsync(connection, """
+                INSERT INTO node_runs(run_day,run_id,node_key,status) VALUES(uuid_v7_run_day($1),$1,$2,$3)
+                """, cancellationToken, run.Snapshot.RunId, node.Key, (short)node.Value);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<RunState> LoadAsync(Guid runId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        return await LoadAsync(connection, runId, false, cancellationToken);
+    }
+
+    internal async Task<RunState> LoadAsync(NpgsqlConnection connection, Guid runId, bool forUpdate,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand("""
+            SELECT s.payload FROM runs r JOIN run_snapshots s
+              ON s.run_day=r.run_day AND s.run_id=r.id AND s.seq=r.snapshot_seq
+            WHERE r.run_day=uuid_v7_run_day($1) AND r.id=$1
+            """ + (forUpdate ? " FOR UPDATE OF r" : ""), connection);
+        command.Parameters.AddWithValue(runId);
+        var payload = await command.ExecuteScalarAsync(cancellationToken) as byte[]
+            ?? throw new KeyNotFoundException($"Run '{runId}' does not exist.");
+        var snapshot = JsonSerializer.Deserialize(payload, RunStoreJson.Default.RunSnapshot)
+            ?? throw new InvalidDataException("Persisted run snapshot is null.");
+        return RunState.Restore(snapshot, [], message => logger.LogWarning("{RunStateError}", message));
+    }
+
+    public async Task AppendAsync(RunState run, EventEntity entity, string? key, int state, DateTimeOffset at,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var durable = await LoadAsync(connection, run.Snapshot.RunId, true, cancellationToken);
+        if (durable.Snapshot.LastSequence != run.Snapshot.LastSequence)
+            throw new InvalidOperationException("Run changed since it was loaded.");
+        var change = durable.CreateEvent(entity, key, state, at);
+        await AppendAsync(connection, durable, change, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        run.Apply(change);
+    }
+
+    internal static async Task AppendAsync(NpgsqlConnection connection, RunState run, RunEvent change,
+        CancellationToken cancellationToken)
+    {
+        await ExecuteAsync(connection, """
+            INSERT INTO run_events(run_day,run_id,seq,ts,kind,entity_key,payload)
+            VALUES(uuid_v7_run_day($1),$1,$2,$3,$4,$5,$6)
+            """, cancellationToken, change.RunId, change.Sequence, change.At, (short)change.Entity,
+            (object?)change.Key ?? DBNull.Value, JsonSerializer.SerializeToUtf8Bytes(change, RunStoreJson.Default.RunEvent));
+        run.Apply(change);
+        await WriteSnapshotAsync(connection, run, cancellationToken);
+        if (change.Entity == EventEntity.Node)
+            await ExecuteAsync(connection, """
+                UPDATE node_runs SET status=$3 WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND node_key=$2
+                """, cancellationToken, change.RunId, change.Key!, (short)change.State);
+    }
+
+    private static async Task WriteSnapshotAsync(NpgsqlConnection connection, RunState run, CancellationToken cancellationToken)
+    {
+        var snapshot = run.Snapshot;
+        await ExecuteAsync(connection, """
+            WITH saved AS (
+                INSERT INTO run_snapshots(run_day,run_id,seq,created_at,payload)
+                VALUES(uuid_v7_run_day($1),$1,$2,$3,$4) RETURNING seq
+            )
+            UPDATE runs SET last_seq=saved.seq,snapshot_seq=saved.seq,status=$5,ended_at=$6 FROM saved
+            WHERE run_day=uuid_v7_run_day($1) AND id=$1
+            """, cancellationToken, snapshot.RunId, snapshot.LastSequence, DateTimeOffset.UtcNow,
+            JsonSerializer.SerializeToUtf8Bytes(snapshot, RunStoreJson.Default.RunSnapshot), (short)snapshot.Status,
+            (object?)snapshot.EndedAt ?? DBNull.Value);
+    }
+
+    public async Task<IReadOnlyList<(long Id, DispatchCommand Command)>> PendingAsync(AgentSession session,
+        CancellationToken cancellationToken)
+    {
+        await using var command = dataSource.CreateCommand("""
+            SELECT o.id,o.payload FROM dispatch_outbox o JOIN agents a ON a.id=o.agent_id
+            WHERE o.agent_id=$1 AND a.session_id=$2 ORDER BY o.id LIMIT 100
+            """);
+        command.Parameters.AddWithValue(session.AgentId);
+        command.Parameters.AddWithValue(session.SessionId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var pending = new List<(long, DispatchCommand)>();
+        while (await reader.ReadAsync(cancellationToken))
+            pending.Add((reader.GetInt64(0), DispatchCommand.Parser.ParseFrom(reader.GetFieldValue<byte[]>(1))));
+        return pending;
+    }
+
+    public async Task AcceptAsync(AgentSession session, AgentMessage message, CancellationToken cancellationToken)
+    {
+        var reference = message.TaskStarted?.Task ?? message.TaskCompleted?.Task;
+        if (reference is null || !Guid.TryParse(reference.RunId, out var runId) || runId == Guid.Empty ||
+            string.IsNullOrWhiteSpace(reference.NodeKey) || reference.NodeKey.Contains('/') ||
+            string.IsNullOrWhiteSpace(reference.TaskKey) || reference.TaskKey.Contains('/') ||
+            reference.Attempt is 0 or > 32767)
+            throw new ArgumentException("Task event requires a valid attempt.", nameof(message));
+        var at = (message.TaskStarted?.At ?? message.TaskCompleted?.At)?.ToDateTimeOffset()
+            ?? throw new ArgumentException("Task event requires a timestamp.", nameof(message));
+        var taskKey = $"{reference.NodeKey}/{reference.TaskKey}";
+        var completed = message.TaskCompleted;
+        if (completed is not null)
+        {
+            if (completed.Outcome == TaskOutcome.Unspecified || !Enum.IsDefined(completed.Outcome) ||
+                completed.OutputsJson.Length > 64 * 1024 ||
+                Encoding.UTF8.GetByteCount(completed.Error?.Message ?? "") > 4096)
+                throw new ArgumentException("Task result contains an invalid outcome or oversized payload.", nameof(message));
+            if (completed.OutputsJson.Length > 0)
+            {
+                using var outputs = JsonDocument.Parse(completed.OutputsJson.Memory);
+                if (outputs.RootElement.ValueKind != JsonValueKind.Object)
+                    throw new ArgumentException("Task outputs must be a JSON object.", nameof(message));
+            }
+        }
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using (var fence = new NpgsqlCommand("SELECT session_id FROM agents WHERE id=$1 FOR UPDATE", connection))
+        {
+            fence.Parameters.AddWithValue(session.AgentId);
+            if (await fence.ExecuteScalarAsync(cancellationToken) is not Guid current || current != session.SessionId)
+                throw new InvalidOperationException("Agent connection was superseded by a new Hello.");
+        }
+        var run = await LoadAsync(connection, runId, true, cancellationToken);
+        await using (var attempt = new NpgsqlCommand("""
+            SELECT status FROM task_attempts WHERE run_day=uuid_v7_run_day($1) AND run_id=$1
+              AND task_key=$2 AND attempt=$3 AND agent_id=$4 FOR UPDATE
+            """, connection))
+        {
+            attempt.Parameters.AddWithValue(runId);
+            attempt.Parameters.AddWithValue(taskKey);
+            attempt.Parameters.AddWithValue((short)reference.Attempt);
+            attempt.Parameters.AddWithValue(session.AgentId);
+            if (await attempt.ExecuteScalarAsync(cancellationToken) is not short status)
+                throw new ArgumentException("Task event does not match an attempt assigned to this agent.", nameof(message));
+            if (TransitionTable.IsTerminal((ExecutionStatus)status) ||
+                message.TaskStarted is not null && (ExecutionStatus)status == ExecutionStatus.Running)
+                return;
+        }
+        var target = completed?.Outcome switch
+        {
+            null => ExecutionStatus.Running,
+            TaskOutcome.Succeeded => ExecutionStatus.Succeeded,
+            TaskOutcome.Failed => ExecutionStatus.Failed,
+            TaskOutcome.Cancelled => ExecutionStatus.Cancelled,
+            TaskOutcome.TimedOut => ExecutionStatus.TimedOut,
+            _ => throw new ArgumentException("Unsupported task outcome.", nameof(message))
+        };
+        var change = run.CreateEvent(EventEntity.Task, taskKey, (int)target, at);
+        await AppendAsync(connection, run, change, cancellationToken);
+        await ExecuteAsync(connection, """
+            WITH removed AS (
+                DELETE FROM dispatch_outbox WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 AND attempt=$3
+                RETURNING id
+            )
+            UPDATE task_attempts SET status=$4,
+                started_at=CASE WHEN $4=3 THEN $5 ELSE started_at END,
+                ended_at=CASE WHEN $4>=5 THEN $5 ELSE ended_at END,error=$6
+            WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 AND attempt=$3
+            """, cancellationToken, runId, taskKey, (short)reference.Attempt, (short)target, at,
+            (object?)completed?.Error?.Message ?? DBNull.Value);
+        if (completed is { Outcome: TaskOutcome.Succeeded, OutputsJson.Length: > 0 })
+            await ExecuteAsync(connection, """
+                UPDATE node_runs SET outputs=COALESCE(outputs,'{}'::jsonb) || $3::jsonb
+                WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND node_key=$2
+                """, cancellationToken, runId, reference.NodeKey, completed.OutputsJson.ToStringUtf8());
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    internal static async Task ExecuteAsync(NpgsqlConnection connection, string sql, CancellationToken cancellationToken,
+        params object[] parameters)
+    {
+        await using var command = new NpgsqlCommand(sql, connection);
+        foreach (var parameter in parameters) command.Parameters.Add(new NpgsqlParameter { Value = parameter });
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+}
+
+[JsonSerializable(typeof(RunSnapshot))]
+[JsonSerializable(typeof(RunEvent))]
+[JsonSerializable(typeof(ImmutableDictionary<string, JsonElement>))]
+[JsonSerializable(typeof(WorkflowMetadata))]
+internal sealed partial class RunStoreJson : JsonSerializerContext;

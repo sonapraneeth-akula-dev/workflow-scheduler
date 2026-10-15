@@ -61,6 +61,52 @@ public sealed class AgentConnectionTests
     }
 
     [Fact]
+    public async Task Unacknowledged_results_replay_with_original_sequences_after_connection_loss()
+    {
+        var outbox = new AgentOutbox();
+        outbox.Enqueue(new AgentMessage { TaskStarted = new TaskStarted { Task = new AttemptRef { TaskKey = "started" } } });
+        outbox.Enqueue(new AgentMessage { TaskCompleted = new TaskCompleted { Outcome = TaskOutcome.Succeeded } });
+        var replayed = new TaskCompletionSource<AgentMessage[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        await using var gateway = await Gateway.Start(async (requests, responses, context) =>
+        {
+            var attempt = Interlocked.Increment(ref calls);
+            var frames = new List<AgentMessage>();
+            await foreach (var message in requests.ReadAllAsync(context.CancellationToken))
+            {
+                frames.Add(message);
+                if (frames.Count != 3) continue;
+                if (attempt == 1)
+                    throw new RpcException(new Status(StatusCode.Unavailable, "Lost before durable result acknowledgement."));
+                await responses.WriteAsync(new ControlMessage
+                {
+                    Sequence = 1, LeaderEpoch = 1, Ack = new Ack { Sequence = message.Sequence }
+                }, context.CancellationToken);
+                replayed.TrySetResult(frames.ToArray());
+            }
+        });
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var options = new AgentOptions([gateway.Address], Id, "Test", "ci", 2);
+        var connection = new AgentConnection(options, new AgentTelemetry(TimeProvider.System), new Commands(_ => { }),
+            TimeProvider.System, NullLogger<AgentConnection>.Instance, outbox);
+        var running = connection.RunAsync(cancellation.Token);
+        try
+        {
+            var frames = await replayed.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            Assert.Equal(2, Volatile.Read(ref calls));
+            Assert.Equal(new ulong[] { 1, 2, 3 }, frames.Select(frame => frame.Sequence));
+            Assert.NotNull(frames[0].Hello);
+            Assert.Equal("started", frames[1].TaskStarted.Task.TaskKey);
+            Assert.Equal(TaskOutcome.Succeeded, frames[2].TaskCompleted.Outcome);
+        }
+        finally
+        {
+            await cancellation.CancelAsync();
+            await running.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
     public async Task Configured_leader_hint_redirects_and_preserves_sequence()
     {
         var leaderHello = new TaskCompletionSource<AgentMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
