@@ -6,12 +6,13 @@ namespace Wf.Sdk;
 public sealed class NodeBuilder
 {
     private readonly List<DependencyDefinition> dependencies = [];
-    private readonly List<TaskDefinition> tasks = [];
+    private readonly List<(string Key, FailurePolicy Failure, PolicyOverrides Policy)> tasks = [];
     private readonly List<InputBinding> inputs = [];
     private readonly List<KeyValuePair<string, Func<TaskContext, Task>>> handlers = [];
     private NodeExecutionMode mode;
     private int? maxParallel;
     private FailurePolicy failure;
+    private readonly PolicyBuilder policy = new();
     internal string Key { get; }
     internal IEnumerable<KeyValuePair<string, Func<TaskContext, Task>>> Handlers => handlers;
 
@@ -49,20 +50,35 @@ public sealed class NodeBuilder
         return this;
     }
 
+    public NodeBuilder Timeout(TimeSpan value) { policy.Timeout(value); return this; }
+    public NodeBuilder Retry(int count, BackoffPolicy? backoff = null, IEnumerable<FailureCategory>? on = null)
+    { policy.Retry(count, backoff, on); return this; }
+    public NodeBuilder NoAutoRetry() { policy.NoAutoRetry(); return this; }
+
     public NodeBuilder Task(string key, Func<TaskContext, Task> execute, FailurePolicy failure = FailurePolicy.Hard)
+        => Task(key, execute, null, failure);
+
+    public NodeBuilder Task(string key, Func<TaskContext, Task> execute, Action<PolicyBuilder>? configure,
+        FailurePolicy failure = FailurePolicy.Hard)
     {
         WorkflowBuilder.ValidateKey(key);
         ArgumentNullException.ThrowIfNull(execute);
         var task = new TaskDefinition(key, failure);
+        var builder = new PolicyBuilder();
+        configure?.Invoke(builder);
         handlers.Add(new(key, execute));
-        tasks.Add(task);
+        tasks.Add((task.Key, task.Failure, builder.Build()));
         return this;
     }
 
     public NodeBuilder Task(string key, Action<TaskContext> execute, FailurePolicy failure = FailurePolicy.Hard)
+        => Task(key, execute, null, failure);
+
+    public NodeBuilder Task(string key, Action<TaskContext> execute, Action<PolicyBuilder>? configure,
+        FailurePolicy failure = FailurePolicy.Hard)
     {
         ArgumentNullException.ThrowIfNull(execute);
-        return Task(key, ctx => { execute(ctx); return System.Threading.Tasks.Task.CompletedTask; }, failure);
+        return Task(key, ctx => { execute(ctx); return System.Threading.Tasks.Task.CompletedTask; }, configure, failure);
     }
 
     public NodeBuilder Series()
@@ -81,6 +97,13 @@ public sealed class NodeBuilder
         return this;
     }
 
-    internal NodeDefinition Build() => new(Key, dependencies.ToImmutableArray(), tasks.ToImmutableArray(),
-        mode, maxParallel, failure, inputs.ToImmutableArray());
+    internal NodeDefinition Build(PolicyOverrides defaults)
+    {
+        var overrides = policy.Build();
+        if (LifecycleStages.After.Contains(Key) && overrides.Timeout is null)
+            overrides = overrides with { Timeout = TimeSpan.FromMinutes(15) };
+        return new(Key, dependencies.ToImmutableArray(), tasks.Select(t =>
+            new TaskDefinition(t.Key, t.Failure, PolicyResolver.Resolve(defaults, overrides, t.Policy))).ToImmutableArray(),
+            mode, maxParallel, failure, inputs.ToImmutableArray(), overrides.Timeout);
+    }
 }

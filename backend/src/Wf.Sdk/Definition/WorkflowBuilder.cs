@@ -11,8 +11,27 @@ public sealed class WorkflowBuilder
     private readonly List<VariableSchema> variables = [];
     private readonly Dictionary<string, string> metadata = new(StringComparer.Ordinal);
     private string? type;
+    private PolicyOverrides defaults = new();
+    private TimeSpan runTimeout = TimeSpan.FromHours(24);
 
     internal WorkflowBuilder(string name, string version) => (this.name, this.version) = (name, version);
+
+    public WorkflowBuilder Defaults(Action<PolicyBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        var builder = new PolicyBuilder();
+        configure(builder);
+        defaults = builder.Build();
+        return this;
+    }
+
+    public WorkflowBuilder RunTimeout(TimeSpan value)
+    {
+        if (value <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(value), "Run timeout must be positive.");
+        runTimeout = value;
+        return this;
+    }
 
     public WorkflowBuilder Type(string value)
     {
@@ -97,14 +116,14 @@ public sealed class WorkflowBuilder
     {
         if (type is null)
             throw new ArgumentException($"Workflow '{name}' must declare exactly one type.");
-        var definitions = nodes.Select(n => n.Build()).ToImmutableArray();
+        var definitions = nodes.Select(n => n.Build(defaults)).ToImmutableArray();
         DagValidator.Validate(definitions);
         var tasks = ImmutableDictionary.CreateBuilder<string, Func<TaskContext, Task>>(StringComparer.Ordinal);
         foreach (var node in nodes)
             foreach (var task in node.Handlers)
                 tasks.Add($"{node.Key}/{task.Key}", task.Value);
         return new(name, version, definitions, tasks.ToImmutable(), variables.ToImmutableArray(),
-            new(type, metadata.ToImmutableDictionary(StringComparer.Ordinal)));
+            new(type, metadata.ToImmutableDictionary(StringComparer.Ordinal)), runTimeout);
     }
 
     internal static void ValidateKey(string key)

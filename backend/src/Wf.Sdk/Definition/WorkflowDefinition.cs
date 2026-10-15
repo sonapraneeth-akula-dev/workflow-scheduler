@@ -12,10 +12,11 @@ public sealed class WorkflowDefinition
     public ImmutableArray<VariableSchema> Variables { get; }
     public WorkflowMetadata Metadata { get; }
     public string Type => Metadata.Type;
+    public TimeSpan RunTimeout { get; }
 
     internal WorkflowDefinition(string name, string version, ImmutableArray<NodeDefinition> nodes,
         ImmutableDictionary<string, Func<TaskContext, Task>> tasks, ImmutableArray<VariableSchema> variables,
-        WorkflowMetadata metadata)
+        WorkflowMetadata metadata, TimeSpan runTimeout)
     {
         Name = name;
         Version = version;
@@ -23,5 +24,6 @@ public sealed class WorkflowDefinition
         Tasks = tasks;
         Variables = variables;
         Metadata = metadata;
+        RunTimeout = runTimeout;
     }
 }
