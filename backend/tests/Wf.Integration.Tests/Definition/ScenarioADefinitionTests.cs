@@ -1,4 +1,6 @@
 using Wf.Sdk;
+using System.Text.Json;
+using Wf.Contracts.Definition;
 
 namespace Wf.Integration.Tests.Definition;
 
@@ -34,5 +36,19 @@ public sealed class ScenarioADefinitionTests
             .Node("a", n => n.DependsOn("b").Task("work", _ => executed = true))
             .Node("b", n => n.DependsOn("a"))));
         Assert.False(executed);
+    }
+
+    [Fact]
+    public void NodeContractRoundTripPreservesModesAndDeclaredOrder()
+    {
+        var workflow = Workflow.Define("sample", "1", w => w.Node("node", n => n
+            .Parallel(3).Task("z", _ => { }).Task("a", _ => { })));
+        var json = JsonSerializer.Serialize(workflow.Nodes[0]);
+        var node = JsonSerializer.Deserialize<NodeDefinition>(json)!;
+        Assert.Equal(NodeExecutionMode.Parallel, node.Mode);
+        Assert.Equal(3, node.MaxParallel);
+        Assert.Equal(["z", "a"], node.Tasks.Select(t => t.Key));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            JsonSerializer.Deserialize<NodeDefinition>(json.Replace("\"MaxParallel\":3", "\"MaxParallel\":0")));
     }
 }
