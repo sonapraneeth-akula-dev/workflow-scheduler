@@ -1363,7 +1363,7 @@ teams/<team>/<type>/<workflow>/tests/*.cs    # workflow tests (xUnit + Wf.Sdk.Te
 | # | Risk / question | Impact | Mitigation / spike |
 |---|-----------------|--------|--------------------|
 | R-1 | Azure PaaS: PG Flexible zone-redundant HA failover takes ~60–120 s, so runs resume up to ~150 s after a DB failover (NFR-033: DB failover time + ≤ 30 s). Self-hosted Patroni ≈ 10–20 s | Engine pauses commits during failover | Agents keep executing and journalling; the engine retries; runs resume ≤ 30 s after the new primary accepts writes. The chaos suite measures it per profile. |
-| R-2 | Group-commit latency with synchronous zone-redundant commit may exceed 4 ms | NFR-030 (≤ 10 ms/node) | Spike in M-002.1: benchmark on D4ds HA; fall back to larger batches with async ack of non-critical events. |
+| R-2 | Group-commit latency with synchronous zone-redundant commit may exceed 4 ms | NFR-030 (≤ 10 ms/node) | Local spike completed in task 2.2.2.1.3; measurements below. Keep synchronous critical acknowledgements and bounded batches, immediate collection by default. Local storage misses the latency target; D4ds HA validation remains open. Never acknowledge critical effects before COMMIT. |
 | R-3 | cgroups v2 delegation on Linux agents | Per-task limits unavailable | systemd `Delegate=yes`; spike on Ubuntu 24.04 + Azure Linux; fall back to `systemd-run --scope`. |
 | R-4 | Bond packages from the Microsoft-internal feed on .NET 10 | Phase 2 Bond codec | Isolated in `Wf.Codec.Bond`; spike early; nuget.org exact version as restore fallback; JSON codec first, and JSON over HTTP if Bond proves unusable. |
 | R-5 | File-based script compile time | NFR-022 (validate < 10 s) | Cache build output by content hash; `wf validate` reuses it. |
@@ -1377,6 +1377,55 @@ teams/<team>/<type>/<workflow>/tests/*.cs    # workflow tests (xUnit + Wf.Sdk.Te
 | R-13 | Unvalidated assumptions: ≥ 1,000 definitions and ≥ 200 concurrent tasks (NFR-003), Entra ID tenant available (NFR-007), Bond packages available from the internal feed (R-4) | Sizing, auth, phase 2 codec | Validation task: confirm with stakeholders and size-test before M-011.1. |
 | R-14 | Remote API idempotency/status retention may be shorter than the task's retry window, or many waiting jobs may exhaust agent slots | Duplicate external side effects or queued work | Require a service contract covering the deadline/retry window, or disable automatic retries and mark uncertain outcomes for operator reconciliation; measure slot occupancy before considering durable suspension. |
 | Q-2 | Which profile is production first (Autopilot fleet vs Azure PaaS)? | Order of M-011.2 work and infrastructure | All profiles share code; only deploy tooling differs. Decided for the first build: Local (pure local + Docker Compose) on this single machine, which is not bare metal. Self-hosted next (matches test-lab machines; code kept portable and lab-verified meanwhile), PaaS after. |
+
+### R-2 local group-commit spike (October 15, 2026)
+
+PostgreSQL 17 Alpine in Docker on this shared, virtualized machine; .NET SDK
+10.0.402/runtime 10.0.13, x64. Windows client crosses Docker's published port;
+Linux client shares the PostgreSQL container network. These are separate local
+profiles, not an isolated OS comparison or a zone-redundant HA measurement.
+`fsync` and `full_page_writes` are explicitly enabled and checked; every measured
+transaction forces `synchronous_commit=on`. Testcontainers' faster defaults were
+rejected by the benchmark guard before collecting accepted results.
+
+BenchmarkDotNet covers six configurations; a separate 1,024-event probe per
+configuration measures enqueue-to-durable-ack and database persistence (connection,
+transaction, statements and COMMIT), then reconstructs the acknowledged core state
+from the PostgreSQL snapshot/event tail.
+
+| Client | Actors | Strategy | Commits | Events/commit | Ack p95 / p99 (ms) | Persistence p95 / p99 (ms) |
+|--------|--------|----------|---------|---------------|-------------------|---------------------------|
+| Windows | 1 | Per-event | 1024 | 1.00 | 14.958 / 20.710 | 14.870 / 20.647 |
+| Windows | 1 | Immediate batch | 1024 | 1.00 | 14.119 / 17.050 | 14.035 / 16.984 |
+| Windows | 1 | Requested 2 ms batch | 1024 | 1.00 | 29.613 / 33.761 | 14.972 / 18.797 |
+| Windows | 32 | Per-event | 1024 | 1.00 | 361.420 / 434.287 | 15.626 / 20.402 |
+| Windows | 32 | Immediate batch | 62 | 16.52 | 46.723 / 56.484 | 28.517 / 41.032 |
+| Windows | 32 | Requested 2 ms batch | 32 | 32.00 | 42.298 / 46.244 | 29.231 / 29.564 |
+| Linux | 1 | Per-event | 1024 | 1.00 | 10.461 / 13.856 | 10.213 / 13.612 |
+| Linux | 1 | Immediate batch | 1024 | 1.00 | 9.794 / 11.912 | 9.645 / 11.745 |
+| Linux | 1 | Requested 2 ms batch | 1024 | 1.00 | 14.438 / 17.323 | 10.322 / 12.653 |
+| Linux | 32 | Per-event | 1024 | 1.00 | 238.477 / 290.524 | 10.726 / 13.685 |
+| Linux | 32 | Immediate batch | 62 | 16.52 | 36.628 / 38.251 | 26.886 / 28.521 |
+| Linux | 32 | Requested 2 ms batch | 32 | 32.00 | 27.715 / 32.026 | 25.146 / 29.515 |
+
+**Decision:** keep synchronous batching, default to immediate coalescing to avoid
+intentional low-load delay; allow an explicitly selected collection window up to
+2 ms for bursts. Bound groups to 512 events and backpressure the queue.
+Requested timer duration is not a real-time OS scheduling guarantee: queueing,
+scheduling and database time remain visible in the measured acknowledgement.
+Do not use asynchronous acknowledgement for Ready, Dispatched, results or other
+critical effects. Larger groups amortize commits but do not remove the measured
+storage floor. Neither local profile meets the 4 ms persistence target; this
+spike does not sign off NFR-030 or establish Azure HA performance.
+
+The event-only prototype validates contiguous sequences atomically and returns
+receipts only after commit. It is not substituted for the dispatch/result
+transactions, which must continue to include attempt/outbox/projection writes.
+Production actor integration and reference-environment tuning remain later work.
+Reproduce with `dotnet run -c Release --project backend\tests\Wf.Benchmarks --
+--filter '*GroupCommit*'`; optional `WF_TEST_POSTGRES` uses isolated schemas on an
+external test server. JSON receipts/latencies are exported alongside BDN reports;
+missing measurements or disabled durability fail the command.
 
 ## 14. Glossary
 | Term | Meaning |

@@ -272,6 +272,29 @@ compatibility follow separately.
 ## Benchmarks
 
 ```powershell
+dotnet run -c Release --project backend\tests\Wf.Benchmarks -- --filter '*GroupCommit*'
+```
+
+The R-2 spike measures actual PostgreSQL event appends with `fsync`,
+`full_page_writes` and synchronous commit enabled. Per-event, immediate and
+requested 2 ms batching compare one/32 actors; each configuration also collects
+1,024 individual acknowledgements and verifies snapshot-tail recovery.
+`GroupCommitAppender` backpressures its bounded queue, commits contiguous event
+groups atomically, acknowledges only after COMMIT and drains on disposal.
+Cancellation before persistence skips a request; cancellation after persistence
+starts cannot turn a committed write into a cancelled acknowledgement.
+
+October 15 local measurements: 32-actor immediate-batch ack p95 46.723 ms on
+Windows / 36.628 ms on Linux; requested 2 ms groups reduce commits from 1024 to 32
+and ack p95 to 42.298 / 27.715 ms. Both profiles miss the 4 ms persistence target.
+TD section 13 records the full table, environment and decision: immediate
+coalescing by default, optional bounded delay for bursts, never early
+acknowledgement of critical effects. This event-only prototype does not replace
+the dispatch/result transactions. Azure HA remains unmeasured; no performance
+sign-off is implied. `group-commit-metrics.json` accompanies BDN results;
+`--artifacts` relocates these outputs too.
+
+```powershell
 dotnet run -c Release --project backend\tests\Wf.Benchmarks -- --filter '*Describe*'
 ```
 

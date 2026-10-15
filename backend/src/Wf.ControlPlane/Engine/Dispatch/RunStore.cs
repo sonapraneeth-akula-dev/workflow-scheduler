@@ -60,7 +60,17 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
             ?? throw new KeyNotFoundException($"Run '{runId}' does not exist.");
         var snapshot = JsonSerializer.Deserialize(payload, RunStoreJson.Default.RunSnapshot)
             ?? throw new InvalidDataException("Persisted run snapshot is null.");
-        return RunState.Restore(snapshot, [], message => logger.LogWarning("{RunStateError}", message));
+        await using var tail = new NpgsqlCommand("""
+            SELECT payload FROM run_events WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND seq>$2 ORDER BY seq
+            """, connection);
+        tail.Parameters.AddWithValue(runId);
+        tail.Parameters.AddWithValue(snapshot.LastSequence);
+        var events = new List<RunEvent>();
+        await using var reader = await tail.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            events.Add(JsonSerializer.Deserialize(reader.GetFieldValue<byte[]>(0), RunStoreJson.Default.RunEvent)
+                ?? throw new InvalidDataException("Persisted run event is null."));
+        return RunState.Restore(snapshot, events, message => logger.LogWarning("{RunStateError}", message));
     }
 
     public async Task AppendAsync(RunState run, EventEntity entity, string? key, int state, DateTimeOffset at,

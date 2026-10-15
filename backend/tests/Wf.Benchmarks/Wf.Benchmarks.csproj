@@ -5,6 +5,12 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="BenchmarkDotNet" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
     <ProjectReference Include="..\..\src\Wf.Sdk\Wf.Sdk.csproj" />
+    <ProjectReference Include="..\..\src\Wf.ControlPlane\Wf.ControlPlane.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\db\migrations\0002_runs_events.sql" Link="Migrations\0002_runs_events.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\db\migrations\0003_attempt_timers.sql" Link="Migrations\0003_attempt_timers.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
