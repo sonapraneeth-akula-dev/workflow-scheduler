@@ -22,7 +22,7 @@ Node/task states print live. Exit code is 0 only for `Succeeded`; failures,
 timeouts and aborts return 1. Ctrl+C requests an abort and allows cleanup.
 `LocalVariables.Parse` accepts repeated `--var key=value` pairs; strings, enums,
 durations and secret-reference names use plain text, other types use JSON.
-All policies and variables validate before tasks start. Remote/task-host/dry-run
+All policies and variables validate before tasks start. General remote/task-host
 mode dispatch follows in its own backlog items.
 
 Unit and integration tests cover authoring, real task execution and PostgreSQL
@@ -46,6 +46,23 @@ cancellation beyond grace causes an explicit error, not a false terminal result:
 an in-process host cannot forcibly kill managed code. Process isolation belongs
 to the task-host backlog; built-in command cancellation kills and reaps its own
 process tree.
+
+Dry-run executes the same core using explicit task mocks, without invoking any
+original task delegate or external service:
+
+```powershell
+dotnet run --file backend\samples\workflows\scenario-a.cs -- --dry-run backend\samples\workflows\scenario-a.mocks.json --var env=ppe
+```
+
+Stdout contains one source-generated JSON event log, including snapshot, outputs,
+attempts and final exit code. Mocks support `Succeed` with outputs, `Fail`,
+`Timeout`, `Throw`, and `FailThenSucceed` with `failuresBeforeSuccess`. Each task
+needs its own mock unless the spec explicitly supplies `default`; missing mocks,
+unknown keys and unknown JSON properties are errors, not automatic success.
+Spec `variables` override workflow defaults; command-line `--var` values win.
+Timeouts/backoff advance virtual time with deterministic midpoint jitter and no
+real delays. The testing-library build cache and fluent assertions follow in
+their own backlog items.
 
 ## Benchmarks
 

@@ -13,6 +13,7 @@ using Wf.Engine.Core.StateMachine;
 using Wf.Engine.Core.Timers;
 using Wf.Engine.Core.Transitions;
 using Wf.Validation;
+using Wf.Sdk.Hosting;
 
 namespace Wf.Sdk.Local;
 
@@ -261,7 +262,11 @@ public sealed class LocalEngine
         timers.Track(new(new(TimerScope.Attempt, key), DeadlineAt: Add(attempt.StartedAt, task.Policy.AttemptTimeout)));
         var context = new TaskContext(attempt.Cancellation.Token, variables, outputs[node.Key], outputs,
             node.Inputs, message => renderer.Log($"{key}: {message}"), reports, artifacts, abort: run.Snapshot.Abort);
-        _ = Task.Run(async () =>
+        if (time is DryRunClock)
+            _ = ExecuteAsync();
+        else
+            _ = Task.Run(ExecuteAsync, CancellationToken.None);
+        async Task ExecuteAsync()
         {
             Exception? error = null;
             try { await registry.ExecuteAsync(key, context).ConfigureAwait(false); }
@@ -270,7 +275,7 @@ public sealed class LocalEngine
                 await attempt.CancellationCompleted.ConfigureAwait(false);
             if (!messages.Writer.TryWrite(new Completed(key, error)))
                 await DisposeCancellationAsync(attempt).ConfigureAwait(false);
-        }, CancellationToken.None);
+        }
     }
 
     private void CompleteAttempt(Completed completed)
@@ -305,7 +310,7 @@ public sealed class LocalEngine
             ? DateTimeOffset.MaxValue : runDeadline;
         var retry = RetryPolicyEvaluator.Evaluate(task.Policy, new(category, budget.Author, budget.Platform, Now, deadline,
             nodeDeadlines.GetValueOrDefault(node.Key, DateTimeOffset.MaxValue),
-            Cancelled: stoppedNodes.ContainsKey(node.Key)), Random.Shared.NextDouble(), completed.Error);
+            Cancelled: stoppedNodes.ContainsKey(node.Key)), time is DryRunClock ? 0.5 : Random.Shared.NextDouble(), completed.Error);
         if (retry.Retry)
         {
             budgets[completed.Key] = (budget.Author + (retry.Budget == RetryBudget.Author ? 1 : 0),
@@ -450,6 +455,16 @@ public sealed class LocalEngine
             t.Phase == TimerPhase.Waiting ? t.DeadlineAt ?? t.RetryAt : null).Where(t => t is not null).Min();
         if (active.Count == 0 && next is null)
             throw new InvalidOperationException("The local run has unfinished work but no dispatch, deadline or retry can make progress.");
+        if (time is DryRunClock clock)
+        {
+            if (messages.Reader.TryPeek(out _))
+                return;
+            if (active.Values.Any(a => a.Cause != CancellationCause.None))
+                await messages.Reader.WaitToReadAsync().ConfigureAwait(false);
+            else if (next is { } virtualDeadline)
+                clock.AdvanceTo(virtualDeadline < Now ? Now : virtualDeadline);
+            return;
+        }
         using var wake = new CancellationTokenSource();
         var read = messages.Reader.WaitToReadAsync(wake.Token).AsTask();
         var delay = Task.Delay(next is { } at ? TimeSpan.FromMilliseconds(Math.Clamp((at - Now).TotalMilliseconds,
