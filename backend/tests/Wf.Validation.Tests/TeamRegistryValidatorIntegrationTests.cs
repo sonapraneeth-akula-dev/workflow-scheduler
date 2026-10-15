@@ -1,4 +1,6 @@
 using System.Text;
+using System.Text.Json;
+using Wf.Contracts.Registry;
 using Wf.Sdk.Testing;
 using Wf.Validation.Rules;
 
@@ -23,6 +25,19 @@ public sealed class TeamRegistryValidatorIntegrationTests
             ValidatorFixture.Token);
         Assert.True(valid.IsValid);
         Assert.NotNull(valid.Build);
+        var registry = JsonSerializer.Deserialize(ValidTeam, TeamRegistryJsonContext.Default.TeamRegistry)!;
+        var twoTypes = registry with { Types = [registry.Types[0], registry.Types[0] with { Name = "cleanup" }] };
+        await File.WriteAllBytesAsync(team, JsonSerializer.SerializeToUtf8Bytes(twoTypes,
+            TeamRegistryJsonContext.Default.TeamRegistry), ValidatorFixture.Token);
+        var limited = await Validator.ValidateAsync(fixture.Source, fixture.Cache, fixture.AdditionalInputs,
+            ValidatorFixture.Token, options: new(1));
+        var facadeLimited = await WorkflowValidation.ValidateAsync(fixture.Source, fixture.Cache, fixture.AdditionalInputs,
+            ValidatorFixture.Token, options: new(1));
+        Assert.Equal("WFV017", Assert.Single(limited.Errors).RuleId);
+        Assert.Equal(limited.Errors, facadeLimited.Errors);
+        Assert.Contains("Configured type quota: 1.", limited.Errors[0].Hint);
+        Assert.True((await WorkflowValidation.ValidateAsync(fixture.Source, fixture.Cache, fixture.AdditionalInputs,
+            ValidatorFixture.Token, options: new(2))).IsValid);
         var presented = ValidTeam.Replace("\"keys\":[]",
             "\"keys\":[{\"key\":\"environment\",\"allowedValues\":[\"dev\",\"ppe\"]}]", StringComparison.Ordinal)
             .Replace("\"team\":\"demo\",\"types\":",

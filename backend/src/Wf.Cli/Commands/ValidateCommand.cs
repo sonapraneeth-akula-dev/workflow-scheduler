@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Wf.Cli.Packaging;
@@ -12,7 +13,7 @@ namespace Wf.Cli.Commands;
 public static class ValidateCommand
 {
     public const string Usage =
-        "Usage: wf validate <workflow-directory> [--input <file-or-directory>]... [--baseline <workflow.api.json>] [--package <output.zip>] [--work-directory <directory>]";
+        "Usage: wf validate <workflow-directory> [--input <file-or-directory>]... [--baseline <workflow.api.json>] [--package <output.zip>] [--work-directory <directory>] [--team-type-quota <positive-integer>]";
 
     /// <summary>Exit codes: 0 valid, 1 validation/build failure, 2 usage/infrastructure failure, 130 cancellation.</summary>
     public static async Task<int> RunAsync(IReadOnlyList<string> arguments, TextWriter output, TextWriter error,
@@ -27,11 +28,13 @@ public static class ValidateCommand
                 throw new ArgumentException(Usage);
             var inputs = new List<string>();
             string? package = null, baseline = null, work = null;
+            int? typeQuota = null;
             for (var index = 1; index < arguments.Count; index += 2)
             {
                 if (index + 1 == arguments.Count || string.IsNullOrWhiteSpace(arguments[index + 1]) ||
                     arguments[index + 1].StartsWith("--", StringComparison.Ordinal))
-                    throw new ArgumentException(Usage);
+                    throw new ArgumentException(arguments[index] == "--team-type-quota"
+                        ? $"--team-type-quota requires a positive integer.{Environment.NewLine}{Usage}" : Usage);
                 var value = arguments[index + 1];
                 switch (arguments[index])
                 {
@@ -39,13 +42,21 @@ public static class ValidateCommand
                     case "--package" when package is null: package = value; break;
                     case "--baseline" when baseline is null: baseline = value; break;
                     case "--work-directory" when work is null: work = value; break;
+                    case "--team-type-quota":
+                        if (typeQuota is not null)
+                            throw new ArgumentException($"--team-type-quota may be specified only once.{Environment.NewLine}{Usage}");
+                        if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var quota) || quota <= 0)
+                            throw new ArgumentException($"--team-type-quota requires a positive integer.{Environment.NewLine}{Usage}");
+                        typeQuota = quota;
+                        break;
                     default: throw new ArgumentException(Usage);
                 }
             }
 
             var cache = work is null ? null : new ScriptBuildCache(Path.Combine(work, "c"), Path.Combine(work, "a"));
             var result = await Validator.ValidateAsync(arguments[0], cache, additionalInputs: inputs,
-                cancellationToken: cancellationToken);
+                cancellationToken: cancellationToken, options: typeQuota is { } configured
+                    ? new ValidationOptions { TypeQuota = configured } : null);
             var errors = result.Errors;
             if (result.IsValid && baseline is not null)
             {

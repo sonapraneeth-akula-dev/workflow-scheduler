@@ -583,6 +583,13 @@ root, `--baseline <workflow.api.json>` for compatibility validation, and
 130 cancellation. Diagnostics retain rule, file, JSON path, message and hint;
 compiler diagnostics remain visible.
 
+`--team-type-quota <positive-integer>` overrides the trusted default of 10 types
+per team; quota violations return WFV017 naming the configured limit. The same
+option is `ValidationOptions.TypeQuota`, passed as trailing `options` to both
+sync/async `Validator` and `WorkflowValidation` entry points. Invalid limits
+fail before workflow discovery. `team.json` cannot raise its own quota;
+author-provided quota properties are rejected as unknown contract fields.
+
 `--package` emits a sorted ZIP with fixed entry metadata, every published file
 and `wf-package.json` containing the workflow version and actual entry assembly.
 The command prints the actual ZIP's SHA-256. Writes replace atomically; unsafe

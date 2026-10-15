@@ -13,8 +13,9 @@ public static class Validator
 {
     /// <summary>Synchronous test/CLI entry point; use ValidateAsync in asynchronous callers.</summary>
     public static ValidationResult Validate(string directory, ScriptBuildCache? buildCache = null,
-        IReadOnlyList<string>? additionalInputs = null, CancellationToken cancellationToken = default) =>
-        Task.Run(() => ValidateAsync(directory, buildCache, additionalInputs, cancellationToken), cancellationToken)
+        IReadOnlyList<string>? additionalInputs = null, CancellationToken cancellationToken = default,
+        ValidationOptions? options = null) =>
+        Task.Run(() => ValidateAsync(directory, buildCache, additionalInputs, cancellationToken, options), cancellationToken)
             .GetAwaiter().GetResult();
 
     /// <summary>
@@ -26,10 +27,13 @@ public static class Validator
     /// Cache behavior and declared-input limitations follow ScriptBuildCache.
     /// </summary>
     public static async Task<ValidationResult> ValidateAsync(string directory, ScriptBuildCache? buildCache = null,
-        IReadOnlyList<string>? additionalInputs = null, CancellationToken cancellationToken = default)
+        IReadOnlyList<string>? additionalInputs = null, CancellationToken cancellationToken = default,
+        ValidationOptions? options = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        var typeQuota = options?.TypeQuota ?? TeamRegistryRules.DefaultTypeQuota;
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(typeQuota);
         var root = Path.GetFullPath(directory);
         if (!HasAttributes(root, FileAttributes.Directory, expected: true))
             return new([RuleCatalog.DirectoryNotFound.CreateError(".", "$")]);
@@ -64,7 +68,7 @@ public static class Validator
                 {
                     var contents = await File.ReadAllBytesAsync(team, cancellationToken).ConfigureAwait(false);
                     errors = errors.AddRange(TeamRegistryRules.ValidateWorkflow(contents, build.Manifest.Metadata,
-                        file: file, cancellationToken: cancellationToken));
+                        file: file, typeQuota: typeQuota, cancellationToken: cancellationToken));
                 }
             }
             return new(errors, build);

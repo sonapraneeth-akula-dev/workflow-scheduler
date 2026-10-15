@@ -10,10 +10,12 @@ namespace Wf.Sdk.Testing;
 public static class WorkflowValidation
 {
     public static ValidationResult Validate(string directory, ScriptBuildCache? buildCache = null,
-        IReadOnlyList<string>? additionalInputs = null, CancellationToken cancellationToken = default) =>
-        Validator.Validate(directory, buildCache, additionalInputs, cancellationToken);
+        IReadOnlyList<string>? additionalInputs = null, CancellationToken cancellationToken = default,
+        ValidationOptions? options = null) =>
+        Validator.Validate(directory, buildCache, additionalInputs, cancellationToken, options);
 
     public static Task<ValidationResult> ValidateAsync(string directory, ScriptBuildCache? buildCache = null,
-        IReadOnlyList<string>? additionalInputs = null, CancellationToken cancellationToken = default) =>
-        Validator.ValidateAsync(directory, buildCache, additionalInputs, cancellationToken);
+        IReadOnlyList<string>? additionalInputs = null, CancellationToken cancellationToken = default,
+        ValidationOptions? options = null) =>
+        Validator.ValidateAsync(directory, buildCache, additionalInputs, cancellationToken, options);
 }
