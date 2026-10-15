@@ -598,8 +598,10 @@ attempt/stdout/stderr, append decoded chunks and publish `Complete()` before
 EOF. Streaming retains at most the longest value minus one UTF-16 characters,
 preventing chunk boundaries from exposing matches; overlapping/adjacent matches
 collapse to `***`. Use a stateful UTF-8 decoder before supplying byte chunks.
-Matching is literal, ordinal and case-sensitive, not an encoding/URL/base64
-detector. `RedactJson` masks decoded string values and property names while
+Matching is literal, ordinal and case-sensitive for each value and its standard
+UTF-8 base64 form; arbitrary transformations, URL encoding and unpadded/base64url
+forms are not detected. Lookahead includes the encoded values.
+`RedactJson` masks decoded string values and property names while
 keeping JSON valid; matching non-string scalars become strings. Key collisions
 fail explicitly rather than discard outputs. Secret resolution, production
 log/output transport wiring and stored-data masking verification remain

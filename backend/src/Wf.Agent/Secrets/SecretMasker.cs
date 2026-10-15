@@ -16,7 +16,8 @@ public sealed class SecretMasker
         {
             ArgumentException.ThrowIfNullOrEmpty(value, nameof(resolvedValues));
             return value;
-        }).Distinct(StringComparer.Ordinal).OrderByDescending(value => value.Length)
+        }).SelectMany(value => new[] { value, Convert.ToBase64String(Encoding.UTF8.GetBytes(value)) })
+            .Distinct(StringComparer.Ordinal).OrderByDescending(value => value.Length)
             .ThenBy(value => value, StringComparer.Ordinal).ToArray();
         _longest = _secrets.Length == 0 ? 0 : _secrets[0].Length;
     }

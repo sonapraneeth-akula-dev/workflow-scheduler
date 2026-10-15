@@ -52,8 +52,8 @@ public sealed class SecretMaskerTests
         var stream = new SecretMasker(["secret"]).CreateStream();
         Assert.Equal("", stream.Append("sec"));
         Assert.Equal("", stream.Append(""));
-        Assert.Equal("***", stream.Append("ret"));
-        Assert.Equal("", stream.Complete());
+        Assert.Equal("", stream.Append("ret"));
+        Assert.Equal("***", stream.Complete());
         var unfinished = new SecretMasker(["secret"]).CreateStream();
         Assert.Equal("", unfinished.Append("sec"));
         Assert.Equal("sec", unfinished.Complete());
@@ -86,8 +86,8 @@ public sealed class SecretMaskerTests
         Assert.Equal("", first.Append("sec"));
         Assert.Equal("", second.Append("ret"));
         Assert.Equal("ret", second.Complete());
-        Assert.Equal("***", first.Append("ret"));
-        Assert.Equal("", first.Complete());
+        Assert.Equal("", first.Append("ret"));
+        Assert.Equal("***", first.Complete());
         Assert.Equal("ret", masker.Redact("ret"));
     }
 
@@ -109,6 +109,21 @@ public sealed class SecretMaskerTests
         Assert.Equal("a", stream.Append("a"));
         Assert.Equal("b", stream.Append("b"));
         Assert.Equal("", stream.Complete());
+    }
+
+    [Theory]
+    [InlineData("token")]
+    [InlineData("p@ss\n\u96EA")]
+    [InlineData(" ")]
+    public void Standard_utf8_base64_values_are_masked_even_when_split_one_character_at_a_time(string secret)
+    {
+        var encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(secret));
+        var text = $"raw:{secret}|encoded:{encoded}";
+        var masker = new SecretMasker([secret]);
+        Assert.Equal("raw:***|encoded:***", masker.Redact(text));
+        var stream = masker.CreateStream();
+        var result = string.Concat(text.Select(character => stream.Append(character.ToString()))) + stream.Complete();
+        Assert.Equal("raw:***|encoded:***", result);
     }
 
     [Fact]
