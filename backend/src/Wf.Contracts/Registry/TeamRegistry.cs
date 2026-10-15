@@ -4,10 +4,26 @@ using System.Text.Json.Serialization;
 namespace Wf.Contracts.Registry;
 
 public sealed record TeamRegistry(string Team, ImmutableArray<WorkflowTypeDefinition> Types,
-    [property: JsonPropertyName("$schema")] string? Schema = null);
+    [property: JsonPropertyName("$schema")] string? Schema = null,
+    ImmutableArray<RegistryRoleBinding> RoleBindings = default)
+{
+    public ImmutableArray<RegistryRoleBinding> RoleBindings { get; init; } =
+        RoleBindings.IsDefault ? [] : RoleBindings;
+}
 
 public sealed record WorkflowTypeDefinition(string Team, string Name, string Description,
-    MetadataSchema MetadataSchema);
+    MetadataSchema MetadataSchema, ImmutableArray<RegistryRoleBinding> RoleBindings = default)
+{
+    public ImmutableArray<RegistryRoleBinding> RoleBindings { get; init; } =
+        RoleBindings.IsDefault ? [] : RoleBindings;
+}
+
+[JsonConverter(typeof(RegistryRoleJsonConverter))]
+public enum RegistryRole { Viewer, Operator, Author, Admin }
+
+public sealed class RegistryRoleJsonConverter() : JsonStringEnumConverter<RegistryRole>(allowIntegerValues: false);
+
+public sealed record RegistryRoleBinding(RegistryRole Role, Guid GroupId);
 
 public sealed record MetadataSchema(ImmutableArray<MetadataFieldSchema> Keys, bool AllowFreeForm = false);
 

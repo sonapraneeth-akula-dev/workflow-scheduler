@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Kardia team registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["team", "types"],
+  "properties": {
+    "$schema": { "type": ["string", "null"] },
+    "team": { "$ref": "#/$defs/nonemptyText" },
+    "types": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/workflowType" }
+    },
+    "roleBindings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/roleBinding" }
+    }
+  },
+  "$defs": {
+    "nonemptyText": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "workflowType": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["team", "name", "description", "metadataSchema"],
+      "properties": {
+        "team": { "$ref": "#/$defs/nonemptyText" },
+        "name": { "$ref": "#/$defs/nonemptyText" },
+        "description": { "$ref": "#/$defs/nonemptyText" },
+        "metadataSchema": { "$ref": "#/$defs/metadataSchema" },
+        "roleBindings": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/roleBinding" }
+        }
+      }
+    },
+    "metadataSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["keys"],
+      "properties": {
+        "keys": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/metadataField" }
+        },
+        "allowFreeForm": { "type": "boolean", "default": false }
+      }
+    },
+    "metadataField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key"],
+      "properties": {
+        "key": { "$ref": "#/$defs/nonemptyText" },
+        "required": { "type": "boolean", "default": false },
+        "allowedValues": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonemptyText" }
+        }
+      }
+    },
+    "roleBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "groupId"],
+      "properties": {
+        "role": { "type": "string", "enum": ["Viewer", "Operator", "Author", "Admin"] },
+        "groupId": {
+          "type": "string",
+          "format": "uuid",
+          "not": { "const": "00000000-0000-0000-0000-000000000000" }
+        }
+      }
+    }
+  }
+}

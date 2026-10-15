@@ -34,6 +34,10 @@ public sealed class TeamRegistryValidatorIntegrationTests
               {"team":"demo","name":"Load-Test","description":"First","metadataSchema":{"keys":[]}},
               {"team":"demo","name":"load_tests","description":"Conflicting","metadataSchema":{"keys":[]}}
             ]}
+            """,
+            """
+            {"team":"demo","roleBindings":[{"role":"Viewer","groupId":"00000000-0000-0000-0000-000000000000"}],
+              "types":[{"team":"demo","name":"release","description":"Release","metadataSchema":{"keys":[]}}]}
             """
         };
         foreach (var json in invalidCases)

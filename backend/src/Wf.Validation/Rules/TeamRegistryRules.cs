@@ -95,6 +95,7 @@ public static class TeamRegistryRules
     {
         if (string.IsNullOrWhiteSpace(registry.Team))
             errors.Add(RegistryShape.CreateError(file, "$.team"));
+        CheckRoleBindings(registry.RoleBindings, "$.roleBindings", file, errors, cancellationToken);
         if (registry.Types.IsDefault)
         {
             errors.Add(RegistryShape.CreateError(file, "$.types"));
@@ -137,10 +138,29 @@ public static class TeamRegistryRules
             }
             if (string.IsNullOrWhiteSpace(type.Description))
                 errors.Add(RegistryShape.CreateError(file, path + ".description"));
+            CheckRoleBindings(type.RoleBindings, path + ".roleBindings", file, errors, cancellationToken);
             if (type.MetadataSchema is null)
                 errors.Add(RegistryShape.CreateError(file, path + ".metadataSchema"));
             else
                 CheckSchema(type.MetadataSchema, path + ".metadataSchema", file, errors, cancellationToken);
+        }
+    }
+
+    private static void CheckRoleBindings(ImmutableArray<RegistryRoleBinding> bindings, string path, string file,
+        List<ValidationError> errors, CancellationToken cancellationToken)
+    {
+        if (bindings.IsDefault)
+        {
+            errors.Add(RegistryShape.CreateError(file, path));
+            return;
+        }
+        var seen = new HashSet<RegistryRoleBinding>();
+        for (var index = 0; index < bindings.Length; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var binding = bindings[index];
+            if (binding is null || !Enum.IsDefined(binding.Role) || binding.GroupId == Guid.Empty || !seen.Add(binding))
+                errors.Add(RegistryShape.CreateError(file, $"{path}[{index}]"));
         }
     }
 

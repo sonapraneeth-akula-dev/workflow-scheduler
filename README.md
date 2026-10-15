@@ -228,6 +228,19 @@ manifest's type and metadata against that registry; invalid registry and schedul
 errors accumulate rather than hiding one another. An absent registry remains
 allowed for standalone workflows; registration supplies its authoritative scope.
 
+The editor contract lives at
+`backend/src/Wf.Validation/Schemas/team.schema.json`, with a complete sample at
+`backend/samples/workflows/teams/demo/team.json`. Tests pin schema properties and
+required fields to the source-generated runtime contracts. The schema rejects
+missing type names/owning teams; the shared validator additionally checks that
+owning teams match, metadata constraints, quotas and near-duplicate names.
+Optional `roleBindings` on the team and each type map
+`Viewer`/`Operator`/`Author`/`Admin` to non-empty Entra `groupId` UUIDs. Omitted
+maps are empty; duplicate role/group pairs within one scope fail, while one
+group may hold different roles or appear at both scopes. Sample UUIDs are
+placeholders, not deployed groups. Registration/RBAC synchronization follows
+separately; declaring a map does not itself grant access to the running API.
+
 `TypeNameSimilarity` supplies the shared registry normalization and bounded
 Levenshtein helper: invariant lowercase letters/digits only, then remove one
 trailing plural `s` when more than one character remains. `WithinTwoEdits`
