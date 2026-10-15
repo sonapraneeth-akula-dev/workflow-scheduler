@@ -163,6 +163,12 @@
   .tbl .k { display: inline-block; width: 30px; font-weight: 700; color: var(--accent); }
   .zone-label.right { left: auto; right: calc(100% - var(--x) - var(--w) + 14px); }
 
+  .glossary { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--edge); font-size: 14px; line-height: 1.5; }
+  .glossary summary { cursor: pointer; font-size: 18px; font-weight: 650; }
+  .glossary dl { max-width: 1100px; margin: 12px 0 0; }
+  .glossary dt { font-weight: 650; margin-top: 10px; }
+  .glossary dd { margin: 0; color: var(--ink-2); }
+
   .sd-root { width: 1614px; }
   .sd-canvas, .sd-links { width: 1550px; height: 650px; }
 </style>
@@ -325,6 +331,31 @@
 <section><h2>Shape language</h2><ul class="split"><li><svg class="sd-icon"><use href="#sd-auth"/></svg> Shield: identity provider</li><li><svg class="sd-icon"><use href="#sd-batch-job"/></svg> Job: task host / one-shot job</li><li><svg class="sd-icon"><use href="#sd-cicd"/></svg> Loop: CI/CD</li><li><svg class="sd-icon"><use href="#sd-consensus"/></svg> Consensus / leader election</li><li><svg class="sd-icon"><use href="#sd-dashboard"/></svg> Panel: dashboard</li><li><svg class="sd-icon"><use href="#sd-db-cluster"/></svg> Stacked cylinders: replicated DB / table group</li><li><svg class="sd-icon"><use href="#sd-external"/></svg> Plug: system outside the platform</li><li><svg class="sd-icon"><use href="#sd-file-storage"/></svg> Folder: file-system storage</li><li><svg class="sd-icon"><use href="#sd-load-balancer"/></svg> Splitter: load balancer</li><li><svg class="sd-icon"><use href="#sd-metrics"/></svg> Bars: telemetry collector</li><li><svg class="sd-icon"><use href="#sd-object-storage"/></svg> Bucket: blob / object storage</li><li><svg class="sd-icon"><use href="#sd-server"/></svg> Rack: physical host</li><li><svg class="sd-icon"><use href="#sd-timeseries"/></svg> Time-series stores</li><li><svg class="sd-icon"><use href="#sd-users"/></svg> People: user group</li><li><svg class="sd-icon"><use href="#sd-vault"/></svg> Vault: secrets store</li></ul></section>
 <section><h2>Notation</h2><ul><li><span class="lg-zone"></span> Boundary: hosts, network, region or domain</li><li><span class="lg-sub">abc</span> Sub-label: count, product or key property</li></ul></section>
 </div>
+<details class="glossary" open>
+<summary>Glossary: terms in this diagram</summary>
+<dl>
+<dt>HLD / self-hosted / bare metal</dt><dd>High-level design of a system run on machines the team manages, rather than a managed cloud application service.</dd>
+<dt>Autopilot-style fleet / OS service</dt><dd>A group of centrally managed machines; an operating-system (OS) service is a background program kept running by Windows Service or Linux systemd.</dd>
+<dt>HA / LB pair / VIP</dt><dd>High availability (HA) keeps working if one machine fails. Two load balancers (LBs) share a virtual IP address (VIP) that sends visitors to a healthy control-plane host.</dd>
+<dt>HAProxy / nginx</dt><dd>Possible programs for the load balancer; keepalived moves the VIP when one load-balancer host fails.</dd>
+<dt>OIDC / IdP / Entra / ADFS / Keycloak</dt><dd>OpenID Connect (OIDC) lets an identity provider (IdP) sign users in. Entra ID, Active Directory Federation Services (ADFS) and Keycloak are provider choices.</dd>
+<dt>CI runner</dt><dd>A machine that automatically validates, tests and publishes a workflow when code changes.</dd>
+<dt><code>cp1</code> / <code>cp2</code> / <code>wf-api</code> / <code>wf-engine</code></dt><dd>Two control-plane hosts, each running the web application programming interface (API) and workflow engine (the part that schedules runs).</dd>
+<dt>Leader / standby / lease poll</dt><dd>Only the leader engine controls runs; the standby can take over. Both check a time-limited database record, called a lease, to determine who leads.</dd>
+<dt>PostgreSQL / SQL / NOTIFY</dt><dd>PostgreSQL holds run state. SQL accesses it; NOTIFY sends a signal to the engine when new commands arrive.</dd>
+<dt>Primary / standby / replication</dt><dd>The primary database accepts changes; standbys copy those changes so another database can take over if needed.</dd>
+<dt>Patroni / etcd / TTL</dt><dd>Patroni manages database failover using etcd, a small coordination store. Time to live (TTL) limits how long a health/leadership claim remains valid.</dd>
+<dt>pgBackRest / WAL archive</dt><dd>pgBackRest backs up PostgreSQL. Write-ahead log (WAL) files record changes between backups for recovery.</dd>
+<dt>Shared blob storage / SMB / NFS</dt><dd>Files such as reports and packages on a shared drive; Server Message Block (SMB) and Network File System (NFS) are ways machines access that drive.</dd>
+<dt><code>wf-agent</code> / client certificate</dt><dd>Worker on a Windows or Linux machine that connects to the engine and manages task hosts. A client certificate proves that machine is allowed to connect.</dd>
+<dt>Task host / gRPC / UDS</dt><dd>The separate process that executes tasks. gRPC carries engine-to-agent messages; Unix domain sockets (UDS) carry local agent-to-task-host messages.</dd>
+<dt>HTTPS / WSS / HTTP load</dt><dd>Encrypted web requests, encrypted long-lived WebSocket connections, and test requests sent to services, respectively.</dd>
+<dt>Services under test / baseline / candidate</dt><dd>Applications the tasks exercise; a baseline is the known version and a candidate is the version being compared.</dd>
+<dt>OTel Collector / OTLP</dt><dd>The OpenTelemetry collector receives logs, measurements and request traces through OpenTelemetry Protocol (OTLP).</dd>
+<dt>Prom / Loki / Tempo / Grafana</dt><dd>Prometheus stores measurements, Loki stores logs, Tempo stores traces, and Grafana displays dashboards and alerts.</dd>
+<dt><code>×N</code> / arrows / dashed boxes</dt><dd>Any number of machines; arrows show calls or data movement and dashed boxes show machine-group boundaries.</dd>
+</dl>
+</details>
 </div>
 </body>
 </html>

@@ -163,6 +163,12 @@
   .tbl .k { display: inline-block; width: 30px; font-weight: 700; color: var(--accent); }
   .zone-label.right { left: auto; right: calc(100% - var(--x) - var(--w) + 14px); }
 
+  .glossary { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--edge); font-size: 14px; line-height: 1.5; }
+  .glossary summary { cursor: pointer; font-size: 18px; font-weight: 650; }
+  .glossary dl { max-width: 1100px; margin: 12px 0 0; }
+  .glossary dt { font-weight: 650; margin-top: 10px; }
+  .glossary dd { margin: 0; color: var(--ink-2); }
+
   .sd-root { width: 1354px; }
   .sd-canvas, .sd-links { width: 1290px; height: 650px; }
 </style>
@@ -320,6 +326,28 @@
 <section><h2>Shape language</h2><ul class="split"><li><svg class="sd-icon"><use href="#sd-api-gateway"/></svg> Arch: ingress</li><li><svg class="sd-icon"><use href="#sd-auth"/></svg> Shield: identity provider</li><li><svg class="sd-icon"><use href="#sd-batch-job"/></svg> Job: task host / one-shot job</li><li><svg class="sd-icon"><use href="#sd-cicd"/></svg> Loop: CI/CD</li><li><svg class="sd-icon"><use href="#sd-container"/></svg> Container app</li><li><svg class="sd-icon"><use href="#sd-database"/></svg> Cylinder: database / table</li><li><svg class="sd-icon"><use href="#sd-external"/></svg> Plug: system outside the platform</li><li><svg class="sd-icon"><use href="#sd-metrics"/></svg> Bars: telemetry collector</li><li><svg class="sd-icon"><use href="#sd-object-storage"/></svg> Bucket: blob / object storage</li><li><svg class="sd-icon"><use href="#sd-pubsub"/></svg> Fan-out: push service</li><li><svg class="sd-icon"><use href="#sd-registry"/></svg> Catalog: registry</li><li><svg class="sd-icon"><use href="#sd-scheduler"/></svg> Clock: orchestrator / scheduler</li><li><svg class="sd-icon"><use href="#sd-users"/></svg> People: user group</li><li><svg class="sd-icon"><use href="#sd-vault"/></svg> Vault: secrets store</li><li><svg class="sd-icon"><use href="#sd-vm"/></svg> VM</li></ul></section>
 <section><h2>Notation</h2><ul><li><span class="lg-zone"></span> Boundary: hosts, network, region or domain</li><li><span class="lg-sub">abc</span> Sub-label: count, product or key property</li></ul></section>
 </div>
+<details class="glossary" open>
+<summary>Glossary: terms in this diagram</summary>
+<dl>
+<dt>HLD / PaaS / ACA</dt><dd>High-level design of a platform-as-a-service (PaaS) setup: Azure runs the containers for the control plane. ACA means Azure Container Apps.</dd>
+<dt>ACA ingress / HTTPS / revision traffic split</dt><dd>Ingress accepts encrypted web requests. A revision is a deployed app version; traffic splitting sends some requests to each version during a rollout.</dd>
+<dt>Replica / zone-redundant / hot standby</dt><dd>A replica is another running copy. Zone redundancy spreads copies across facilities; a hot standby is ready to take over from a failed leader.</dd>
+<dt>Entra ID / OIDC / managed identity (MI)</dt><dd>Entra ID signs users in with OpenID Connect (OIDC); managed identities let Azure applications access resources without stored passwords.</dd>
+<dt>GitHub Actions / CI/CD / <code>azd</code> / Container Registry</dt><dd>Automated build/deployment jobs (continuous integration and delivery, CI/CD) use Azure Developer CLI (<code>azd</code>) to deploy container images (packaged applications) stored in Azure Container Registry.</dd>
+<dt>DbUp job / expand-only migration</dt><dd>A one-time database update run as an ACA job; expand-only changes add compatible database structures before old ones are removed.</dd>
+<dt>API app / REST / engine app / leader / lease</dt><dd>The application programming interface (API) handles web requests (REST). The engine schedules runs; one leader is chosen by a time-limited database record (lease).</dd>
+<dt>PG Flexible Server / GP D4ds / SQL / LISTEN / NOTIFY</dt><dd>Azure-managed PostgreSQL (PG) holds run state; GP D4ds identifies the chosen service tier and machine size. SQL accesses it; NOTIFY sends a signal and LISTEN receives it when new work arrives.</dd>
+<dt>Azure SignalR Service / WebSocket / SPA / deltas</dt><dd>A managed service pushes live updates to the single-page browser app (SPA) over long-lived WebSocket connections. Deltas are only the changes since the last update.</dd>
+<dt>Agent VMs / VMSS</dt><dd>Windows/Linux virtual machines (VMs) or Virtual Machine Scale Sets (VMSS) host agents; unlike containers, they give tasks full access to their operating system.</dd>
+<dt><code>wf-agent</code> / task host / gRPC / UDS</dt><dd>The agent receives work over gRPC from the engine; separate task-host processes run the tasks and communicate locally over Unix domain sockets (UDS).</dd>
+<dt>Blob Storage / ZRS / cool tier</dt><dd>Storage for files such as reports. Zone-redundant storage (ZRS) copies files across facilities; cool tier is for older, less-used files.</dd>
+<dt>SAS upload / checkpoints</dt><dd>A Shared Access Signature (SAS) grants short-lived permission to upload files; a checkpoint saves progress so a task can resume later.</dd>
+<dt>Key Vault / secret refs</dt><dd>A protected store for passwords and keys; a reference lets an app retrieve one without hardcoding it.</dd>
+<dt>App Insights / Azure Monitor / OTel</dt><dd>Azure services for logs, measurements and request traces; OpenTelemetry (OTel) is the standard used to produce and send them.</dd>
+<dt>Services under test / baseline / candidate / HTTP load</dt><dd>Applications tested by task hosts. Baseline is the known version; candidate is the version being checked; HTTP load is test web traffic sent to both.</dd>
+<dt>Arrows / dashed boxes</dt><dd>Arrows show requests, signals or uploads; dashed boxes group Azure-managed containers and separate agent machines.</dd>
+</dl>
+</details>
 </div>
 </body>
 </html>

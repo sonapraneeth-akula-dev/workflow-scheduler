@@ -163,12 +163,18 @@
   .tbl .k { display: inline-block; width: 30px; font-weight: 700; color: var(--accent); }
   .zone-label.right { left: auto; right: calc(100% - var(--x) - var(--w) + 14px); }
 
+  .glossary { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--edge); font-size: 14px; line-height: 1.5; }
+  .glossary summary { cursor: pointer; font-size: 18px; font-weight: 650; }
+  .glossary dl { max-width: 1100px; margin: 12px 0 0; }
+  .glossary dt { font-weight: 650; margin-top: 10px; }
+  .glossary dd { margin: 0; color: var(--ink-2); }
+
   .sd-root { width: 1614px; }
   .sd-canvas, .sd-links { width: 1550px; height: 650px; }
 </style>
 </head>
 <body>
-<div class="sd-root" data-diagram-root aria-label="Data flow: registration writes registry tables and packages; commands go through the commands table and NOTIFY to the engine, which group-commits run events and snapshot tables; agents return results that become pointer rows; task hosts upload logs, artifacts, reports and checkpoints to blob storage; the scheduler records fires exactly once.">
+<div class="sd-root" data-diagram-root aria-label="Data flow: registration writes registry tables and packages; commands go through the commands table and NOTIFY to the engine, which group-commits run events and snapshot tables; agents return results that become pointer rows; agents upload logs and resource series and task hosts upload artifacts, reports and checkpoints to blob storage; the engine writes merged perf histograms; the scheduler records fires exactly once.">
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
   <symbol id="sd-batch-job" viewBox="0 0 24 24">
     <path d="M3 6.6h11M3 11h11M3 15.4h7"/>
@@ -249,6 +255,8 @@
 <path class="link c-duplex" d="M860,292 V330 H642 V360" marker-start="url(#m-arrow)" marker-end="url(#m-arrow)"/>
 <path class="link c-duplex" d="M552,406 L468,406" marker-start="url(#m-arrow)" marker-end="url(#m-arrow)"/>
 <path class="link c-bulk" d="M288,406 L204,406" marker-end="url(#m-bulk)"/>
+<path class="link c-bulk" d="M836,292 V306 H114 L114,360" marker-end="url(#m-bulk)"/>
+<path class="link c-bulk" d="M642,452 V478 H114 L114,452" marker-end="url(#m-bulk)"/>
 <path class="link c-sync" d="M996,276 H1038 V406 L1080,406" marker-end="url(#m-arrow)"/>
 <path class="link c-sync" d="M940,520 L940,292" marker-end="url(#m-arrow)"/>
 <path class="link c-sync" d="M996,566 L1080,566" marker-end="url(#m-arrow)"/>
@@ -264,7 +272,9 @@
 <text class="link-label" x="1302" y="236" text-anchor="middle">project</text>
 <text class="link-label" x="751" y="322" text-anchor="middle">Dispatch ⇄ Result</text>
 <text class="link-label" x="510" y="396" text-anchor="middle">UDS</text>
-<text class="link-label" x="246" y="396" text-anchor="middle">SAS chunks</text>
+<text class="link-label" x="246" y="396" text-anchor="middle">outputs</text>
+<text class="link-label" x="330" y="324" text-anchor="middle">merged perf histograms</text>
+<text class="link-label" x="378" y="496" text-anchor="middle">logs · resources</text>
 <text class="link-label" x="1044" y="340" text-anchor="start">blob_uri</text>
 <text class="link-label" x="948" y="470" text-anchor="start">start run</text>
 <text class="link-label" x="1038" y="556" text-anchor="middle">ON CONFLICT</text>
@@ -275,7 +285,7 @@
 <div class="zone-label right" style="--x:1064px; --y:174px; --w:474px"><svg class="sd-icon" aria-hidden="true"><use href="#sd-lock"/></svg>Same transaction</div>
 <div class="node n-client" style="--x:24px; --y:40px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-desktop"/></svg></span><span class="node-title">workflow.cs + SDK</span><span class="node-sub">describe → manifest.json</span></div>
 <div class="node n-client" style="--x:288px; --y:40px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-cicd"/></svg></span><span class="node-title">wf publish (CI)</span><span class="node-sub">validate · test · package</span></div>
-<div class="node n-compute" style="--x:552px; --y:40px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-service"/></svg></span><span class="node-title">api · /register</span><span class="node-sub">schema + metadata checks</span></div>
+<div class="node n-compute" style="--x:552px; --y:40px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-service"/></svg></span><span class="node-title">api · registrations</span><span class="node-sub">POST /api/v1/registrations</span></div>
 <div class="node n-data" style="--x:816px; --y:40px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-db-cluster"/></svg></span><span class="node-title">Registry tables</span><span class="node-sub">versions · schedules</span></div>
 <div class="node n-data" style="--x:1080px; --y:40px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-object-storage"/></svg></span><span class="node-title">packages/</span><span class="node-sub">{sha256}.zip · immutable</span></div>
 <div class="node n-client" style="--x:24px; --y:200px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-browser"/></svg></span><span class="node-title">UI / API / CLI</span><span class="node-sub">Trigger · Abort · Rerun</span></div>
@@ -283,11 +293,11 @@
 <div class="node n-data" style="--x:552px; --y:200px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-database"/></svg></span><span class="node-title">commands</span><span class="node-sub">INSERT + NOTIFY, one tx</span></div>
 <div class="node n-compute" style="--x:816px; --y:200px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-scheduler"/></svg></span><span class="node-title">engine leader</span><span class="node-sub">run actors · single writer</span></div>
 <div class="node n-data" style="--x:1080px; --y:200px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-stream-log"/></svg></span><span class="node-title">run_events ⧉</span><span class="node-sub">append-only · protobuf · seq</span></div>
-<div class="node n-data" style="--x:1344px; --y:200px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-db-cluster"/></svg></span><span class="node-title">Snapshot tables ⧉</span><span class="node-sub">runs · node_runs · attempts</span></div>
-<div class="node n-data" style="--x:24px; --y:360px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-object-storage"/></svg></span><span class="node-title">Run blobs</span><span class="node-sub">logs/ artifacts/ reports/ ckpt/</span></div>
+<div class="node n-data" style="--x:1344px; --y:200px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-db-cluster"/></svg></span><span class="node-title">Snapshot tables ⧉</span><span class="node-sub">runs · node_runs · task_attempts</span></div>
+<div class="node n-data" style="--x:24px; --y:360px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-object-storage"/></svg></span><span class="node-title">Run blobs</span><span class="node-sub">logs/ · checkpoints/ · …</span></div>
 <div class="node n-compute" style="--x:288px; --y:360px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-batch-job"/></svg></span><span class="node-title">task host</span><span class="node-sub">ctx: outputs · checkpoint</span></div>
 <div class="node n-compute" style="--x:552px; --y:360px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-worker"/></svg></span><span class="node-title">agent</span><span class="node-sub">disk journal until acked</span></div>
-<div class="node n-data" style="--x:1080px; --y:360px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-database"/></svg></span><span class="node-title">Pointer rows ⧉</span><span class="node-sub">reports · artifacts · ckpt · perf</span></div>
+<div class="node n-data" style="--x:1080px; --y:360px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-database"/></svg></span><span class="node-title">Pointer rows ⧉</span><span class="node-sub">log · report · artifact · ckpt · perf · parity</span></div>
 <div class="node n-compute" style="--x:816px; --y:520px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-scheduler"/></svg></span><span class="node-title">scheduler (in engine)</span><span class="node-sub">heap on next_fire_at</span></div>
 <div class="node n-data" style="--x:1080px; --y:520px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-database"/></svg></span><span class="node-title">schedule_fires</span><span class="node-sub">PK(schedule_id, fire_at)</span></div>
 </div>
@@ -297,6 +307,31 @@
 <section><h2>Shape language</h2><ul class="split"><li><svg class="sd-icon"><use href="#sd-batch-job"/></svg> Job: task host / one-shot job</li><li><svg class="sd-icon"><use href="#sd-browser"/></svg> Window: browser</li><li><svg class="sd-icon"><use href="#sd-cicd"/></svg> Loop: CI/CD</li><li><svg class="sd-icon"><use href="#sd-database"/></svg> Cylinder: database / table</li><li><svg class="sd-icon"><use href="#sd-db-cluster"/></svg> Stacked cylinders: replicated DB / table group</li><li><svg class="sd-icon"><use href="#sd-desktop"/></svg> Monitor: developer tooling</li><li><svg class="sd-icon"><use href="#sd-object-storage"/></svg> Bucket: blob / object storage</li><li><svg class="sd-icon"><use href="#sd-scheduler"/></svg> Clock: orchestrator / scheduler</li><li><svg class="sd-icon"><use href="#sd-service"/></svg> Hexagon: service</li><li><svg class="sd-icon"><use href="#sd-stream-log"/></svg> Segments: append-only log</li><li><svg class="sd-icon"><use href="#sd-worker"/></svg> Gear: agent</li></ul></section>
 <section><h2>Notation</h2><ul><li><span class="lg-zone"></span> Boundary: hosts, network, region or domain</li><li><span class="lg-sub">abc</span> Sub-label: count, product or key property</li></ul></section>
 </div>
+<details class="glossary" open>
+<summary>Glossary: terms in this diagram</summary>
+<dl>
+<dt>LLD / write path</dt><dd>Low-level design: the exact route a change takes through programs, database tables and file storage.</dd>
+<dt><code>workflow.cs</code> / SDK / describe / manifest</dt><dd>A C# workflow file uses the software development kit (SDK). Describe reads its structure into <code>manifest.json</code>, a machine-readable description.</dd>
+<dt><code>wf publish</code> / CI/CD / CLI / registration</dt><dd>The command-line interface (CLI) publishes a workflow version; an automated continuous integration and delivery (CI/CD) job checks and registers it.</dd>
+<dt>Registry tables / <code>packages/</code> / SHA-256</dt><dd>Registry tables track registered versions and schedules; <code>packages/</code> stores compiled workflow files named by their SHA-256 content fingerprint.</dd>
+<dt>API / <code>POST /api/v1/registrations</code> / HTTPS</dt><dd>The application programming interface (API) accepts registration at this web address; HTTPS encrypts the request.</dd>
+<dt>Upload grant / immutable package</dt><dd>A grant gives temporary permission to upload a file; an immutable package cannot be changed after publication.</dd>
+<dt>Trigger / Abort / Rerun / idempotency key</dt><dd>Start, stop or repeat a run. An idempotency key prevents an accidentally repeated request from creating duplicate work.</dd>
+<dt>UI / <code>commands</code> / SQL / INSERT / NOTIFY / transaction</dt><dd>The user interface (UI) or API requests an action. The API adds a command row using database language (SQL INSERT) and signals the engine (NOTIFY) in one transaction: both succeed together or neither does.</dd>
+<dt>Upsert / project</dt><dd>Upsert inserts a new record or updates an existing one; project applies recorded events to current-state tables.</dd>
+<dt>Engine leader / run actor / single writer</dt><dd>The active engine schedules work. A run actor manages one run; only that engine writes run state, avoiding conflicting updates.</dd>
+<dt><code>run_events</code> / append-only / protobuf / <code>seq</code></dt><dd>Permanent ordered records of changes to a run. Protocol Buffers (protobuf) stores them compactly; <code>seq</code> is their sequence number.</dd>
+<dt>Snapshot tables / <code>runs</code> / <code>node_runs</code> / <code>task_attempts</code></dt><dd>Tables holding the current status of a run, its steps (nodes), and each attempt to execute a task; updated with the event in the same transaction.</dd>
+<dt>DB / ⧉ / partition</dt><dd>DB means database. Tables marked ⧉ are divided by month so old run data can be found or removed more efficiently.</dd>
+<dt>Dispatch / Result / gRPC / agent journal</dt><dd>The engine sends a task to an agent over gRPC, a two-way messaging connection; the agent reports its result and keeps a disk copy until the engine confirms receipt.</dd>
+<dt>Task host / UDS / <code>ctx</code> / outputs / checkpoint</dt><dd>A separate process executes tasks and sends outputs to its agent over a Unix domain socket (UDS). <code>ctx</code> means task context, the data and services provided to a task; a checkpoint saves progress for a later retry.</dd>
+<dt>Run blobs / <code>logs/</code> / <code>resources/</code> / <code>reports/</code> / <code>artifacts/</code> / <code>checkpoints/</code></dt><dd>Large files stored outside the database: task messages, CPU/memory samples, readable reports, downloaded files and saved task progress.</dd>
+<dt><code>perf/</code> / histograms / <code>parity/</code></dt><dd>Performance measurement distributions and saved examples of differences between baseline and candidate results.</dd>
+<dt>Pointer row / <code>blob_uri</code></dt><dd>A database row containing the location of a stored file rather than the entire file.</dd>
+<dt>Scheduler / heap / <code>next_fire_at</code> / <code>schedule_fires</code> / PK / ON CONFLICT</dt><dd>The scheduler keeps due times in a heap (a queue ordered by the next due time, <code>next_fire_at</code>). A primary key (PK) on schedule and time in <code>schedule_fires</code> and ON CONFLICT prevent recording the same scheduled time twice.</dd>
+<dt>Arrows / same-transaction box</dt><dd>Arrows show who writes or signals whom; the dashed box marks writes committed together or rolled back together.</dd>
+</dl>
+</details>
 </div>
 </body>
 </html>

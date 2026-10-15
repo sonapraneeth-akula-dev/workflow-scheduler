@@ -163,6 +163,12 @@
   .tbl .k { display: inline-block; width: 30px; font-weight: 700; color: var(--accent); }
   .zone-label.right { left: auto; right: calc(100% - var(--x) - var(--w) + 14px); }
 
+  .glossary { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--edge); font-size: 14px; line-height: 1.5; }
+  .glossary summary { cursor: pointer; font-size: 18px; font-weight: 650; }
+  .glossary dl { max-width: 1100px; margin: 12px 0 0; }
+  .glossary dt { font-weight: 650; margin-top: 10px; }
+  .glossary dd { margin: 0; color: var(--ink-2); }
+
   .sd-root { width: 1618px; }
   .sd-canvas, .sd-links { width: 1554px; height: 650px; }
 </style>
@@ -258,7 +264,7 @@
 <text class="link-label" x="250" y="476" text-anchor="end">gRPC · TLS</text>
 <text class="link-label" x="386" y="170" text-anchor="start">HTTPS · gRPC</text>
 <text class="link-label" x="502" y="236" text-anchor="middle">HTTP</text>
-<text class="link-label" x="774" y="236" text-anchor="middle">/api · /hub</text>
+<text class="link-label" x="774" y="236" text-anchor="middle">/api · /hubs</text>
 <text class="link-label" x="778" y="350" text-anchor="end">grpc → leader</text>
 <text class="link-label" x="1038" y="236" text-anchor="middle">SQL · NOTIFY</text>
 <text class="link-label" x="1054" y="330" text-anchor="start">SQL</text>
@@ -266,7 +272,7 @@
 <text class="link-label" x="914" y="486" text-anchor="start">gRPC</text>
 <text class="link-label" x="1038" y="556" text-anchor="middle">UDS</text>
 <text class="link-label" x="1302" y="556" text-anchor="middle">HTTP load</text>
-<text class="link-label" x="1178" y="490" text-anchor="start">logs · artifacts</text>
+<text class="link-label" x="1178" y="490" text-anchor="start">reports · artifacts</text>
 <text class="link-label" x="1308" y="226" text-anchor="end">OTLP</text>
 </svg>
 <div class="zone" style="--x:8px; --y:140px; --w:1538px; --h:500px"></div>
@@ -284,7 +290,7 @@
 <div class="node n-compute" style="--x:816px; --y:520px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-worker"/></svg></span><span class="node-title">wf-agent (Linux) ×N</span><span class="node-sub">container · Linux tasks</span></div>
 <div class="node n-data" style="--x:1080px; --y:200px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-database"/></svg></span><span class="node-title">PostgreSQL 17</span><span class="node-sub">named volume · TLS</span></div>
 <div class="node n-data" style="--x:1080px; --y:360px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-file-storage"/></svg></span><span class="node-title">Blob volume</span><span class="node-sub">filesystem store</span></div>
-<div class="node n-compute" style="--x:1080px; --y:520px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-batch-job"/></svg></span><span class="node-title">Task hosts</span><span class="node-sub">one child process per task</span></div>
+<div class="node n-compute" style="--x:1080px; --y:520px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-batch-job"/></svg></span><span class="node-title">Task hosts</span><span class="node-sub">per-run · hooks per attempt</span></div>
 <div class="node n-observe" style="--x:1344px; --y:200px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-dashboard"/></svg></span><span class="node-title">Aspire dashboard</span><span class="node-sub">standalone container · OTLP</span></div>
 <div class="node n-ext" style="--x:1344px; --y:520px"><span class="node-icon"><svg class="sd-icon"><use href="#sd-external"/></svg></span><span class="node-title">Sample services A / B</span><span class="node-sub">containers · Bond types</span></div>
 </div>
@@ -294,6 +300,29 @@
 <section><h2>Shape language</h2><ul class="split"><li><svg class="sd-icon"><use href="#sd-batch-job"/></svg> Job: task host / one-shot job</li><li><svg class="sd-icon"><use href="#sd-browser"/></svg> Window: browser</li><li><svg class="sd-icon"><use href="#sd-container"/></svg> Container app</li><li><svg class="sd-icon"><use href="#sd-dashboard"/></svg> Panel: dashboard</li><li><svg class="sd-icon"><use href="#sd-database"/></svg> Cylinder: database / table</li><li><svg class="sd-icon"><use href="#sd-desktop"/></svg> Monitor: developer tooling</li><li><svg class="sd-icon"><use href="#sd-external"/></svg> Plug: system outside the platform</li><li><svg class="sd-icon"><use href="#sd-file-storage"/></svg> Folder: file-system storage</li><li><svg class="sd-icon"><use href="#sd-load-balancer"/></svg> Splitter: load balancer</li><li><svg class="sd-icon"><use href="#sd-proxy"/></svg> Relay: dev proxy</li><li><svg class="sd-icon"><use href="#sd-scheduler"/></svg> Clock: orchestrator / scheduler</li><li><svg class="sd-icon"><use href="#sd-users"/></svg> People: user group</li><li><svg class="sd-icon"><use href="#sd-worker"/></svg> Gear: agent</li></ul></section>
 <section><h2>Notation</h2><ul><li><span class="lg-zone"></span> Boundary: hosts, network, region or domain</li><li><span class="lg-sub">abc</span> Sub-label: count, product or key property</li></ul></section>
 </div>
+<details class="glossary" open>
+<summary>Glossary: terms in this diagram</summary>
+<dl>
+<dt>HLD / prod-like / PPE</dt><dd>High-level design of a production-shaped local test setup. PPE is the named local test environment, not the deployed production system.</dd>
+<dt><code>wf local up</code> / <code>aspire run</code></dt><dd>The first command starts release builds in Docker for integration testing; the second starts the quicker development setup.</dd>
+<dt>Docker Compose / container / native</dt><dd>Compose starts a group of isolated containers. Native means a program runs directly on the host operating system instead.</dd>
+<dt>Edge Caddy / gateway Caddy / GrihaSetu</dt><dd>Caddy is a web traffic router. The shared GrihaSetu edge accepts LAN traffic; the gateway inside Compose forwards it to the appropriate workflow service.</dd>
+<dt>LAN / loopback / <code>127.2.6.7:80</code></dt><dd>LAN is the local network. Loopback means traffic stays on this computer; this address and port identify the private gateway, not a public internet address.</dd>
+<dt>mkcert / certificate / TLS / HTTPS</dt><dd>mkcert creates locally trusted certificates. A certificate identifies the site; Transport Layer Security (TLS) encrypts web traffic, making HTTP into HTTPS.</dd>
+<dt><code>wf</code> CLI / <code>workflow.cs</code></dt><dd>The workflow command-line interface (CLI) publishes and starts runs; <code>workflow.cs</code> is a C# workflow definition.</dd>
+<dt><code>wf-api</code> / REST / <code>/api</code> / <code>/hubs</code></dt><dd>The application programming interface (API) accepts commands and serves data using web requests (REST). <code>/api</code> is for those requests; <code>/hubs</code> carries live updates.</dd>
+<dt>SignalR / WebSocket</dt><dd>SignalR pushes live updates to browsers, usually over a long-lived two-way WebSocket connection.</dd>
+<dt><code>wf-engine</code> / leader / standby / PG lease</dt><dd>The engine schedules and tracks runs. One active copy is the leader; the other waits to take over. A timed record in PostgreSQL (PG) decides which copy leads.</dd>
+<dt>PostgreSQL / SQL / NOTIFY</dt><dd>PostgreSQL is the database for run state. SQL is its query language; NOTIFY signals the engine when new commands arrive.</dd>
+<dt><code>wf-agent</code> (Windows / Linux)</dt><dd>A per-machine worker, not an AI agent or the engine. It registers, sends heartbeats, receives tasks over gRPC, manages task hosts and journals results until acknowledged. The Windows agent runs natively for Windows tasks; Linux agents run in containers for Linux tasks. Neither writes directly to the database.</dd>
+<dt>Task host / UDS</dt><dd>A separate process that actually executes workflow tasks. It talks to its agent over a Unix domain socket (UDS), a private connection on the same machine.</dd>
+<dt>gRPC / heartbeat</dt><dd>gRPC carries two-way messages between agents and the engine; a heartbeat is a periodic message saying the agent is still available.</dd>
+<dt>Blob volume / named volume</dt><dd>Persistent file storage for uploads such as reports and artifacts; a named volume survives container restarts.</dd>
+<dt>Sample services A / B / Bond types / HTTP load</dt><dd>Test applications that use Bond-encoded data; task hosts send them HTTP requests to exercise their behavior.</dd>
+<dt>Aspire dashboard / OTLP</dt><dd>The dashboard shows diagnostics sent using OpenTelemetry Protocol (OTLP): logs, measurements and request traces.</dd>
+<dt><code>×N</code> / arrows / dashed boxes</dt><dd>Any number of copies; arrows show communication direction and dashed boxes group parts sharing a machine or Compose project.</dd>
+</dl>
+</details>
 </div>
 </body>
 </html>

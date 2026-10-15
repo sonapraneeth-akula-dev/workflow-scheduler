@@ -1,5 +1,5 @@
 # Discovery: Workflow Scheduler (+ Phase 2: Perf & Response-Parity Testing)
-**Date**: 2026-10-12 | **Status**: Approved | **Owner**: soakula | **Revised**: 2026-10-13 — run abort with who/when/reason (FR-015, scenario A2); retry and timeout semantics detailed (FR-014); crash/restart recovery for long tasks (FR-061)
+**Date**: 2026-10-12 | **Status**: Approved | **Owner**: soakula | **Revised**: 2026-10-15 — remote long-running API operations (FR-062–FR-064); previously run abort (FR-015), retries/timeouts (FR-014), long-task recovery (FR-061)
 
 > Produced in autopilot: interview answers below are **assumed defaults** (marked _Assumed_).
 > Every assumption is listed in §9 and §12 for stakeholder confirmation before status → Approved.
@@ -66,12 +66,12 @@ service team owns **only request/response-specific logic** via a narrow hook sur
 - Zero-downtime platform deployments; workflow and schedule config changes go live immediately after check-in without redeploying.
 - Runs on Azure (VMs or managed services) and fully locally (single-machine dev setup); Windows + Linux for
   engine, agents, and SDK.
-- Run lifecycle: queued → running → (aborting) → succeeded/failed/aborted/timed-out; per node and per task.
+- Run lifecycle: queued → running → (aborting) → succeeded/failed/aborted/timed-out. Node/task lifecycle: pending → ready → dispatched → running → (retrying) → succeeded/soft-failed/failed/timed-out/cancelled/skipped/reused.
 - Live status of workflow, nodes, tasks; logs/outputs per task.
 - Retries, timeouts, abort of a started run (who, when, reason recorded), re-run (whole or from failed node).
 - History: all runs, grouped by schedule ("run series"), filterable, with trends.
 - UI: separate views per workflow type; group/filter/search by metadata.
-- Extensibility: task executors are pluggable (core ships a few generic ones, e.g. HTTP call, script/container).
+- Extensibility: authors can write SDK-function tasks alongside the built-in HTTP and command/script tasks.
 
 **Phase 2 — Perf & response-parity testing on shared infra**
 - Machine (agent) registry with labels/capacity; select machines explicitly or by label per run/node.
@@ -94,6 +94,7 @@ service team owns **only request/response-specific logic** via a narrow hook sur
 - Provisioning/autoscaling machines — _Rationale: phase 2 selects from already-registered machines._
 - Service-specific request/response logic — _Rationale: owned by service team via hooks; everything else is ours._
 - Cross-region active-active HA — _Rationale: no stated need; revisit with scale data._
+- Transparent recovery of an hours-long synchronous HTTP request to a service with no operation status or deduplication — _Rationale: after disconnect, its external outcome cannot be known safely._
 
 ## 6. Key Scenarios / User Journeys
 ### A. Author and run on demand
@@ -101,14 +102,24 @@ Author writes a workflow script importing the SDK: type "Release Validation", me
 variables `env, version`. System init → pre-setup (fetch config) → nodes Build → (Deploy-EU ‖ Deploy-US) →
 Smoke → post-process (publish report) → system post-process (cleanup). Author runs it locally first, then
 registers it. Operator triggers it with `env=staging, version=1.4`. UI shows the graph; nodes turn
-running/succeeded live; Deploy-US fails after 2 retries → Smoke skipped → run ends Failed. Operator fixes the
-cause and re-runs from Deploy-US; Build/Deploy-EU results are reused.
+running/succeeded live; Deploy-US fails after 2 retries → Smoke skipped → run ends Failed. From the workflow
+page the operator opens this run's System Events to see when and why each attempt was placed, then opens
+Deploy-US's version-pinned Task Plan to see its intended action and its per-attempt Logs to see what it printed.
+Operator fixes the cause and re-runs from Deploy-US; Build/Deploy-EU results are reused.
 
 ### A2. Abort a started run
 Mid-run, the operator notices the wrong `version` was passed and clicks Abort, entering the reason "wrong build
 version". Running tasks are signalled to stop, not-started nodes are skipped, post-process still publishes a
 partial report, and the run ends Aborted. The run page, history, series view, notifications and audit log all
 show who aborted it, when, and why. Aborting again or aborting a finished run changes nothing.
+
+### A3. Wait for a remote operation
+An author configures a task to submit a long-running request to another service. The service accepts it and
+returns a way to check progress; the task remains running while it waits, without holding one HTTP request
+open for hours. The operator can see when the remote operation was accepted, is waiting, completes, fails,
+or cannot be reconciled. If the task machine disappears, the replacement continues tracking the same remote
+operation rather than starting a second one when the service supports deduplication. Aborting the run asks
+the remote service to cancel when supported; the UI does not claim the remote work stopped until confirmed.
 
 ### B. Recurring parameterised schedule and its history
 A schedule config file (separate from the workflow script) defines default variables grouped by category
@@ -157,7 +168,7 @@ sample diffs; below threshold → run Failed.
 | FR-006 | The system shall version workflow definitions with semantic versioning (MAJOR.MINOR.PATCH), recording author, timestamp, and change note per version; each run records the version it used. | Must | Edits never mutate past runs. |
 | FR-007 | The system shall start a run on demand via UI and API with a supplied variable set. | Must | |
 | FR-008 | The system shall start runs on a schedule (cron or fixed interval, timezone-aware) with a bound variable set. | Must | |
-| FR-009 | The system shall let users pause, resume, edit, and delete user-defined schedules. | Must | Code-defined: view only (FR-035). |
+| FR-009 | The system shall let users pause, resume, edit, and delete user-defined schedules. | Must | UI only (FR-035); code-defined: view only. |
 | FR-010 | The system shall apply a per-schedule overlap policy when a previous run is still active: skip, queue, or allow concurrent. | Must | Default: skip. |
 | FR-011 | The system shall record missed schedule fires and apply a catch-up policy (none / latest-only). | Should | Default: latest-only. |
 | FR-012 | The system shall execute a node only after its dependencies complete per their failure policy (FR-038); downstream nodes of a hard-failed node are marked Skipped. | Must | Independent branches continue. |
@@ -166,8 +177,8 @@ sample diffs; below threshold → run Failed.
 | FR-015 | The system shall let operators abort a queued or running workflow run from the UI, API, or CLI with a mandatory reason. The system shall record who aborted it, when, the reason, and the source (UI/API/CLI/kill switch); running tasks receive a cancellation signal, not-started nodes are skipped, post-process stages and `always` nodes still run, and the run ends Aborted. Abort details are shown on the run, in history, live, in notifications, and in the audit trail. | Must | First abort wins (idempotent); aborting a finished run is rejected. |
 | FR-016 | The system shall let operators re-run a failed run from failed node(s), reusing outputs of succeeded nodes. | Should | |
 | FR-017 | The system shall expose a terminal status for each run: Succeeded, Failed, Aborted, TimedOut. | Must | |
-| FR-018 | The system shall push live state changes for runs, nodes, and tasks (queued, running, retrying, aborting, succeeded, failed, soft-failed, skipped, cancelled, aborted) to clients; clients load one snapshot then apply deltas, and resync from a sequence number after reconnect. | Must | No periodic polling. |
-| FR-019 | The system shall capture logs and structured outputs per task, viewable during and after execution. | Must | |
+| FR-018 | The system shall push live state changes for runs (Queued, Running, Aborting, Succeeded, Failed, Aborted, TimedOut) and for nodes and tasks (Pending, Ready, Dispatched, Running, Retrying, Succeeded, SoftFailed, Failed, TimedOut, Cancelled, Skipped, Reused) to clients; clients load one snapshot then apply deltas, and resync from a sequence number after reconnect. A separate read-only System Events view shall show each run's ordered, timestamped task-attempt lifecycle, including why an agent was selected, when it was dispatched/started/completed, and retries or failures. | Must | Filter by node, task and attempt; no periodic polling. |
+| FR-019 | The system shall capture logs and structured outputs per task attempt, viewable during and after execution; users shall be able to search and download task logs separately from system events. | Must | |
 | FR-020 | The system shall let node outputs be consumed as inputs by dependent nodes. | Should | |
 | FR-021 | The system shall organise the UI as team → workflow type → workflows; each team's types and workflows appear only under that team's area and never mix with another team's. | Must | Team isolation in UI. |
 | FR-022 | The system shall let users filter, group, and search workflows and runs by metadata, status, type, and time range. | Must | |
@@ -179,11 +190,11 @@ sample diffs; below threshold → run Failed.
 | FR-028 | The system shall notify subscribers (email/Teams/webhook) on run completion or failure. | Should | |
 | FR-029 | The system shall reference secrets by name from a secret store and never persist or display secret values in definitions, params, metadata, or logs. | Must | |
 | FR-030 | The system shall apply a configurable retention period to run history, logs, and outputs. | Should | Default 90 days. |
-| FR-031 | The system shall expose all UI capabilities through a documented API. | Must | CI + phase 2 automation. |
-| FR-032 | The system shall provide a read-only graph view of a workflow and its live run state. | Should | Not an editor. |
+| FR-031 | The system shall expose all UI capabilities through a documented, versioned API, except user-defined schedule mutations (FR-035), which are UI-only. | Must | CI + phase 2 automation. |
+| FR-032 | The system shall provide a read-only graph view of a workflow and its live run state, plus a separate, version-pinned Task Plan page showing what each task was defined to do (commands or other task actions, dependencies, placement rules, retries and timeouts) without exposing secret values. | Must | Not an editor; past runs retain the plan for their original version. SDK-function internals cannot be predicted from the manifest. |
 | FR-033 | The SDK shall define lifecycle stages executed in order: system init → workflow pre-setup → tasks (node DAG) → workflow post-process → system post-process; post-process stages run even when earlier stages fail. | Must | Stage status shown live like nodes. |
 | FR-034 | The system shall support two kinds of recurring schedules: code-defined (recurring test instances declared in a schedule config file, scheduled by the system) and user-defined (created in the UI). | Must | |
-| FR-035 | The system shall make code-defined schedules read-only in the UI and allow user-defined schedules to be created, modified, paused, and deleted only via UI (and its API). | Must | Code-defined sync on registration/deploy. |
+| FR-035 | The system shall make code-defined schedules read-only in the UI and allow user-defined schedules to be created, modified, paused, resumed, and deleted only through the Kardia UI. The endpoints behind these UI actions are excluded from the public, versioned API contract, the SDK and the CLI, and accept only the Kardia UI's delegated user tokens (a product/contract boundary, not a security boundary: a user scripting the UI's token can do nothing beyond what their role allows in the UI); code-defined schedules and registration never create or modify user-defined schedules; reading them (list, history) stays in the public API. | Must | Code-defined sync on registration/deploy. |
 | FR-036 | The system shall let authors run a workflow script locally against a local engine with identical behaviour to the hosted engine. | Must | |
 | FR-037 | The system shall execute workflows, SDK, and agents on both Windows and Linux. | Must | |
 | FR-038 | The SDK shall let authors set a failure policy per task and per node in the workflow script: **hard** (failure fails the node/workflow; dependents skipped; not-yet-started parallel siblings cancelled) or **soft** (marked soft-failed/warning; dependents and siblings continue). | Must | Default when unspecified: hard. |
@@ -191,7 +202,7 @@ sample diffs; below threshold → run Failed.
 | FR-040 | The SDK shall provide a test harness to run a workflow offline in dry-run mode with mocked task outcomes, so unit tests can assert node order, dependency handling, hard/soft failure paths, retries, timeouts, and lifecycle stages. | Must | Runs in `dotnet test`, no engine needed. |
 | FR-041 | The SDK shall expose the same validator the engine uses at registration (DAG cycles, missing dependencies, variable types/required values, cron validity, schedule-file overrides referencing unknown variables or invalid values, SemVer bump rules) so any config or script change is caught by unit tests before check-in. | Must | One validator → no drift between local and server. |
 | FR-042 | The system shall reject registration of any workflow or schedule config that fails validation, with actionable errors. | Must | Server-side backstop. |
-| FR-043 | The system shall detect breaking changes (variable removed/renamed/type-changed, node removed that schedules depend on) and require a MAJOR bump; additive changes → MINOR; others → PATCH. | Should | Enforced by FR-041 validator. |
+| FR-043 | The system shall detect breaking changes (variable removed, renamed, or type-changed; node removed or renamed) and require a MAJOR bump; additive variables or nodes → MINOR; implementation-only changes → PATCH. Schedule validation checks variable compatibility, not node references. | Should | Enforced by FR-041 validator. |
 | FR-044 | The system shall let users view, diff, and clone any workflow version into a new workflow (or new major line), preserving lineage. | Must | |
 | FR-045 | The system shall let users trigger a recurring instance on demand from its history (same instance variables, latest or pinned version), recording the run in the same run series with trigger = manual. | Must | |
 | FR-046 | The system shall record metrics per run, stage, node, task, agent, and engine component: queue wait, start/end/duration, retries, terminal status and failure reason/category, success/failure rates, latency (p50/p95/p99), CPU, RAM, and (phase 2) network I/O. | Must | Viewable in UI and exported (NFR-010). |
@@ -199,17 +210,20 @@ sample diffs; below threshold → run Failed.
 | FR-048 | The SDK shall let any lifecycle stage, node, or task publish reports (kind, title, optional tags, payload), attached to the run and its source stage/node/task; limits: ≤ 10 reports per run, ≤ 10 MB each (configurable per type). Exceeding a limit fails the publishing call with a clear error, handled by the task's failure policy (FR-038). | Must | Mixed kinds per run. |
 | FR-049 | The UI shall render report kinds inline for user review: Markdown, HTML, table (CSV/JSON rows; sortable, filterable, virtualised), chart (time-series/bar from JSON), image (PNG/JPEG/SVG), JSON tree, text/log, side-by-side diff, PDF; any other file offered as download. | Must | Phase 2 perf and parity reports use these kinds. |
 | FR-050 | The UI shall show a report index per run (grouped by stage/node/task, filterable by kind/tag), show reports as soon as they are published during a live run, and let users compare the same report across runs in a run series. | Must | |
+| FR-051 | The UI shall render HTML/SVG reports in a sandboxed iframe; report content is served with `Content-Security-Policy: sandbox allow-scripts; frame-ancestors 'self'` (only Kardia can frame it; only this response omits `X-Frame-Options DENY`; opaque origin: any script has no access to Kardia's origin, cookies, storage, or API) and `X-Content-Type-Options: nosniff`. | Must | Security: reports are user-generated content. |
 | FR-052 | The frontend shall render report kinds through a renderer registry so new kinds are added as a frontend renderer only (no backend or SDK change); unknown kinds fall back to download. | Must | |
-| FR-053 | The system shall activate a newly registered workflow version or schedule config without restarting or redeploying any component; runs already in flight finish on the version they started with, and the next triggered/scheduled run uses the new version. | Must | Post check-in changes go live immediately. |
+| FR-053 | The system shall activate a newly registered workflow version or schedule config without restarting or redeploying any component; runs already in flight finish on the version they started with, and the next triggered/scheduled run uses the new version. | Must | Post check-in changes go live immediately. Workflow versions and schedule configs register independently: a schedule-only change needs no workflow version bump. |
 | FR-054 | The system shall apply schedule config changes (add/remove/modify instances, overrides) atomically, with no missed or duplicated fires during the change. | Must | |
-| FR-055 | The system shall let admins roll back a workflow or schedule config to a previous version instantly from the UI/API. | Should | Rollback = activate older version. |
+| FR-055 | The system shall let admins roll back a workflow to a previous version instantly from the UI/API. Code-defined schedule configs are rolled back through source control (revert, then re-register). | Should | Rollback = activate older workflow version. |
 | FR-056 | The SDK shall let tasks store run data artifacts (e.g. response dumps, raw load results) up to 5 GB per run via streamed upload; artifacts are listed per run and downloadable in the UI but not rendered as reports. | Must | Separate from reports (FR-048). |
 | FR-057 | The system shall assign every workflow type to exactly one owning team; a team may own up to 10 types (configurable quota). | Must | |
 | FR-058 | The system shall reject duplicate or near-duplicate types at validation time: names compared after normalisation (case, spaces, `-`/`_`, punctuation, plural "s") and by similarity (e.g. edit distance ≤ 2 within the same team); same normalised name across teams is allowed but shown with team prefix. | Must | Runs in pre-check-in validator (FR-041) and server-side (FR-042). |
 | FR-059 | The system shall let each team declare its own presentation for its area in the registry file: type order, grouping keys, list columns, default filters, display labels. | Should | No team's layout affects another's. |
-| FR-061 | The system shall keep long-running tasks (e.g. multi-hour load tests) going through control-plane crashes, restarts, deploys, and DB failover, and through an agent process crash, restart, or update; and shall let tasks save checkpoints so that after machine loss or reboot the retried attempt resumes from the last checkpoint instead of from the start. Built-in load and parity tasks checkpoint automatically; perf samples and results already collected are never lost. | Must | Run state is durable in the DB before any effect; engine memory is only a cache. |
 | FR-060 | The system shall define transport and codec as two independent, core-owned plug-in points, so a new transport (ACS, HTTP, gRPC, …) or codec (Bond, JSON, …) is added without changing load generation, parity, or hook code. | Must | v1: HTTP transport + Bond codec (JSON fallback). ACS transport client written by the owner on this plug-in point. |
-| FR-051 | The UI shall render HTML/SVG reports in a sandboxed iframe with no script execution or same-origin access by default. | Must | Security: reports are user-generated content. |
+| FR-061 | The system shall keep long-running tasks (e.g. multi-hour load tests) going through control-plane crashes, restarts, deploys, and DB failover, and through an agent process crash, restart, or update; and shall let tasks save checkpoints so that after machine loss or reboot the retried attempt resumes from the last checkpoint instead of from the start. Built-in load and parity tasks checkpoint automatically; perf samples and results already collected are never lost. | Must | Run state is durable in the DB before any effect; engine memory is only a cache. |
+| FR-062 | The system shall offer an opt-in HTTP task mode for remote asynchronous operations: accept a submission response with a status location, check progress without holding the submission request open, and complete or fail the task from the remote terminal result within the configured task, node, and run deadlines. Ordinary HTTP tasks retain their current synchronous behavior. | Must | A waiting task still occupies an agent slot in phase 1. |
+| FR-063 | The system shall recover a remote-operation task after host, agent, or machine loss by resuming its recorded operation, reattaching via a stable per-run/task submission key when the remote service deduplicates, or finding an accepted job via authoritative lookup. An uncertain submission shall not be automatically repeated without remote deduplication; operators shall see that its outcome needs reconciliation. | Must | Record intent before submitting; a lookup that returns no job does not prove submission never happened. Internal completion deduplication does not guarantee external side effects execute once. |
+| FR-064 | The system shall show remote-operation submit, wait, terminal outcome, and cancellation attempts in the run's System Events separately from task logs; abort or timeout shall request remote cancellation when supported and show whether it was confirmed or remains unknown. | Must | No claim that local task cancellation automatically stops remote work. |
 
 ### Phase 2 — Perf & response-parity testing
 | ID | Requirement | Priority | Notes |
@@ -231,7 +245,7 @@ sample diffs; below threshold → run Failed.
 | FR-115 | The system shall ship two dummy services (A and B), each with its own Bond request/response schema and baseline + candidate versions, plus sample C# hooks, demonstrating the end-to-end perf and parity flow. | Must | Together cover all Bond types (§9). |
 | FR-116 | The system shall enforce per-team quotas on machines and max load rate. | Could | No approval/allow-list for load targets — targets in code are trusted. |
 | FR-117 | The system shall provide a kill switch that immediately stops load generation for a run. | Must | Safety. |
-| FR-118 | The system shall support recording real traffic as a request source for parity tests. | Could | Schema/file sources first. |
+| FR-118 | The system shall support recording real traffic as a request source for parity tests. | Could | Schema/file sources first. Capture uses a core-owned service middleware or sidecar writing the standard replay format; sampling and declarative redaction are configuration; no new service-team-owned hook contract. |
 | FR-119 | The system shall generate requests automatically from a request schema (Bond schema first; OpenAPI/JSON Schema later) with configurable value distributions, covering all Bond types. | Must | |
 | FR-120 | The system shall generate load by replaying requests from a provided file obtained from a configured source. | Must | |
 | FR-121 | The system shall provide source connectors that handle authentication, download, and streaming of request data, in this order: local files; HTTPS URL; Azure Files; Azure Blob; Azure Cosmos DB. Every non-local source shall support both modes, chosen per test: **download-first** (fetch fully to local cache, then read) and **live streaming** (read while fetching, no full local copy). | Must | Core-owned; credentials via secret store (FR-029). Cosmos: download = export query results; stream = paged query/change feed. |
@@ -251,39 +265,39 @@ sample diffs; below threshold → run Failed.
 | NFR-004 | Durability | No run state lost on engine restart; in-flight runs resume or end Failed with reason | |
 | NFR-005 | Availability | API/UI/scheduler 99.9% monthly, deployments included (they cause no downtime, NFR-025) | _Assumed_ |
 | NFR-006 | UI performance | List/filter views p95 < 300 ms over 100k runs (server-side paging + virtualised lists) | |
-| NFR-007 | Security | SSO (_Assumed_ Microsoft Entra ID), RBAC, TLS everywhere, secrets via secret store only | |
+| NFR-007 | Security | SSO (_Assumed_ Microsoft Entra ID), RBAC, TLS on every non-loopback, non-container-internal link (UDS, loopback HTTP, and h2c inside an isolated local Docker network are permitted), secrets via secret store only | |
 | NFR-008 | Auditability | 100% of mutating actions audited, retained ≥ 1 year | |
 | NFR-009 | Accessibility | UI meets WCAG 2.2 AA | |
 | NFR-010 | Observability | Engine, agents, and SDK emit metrics, logs, traces via OpenTelemetry; resource metrics (CPU, RAM) sampled ≤ 5 s per task process and machine; metric retention ≥ 90 days | Feeds FR-046/FR-047 |
 | NFR-011 | Extensibility | New service onboarded with only request/response hooks, 0 core code changes | Phase 2 driver |
 | NFR-012 | Load-gen fidelity (phase 2) | Achieved RPS within ±5% of target at steady state; generator overhead reported | |
-| NFR-013 | Isolation (phase 2) | A failing/crashing C# hook fails only its task, never the engine or other runs | Run hooks out-of-process on agents |
+| NFR-013 | Isolation (phase 2) | A failing/crashing C# hook fails only its task, never the engine or other runs | Hook-invoking tasks run in a dedicated task-host process per task attempt on agents; a hook crash fails the task with category TaskError, code HookError |
 | NFR-014 | Data retention | Runs, logs, reports, artifacts, metrics: 90 days (confirmed), configurable per type | Artifacts may need shorter retention for cost (see risk) |
 | NFR-015 | Portability | Engine, agents, SDK, UI pass the same test suite on Windows and Linux | CI matrix |
-| NFR-016 | Local dev | Full stack starts locally with one command in ≤ 2 min, no Azure dependency (local stand-ins for storage/queues/secrets). An optional prod-like PPE mode runs production builds of every component in containers behind the local HTTPS edge at `https://ppe.kardia.sonapraneeth.in` (GrihaSetu platform pattern), so other machines can join | |
-| NFR-022 | Pre-check-in validation | Full validation + dry-run test suite for a typical workflow and its schedule file completes in < 10 s locally; 100% of registration-time rejection rules are reproducible offline | |
-| NFR-023 | Report viewing | Reports ≤ 5 MB render in < 1 s; larger reports load progressively (paged tables, streamed text) without freezing the UI | |
-| NFR-024 | Report & artifact volume | Reports: ≤ 10 per run, ≤ 10 MB each; report index loads p95 < 300 ms. Artifacts: ≤ 5 GB per run, upload/download streamed at ≥ 100 MB/s within Azure region. Payloads stored in blob (Azure) / disk (local), never in the main DB | Confirmed limits |
-| NFR-025 | Zero-downtime deploys | Platform deployments (API, engine, agents, UI) cause 0 s of user-visible downtime and fail 0 in-flight runs: rolling/blue-green rollout, agents drain before update, backward-compatible DB migrations (expand → migrate → contract), versioned API + SignalR auto-reconnect with resync, hashed static assets so open browser tabs keep working | |
-| NFR-026 | Rollback | Any platform deployment can be rolled back in ≤ 5 min with no data loss | |
-| NFR-027 | Change activation | Workflow/schedule change active p95 ≤ 60 s after merge (webhook-triggered validate → pre-compile → register) and ≤ 5 s after registration completes | "Instantaneous" post check-in |
-| NFR-017 | Deployability | Same build artefacts deploy to Azure VMs or Azure managed services; environment differences via config only | |
+| NFR-016 | Local dev | The everyday dev stack starts locally with one command in ≤ 2 min, no Azure dependency (local stand-ins for storage/queues/secrets). The optional prod-like PPE mode may take longer to build/start: it runs production builds of all Linux/server components in containers (the Windows agent runs natively) behind the local HTTPS edge at `https://ppe.kardia.sonapraneeth.in` (GrihaSetu platform pattern), so other machines can join | |
+| NFR-017 | Deployability | The same versioned application code and per-OS binaries deploy to Azure VMs or managed services; hosting packages differ (service folders versus container images), while environment-specific adapters are selected by config | |
 | NFR-018 | Backend API latency | Read APIs p95 < 50 ms, p99 < 150 ms; trigger-run API p95 < 100 ms | Excluding long queries |
 | NFR-019 | Event throughput | Engine sustains ≥ 10k state events/s fan-out to ≥ 500 concurrent UI clients without dropping updates | Coalesce per entity |
 | NFR-020 | Frontend reactivity | First load (cold) < 2 s, route change < 200 ms, 60 fps while live-updating a 200-node graph at 100 events/s; JS bundle < 300 KB gz for initial route | |
 | NFR-021 | Load-gen efficiency (phase 2) | Generator overhead < 1 ms p99 per request. Per-machine throughput is **not fixed**: it comes from each machine's registered capacity (FR-125). Dev/test sizing assumption: 20k requests/s per 8-core machine for small Bond payloads | Max load per test is service-specific (some services saturate at ~2k req/s); production machines are much larger |
+| NFR-022 | Pre-check-in validation | Full validation + dry-run test suite for a typical workflow and its schedule file completes in < 10 s locally; 100% of registration-time rejection rules are reproducible offline | |
+| NFR-023 | Report viewing | Reports ≤ 5 MB render in < 1 s; larger reports load progressively (paged tables, streamed text) without freezing the UI | |
+| NFR-024 | Report & artifact volume | Reports: ≤ 10 per run, ≤ 10 MB each; report index loads p95 < 300 ms. Artifacts: ≤ 5 GB per run, upload/download streamed at ≥ 100 MB/s within Azure region. Payloads stored in blob (Azure) / disk (local), never in the main DB | Confirmed limits |
+| NFR-025 | Zero-downtime deploys | In hosted production profiles, platform deployments (API, engine, agents, UI) cause 0 s of user-visible downtime and fail 0 in-flight runs: rolling/blue-green rollout, agents updated in waves without draining (running tasks survive the agent restart, FR-061; drain only for machine maintenance or an incompatible protocol migration), backward-compatible DB migrations (expand → migrate → contract), versioned API + SignalR auto-reconnect with resync, hashed static assets so open browser tabs keep working | Local single-instance mode is exempt |
+| NFR-026 | Rollback | Any platform deployment can be rolled back in ≤ 5 min with no data loss | |
+| NFR-027 | Change activation | Workflow/schedule change active p95 ≤ 60 s after merge (webhook-triggered validate → pre-compile → register) and ≤ 5 s after registration completes | "Instantaneous" post check-in |
 | NFR-028 | Dispatch latency | Dependencies satisfied → dependent task starts on an agent: p95 ≤ 50 ms, p99 ≤ 200 ms (warm agent, pre-compiled workflow) | Agile execution |
 | NFR-029 | Run start latency | Trigger (manual/schedule) → first task running: p95 ≤ 1 s for a pre-compiled workflow version; no per-run compilation | Compile once at registration (FR-053) |
 | NFR-030 | Engine overhead | Engine-added time per node (state persist + dispatch + status publish) ≤ 10 ms p95; a 200-node workflow of no-op tasks finishes in ≤ 3 s end to end | Benchmark in CI; regression > 10% fails the build |
 | NFR-031 | Control-plane footprint | Engine + API + scheduler at phase-1 peak (2,000 runs/day, ≥ 200 concurrent tasks, 500 UI clients): ≤ 2 vCPU average, ≤ 1 GB RAM total; idle ≤ 2% CPU, ≤ 300 MB RAM | Allocation-light hot paths, no per-event polling |
-| NFR-032 | Agent footprint | Idle agent ≤ 1% CPU, ≤ 100 MB RAM; per-task harness overhead ≤ 50 MB RAM; agents enforce per-task CPU/RAM limits so one task cannot starve others | Win + Linux |
-| NFR-033 | Reliability under faults | Loss of any single engine node, agent, or DB failover: no run state lost, in-flight runs resume within ≤ 30 s; each task runs at-least-once with idempotency keys, so state transitions are applied exactly once; automated chaos/fault-injection suite in CI covers process kill, network partition, DB failover, disk full. An agent process restart or update does not stop running tasks; after machine loss, checkpointing tasks resume from their last checkpoint (FR-061) | Extends NFR-004 |
+| NFR-032 | Agent footprint | Idle agent ≤ 1% CPU, ≤ 100 MB RAM; per-task harness overhead ≤ 50 MB RAM; agents enforce per-task CPU/RAM limits so one task cannot starve others | Win + Linux. Warm task hosts form a globally capped pool released when the agent goes idle |
+| NFR-033 | Reliability under faults | Loss of any single engine node or agent: no run state lost, in-flight runs resume within ≤ 30 s of the crash or restart (leader failover). An agent is Unhealthy after 15 s without a heartbeat; its attempts stay reclaimable until 30 s, then end AgentLost and are re-placed per retry policy; a restarted agent re-adopts its running tasks within 10 s. DB failover: no run state lost; recovery time = the database's own failover time + ≤ 30 s (Azure Database for PostgreSQL zone-redundant HA ≈ 60–120 s; Patroni ≈ 10–20 s). Task dispatch is at-least-once and internal state transitions are idempotently applied once; external side effects require FR-063. Automated chaos/fault-injection suite in CI covers process kill, network partition, DB failover, disk full. An agent process restart or update does not stop running tasks; after machine loss, checkpointing tasks resume from their last checkpoint (FR-061) | Extends NFR-004. **Exception (Windows-only self-hosted sites)**: no automatic DB failover; the database is failed over manually (RTO in minutes). Everything else, including engine, API, and agents on Windows, is fully supported |
 | NFR-034 | No single point of failure | Every control-plane component runs ≥ 2 instances in Azure (leader election for scheduler); local mode may run single-instance | |
 
 ## 9. Constraints & Assumptions
 - **Constraint**: We build and own the engine, SDK, load generation, source connectors, parity framework, storage, and machine management. Service team owns only request/response hooks.
 - **Constraint**: Hosted on Azure VMs or Azure managed services; must be fully replicable locally.
-- **Constraint**: Engine machines and test machines may be Windows or Linux; everything must work on both.
+- **Constraint**: Engine machines and test machines may be Windows or Linux; everything must work on both. Sole exception: automatic DB failover needs Linux database hosts or a managed database, so Windows-only self-hosted sites fail the database over manually (NFR-033).
 - **Constraint**: Third-party orchestrators are not used (decision: build our own).
 - **Constraint**: C# for all backend code, SDK, libraries, and service hooks (.NET, cross-platform).
 - **Constraint**: No approval/allow-list for load targets — whatever is checked into code is assumed correct.
@@ -291,7 +305,7 @@ sample diffs; below threshold → run Failed.
 - **Decision (backend)**: ASP.NET Core (C#) hosts the REST API and the SignalR hub for live updates. React runs only in the browser and talks to this C# backend. Frontend deployment: static files served by ASP.NET Core by default (one deployable, simplest locally), or from Azure Static Web Apps/CDN — both work because the code is separate.
 - **Decision (frontend)**: React + TypeScript SPA built with Vite; Bun as package manager/script runner (dev tooling only — production serves static files, so Bun is not in production). Live updates via ASP.NET Core SignalR (WebSockets; push, no polling). UI kit: **Tailwind CSS v4 + shadcn/ui** (accessible Radix-based components copied into repo, no runtime CSS-in-JS); DAG view: **React Flow (xyflow)**; lists: **TanStack Virtual**; server data: **TanStack Query**. _Rationale: Blazor Server adds a round-trip per interaction, Blazor WASM a large initial download (NFR-020). Astro is built for content/mostly-static sites with small interactive islands; this app is one fully live dashboard → Astro would wrap a single React island and add nothing. Fluent UI React v9 is the alternative if a Microsoft-native look is required._
 - **Decision (workflow format)**: each workflow is a single .NET 10 file-based app (`dotnet run workflow.cs`). Shared code across workflows goes in our SDK/NuGet packages referenced via `#:package` (or `#:project` locally).
-- **Decision (dummy services transport/codec)**: Bond over HTTP. Bond C# packages remain restorable from nuget.org by exact version (unlisted, not deleted) and from the Microsoft-internal feed; JSON over HTTP is the fallback if the package proves unusable.
+- **Decision (dummy services transport/codec)**: Bond over HTTP. Bond C# packages come from the Microsoft-internal feed (https://aka.ms/bond); nuget.org by exact version (unlisted, not deleted) is the restore fallback; JSON over HTTP is the fallback if the package proves unusable.
 - **Context**: real services today are called via **ACS** (internal client transport). Transport and codec are pluggable (FR-060) so ACS, gRPC, etc. can be onboarded later without touching load/parity/hook code.
 - **Assumption**: Two dummy services, each with its own Bond schema and wire protocol, e.g.
   **A "Catalog"** — Bond Compact Binary over HTTP; **B "Pricing"** — Bond Simple JSON over HTTP. Between them
@@ -319,6 +333,7 @@ Decision: **we build our own engine**. Existing engines below are listed as refe
 - [Diffy (opendiffy)](https://github.com/opendiffy/diffy) — response parity via baseline/candidate + secondary baseline for noise detection. Directly informs FR-109–FR-111.
 - [GoReplay](https://github.com/buger/goreplay) — traffic capture/replay; candidate request source for FR-118.
 - [GitHub Scientist](https://github.com/github/scientist) — in-process experiment/parity pattern; comparator design ideas.
+- [Microsoft's asynchronous request-reply pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/asynchronous-request-reply) — reference contract for remote jobs (202, status location, retry interval, idempotency, optional cancellation); fits inside existing task hosts without another service.
 - Standards: [WCAG 2.2](https://www.w3.org/TR/WCAG22/) (NFR-009), [OpenTelemetry](https://opentelemetry.io) (NFR-010), [CloudEvents](https://cloudevents.io) (candidate format for live status events/webhooks).
 
 ## 11. Suggestions & Opportunities
@@ -329,9 +344,11 @@ Decision: **we build our own engine**. Existing engines below are listed as refe
 - **Reactivity path**: engine → in-process event stream → SignalR groups per run/type → client store patched per entity, rendered with virtualisation; coalesce bursts server-side (e.g. 100 ms windows) so the UI never falls behind.
 - **Cleanup/always nodes** (FR-013): essential for phase 2 so machines are always released and load always stops.
 - **Noise baseline for parity**: run baseline vs baseline (Diffy approach) to auto-learn noisy fields before judging candidate.
-- **Run series as first-class entity** (schedule + variable set) so history survives definition edits.
+- **Run series as first-class entity** (keyed permanently by schedule; each run stores its effective variables) so history survives definition and variable edits.
 - **Definition versioning + re-run from node** (FR-006, FR-016) avoid re-running long workflows end to end.
 - **Edge cases**: DAG cycles; variable schema changes breaking existing schedules; DST transitions in cron; clock skew across machines (perf timestamps); engine restart mid-run; agent disconnect mid-test (reservation timeout); partial failure among parallel tasks (handled by hard/soft policy, FR-038); huge logs/outputs (size caps + external storage).
+- **Remote API edge cases**: the submit response is lost after the remote service accepts work; operation status expires before the run ends; cancellation is unsupported or fails; a remote job outlives the task deadline. Preserve the remote outcome as unknown where it cannot be confirmed, rather than reporting a successful cancellation or blindly resubmitting.
+- **Sequencing**: use existing task hosts and checkpoints for remote waits in v1; releasing an agent slot while waiting would require a separate durable suspension mechanism and is deferred until capacity data justifies it.
 - **Abuse/safety**: no target approval by decision; kill switch (FR-117) remains the safety net for a runaway test; C# hooks isolated out-of-process (NFR-013).
 - **Sequencing / cut from v1**: v1 = SDK + engine + phase 1 Must items, local mode, both OSes, read-only graph. v1.1 = trends, notifications, re-run-from-node. Phase 2 starts with machine registry + reservation + Bond-schema-based load + basic comparator on dummy services A & B; file sources/connectors next; traffic recording last.
 
@@ -350,7 +367,7 @@ Decision: **we build our own engine**. Existing engines below are listed as refe
 - [x] ~~Workflow format~~ → single .NET 10 file-based script.
 - [x] ~~Failure behaviour~~ → per task/node hard or soft, set in the script; default hard (FR-038).
 - [x] ~~Request-data connectors~~ → local files, HTTPS URL, Azure Files, Azure Blob, then Cosmos DB; every non-local source supports download-first and live streaming (FR-121).
-- [x] ~~Bond support~~ → Bond OSS ended March 2025 upstream, but Microsoft internally supports it (incl. security fixes); use the internal package (https://aka.ms/bond).
+- [x] ~~Bond support~~ → Bond OSS ended March 2025 upstream, but Microsoft internally supports it (incl. security fixes); use the internal feed package (https://aka.ms/bond), nuget.org exact version as restore fallback, JSON over HTTP if unusable.
 
 ### Resolved (from detailed review)
 - [x] ~~OQ-1 Scale/retention~~ → 1,000–2,000 runs/day, ≤ 200 nodes/workflow, 90-day retention (NFR-003, NFR-014).
@@ -364,7 +381,7 @@ Decision: **we build our own engine**. Existing engines below are listed as refe
 - [x] ~~ACS transport~~ → owner writes the ACS client on the transport plug-in point; v1 ships HTTP transport (FR-060).
 - [x] ~~Artifact storage budget~~ → 2,000 runs/day and 5 GB/run are outlier maximums; quotas and retention adjustable per type based on actual usage.
 
-No open questions remain. Ready for sign-off.
+No product-scope questions remain. Technical delivery sequencing is tracked in technical-design Q-2.
 ### Risks
 - **Risk**: In-house durable orchestrator is costly and bug-prone (stuck runs, exactly-once schedule firing) — mitigate with event-log design + chaos tests (kill engine mid-run).
 - **Risk**: Cross-OS drift (Windows vs Linux) — mitigate with CI matrix from day one.
@@ -388,12 +405,13 @@ No open questions remain. Ready for sign-off.
 | Workflow type | Category grouping workflows; each has its own UI view. |
 | Node | Unit in the DAG; contains tasks run in series or parallel; may depend on other nodes. |
 | Task | Smallest executable step, run by a built-in task type. |
+| Remote operation | A job accepted by an external API that completes later; its status is checked separately from the submission request. |
 | Run | One execution of a workflow definition version with a concrete variable set. |
 | Schedule | Recurring trigger (cron/interval) with a bound variable set; code-defined (schedule config file, read-only in UI) or user-defined (UI-only). |
 | Schedule config file | Separate file holding categorised default variables and recurring test instances with overrides. |
 | Test instance | One code-defined recurring entry: schedule + variable overrides; its runs form a run series. |
 | Dry run | SDK test mode executing workflow logic with mocked tasks, for unit tests before check-in. |
-| Run series | All runs produced by one schedule/variable set; unit of history and trends. |
+| Run series | All runs produced by one schedule (fires and Run now), keyed permanently by schedule ID (editing variables keeps the series; each run stores its effective variables); unit of history and trends. Ad-hoc runs belong to no series. |
 | Metadata | Key/value attributes on workflows/runs used to organise and filter. |
 | Service hooks | The only service-team-owned code: request shaping, response normalisation, comparator extensions. |
 | Source connector | Core-owned component that authenticates to, downloads, or streams request data from a source. |
