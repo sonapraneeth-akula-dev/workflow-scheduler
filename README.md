@@ -118,8 +118,12 @@ Migration `0007_schedules.sql` adds durable code/UI schedule rows, stable code
 keys, expression/policy checks, optimistic `row_version` and a partial due-fire
 index excluding paused/deleted rows. Storage follows the design's positive
 whole-second `interval_s`; subsecond interval precision is not represented.
-Registry foreign keys, code-config versions, API mutations and the leader
-scheduler follow in their own tasks.
+Migration `0008_schedule_config_versions.sql` adds independent content-addressed
+schedule-file provenance (source path, Git SHA, SHA-256 and attribution).
+Composite foreign keys prohibit cross-workflow links; UI schedules cannot link
+code configs, and old code rows remain valid during upgrade.
+Workflow-registry foreign keys, atomic registration, API mutations and the
+leader scheduler follow in their own tasks.
 
 `ScheduleCompatibilityRule.Validate(scheduleUtf8, targetApi)` applies those same
 variable checks to a target `ApiBaseline`. Removed/renamed nodes do not affect
