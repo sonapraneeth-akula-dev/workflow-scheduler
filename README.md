@@ -97,6 +97,12 @@ fail even when another override would hide them. `Validator` and the testing
 facade automatically check optional `schedules.json`; registration remains its
 own backlog task.
 
+`ScheduleCompatibilityRule.Validate(scheduleUtf8, targetApi)` applies those same
+variable checks to a target `ApiBaseline`. Removed/renamed nodes do not affect
+schedule compatibility; removed variables still referenced by defaults or
+overrides do, even after a valid MAJOR bump. Version-pin resolution chooses the
+target API before this check; the rule does not silently select another version.
+
 Placement is authored at workflow, node or task level with `RunsOn` and
 `Affinity`. The innermost selector replaces the whole outer selector; affinity
 inherits independently. `RunsOn()` explicitly clears constraints; `Affinity.None`
