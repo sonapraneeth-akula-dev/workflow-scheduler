@@ -14,7 +14,7 @@ using static Wf.Integration.Tests.Registration.RegistrationTests;
 
 namespace Wf.Integration.Tests.Registration;
 
-public sealed class ScheduleFireTests(RegistrationDatabase database) : IClassFixture<RegistrationDatabase>
+public sealed partial class ScheduleFireTests(RegistrationDatabase database) : IClassFixture<RegistrationDatabase>
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
@@ -476,7 +476,8 @@ public sealed class ScheduleFireTests(RegistrationDatabase database) : IClassFix
                 NullLogger<LeaseManager>.Instance);
             Store = new(source, NullLogger<RunStore>.Instance, Lease);
             Recovery = new(source, Store, Lease, server.Clock, NullLogger<RunRecovery>.Instance);
-            Scheduler = new(source, Lease, Recovery, server.Versions, server.Clock, NullLogger<ScheduleFireService>.Instance);
+            Scheduler = new(source, Lease, Recovery, server.Versions, new(server.Clock), server.Clock,
+                NullLogger<ScheduleFireService>.Instance);
         }
 
         public async Task Start()

@@ -66,6 +66,8 @@ builder.Services.AddSingleton<RunStore>();
 builder.Services.AddSingleton<CommandInbox>();
 builder.Services.AddSingleton<RunRecovery>();
 builder.Services.AddHostedService<RunRecovery>(services => services.GetRequiredService<RunRecovery>());
+builder.Services.AddSingleton(services => new ScheduleCatchUp(services.GetRequiredService<TimeProvider>(),
+    builder.Configuration.GetValue<TimeSpan?>("Scheduler:FireGrace")));
 builder.Services.AddSingleton<ScheduleFireService>();
 builder.Services.AddHostedService<ScheduleFireService>(services => services.GetRequiredService<ScheduleFireService>());
 builder.Services.AddSingleton<GroupCommitAppender>();

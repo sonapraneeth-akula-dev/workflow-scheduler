@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
+using Wf.Contracts.Runs;
 using Wf.Contracts.Schedules;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Leadership;
@@ -16,7 +17,7 @@ namespace Wf.ControlPlane.Engine.Scheduler;
 public sealed class ScheduleFireRejectedException(string message, Exception? inner = null) : Exception(message, inner);
 
 public sealed class ScheduleFireService(NpgsqlDataSource source, LeaseManager leadership, RunRecovery recovery,
-    ActiveVersionCache versions, TimeProvider time, ILogger<ScheduleFireService> logger) : BackgroundService
+    ActiveVersionCache versions, ScheduleCatchUp catchUp, TimeProvider time, ILogger<ScheduleFireService> logger) : BackgroundService
 {
     private readonly ScheduleTimerHeap timers = new();
     private LeaseToken? readyLease;
@@ -37,10 +38,11 @@ public sealed class ScheduleFireService(NpgsqlDataSource source, LeaseManager le
         string? cron, pin;
         TimeSpan? interval;
         ScheduleOverlapPolicy overlap;
+        ScheduleCatchUpPolicy catchUpPolicy;
         DateTimeOffset fireAt;
         await using (var read = new NpgsqlCommand("""
             SELECT s.workflow_id,s.timezone,s.cron,s.interval_s,s.variables::text,s.version_pin,
-                s.overlap_policy,s.next_fire_at,r.id
+                s.overlap_policy,s.next_fire_at,r.id,s.catchup_policy
             FROM schedules s JOIN workflows w ON w.id=s.workflow_id
             LEFT JOIN run_series r ON r.schedule_id=s.id
             WHERE s.id=$1 AND NOT s.paused AND s.deleted_at IS NULL AND w.deleted_at IS NULL
@@ -60,72 +62,86 @@ public sealed class ScheduleFireService(NpgsqlDataSource source, LeaseManager le
             overlap = (ScheduleOverlapPolicy)reader.GetInt16(6);
             fireAt = reader.GetFieldValue<DateTimeOffset>(7);
             series = reader.IsDBNull(8) ? throw new InvalidDataException("An active schedule has no permanent run series.") : reader.GetGuid(8);
+            catchUpPolicy = (ScheduleCatchUpPolicy)reader.GetInt16(9);
         }
         if (fireAt != timer.FireAt || fireAt > time.GetUtcNow()) return new(timer.ScheduleId, fireAt);
-        var next = ScheduleExpression.Create(cron, interval, timezone).GetNextOccurrence(fireAt);
-        bool claimed;
-        await using (var claim = new NpgsqlCommand("""
-            INSERT INTO schedule_fires(schedule_id,fire_at,outcome) VALUES($1,$2,0)
-            ON CONFLICT(schedule_id,fire_at) DO NOTHING RETURNING schedule_id
-            """, connection, transaction))
+        var plan = catchUp.Plan(fireAt, ScheduleExpression.Create(cron, interval, timezone), catchUpPolicy, cancellationToken);
+        var claimed = new HashSet<DateTimeOffset>();
+        foreach (var fire in plan.CatchUp.Fires)
         {
+            await using var claim = new NpgsqlCommand("""
+                INSERT INTO schedule_fires(schedule_id,fire_at,outcome) VALUES($1,$2,$3)
+                ON CONFLICT(schedule_id,fire_at) DO NOTHING RETURNING schedule_id
+                """, connection, transaction);
             claim.Parameters.AddWithValue(timer.ScheduleId);
-            claim.Parameters.AddWithValue(fireAt);
-            claimed = await claim.ExecuteScalarAsync(cancellationToken) is Guid;
+            claim.Parameters.AddWithValue(fire.FireAt);
+            claim.Parameters.AddWithValue((short)fire.Outcome);
+            if (await claim.ExecuteScalarAsync(cancellationToken) is Guid) claimed.Add(fire.FireAt);
         }
-        if (claimed)
+        // Preserve every missed row; the catch-up run belongs to its newest missed source, not a second fire.
+        if (plan.CatchUp.CatchUp is { } action && claimed.Contains(action.SourceFireAt))
         {
-            int active;
-            await using (var count = new NpgsqlCommand("SELECT count(*)::int FROM runs WHERE series_id=$1 AND status IN (0,1,2)",
-                connection, transaction))
-            {
-                count.Parameters.AddWithValue(series);
-                active = (int)(await count.ExecuteScalarAsync(cancellationToken)
-                    ?? throw new InvalidDataException("The overlap query returned no count."));
-            }
-            if (OverlapPolicy.Decide(active, overlap) == ScheduleOverlapDecision.Skip)
-            {
-                await RunStore.ExecuteAsync(connection, """
-                    UPDATE schedule_fires SET outcome=1,reason='overlap' WHERE schedule_id=$1 AND fire_at=$2
-                    """, cancellationToken, timer.ScheduleId, fireAt);
-            }
-            else
-            {
-                SelectedWorkflowVersion selected;
-                try
-                {
-                    selected = await WorkflowVersionResolver.ResolveAsync(versions, source, workflow, pin, true,
-                        cancellationToken, connection);
-                }
-                catch (Exception error) when (error is KeyNotFoundException or ArgumentException or FormatException)
-                {
-                    throw new ScheduleFireRejectedException($"Schedule '{timer.ScheduleId}' has no valid matching workflow version.", error);
-                }
-                var values = JsonSerializer.Deserialize(variables, ScheduleFileJsonContext.Default.ImmutableDictionaryStringJsonElement)
-                    ?? throw new InvalidDataException("Schedule variables are null.");
-                var bound = VariableBinder.Resolve(selected.Manifest.Variables, values, path: "$.schedule.variables",
-                    cancellationToken: cancellationToken);
-                if (!bound.IsValid)
-                    throw new ScheduleFireRejectedException($"Schedule '{timer.ScheduleId}' variables failed validation: " +
-                        string.Join("; ", bound.Errors.Select(error => $"{error.RuleId} {error.Path}: {error.Message}")));
-                var now = time.GetUtcNow();
-                var run = new RunState(Guid.CreateVersion7(now), selected.Manifest.Nodes, selected.Manifest.Metadata,
-                    message => logger.LogWarning("{RunStateError}", message), bound.Values);
-                await RunStore.CreateAsync(connection, run, workflow, selected.VersionId, now.Add(selected.Manifest.RunTimeout),
-                    now, "scheduler", cancellationToken, series, scheduled: true);
-                await RunStore.ExecuteAsync(connection, """
-                    UPDATE schedule_fires SET run_id=$3 WHERE schedule_id=$1 AND fire_at=$2
-                    """, cancellationToken, timer.ScheduleId, fireAt, run.Snapshot.RunId);
-            }
+            var run = await TryStartRunAsync(connection, timer.ScheduleId, series, workflow, pin, variables, overlap,
+                RunTrigger.CatchUp, cancellationToken);
+            await RunStore.ExecuteAsync(connection, """
+                UPDATE schedule_fires SET run_id=$3,reason=$4 WHERE schedule_id=$1 AND fire_at=$2
+                """, cancellationToken, timer.ScheduleId, action.SourceFireAt, (object?)run ?? DBNull.Value,
+                run is null ? "overlap" : "catch-up");
+        }
+        foreach (var fire in plan.CatchUp.Fires.Where(fire => fire.Outcome == ScheduleFireOutcome.Started && claimed.Contains(fire.FireAt)))
+        {
+            var run = await TryStartRunAsync(connection, timer.ScheduleId, series, workflow, pin, variables, overlap,
+                RunTrigger.Schedule, cancellationToken);
+            await RunStore.ExecuteAsync(connection, """
+                UPDATE schedule_fires SET outcome=$3,run_id=$4,reason=$5 WHERE schedule_id=$1 AND fire_at=$2
+                """, cancellationToken, timer.ScheduleId, fire.FireAt,
+                (short)(run is null ? ScheduleFireOutcome.Skipped : ScheduleFireOutcome.Started),
+                (object?)run ?? DBNull.Value, run is null ? "overlap" : DBNull.Value);
         }
         await using (var advance = new NpgsqlCommand("UPDATE schedules SET next_fire_at=$2 WHERE id=$1", connection, transaction))
         {
             advance.Parameters.AddWithValue(timer.ScheduleId);
-            advance.Parameters.AddWithValue(NpgsqlDbType.TimestampTz, (object?)next ?? DBNull.Value);
+            advance.Parameters.AddWithValue(NpgsqlDbType.TimestampTz, (object?)plan.NextFireAt ?? DBNull.Value);
             await advance.ExecuteNonQueryAsync(cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);
-        return next is { } at ? new(timer.ScheduleId, at) : null;
+        return plan.NextFireAt is { } at ? new(timer.ScheduleId, at) : null;
+    }
+
+    private async Task<Guid?> TryStartRunAsync(NpgsqlConnection connection, Guid scheduleId, Guid series,
+        string workflow, string? pin, string variables, ScheduleOverlapPolicy overlap, RunTrigger trigger,
+        CancellationToken cancellationToken)
+    {
+        await using (var count = new NpgsqlCommand("SELECT count(*)::int FROM runs WHERE series_id=$1 AND status IN (0,1,2)", connection))
+        {
+            count.Parameters.AddWithValue(series);
+            var active = (int)(await count.ExecuteScalarAsync(cancellationToken)
+                ?? throw new InvalidDataException("The overlap query returned no count."));
+            if (OverlapPolicy.Decide(active, overlap) == ScheduleOverlapDecision.Skip) return null;
+        }
+        SelectedWorkflowVersion selected;
+        try
+        {
+            selected = await WorkflowVersionResolver.ResolveAsync(versions, source, workflow, pin, true,
+                cancellationToken, connection);
+        }
+        catch (Exception error) when (error is KeyNotFoundException or ArgumentException or FormatException)
+        {
+            throw new ScheduleFireRejectedException($"Schedule '{scheduleId}' has no valid matching workflow version.", error);
+        }
+        var values = JsonSerializer.Deserialize(variables, ScheduleFileJsonContext.Default.ImmutableDictionaryStringJsonElement)
+            ?? throw new InvalidDataException("Schedule variables are null.");
+        var bound = VariableBinder.Resolve(selected.Manifest.Variables, values, path: "$.schedule.variables",
+            cancellationToken: cancellationToken);
+        if (!bound.IsValid)
+            throw new ScheduleFireRejectedException($"Schedule '{scheduleId}' variables failed validation: " +
+                string.Join("; ", bound.Errors.Select(error => $"{error.RuleId} {error.Path}: {error.Message}")));
+        var now = time.GetUtcNow();
+        var run = new RunState(Guid.CreateVersion7(now), selected.Manifest.Nodes, selected.Manifest.Metadata,
+            message => logger.LogWarning("{RunStateError}", message), bound.Values);
+        await RunStore.CreateAsync(connection, run, workflow, selected.VersionId, now.Add(selected.Manifest.RunTimeout),
+            now, "scheduler", cancellationToken, series, trigger);
+        return run.Snapshot.RunId;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

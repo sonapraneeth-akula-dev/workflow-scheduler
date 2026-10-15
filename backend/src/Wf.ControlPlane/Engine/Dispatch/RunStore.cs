@@ -8,6 +8,7 @@ using Wf.Contracts;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Events;
 using Wf.Contracts.Definition;
+using Wf.Contracts.Runs;
 using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Leadership;
 using Wf.Engine.Core;
@@ -43,7 +44,7 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
 
     internal static async Task CreateAsync(NpgsqlConnection connection, RunState run, string workflowId, Guid versionId,
         DateTimeOffset deadline, DateTimeOffset createdAt, string createdBy, CancellationToken cancellationToken,
-        Guid? seriesId = null, bool scheduled = false)
+        Guid? seriesId = null, RunTrigger trigger = RunTrigger.Manual)
     {
         await ExecuteAsync(connection, "SELECT ensure_run_partitions(uuid_v7_run_day($1))", cancellationToken, run.Snapshot.RunId);
         await ExecuteAsync(connection, """
@@ -52,7 +53,7 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
             """, cancellationToken, run.Snapshot.RunId, workflowId, versionId, createdAt, deadline,
             JsonSerializer.Serialize(run.Snapshot.Variables, RunStoreJson.Default.ImmutableDictionaryStringJsonElement),
             JsonSerializer.Serialize(run.Snapshot.Metadata, RunStoreJson.Default.WorkflowMetadata), createdBy,
-            (object?)seriesId ?? DBNull.Value, scheduled ? (short)1 : (short)0);
+            (object?)seriesId ?? DBNull.Value, (short)trigger);
         await WriteSnapshotAsync(connection, run, cancellationToken);
         foreach (var node in run.Snapshot.Nodes)
             await ExecuteAsync(connection, """

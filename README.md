@@ -834,7 +834,7 @@ missed slot's identity and link the run to its source. The returned next cursor
 preserves interval phase and UTC/DST identity. Commit cursor advancement,
 missed history and run creation atomically; repeated planning alone is not
 exactly-once execution. Applying this beyond-grace policy in the hosted scheduler
-remains task 3.2.2.1.3.
+uses `ScheduleCatchUp` and the same pure planner.
 
 Migration `0014_schedule_fires.sql` stores fire history with an exact-once
 `(schedule_id, fire_at)` key; claim with `ON CONFLICT DO NOTHING` and create a
@@ -861,9 +861,28 @@ and recurring exact/range pins; a recurring unpinned fire reads the current
 active pointer in its transaction, independently of notification ordering.
 Invalid pins/values log a rejection and retain the due cursor, without starving
 other schedules. Transient storage failures disable scheduler readiness until
-resynchronization; fatal corrupt state fails explicitly. Beyond-grace catch-up,
-queued-run FIFO release, skipped-fire UI and the one-hour/1,000-schedule chaos
+resynchronization; fatal corrupt state fails explicitly. Queued-run FIFO release,
+skipped-fire UI and the one-hour/1,000-schedule chaos
 gate remain their dependent tasks, not implied by basic exactly-once firing.
+
+Every overdue cursor is replanned against one UTC clock snapshot, including on
+takeover and reconnect. `Scheduler:FireGrace` is a nonnegative `TimeSpan`
+(environment: `Scheduler__FireGrace`), default `00:00:02`, matching the on-time
+delay budget. Exactly at grace is an ordinary scheduled fire; older slots are
+all recorded as Missed. Default Latest admits one catch-up action from the
+newest newly claimed missed source; None records the same history without that
+action. The missed row keeps outcome Missed and links its catch-up run with
+`run_id` and reason `catch-up`, never a duplicate slot or rewritten outcome.
+Stable `RunTrigger` values are Manual=0, Schedule=1, CatchUp=2.
+
+Catch-up admission precedes recent ordinary due slots in the same transaction
+and obeys Skip/Queue/Concurrent. An already-active series can suppress catch-up
+under Skip; its missed source retains reason `overlap`. A catch-up admitted under
+Skip can similarly suppress a newer ordinary slot, which is recorded Skipped.
+All missing history, admitted runs and the final future cursor commit together,
+so failure/retry or repeated takeover cannot consume only part of the backlog.
+The ten-minute hosted outage test advances an injected clock, not a wall-clock
+sleep; it verifies ten missed rows and exactly one catch-up across three leaders.
 
 `Wf.Agent.Secrets.SecretMasker` takes resolved secret values, never reference
 names. `Redact` masks complete text; create a separate text stream for each
