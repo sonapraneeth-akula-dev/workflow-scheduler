@@ -19,9 +19,9 @@ public sealed class ScenarioADefinitionTests
                 .Task("api", work).Task("ui", work).Task("perf-probe", work)));
 
         Assert.Empty(calls);
-        Assert.Equal(["build"], workflow.Nodes[1].Dependencies);
-        Assert.Equal(["build"], workflow.Nodes[2].Dependencies);
-        Assert.Equal(["deploy-eu", "deploy-us"], workflow.Nodes[3].Dependencies);
+        Assert.Equal(["build"], workflow.Nodes[1].Dependencies.Select(d => d.Node));
+        Assert.Equal(["build"], workflow.Nodes[2].Dependencies.Select(d => d.Node));
+        Assert.Equal(["deploy-eu", "deploy-us"], workflow.Nodes[3].Dependencies.Select(d => d.Node));
         foreach (var node in workflow.Nodes)
             foreach (var task in node.Tasks)
                 await workflow.Tasks[$"{node.Key}/{task.Key}"](new());

@@ -9,6 +9,6 @@ var workflow = Workflow.Define("payments/release-validation/deploy-check", "1.4.
     .Node("deploy-eu", n => n.DependsOn("build").Task("deploy", _ => { }))
     .Node("deploy-us", n => n.DependsOn("build").Task("deploy", _ => { }))
     .Node("smoke", n => n.DependsOn("deploy-eu", "deploy-us").Parallel(maxParallel: 4)
-        .Task("api", _ => { }).Task("ui", _ => { }).Task("perf-probe", _ => { })));
+        .Task("api", _ => { }).Task("ui", _ => { }).Task("perf-probe", _ => { }, failure: Failure.Soft)));
 
 Console.WriteLine($"{workflow.Name}@{workflow.Version}: {workflow.Nodes.Length} nodes");

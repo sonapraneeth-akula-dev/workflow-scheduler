@@ -46,13 +46,14 @@ public sealed class WorkflowBuilder
         return this;
     }
 
-    public WorkflowBuilder Node(string key, Action<NodeBuilder> configure)
+    public WorkflowBuilder Node(string key, Action<NodeBuilder> configure, FailurePolicy failure = FailurePolicy.Hard)
     {
         ValidateKey(key);
         if (key.StartsWith('$'))
             throw new ArgumentException($"Node key '{key}' is reserved for lifecycle stages.", nameof(key));
         ArgumentNullException.ThrowIfNull(configure);
         var node = new NodeBuilder(key);
+        node.OnFailure(failure);
         configure(node);
         nodes.Add(node);
         return this;

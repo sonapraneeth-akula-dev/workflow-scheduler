@@ -18,9 +18,16 @@ public static class DagValidator
                     throw new ArgumentException($"Duplicate task key '{node.Key}/{task.Key}'.");
         }
         foreach (var node in nodes)
+        {
+            var dependencies = new HashSet<string>(StringComparer.Ordinal);
             foreach (var dependency in node.Dependencies)
-                if (!byKey.ContainsKey(dependency))
-                    throw new ArgumentException($"Node '{node.Key}' depends on unknown node '{dependency}'.");
+            {
+                if (!dependencies.Add(dependency.Node))
+                    throw new ArgumentException($"Node '{node.Key}' has duplicate dependency '{dependency.Node}'.");
+                if (!byKey.ContainsKey(dependency.Node))
+                    throw new ArgumentException($"Node '{node.Key}' depends on unknown node '{dependency.Node}'.");
+            }
+        }
 
         var visited = new HashSet<string>(StringComparer.Ordinal);
         var active = new HashSet<string>(StringComparer.Ordinal);
@@ -46,7 +53,7 @@ public static class DagValidator
                 path.Add(frame.Key);
                 stack.Push((frame.Key, true));
                 foreach (var dependency in byKey[frame.Key].Dependencies.Reverse())
-                    stack.Push((dependency, false));
+                    stack.Push((dependency.Node, false));
             }
         }
     }

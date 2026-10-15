@@ -17,7 +17,7 @@ public sealed class WorkflowBuilderTests
         Assert.Equal("1.0.0", definition.Version);
         Assert.Equal(["build", "deploy"], definition.Nodes.Select(n => n.Key));
         Assert.Equal(["restore", "compile"], definition.Nodes[0].Tasks.Select(t => t.Key));
-        Assert.Equal(["build"], definition.Nodes[1].Dependencies);
+        Assert.Equal(["build"], definition.Nodes[1].Dependencies.Select(d => d.Node));
         Assert.Equal(NodeExecutionMode.Series, definition.Nodes[0].Mode);
         Assert.Equal(NodeExecutionMode.Parallel, definition.Nodes[1].Mode);
         Assert.Equal(2, definition.Nodes[1].MaxParallel);
