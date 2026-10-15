@@ -182,6 +182,18 @@ is active; a second process acquires and completes it within 30 s. Disposable
 PostgreSQL stop/start and dropped wire-level COMMIT acknowledgements are tested
 separately. Shared external PostgreSQL instances are never stopped by tests.
 
+`AgentLossSweeper` shares the core liveness policy: 15 s without a heartbeat
+excludes an agent from placement, but its attempts remain reclaimable until
+30 s after that original heartbeat. Engine recovery does not add another grace
+period. At expiry, a fenced transaction classifies dispatched/running attempts
+as `AgentLost`, records the stop time/reason and removes undelivered dispatches.
+On reconnect, the gateway reconciles the full run/task/attempt identities in
+`Hello.inflight` before acknowledging Hello; omitted attempts are lost immediately,
+reported attempts remain reclaimable. Superseded sessions cannot reconcile.
+Attempt classification and dispatch removal roll back together. Retry/final
+core-task disposition belongs to the platform re-placement handler, not this
+liveness classifier.
+
 Placement is authored at workflow, node or task level with `RunsOn` and
 `Affinity`. The innermost selector replaces the whole outer selector; affinity
 inherits independently. `RunsOn()` explicitly clears constraints; `Affinity.None`

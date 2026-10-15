@@ -4,11 +4,12 @@ using System.Threading.Channels;
 using Wf.Contracts.Agent.V1;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Leadership;
+using Wf.ControlPlane.Engine.Sweeper;
 
 namespace Wf.ControlPlane.Engine.Agents;
 
 public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGatewayService> logger, RunStore? runs = null,
-    LeaseManager? leadership = null)
+    LeaseManager? leadership = null, AgentLossSweeper? losses = null)
     : AgentGateway.AgentGatewayBase
 {
     public override async Task Connect(IAsyncStreamReader<AgentMessage> requestStream,
@@ -27,6 +28,9 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
             var first = requestStream.Current;
             if (first.Sequence == 0 || first.Hello is null) throw Invalid("The first agent message must be a sequenced Hello.");
             var session = await registry.RegisterAsync(first.Hello, token);
+            CheckLeadership();
+            if (losses is not null) await losses.ReconcileAsync(session, first.Hello.Inflight, token);
+            CheckLeadership();
             logger.LogInformation("Agent {AgentId} registered.", session.AgentId);
             var received = first.Sequence;
             var acknowledgements = Channel.CreateBounded<ulong>(32);

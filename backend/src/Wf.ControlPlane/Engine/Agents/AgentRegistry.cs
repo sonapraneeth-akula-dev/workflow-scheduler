@@ -3,12 +3,13 @@ using System.Collections.Immutable;
 using Npgsql;
 using Wf.Contracts.Agent.V1;
 using Wf.ControlPlane.Engine.Leadership;
+using Wf.Engine.Core.Agents;
 
 namespace Wf.ControlPlane.Engine.Agents;
 
 public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider timeProvider, LeaseManager? leadership = null) : IDisposable
 {
-    public static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromSeconds(15);
+    public static readonly TimeSpan HeartbeatTimeout = AgentLossPolicy.UnhealthyAfter;
     private readonly ConcurrentDictionary<Guid, AgentRecord> agents = new();
     private readonly SemaphoreSlim writes = new(1, 1);
 
@@ -187,7 +188,7 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
         var inflight = new HashSet<string>(StringComparer.Ordinal);
         foreach (var attempt in hello.Inflight)
         {
-            if (!Guid.TryParse(attempt.RunId, out var run) || run == Guid.Empty || attempt.Attempt is 0 or > int.MaxValue ||
+            if (!Guid.TryParse(attempt.RunId, out var run) || run == Guid.Empty || attempt.Attempt is 0 or > 32767 ||
                 string.IsNullOrWhiteSpace(attempt.NodeKey) || string.IsNullOrWhiteSpace(attempt.TaskKey) ||
                 attempt.NodeKey.Contains('/') || attempt.TaskKey.Contains('/') ||
                 !inflight.Add($"{run}/{attempt.NodeKey}/{attempt.TaskKey}/{attempt.Attempt}"))

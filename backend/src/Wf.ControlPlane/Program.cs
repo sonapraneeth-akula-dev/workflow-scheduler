@@ -6,6 +6,7 @@ using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Events;
 using Wf.ControlPlane.Engine.Leadership;
 using Wf.ControlPlane.Engine.Recovery;
+using Wf.ControlPlane.Engine.Sweeper;
 using Wf.Engine.Core.Placement;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -31,6 +32,8 @@ builder.Services.AddSingleton<GroupCommitAppender>();
 builder.Services.AddSingleton<PlacementEngine>();
 builder.Services.AddSingleton<Dispatcher>();
 builder.Services.AddHostedService<AgentRegistryService>();
+builder.Services.AddSingleton<AgentLossSweeper>();
+builder.Services.AddHostedService<AgentLossSweeper>(services => services.GetRequiredService<AgentLossSweeper>());
 var app = builder.Build();
 app.MapGrpcService<AgentGatewayService>();
 app.MapGet("/healthz", () => Results.Ok());
