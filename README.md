@@ -27,3 +27,9 @@ assembly scanning. Contexts expose `Var<T>`, AOT-safe `VarEnum<T>`, declared
 `Input<T>`, bounded `Outputs`, cancellation, logging and injected report/artifact
 publishers. Publishing without a configured host publisher fails explicitly.
 Native AOT/trim analyzers run for the SDK and shared contracts.
+
+Core abort plans preserve the first accepted who/when/reason/source record.
+Hosts commit the initial abort event before cancelling attempts, drain active
+work, then run eligible `always` and post stages with `ctx.Abort`. Queued aborts
+skip all work; running aborts record `EndedAt` only after cleanup actually stops.
+Abort targets and the original record survive snapshot/event replay.

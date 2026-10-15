@@ -9,7 +9,8 @@ namespace Wf.Engine.Core;
 
 public sealed record RunSnapshot(Guid RunId, RunStatus Status, long LastSequence,
     ImmutableDictionary<string, ExecutionStatus> Nodes, ImmutableDictionary<string, ExecutionStatus> Tasks,
-    WorkflowMetadata Metadata, ImmutableDictionary<string, JsonElement> Variables);
+    WorkflowMetadata Metadata, ImmutableDictionary<string, JsonElement> Variables,
+    AbortRecord? Abort = null, DateTimeOffset? EndedAt = null, ImmutableArray<string> AbortTargets = default);
 
 public sealed class RunState
 {
@@ -37,6 +38,11 @@ public sealed class RunState
         ArgumentNullException.ThrowIfNull(snapshot.Nodes);
         ArgumentNullException.ThrowIfNull(snapshot.Tasks);
         ArgumentNullException.ThrowIfNull(snapshot.Variables);
+        if ((snapshot.Abort is not null && snapshot.Status is not (RunStatus.Aborting or RunStatus.Aborted)) ||
+            (snapshot.EndedAt is { } endedAt && (endedAt.Offset != TimeSpan.Zero ||
+                !TransitionTable.IsTerminal(snapshot.Status) || endedAt < snapshot.Abort?.At)) ||
+            (!snapshot.AbortTargets.IsDefault && snapshot.AbortTargets.Any(key => !snapshot.Tasks.ContainsKey(key))))
+            throw new ArgumentException("Run snapshot contains invalid abort or completion data.", nameof(snapshot));
         if (snapshot.RunId == Guid.Empty || snapshot.LastSequence < 0 || !Enum.IsDefined(snapshot.Status) ||
             snapshot.Nodes.Any(p => string.IsNullOrWhiteSpace(p.Key) || !Enum.IsDefined(p.Value)) ||
             snapshot.Tasks.Any(p => !Enum.IsDefined(p.Value) || p.Key.IndexOf('/') < 1 ||
@@ -47,6 +53,7 @@ public sealed class RunState
         {
             Nodes = snapshot.Nodes.WithComparers(StringComparer.Ordinal),
             Tasks = snapshot.Tasks.WithComparers(StringComparer.Ordinal),
+            AbortTargets = snapshot.AbortTargets.IsDefault ? [] : snapshot.AbortTargets,
             Variables = snapshot.Variables.ToImmutableDictionary(p => p.Key, p => p.Value.Clone(), StringComparer.Ordinal)
         };
     }
@@ -60,16 +67,16 @@ public sealed class RunState
         return run;
     }
 
-    public RunEvent CreateEvent(EventEntity entity, string? key, int state, DateTimeOffset at)
+    public RunEvent CreateEvent(EventEntity entity, string? key, int state, DateTimeOffset at, AbortRecord? abort = null)
     {
-        var @event = new RunEvent(Snapshot.RunId, checked(Snapshot.LastSequence + 1), at.ToUniversalTime(), entity, key, state);
+        var @event = new RunEvent(Snapshot.RunId, checked(Snapshot.LastSequence + 1), at.ToUniversalTime(), entity, key, state, abort);
         Validate(@event);
         return @event;
     }
 
-    public RunEvent Append(EventEntity entity, string? key, int state, DateTimeOffset at)
+    public RunEvent Append(EventEntity entity, string? key, int state, DateTimeOffset at, AbortRecord? abort = null)
     {
-        var @event = CreateEvent(entity, key, state, at);
+        var @event = CreateEvent(entity, key, state, at, abort);
         Apply(@event);
         return @event;
     }
@@ -80,7 +87,16 @@ public sealed class RunState
         Validate(@event);
         Snapshot = @event.Entity switch
         {
-            EventEntity.Run => Snapshot with { Status = (RunStatus)@event.State, LastSequence = @event.Sequence },
+            EventEntity.Run => Snapshot with
+            {
+                Status = (RunStatus)@event.State, LastSequence = @event.Sequence,
+                Abort = @event.Abort ?? Snapshot.Abort,
+                AbortTargets = @event.Abort is not null
+                    ? Snapshot.Tasks.Where(p => p.Value is ExecutionStatus.Dispatched or ExecutionStatus.Running or ExecutionStatus.Retrying)
+                        .Select(p => p.Key).Order(StringComparer.Ordinal).ToImmutableArray()
+                    : Snapshot.AbortTargets,
+                EndedAt = TransitionTable.IsTerminal((RunStatus)@event.State) ? @event.At : null
+            },
             EventEntity.Node => Snapshot with
                 { Nodes = Snapshot.Nodes.SetItem(@event.Key!, (ExecutionStatus)@event.State), LastSequence = @event.Sequence },
             EventEntity.Task => Snapshot with
@@ -96,6 +112,13 @@ public sealed class RunState
             Reject($"Run '{Snapshot.RunId}' expected event sequence {Snapshot.LastSequence + 1} for the same run.");
         if (@event.At.Offset != TimeSpan.Zero)
             Reject("Event timestamps must use UTC.");
+        if (@event.Abort is { } abort && (@event.Entity != EventEntity.Run || Snapshot.Abort is not null ||
+                (Snapshot.Status, (RunStatus)@event.State) is not
+                    ((RunStatus.Queued, RunStatus.Aborted) or (RunStatus.Running, RunStatus.Aborting)) ||
+                abort.At > @event.At))
+            Reject("An abort record can only be set once, on the initial abort transition, at or after acceptance.");
+        if (Snapshot.Abort is { } accepted && @event.At < accepted.At)
+            Reject("An event cannot precede the accepted abort time.");
         if (TransitionTable.IsTerminal(Snapshot.Status))
             Reject($"Run '{Snapshot.RunId}' is terminal ({Snapshot.Status}); late events are rejected.");
         switch (@event.Entity)

@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text.Json.Serialization.Metadata;
+using Wf.Contracts;
 using Wf.Contracts.Definition;
 
 namespace Wf.Sdk;
@@ -15,13 +16,15 @@ public sealed class TaskContext
     public NodeOutputs Outputs { get; }
     public string? TaskKey { get; }
     public Action<string> Logger { get; }
+    public AbortRecord? Abort { get; }
     public IReports Reports => reports ?? throw new NotSupportedException("Report publishing is not configured for this task host.");
     public IArtifacts Artifacts => artifacts ?? throw new NotSupportedException("Artifact publishing is not configured for this task host.");
 
     public TaskContext(CancellationToken cancellationToken = default,
         IReadOnlyDictionary<string, object>? variables = null, NodeOutputs? outputs = null,
         IReadOnlyDictionary<string, NodeOutputs>? inputs = null, IEnumerable<InputBinding>? declaredInputs = null,
-        Action<string>? logger = null, IReports? reports = null, IArtifacts? artifacts = null, string? taskKey = null)
+        Action<string>? logger = null, IReports? reports = null, IArtifacts? artifacts = null, string? taskKey = null,
+        AbortRecord? abort = null)
     {
         CancellationToken = cancellationToken;
         Outputs = outputs ?? new("task");
@@ -34,10 +37,11 @@ public sealed class TaskContext
         this.reports = reports;
         this.artifacts = artifacts;
         TaskKey = taskKey;
+        Abort = abort;
     }
 
     internal TaskContext ForTask(string key) => new(CancellationToken, variables, Outputs, inputs,
-        declaredInputs, Logger, reports, artifacts, key);
+        declaredInputs, Logger, reports, artifacts, key, Abort);
 
     public void Log(string message)
     {
