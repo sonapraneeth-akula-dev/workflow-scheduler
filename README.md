@@ -46,3 +46,15 @@ cancellation beyond grace causes an explicit error, not a false terminal result:
 an in-process host cannot forcibly kill managed code. Process isolation belongs
 to the task-host backlog; built-in command cancellation kills and reaps its own
 process tree.
+
+## Benchmarks
+
+```powershell
+dotnet run -c Release --project backend\tests\Wf.Benchmarks -- --filter '*Describe*'
+```
+
+The precompiled 200-node description benchmark exports full JSON and fails when
+p95 reaches 1 second or measurements are missing. Workflow construction and
+compilation are outside the measured operation. A local Windows measurement on
+October 15, 2026: mean 0.483 ms, p95 0.524 ms. Generated reports stay under
+`BenchmarkDotNet.Artifacts` and are ignored by git; results depend on the machine.

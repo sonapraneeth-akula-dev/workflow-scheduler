@@ -2,6 +2,7 @@
 **/obj/
 **/TestResults/
 **/coverage/
+**/BenchmarkDotNet.Artifacts/
 .vs/
 .idea/
 node_modules/

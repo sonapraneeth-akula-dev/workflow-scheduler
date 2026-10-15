@@ -9,6 +9,38 @@ namespace Wf.Sdk.Tests;
 public sealed class ManifestSnapshotTests
 {
     [Fact]
+    public void TwoHundredNodeDescribePreservesEveryNodeTaskAndDependencyWithoutExecution()
+    {
+        var calls = 0;
+        var workflow = Workflow.Define("benchmark-describe", "1", w =>
+        {
+            w.Type("benchmark").Metadata("area", "description").Variables(v => v.String("env", "dev"));
+            for (var index = 0; index < 200; index++)
+                w.Node($"node-{index}", n =>
+                {
+                    if (index > 0)
+                        n.DependsOn($"node-{index - 1}");
+                    n.Task("work", _ => { calls++; });
+                });
+        });
+        var bytes = ManifestWriter.WriteUtf8(workflow);
+        var manifest = JsonSerializer.Deserialize(bytes, WorkflowManifestJsonContext.Default.WorkflowManifest)!;
+        Assert.Equal(200, manifest.Nodes.Length);
+        for (var index = 0; index < manifest.Nodes.Length; index++)
+        {
+            var node = manifest.Nodes[index];
+            Assert.Equal($"node-{index}", node.Key);
+            Assert.Equal("work", Assert.Single(node.Tasks).Key);
+            if (index == 0)
+                Assert.Empty(node.Dependencies);
+            else
+                Assert.Equal($"node-{index - 1}", Assert.Single(node.Dependencies).Node);
+        }
+        Assert.Equal(bytes, ManifestWriter.WriteUtf8(workflow));
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
     public void ManifestMatchesGoldenFile()
     {
         var workflow = Workflow.Define("payments/release/deploy", "1.0.0",
