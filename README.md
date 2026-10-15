@@ -465,6 +465,13 @@ Elapsed intervals must advance from the last intended fire, not scheduler poll
 time. Hosts need ICU/timezone data; schedule persistence, APIs and the leader
 scheduler remain separate tasks.
 
+`Wf.Engine.Core.Scheduling.OverlapPolicy.Decide(activeRuns, policy)` reuses the
+schedule contract's Skip/Queue/Concurrent values. With no other nonterminal run
+in the same series it returns Start; otherwise default Skip, Queue, or Start
+for Concurrent. Count queued runs too, excluding the candidate itself.
+Decisions are pure and reject invalid policies/counts. Durable skipped-fire
+history and FIFO queued-run release belong to the leader scheduler tasks.
+
 ## Workflow project template
 
 Pack `backend\src\Wf.Templates\Wf.Templates.csproj`, install the resulting NuGet
