@@ -27,6 +27,14 @@ public static class DagValidator
                 if (!byKey.ContainsKey(dependency.Node))
                     throw new ArgumentException($"Node '{node.Key}' depends on unknown node '{dependency.Node}'.");
             }
+            var inputs = new HashSet<InputBinding>();
+            foreach (var input in node.Inputs)
+            {
+                if (!dependencies.Contains(input.Node))
+                    throw new ArgumentException($"Node '{node.Key}' reads output '{input.Key}' from non-dependency node '{input.Node}'.");
+                if (!inputs.Add(input))
+                    throw new ArgumentException($"Node '{node.Key}' has duplicate input '{input.Node}/{input.Key}'.");
+            }
         }
 
         var visited = new HashSet<string>(StringComparer.Ordinal);

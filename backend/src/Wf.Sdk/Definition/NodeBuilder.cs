@@ -7,6 +7,7 @@ public sealed class NodeBuilder
 {
     private readonly List<DependencyDefinition> dependencies = [];
     private readonly List<TaskDefinition> tasks = [];
+    private readonly List<InputBinding> inputs = [];
     private readonly List<KeyValuePair<string, Func<TaskContext, Task>>> handlers = [];
     private NodeExecutionMode mode;
     private int? maxParallel;
@@ -37,6 +38,14 @@ public sealed class NodeBuilder
         if (!Enum.IsDefined(policy))
             throw new ArgumentOutOfRangeException(nameof(policy));
         failure = policy;
+        return this;
+    }
+
+    public NodeBuilder Input(string node, string key)
+    {
+        WorkflowBuilder.ValidateKey(node);
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        inputs.Add(new(node, key));
         return this;
     }
 
@@ -73,5 +82,5 @@ public sealed class NodeBuilder
     }
 
     internal NodeDefinition Build() => new(Key, dependencies.ToImmutableArray(), tasks.ToImmutableArray(),
-        mode, maxParallel, failure);
+        mode, maxParallel, failure, inputs.ToImmutableArray());
 }

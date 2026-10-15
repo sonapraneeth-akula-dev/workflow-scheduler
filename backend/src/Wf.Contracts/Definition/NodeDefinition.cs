@@ -27,10 +27,11 @@ public sealed record NodeDefinition
     public NodeExecutionMode Mode { get; }
     public int? MaxParallel { get; }
     public FailurePolicy Failure { get; }
+    public ImmutableArray<InputBinding> Inputs { get; }
 
     public NodeDefinition(string key, ImmutableArray<DependencyDefinition> dependencies, ImmutableArray<TaskDefinition> tasks,
         NodeExecutionMode mode = NodeExecutionMode.Series, int? maxParallel = null,
-        FailurePolicy failure = FailurePolicy.Hard)
+        FailurePolicy failure = FailurePolicy.Hard, ImmutableArray<InputBinding> inputs = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         if (dependencies.IsDefault || tasks.IsDefault)
@@ -49,5 +50,6 @@ public sealed record NodeDefinition
         Mode = mode;
         MaxParallel = maxParallel;
         Failure = failure;
+        Inputs = inputs.IsDefault ? [] : inputs;
     }
 }
