@@ -1,9 +1,10 @@
 using System.Threading.Channels;
+using Wf.Agent.Journal;
 using Wf.Contracts.Agent.V1;
 
 namespace Wf.Agent;
 
-public sealed class AgentOutbox
+public sealed class AgentOutbox : IDisposable
 {
     private readonly object gate = new();
     private readonly SortedDictionary<ulong, AgentMessage> pending = [];
@@ -12,15 +13,35 @@ public sealed class AgentOutbox
         FullMode = BoundedChannelFullMode.DropOldest
     });
     private ulong sequence;
+    private ulong leaderEpoch;
+    private readonly ResultJournal? journal;
+
+    public AgentOutbox(ResultJournal? journal = null)
+    {
+        this.journal = journal;
+        sequence = journal?.Sequence ?? 0;
+        leaderEpoch = journal?.LeaderEpoch ?? 0;
+        foreach (var message in journal?.Pending ?? [])
+            pending.Add(message.Sequence, message.Clone());
+    }
 
     public AgentMessage CreateHello(Hello hello)
     {
+        ArgumentNullException.ThrowIfNull(hello);
         lock (gate)
+        {
+            var next = pending.Count == 0 ? checked(sequence + 1) : pending.First().Key - 1;
+            if (next > sequence)
+            {
+                Persist(next, leaderEpoch, pending.Values);
+                sequence = next;
+            }
             return new AgentMessage
             {
-                Sequence = pending.Count == 0 ? checked(++sequence) : pending.First().Key - 1,
+                Sequence = next,
                 Hello = hello
             };
+        }
     }
 
     public void Enqueue(AgentMessage message)
@@ -31,9 +52,15 @@ public sealed class AgentOutbox
             throw new ArgumentException("Only task events and heartbeats belong in the agent outbox.", nameof(message));
         lock (gate)
         {
-            if (sequence == 0) sequence = 1;
             var copy = message.Clone();
-            copy.Sequence = checked(++sequence);
+            copy.Sequence = checked(Math.Max(sequence, 1) + 1);
+            if (journal is not null && copy.Heartbeat is null) ResultJournal.Validate(copy);
+            Persist(copy.Sequence, leaderEpoch, pending.Values.Append(copy));
+            sequence = copy.Sequence;
+            // Only the latest heartbeat is useful after a disconnection; task events are never dropped.
+            if (copy.Heartbeat is not null)
+                foreach (var key in pending.Where(pair => pair.Value.Heartbeat is not null).Select(pair => pair.Key).ToArray())
+                    pending.Remove(key);
             pending.Add(copy.Sequence, copy);
         }
         changed.Writer.TryWrite(true);
@@ -47,14 +74,47 @@ public sealed class AgentOutbox
 
     public void Acknowledge(Ack acknowledgement)
     {
+        ArgumentNullException.ThrowIfNull(acknowledgement);
         lock (gate)
         {
             if (acknowledgement.Sequence == 0 || acknowledgement.Sequence > sequence || acknowledgement.LeaderEpoch != 0)
                 throw new InvalidDataException("Invalid acknowledgement of agent messages.");
+            Persist(sequence, leaderEpoch, pending.Where(pair => pair.Key > acknowledgement.Sequence).Select(pair => pair.Value));
             foreach (var key in pending.Keys.TakeWhile(key => key <= acknowledgement.Sequence).ToArray())
                 pending.Remove(key);
         }
     }
+
+    public void ObserveLeaderEpoch(ulong epoch)
+    {
+        lock (gate)
+        {
+            if (epoch == 0 || epoch < leaderEpoch) throw new InvalidDataException("Control message is from a stale leader.");
+            if (epoch == leaderEpoch) return;
+            Persist(sequence, epoch, pending.Values);
+            leaderEpoch = epoch;
+        }
+    }
+
+    public bool ContainsResult(AttemptRef task)
+    {
+        lock (gate)
+            return pending.Values.Any(message => message.TaskCompleted?.Task is { } result &&
+                Guid.TryParse(result.RunId, out var run) && Guid.TryParse(task.RunId, out var expected) &&
+                run == expected && result.NodeKey == task.NodeKey && result.TaskKey == task.TaskKey && result.Attempt == task.Attempt);
+    }
+
+    public IReadOnlyList<AttemptRef> UnacknowledgedAttempts()
+    {
+        lock (gate)
+            return pending.Values.Select(message => message.TaskStarted?.Task ?? message.TaskCompleted?.Task)
+                .OfType<AttemptRef>().Select(task => task.Clone()).ToArray();
+    }
+
+    private void Persist(ulong next, ulong epoch, IEnumerable<AgentMessage> messages) =>
+        journal?.Save(next, epoch, messages.Where(message => message.Heartbeat is null).ToArray());
+
+    public void Dispose() => journal?.Dispose();
 
     public async Task WaitForChangeAsync(CancellationToken cancellationToken) =>
         _ = await changed.Reader.ReadAsync(cancellationToken);

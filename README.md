@@ -293,8 +293,20 @@ Agent-role token acquisition is a separate authentication backlog item.
 Dispatch and cancel commands run asynchronously, so downloads and user tasks do
 not block heartbeats or stream reception. Replayed attempts are deduplicated
 within the agent process. Started/completed messages retain their sequence until
-acknowledged and replay on reconnect; this queue is in memory, not yet the durable
-result journal. Drain, restart recovery and host re-adoption follow separately.
+acknowledged and replay on reconnect or process restart. Production uses an
+owner-only, checksummed result journal under the user's local application data
+`wf\agents\<agent-UUID>\results`; override with `Agent__ResultJournalDirectory`.
+Atomic flushed snapshots retain sequence high-water marks, observed leader epoch
+and unACKed results before send; completion is durable before the task host ACK.
+Only a valid current-connection/current-leader ACK removes offered records.
+Limits are 4,096 records, 1 MiB per record and 32 MiB total; corruption, disk
+failure and exhausted capacity fail explicitly rather than dropping results.
+Hello includes both running attempts and every unACKed result, even when this
+logical backlog exceeds physical task slots. The registry bounds it to 8,192
+attempts and a 1 MiB protocol frame; physical slots remain clamped to MaxTasks
+until a heartbeat reports actual usage. Replayed terminal results are ACKed
+without a second event or changed outputs. Drain and live-host re-adoption
+remain separate tasks.
 
 `TaskHostPool` prewarms compiled workflow processes and verifies their PID,
 protocol and workflow version over owner-only Unix domain sockets on Windows
@@ -305,7 +317,7 @@ inputs and bounded outputs; completion waits for acknowledgement before exit.
 Cancellation is cooperative first, then kills that host's process tree after
 grace (default 30 seconds). Workflow hosts use ordinary, untrimmed .NET IL, not
 Native AOT, and require the ASP.NET Core runtime. Resource-limit enforcement and
-durable result recovery remain separate backlog items. The sample accepts
+live-host re-adoption remain separate backlog items. The sample accepts
 `--task-host --socket <path>`; normal local execution is unchanged.
 
 `PackageCache` downloads immutable ZIP packages into SHA-256-addressed directories.

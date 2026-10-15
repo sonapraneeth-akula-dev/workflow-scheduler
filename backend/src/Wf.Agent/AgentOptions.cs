@@ -13,10 +13,11 @@ public sealed class AgentOptions
     public uint MaxTasks { get; }
     public IReadOnlyDictionary<string, string> Labels { get; }
     public TimeSpan HeartbeatInterval { get; }
+    public string ResultJournalDirectory { get; }
 
     public AgentOptions(IEnumerable<Uri> engines, string id, string name, string pool, uint maxTasks,
         IReadOnlyDictionary<string, string>? labels = null, TimeSpan? heartbeatInterval = null,
-        bool allowInsecureTransport = false)
+        bool allowInsecureTransport = false, string? resultJournalDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(engines);
         var endpoints = engines.Distinct().ToArray();
@@ -52,6 +53,8 @@ public sealed class AgentOptions
         MaxTasks = maxTasks;
         Labels = new ReadOnlyDictionary<string, string>(copiedLabels);
         HeartbeatInterval = interval;
+        ResultJournalDirectory = Path.GetFullPath(resultJournalDirectory ??
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wf", "agents", identity.ToString("N"), "results"));
     }
 
     public static AgentOptions FromConfiguration(IConfiguration configuration)
@@ -68,6 +71,7 @@ public sealed class AgentOptions
             section["Name"] ?? Environment.MachineName, section["Pool"] ?? "default", maxTasks,
             section.GetSection("Labels").GetChildren().ToDictionary(item => item.Key,
                 item => item.Value ?? throw new ArgumentException("An agent label is empty."), StringComparer.Ordinal),
-            allowInsecureTransport: section["AllowInsecureTransport"] is { } insecure && bool.Parse(insecure));
+            allowInsecureTransport: section["AllowInsecureTransport"] is { } insecure && bool.Parse(insecure),
+            resultJournalDirectory: section["ResultJournalDirectory"]);
     }
 }

@@ -4,6 +4,7 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Wf.Agent.Hosts;
+using Wf.Agent.Journal;
 using Wf.Contracts.Agent.V1;
 using Wf.TaskHost.Fixture;
 
@@ -42,6 +43,38 @@ public sealed class TaskHostPoolTests
         Assert.Equal(pid, outputs.RootElement.GetProperty("pid").GetInt32());
         Assert.Equal("work/echo", outputs.RootElement.GetProperty("taskKey").GetString());
         AssertStopped(pid);
+    }
+
+    [Fact]
+    public async Task Result_is_durable_before_host_acknowledgement_allows_process_exit()
+    {
+        var root = Path.GetFullPath(Path.Combine(".agent-artifacts", "host-journal-tests", Guid.NewGuid().ToString("N")));
+        var id = Guid.NewGuid().ToString();
+        var dispatch = Dispatch();
+        try
+        {
+            await using var pool = Pool();
+            await pool.PrewarmAsync(Package, TestContext.Current.CancellationToken);
+            var pid = Assert.Single(pool.WarmProcessIds);
+            using (var outbox = new AgentOutbox(new ResultJournal(root, id)))
+            {
+                var called = false;
+                var result = await pool.ExecuteAsync(Package, dispatch, cancellationToken: TestContext.Current.CancellationToken,
+                    journalResult: completed =>
+                    {
+                        using var host = Process.GetProcessById(pid);
+                        Assert.False(host.HasExited);
+                        outbox.Enqueue(new AgentMessage { TaskCompleted = completed });
+                        called = true;
+                    });
+                Assert.True(called);
+                Assert.Equal(result, outbox.NextAfter(0)!.TaskCompleted);
+                AssertStopped(pid);
+            }
+            using var restored = new AgentOutbox(new ResultJournal(root, id));
+            Assert.Equal(dispatch.Task, restored.NextAfter(0)!.TaskCompleted.Task);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
     }
 
     [Fact]

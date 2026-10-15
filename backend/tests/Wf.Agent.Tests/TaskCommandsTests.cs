@@ -3,6 +3,7 @@ using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Wf.Agent;
 using Wf.Agent.Hosts;
+using Wf.Agent.Journal;
 using Wf.Contracts.Agent.V1;
 
 namespace Wf.Agent.Tests;
@@ -60,6 +61,33 @@ public sealed class TaskCommandsTests
         await commands.HandleAsync(dispatch, TestContext.Current.CancellationToken);
         Assert.Equal(1, cache.Handler.Count);
         Assert.Equal(0, hosts.ProcessStartCount);
+    }
+
+    [Fact]
+    public async Task Persisted_completion_suppresses_redispatch_after_new_journal_and_command_objects()
+    {
+        var root = Path.GetFullPath(Path.Combine(".agent-artifacts", "command-journal-tests", Guid.NewGuid().ToString("N")));
+        var id = Guid.NewGuid().ToString();
+        try
+        {
+            await using var cache = new PackageCacheTests.CacheFixture([]);
+            await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
+            var dispatch = Dispatch(cache.Sha);
+            using (var original = new AgentOutbox(new ResultJournal(root, id)))
+                original.Enqueue(new AgentMessage { TaskCompleted = new TaskCompleted
+                {
+                    Task = dispatch.Dispatch.Task.Clone(), Outcome = TaskOutcome.Succeeded,
+                    At = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow)
+                } });
+            using var restored = new AgentOutbox(new ResultJournal(root, id));
+            await using var commands = Create(cache, hosts, restored);
+            await commands.HandleAsync(dispatch, TestContext.Current.CancellationToken);
+            Assert.Empty(commands.Inflight);
+            Assert.Equal(0, cache.Handler.Count);
+            Assert.Equal(0, hosts.ProcessStartCount);
+            Assert.NotNull(restored.NextAfter(0)!.TaskCompleted);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
     }
 
     [Theory]

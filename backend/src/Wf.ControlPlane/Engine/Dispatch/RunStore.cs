@@ -12,6 +12,7 @@ using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Leadership;
 using Wf.Engine.Core;
 using Wf.Engine.Core.StateMachine;
+using Wf.Engine.Core.Results;
 using DispatchCommand = Wf.Contracts.Agent.V1.Dispatch;
 
 namespace Wf.ControlPlane.Engine.Dispatch;
@@ -161,28 +162,13 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
     public async Task AcceptAsync(AgentSession session, AgentMessage message, CancellationToken cancellationToken)
     {
         var reference = message.TaskStarted?.Task ?? message.TaskCompleted?.Task;
-        if (reference is null || !Guid.TryParse(reference.RunId, out var runId) || runId == Guid.Empty ||
-            string.IsNullOrWhiteSpace(reference.NodeKey) || reference.NodeKey.Contains('/') ||
-            string.IsNullOrWhiteSpace(reference.TaskKey) || reference.TaskKey.Contains('/') ||
-            reference.Attempt is 0 or > 32767)
-            throw new ArgumentException("Task event requires a valid attempt.", nameof(message));
+        var identity = ResultDeduplicator.Identity(reference);
+        var runId = identity.RunId;
         var at = (message.TaskStarted?.At ?? message.TaskCompleted?.At)?.ToDateTimeOffset()
             ?? throw new ArgumentException("Task event requires a timestamp.", nameof(message));
-        var taskKey = $"{reference.NodeKey}/{reference.TaskKey}";
+        var taskKey = identity.TaskKey;
         var completed = message.TaskCompleted;
-        if (completed is not null)
-        {
-            if (completed.Outcome == TaskOutcome.Unspecified || !Enum.IsDefined(completed.Outcome) ||
-                completed.OutputsJson.Length > 64 * 1024 ||
-                Encoding.UTF8.GetByteCount(completed.Error?.Message ?? "") > 4096)
-                throw new ArgumentException("Task result contains an invalid outcome or oversized payload.", nameof(message));
-            if (completed.OutputsJson.Length > 0)
-            {
-                using var outputs = JsonDocument.Parse(completed.OutputsJson.Memory);
-                if (outputs.RootElement.ValueKind != JsonValueKind.Object)
-                    throw new ArgumentException("Task outputs must be a JSON object.", nameof(message));
-            }
-        }
+        if (completed is not null) ResultDeduplicator.Validate(completed);
         var lease = CaptureLease();
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -201,12 +187,11 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
         {
             attempt.Parameters.AddWithValue(runId);
             attempt.Parameters.AddWithValue(taskKey);
-            attempt.Parameters.AddWithValue((short)reference.Attempt);
+            attempt.Parameters.AddWithValue(identity.Attempt);
             attempt.Parameters.AddWithValue(session.AgentId);
             if (await attempt.ExecuteScalarAsync(cancellationToken) is not short status)
                 throw new ArgumentException("Task event does not match an attempt assigned to this agent.", nameof(message));
-            if (TransitionTable.IsTerminal((ExecutionStatus)status) ||
-                message.TaskStarted is not null && (ExecutionStatus)status == ExecutionStatus.Running)
+            if (ResultDeduplicator.IsDuplicate((ExecutionStatus)status, completed is not null))
                 return;
         }
         var target = completed?.Outcome switch
@@ -229,13 +214,13 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
                 started_at=CASE WHEN $4=3 THEN $5 ELSE started_at END,
                 ended_at=CASE WHEN $4>=5 THEN $5 ELSE ended_at END,error=$6
             WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 AND attempt=$3
-            """, cancellationToken, runId, taskKey, (short)reference.Attempt, (short)target, at,
+            """, cancellationToken, runId, taskKey, identity.Attempt, (short)target, at,
             (object?)completed?.Error?.Message ?? DBNull.Value);
         if (completed is { Outcome: TaskOutcome.Succeeded, OutputsJson.Length: > 0 })
             await ExecuteAsync(connection, """
                 UPDATE node_runs SET outputs=COALESCE(outputs,'{}'::jsonb) || $3::jsonb
                 WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND node_key=$2
-                """, cancellationToken, runId, reference.NodeKey, completed.OutputsJson.ToStringUtf8());
+                """, cancellationToken, runId, reference!.NodeKey, completed.OutputsJson.ToStringUtf8());
         await transaction.CommitAsync(cancellationToken);
     }
 

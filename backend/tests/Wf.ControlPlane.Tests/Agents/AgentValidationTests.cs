@@ -62,6 +62,33 @@ public sealed class AgentValidationTests
         Assert.NotEqual(Guid.Empty, agent.SessionId);
     }
 
+    [Fact]
+    public void Logical_result_backlog_may_exceed_physical_slots_without_truncation()
+    {
+        var hello = ValidHello();
+        for (var index = 0; index < AgentRegistry.MaximumHelloAttempts; index++)
+            hello.Inflight.Add(new AttemptRef { RunId = Guid.NewGuid().ToString(), NodeKey = "n", TaskKey = "t", Attempt = 1 });
+        var agent = AgentRegistry.ValidateHello(hello, DateTimeOffset.UnixEpoch);
+        Assert.Equal((int)hello.MaxTasks, agent.SlotsUsed);
+        Assert.Equal(AgentRegistry.MaximumHelloAttempts, hello.Inflight.Count);
+        hello.Inflight.Add(new AttemptRef { RunId = Guid.NewGuid().ToString(), NodeKey = "n", TaskKey = "t", Attempt = 1 });
+        var error = Assert.Throws<ArgumentException>(() => AgentRegistry.ValidateHello(hello, DateTimeOffset.UnixEpoch));
+        Assert.Contains("inventory", error.Message);
+    }
+
+    [Fact]
+    public void Logical_inventory_is_bounded_by_the_actual_protocol_frame_size()
+    {
+        var hello = ValidHello();
+        hello.Inflight.Add(new AttemptRef
+        {
+            RunId = Guid.NewGuid().ToString(), NodeKey = new string('n', AgentRegistry.MaximumHelloMessageBytes),
+            TaskKey = "t", Attempt = 1
+        });
+        var error = Assert.Throws<ArgumentException>(() => AgentRegistry.ValidateHello(hello, DateTimeOffset.UnixEpoch));
+        Assert.Contains("message-size", error.Message);
+    }
+
     private static Hello ValidHello() => new()
     {
         Id = Guid.NewGuid().ToString(), Name = "worker", Os = "linux", Arch = "x64", Cores = 4,

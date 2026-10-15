@@ -70,6 +70,27 @@ public sealed class RegistrationTests(AgentDatabase database) : IClassFixture<Ag
     }
 
     [Fact]
+    public async Task Reconnect_persists_clamped_slots_for_a_larger_unacknowledged_result_inventory()
+    {
+        var clock = new ManualClock();
+        using var registry = new AgentRegistry(database.DataSource, clock);
+        var hello = Hello();
+        hello.MaxTasks = 1;
+        hello.Inflight.Add(new AttemptRef { RunId = Guid.NewGuid().ToString(), NodeKey = "n", TaskKey = "t", Attempt = 1 });
+        hello.Inflight.Add(new AttemptRef { RunId = Guid.NewGuid().ToString(), NodeKey = "n", TaskKey = "t", Attempt = 1 });
+        var session = await registry.RegisterAsync(hello, TestContext.Current.CancellationToken);
+        Assert.Equal(1, registry.Find(session.AgentId)!.SlotsUsed);
+        Assert.Equal(2, hello.Inflight.Count);
+        using var rebuilt = new AgentRegistry(database.DataSource, clock);
+        await rebuilt.LoadAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1, rebuilt.Find(session.AgentId)!.SlotsUsed);
+        var heartbeat = Heartbeat();
+        heartbeat.SlotsUsed = 0;
+        Assert.True(await registry.HeartbeatAsync(session, heartbeat, TestContext.Current.CancellationToken));
+        Assert.Equal(0, registry.Find(session.AgentId)!.SlotsUsed);
+    }
+
+    [Fact]
     public async Task Superseded_connection_cannot_refresh_a_new_session_or_its_database_record()
     {
         var clock = new ManualClock();

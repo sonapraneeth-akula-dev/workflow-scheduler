@@ -1,4 +1,6 @@
 using System.Collections.Immutable;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
@@ -6,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
+using Grpc.Core;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -18,12 +21,14 @@ using Npgsql;
 using Wf.Agent;
 using Wf.Agent.Hosts;
 using Wf.Agent.Packages;
+using Wf.Agent.Journal;
 using Wf.Contracts;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
 using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Dispatch;
+using Wf.ControlPlane.Engine.Sweeper;
 using Wf.Engine.Core;
 using Wf.Engine.Core.Placement;
 using Wf.Engine.Core.Scheduling;
@@ -143,6 +148,264 @@ public sealed class DispatchTests(DispatchDatabase database) : IClassFixture<Dis
         Assert.Equal(completed.Snapshot.LastSequence, (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot.LastSequence);
         var foreign = await registry.RegisterAsync(Hello(), Token);
         await Assert.ThrowsAsync<ArgumentException>(() => store.AcceptAsync(foreign, result, Token));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ResultJournal_replays_after_agent_process_kill_and_database_ignores_the_already_committed_result(bool offlineResult)
+    {
+        using var registry = new AgentRegistry(database.DataSource, TimeProvider.System);
+        var identity = Hello();
+        identity.MaxTasks = 1;
+        var initial = await registry.RegisterAsync(identity, Token);
+        using var dispatcher = CreateDispatcher(registry);
+        var run = await CreateRun();
+        await Ready(run, "source/noop");
+        if (offlineResult) await Dispatch(dispatcher, run, "source", "noop");
+        var reference = new AttemptRef
+        {
+            RunId = run.Snapshot.RunId.ToString(), NodeKey = "source", TaskKey = "noop", Attempt = 1
+        };
+        var expectedAttempts = new List<AttemptRef> { reference };
+        RunState? previouslyAccepted = null;
+        RunState? additionalRun = null;
+        var root = Path.GetFullPath(Path.Combine(".agent-artifacts", "jr", Guid.NewGuid().ToString("N")[..16]));
+        Directory.CreateDirectory(root);
+        var journalPath = Path.Combine(root, "journal");
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var losses = new AgentLossSweeper(database.DataSource, registry, TimeProvider.System,
+            NullLogger<AgentLossSweeper>.Instance);
+        var service = new ResultJournalGateway(new AgentGatewayService(registry,
+            NullLogger<AgentGatewayService>.Instance, store, losses: losses), held, offlineResult ? 2 : 1);
+        var packageBytes = offlineResult ? [] : await Package();
+        var packageBuilder = WebApplication.CreateBuilder();
+        packageBuilder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+        await using var packages = packageBuilder.Build();
+        packages.MapGet("/package.zip", () => Results.Bytes(packageBytes, "application/zip"));
+        await packages.StartAsync(Token);
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, listen => listen.Protocols = HttpProtocols.Http2));
+        builder.Services.AddGrpc();
+        builder.Services.AddSingleton(service);
+        await using var gateway = builder.Build();
+        gateway.MapGrpcService<ResultJournalGateway>();
+        await gateway.StartAsync(Token);
+        try
+        {
+            if (offlineResult)
+            {
+                using var journal = new AgentOutbox(new ResultJournal(journalPath, identity.Id));
+                journal.Enqueue(new AgentMessage { TaskStarted = new TaskStarted
+                {
+                    Task = reference.Clone(), At = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow)
+                } });
+                journal.Enqueue(new AgentMessage { TaskCompleted = new TaskCompleted
+                {
+                    Task = reference.Clone(), At = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow),
+                    Outcome = TaskOutcome.Succeeded, OutputsJson = ByteString.CopyFromUtf8("""{"durable":42}""")
+                } });
+                await store.AcceptAsync(initial, journal.NextAfter(1)!, Token);
+                await store.AcceptAsync(initial, journal.NextAfter(2)!, Token);
+                previouslyAccepted = await store.LoadAsync(run.Snapshot.RunId, Token);
+                additionalRun = await CreateRun();
+                await Ready(additionalRun, "source/noop");
+                using var nextDispatcher = CreateDispatcher(registry);
+                Assert.NotNull((await Dispatch(nextDispatcher, additionalRun, "source", "noop")).Agent);
+                var additional = reference.Clone();
+                additional.RunId = additionalRun.Snapshot.RunId.ToString();
+                expectedAttempts.Add(additional);
+                journal.Enqueue(new AgentMessage { TaskStarted = new TaskStarted
+                {
+                    Task = additional.Clone(), At = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow)
+                } });
+                journal.Enqueue(new AgentMessage { TaskCompleted = new TaskCompleted
+                {
+                    Task = additional.Clone(), At = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow),
+                    Outcome = TaskOutcome.Succeeded, OutputsJson = ByteString.CopyFromUtf8("""{"durable":43}""")
+                } });
+            }
+            var executable = Environment.GetEnvironmentVariable("WF_AGENT_EXECUTABLE");
+            if (executable is not null) Assert.True(File.Exists(executable), $"Agent executable not found: {executable}");
+            Process Start()
+            {
+                var start = new ProcessStartInfo(executable ?? "dotnet")
+                {
+                    UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
+                    WorkingDirectory = root
+                };
+                if (executable is null)
+                {
+                    start.ArgumentList.Add("exec");
+                    start.ArgumentList.Add("--runtimeconfig");
+                    start.ArgumentList.Add(Path.ChangeExtension(typeof(DispatchTests).Assembly.Location, ".runtimeconfig.json"));
+                    start.ArgumentList.Add("--depsfile");
+                    start.ArgumentList.Add(Path.ChangeExtension(typeof(DispatchTests).Assembly.Location, ".deps.json"));
+                    start.ArgumentList.Add(typeof(AgentConnection).Assembly.Location);
+                }
+                foreach (var key in start.Environment.Keys.Where(key => key.StartsWith("Agent__", StringComparison.OrdinalIgnoreCase)).ToArray())
+                    start.Environment.Remove(key);
+                start.Environment["Agent__Id"] = identity.Id;
+                start.Environment["Agent__Name"] = identity.Name;
+                start.Environment["Agent__Engines__0"] = Address(gateway).ToString();
+                start.Environment["Agent__ResultJournalDirectory"] = journalPath;
+                start.Environment["Agent__PackageCache"] = Path.Combine(root, "packages");
+                start.Environment["Agent__MaxTasks"] = identity.MaxTasks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                return Process.Start(start)!;
+            }
+            async Task Stop(Process process, Task<string> stdout, Task<string> stderr)
+            {
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync(Token);
+                await Task.WhenAll(stdout, stderr);
+            }
+            using (var first = Start())
+            {
+                var stdout = first.StandardOutput.ReadToEndAsync(Token);
+                var stderr = first.StandardError.ReadToEndAsync(Token);
+                try
+                {
+                    if (!offlineResult)
+                    {
+                        await Wait(() => Task.FromResult(registry.Find(Guid.Parse(identity.Id))?.SessionId != initial.SessionId),
+                            first.WaitForExitAsync(Token));
+                        await Dispatch(dispatcher, run, "source", "noop",
+                            Convert.ToHexStringLower(SHA256.HashData(packageBytes)), new Uri(Address(packages), "/package.zip"));
+                    }
+                    var ready = await Task.WhenAny(held.Task, first.WaitForExitAsync(Token), Task.Delay(TimeSpan.FromSeconds(20), Token));
+                    if (ready != held.Task)
+                    {
+                        await Stop(first, stdout, stderr);
+                        Assert.Fail($"Agent failed to replay: {service.Error} {await stdout} {await stderr}");
+                    }
+                    Assert.False(first.HasExited);
+                }
+                finally { await Stop(first, stdout, stderr); }
+            }
+            var accepted = await store.LoadAsync(run.Snapshot.RunId, Token);
+            Assert.True(accepted.Snapshot.Tasks["source/noop"] == ExecutionStatus.Succeeded,
+                $"Task failed instead of completing successfully: {service.LastResult?.Error}");
+            if (previouslyAccepted is not null)
+                Assert.Equal(previouslyAccepted.Snapshot.LastSequence, accepted.Snapshot.LastSequence);
+            var additionalAccepted = additionalRun is null ? null : await store.LoadAsync(additionalRun.Snapshot.RunId, Token);
+            if (additionalAccepted is not null)
+                Assert.Equal(ExecutionStatus.Succeeded, additionalAccepted.Snapshot.Tasks["source/noop"]);
+            var firstHello = Assert.Single(service.Hellos);
+            Assert.Equal(1U, firstHello.Hello.MaxTasks);
+            if (offlineResult)
+            {
+                Assert.Equal(expectedAttempts, firstHello.Hello.Inflight);
+                Assert.True(firstHello.Hello.Inflight.Count > firstHello.Hello.MaxTasks);
+            }
+            else Assert.Empty(firstHello.Hello.Inflight);
+            var firstReplay = service.Completions;
+            Assert.Equal(expectedAttempts, firstReplay.Select(message => message.TaskCompleted.Task));
+            var resultSequence = service.ResultSequence;
+            Assert.True(resultSequence >= 2);
+            using (var persisted = new AgentOutbox(new ResultJournal(journalPath, identity.Id)))
+            {
+                Assert.Equal(resultSequence, persisted.NextAfter(resultSequence - 1)!.Sequence);
+                Assert.Equal(expectedAttempts, persisted.UnacknowledgedAttempts().DistinctBy(task => task.ToString()));
+                foreach (var replay in firstReplay)
+                    Assert.Equal(replay, persisted.NextAfter(replay.Sequence - 1));
+            }
+            service.SuppressResultAcknowledgements = false;
+            using (var second = Start())
+            {
+                var stdout = second.StandardOutput.ReadToEndAsync(Token);
+                var stderr = second.StandardError.ReadToEndAsync(Token);
+                try
+                {
+                    await Wait(() => Task.FromResult(new FileInfo(Path.Combine(journalPath, "results.wfj")).Length == 72),
+                        second.WaitForExitAsync(Token));
+                    Assert.False(second.HasExited);
+                }
+                finally { await Stop(second, stdout, stderr); }
+            }
+            using (var persisted = new AgentOutbox(new ResultJournal(journalPath, identity.Id)))
+            {
+                Assert.Null(persisted.NextAfter(0));
+                Assert.True(persisted.CreateHello(new Hello()).Sequence > resultSequence);
+            }
+            Assert.Equal(expectedAttempts, Assert.Single(service.Hellos.Skip(1)).Hello.Inflight);
+            var secondReplay = service.Completions.Skip(firstReplay.Length).ToArray();
+            Assert.Equal(firstReplay.Select(message => message.Sequence), secondReplay.Select(message => message.Sequence));
+            foreach (var replay in firstReplay)
+                Assert.Equal(replay, Assert.Single(secondReplay, message => message.Sequence == replay.Sequence));
+            Assert.Equal(accepted.Snapshot.LastSequence, (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot.LastSequence);
+            if (additionalAccepted is not null)
+                Assert.Equal(additionalAccepted.Snapshot.LastSequence,
+                    (await store.LoadAsync(additionalAccepted.Snapshot.RunId, Token)).Snapshot.LastSequence);
+            await using var output = database.DataSource.CreateCommand("SELECT outputs->>$2 FROM node_runs WHERE run_id=$1 AND node_key='source'");
+            output.Parameters.AddWithValue(run.Snapshot.RunId);
+            output.Parameters.AddWithValue(offlineResult ? "durable" : "value");
+            Assert.Equal(offlineResult ? "42" : "7", await output.ExecuteScalarAsync(Token));
+            if (additionalRun is not null)
+            {
+                output.Parameters[0].Value = additionalRun.Snapshot.RunId;
+                Assert.Equal("43", await output.ExecuteScalarAsync(Token));
+            }
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    public sealed class ResultJournalGateway(AgentGatewayService inner, TaskCompletionSource held, int expectedCompletions)
+        : AgentGateway.AgentGatewayBase
+    {
+        private readonly ConcurrentQueue<AgentMessage> hellos = new();
+        private readonly ConcurrentQueue<AgentMessage> completions = new();
+        private ulong firstResultSequence;
+        public volatile bool SuppressResultAcknowledgements = true;
+        public Exception? Error { get; private set; }
+        public ulong ResultSequence;
+        public TaskCompleted? LastResult { get; private set; }
+        public AgentMessage[] Hellos => hellos.ToArray();
+        public AgentMessage[] Completions => completions.ToArray();
+        private int ExpectedCompletions { get; } = expectedCompletions;
+
+        public override async Task Connect(IAsyncStreamReader<AgentMessage> requests, IServerStreamWriter<ControlMessage> responses,
+            ServerCallContext context)
+        {
+            try { await inner.Connect(new Reader(this, requests), new Writer(this, responses, held), context); }
+            catch (Exception exception) { Error = exception; throw; }
+        }
+
+        private sealed class Reader(ResultJournalGateway owner, IAsyncStreamReader<AgentMessage> inner) : IAsyncStreamReader<AgentMessage>
+        {
+            public AgentMessage Current => inner.Current;
+            public async Task<bool> MoveNext(CancellationToken cancellationToken)
+            {
+                if (!await inner.MoveNext(cancellationToken)) return false;
+                if (Current.Hello is not null) owner.hellos.Enqueue(Current.Clone());
+                if (Current.TaskCompleted is not null)
+                {
+                    owner.LastResult = Current.TaskCompleted.Clone();
+                    Interlocked.CompareExchange(ref owner.firstResultSequence, Current.Sequence, 0UL);
+                    Volatile.Write(ref owner.ResultSequence, Current.Sequence);
+                    owner.completions.Enqueue(Current.Clone());
+                }
+                return true;
+            }
+        }
+
+        private sealed class Writer(ResultJournalGateway owner, IServerStreamWriter<ControlMessage> inner,
+            TaskCompletionSource held) : IServerStreamWriter<ControlMessage>
+        {
+            public WriteOptions? WriteOptions { get => inner.WriteOptions; set => inner.WriteOptions = value; }
+            public Task WriteAsync(ControlMessage message) => WriteAsync(message, CancellationToken.None);
+            public Task WriteAsync(ControlMessage message, CancellationToken cancellationToken)
+            {
+                var result = Volatile.Read(ref owner.ResultSequence);
+                var first = Volatile.Read(ref owner.firstResultSequence);
+                if (owner.SuppressResultAcknowledgements && first != 0 && message.Ack?.Sequence >= first)
+                {
+                    if (owner.completions.Count >= owner.ExpectedCompletions && message.Ack.Sequence >= result)
+                        held.TrySetResult();
+                    return Task.CompletedTask;
+                }
+                return inner.WriteAsync(message, cancellationToken);
+            }
+        }
     }
 
     [Fact]

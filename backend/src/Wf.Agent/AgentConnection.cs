@@ -1,6 +1,7 @@
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
+using Wf.Agent.Journal;
 using Wf.Contracts.Agent.V1;
 
 namespace Wf.Agent;
@@ -11,9 +12,9 @@ public interface IAgentCommandHandler
 }
 
 public sealed class AgentConnection(AgentOptions options, IAgentTelemetry telemetry,
-    IAgentCommandHandler commands, TimeProvider timeProvider, ILogger<AgentConnection> logger, AgentOutbox? outbox = null)
+    IAgentCommandHandler commands, TimeProvider timeProvider, ILogger<AgentConnection> logger, AgentOutbox? outbox = null) : IDisposable
 {
-    private readonly AgentOutbox outgoing = outbox ?? new AgentOutbox();
+    private readonly AgentOutbox outgoing = outbox ?? new AgentOutbox(new ResultJournal(options.ResultJournalDirectory, options.Id));
 
     public async Task RunAsync(CancellationToken stoppingToken)
     {
@@ -44,6 +45,7 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+        finally { Dispose(); }
     }
 
     private async Task<Uri?> ConnectAsync(Uri endpoint, CancellationToken stoppingToken)
@@ -61,14 +63,22 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
         });
         using var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         using var call = new AgentGateway.AgentGatewayClient(channel).Connect(cancellationToken: session.Token);
-        var hello = outgoing.CreateHello(telemetry.CreateHello(options));
+        var inventory = telemetry.CreateHello(options);
+        var attempts = inventory.Inflight.Concat(outgoing.UnacknowledgedAttempts())
+            .DistinctBy(task => (Guid.Parse(task.RunId), task.NodeKey, task.TaskKey, task.Attempt)).ToArray();
+        inventory.Inflight.Clear();
+        inventory.Inflight.AddRange(attempts);
+        var hello = outgoing.CreateHello(inventory);
+        var offered = hello.Sequence;
         await call.RequestStream.WriteAsync(hello, session.Token);
         logger.LogInformation("Agent Hello sent.");
         var sending = SendAsync(hello.Sequence);
         var receiving = ReceiveAsync();
-        await Task.WhenAny(sending, receiving);
+        var failure = (commands as TaskCommands)?.Failure ?? Task.Delay(Timeout.Infinite, session.Token);
+        var completed = await Task.WhenAny(sending, receiving, failure);
         await session.CancelAsync();
         await Task.WhenAll(sending, receiving);
+        if (completed == failure) await failure;
         return await receiving;
 
         async Task SendAsync(ulong sent)
@@ -80,6 +90,7 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
                 {
                     while (outgoing.NextAfter(sent) is { } message)
                     {
+                        Volatile.Write(ref offered, message.Sequence);
                         await call.RequestStream.WriteAsync(message, session.Token);
                         sent = message.Sequence;
                     }
@@ -122,10 +133,13 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
                         (epoch != 0 && message.LeaderEpoch != epoch))
                         throw new InvalidDataException("Invalid control sequence or leader epoch.");
                     epoch = message.LeaderEpoch;
+                    outgoing.ObserveLeaderEpoch(epoch);
                     if (message.Sequence <= received) continue;
                     received = message.Sequence;
                     if (message.PayloadCase == ControlMessage.PayloadOneofCase.Ack)
                     {
+                        if (message.Ack.Sequence < hello.Sequence || message.Ack.Sequence > Volatile.Read(ref offered))
+                            throw new InvalidDataException("Acknowledgement does not correspond to messages sent in this session.");
                         outgoing.Acknowledge(message.Ack);
                         continue;
                     }
@@ -138,5 +152,10 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
             catch (RpcException exception) when (session.IsCancellationRequested && exception.StatusCode == StatusCode.Cancelled) { }
             return null;
         }
+    }
+
+    public void Dispose()
+    {
+        if (outbox is null) outgoing.Dispose();
     }
 }

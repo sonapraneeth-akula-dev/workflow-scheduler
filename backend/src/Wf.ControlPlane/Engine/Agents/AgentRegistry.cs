@@ -10,6 +10,8 @@ namespace Wf.ControlPlane.Engine.Agents;
 public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider timeProvider, LeaseManager? leadership = null) : IDisposable
 {
     public static readonly TimeSpan HeartbeatTimeout = AgentLossPolicy.UnhealthyAfter;
+    public const int MaximumHelloAttempts = 8192;
+    public const int MaximumHelloMessageBytes = 1024 * 1024;
     private readonly ConcurrentDictionary<Guid, AgentRecord> agents = new();
     private readonly SemaphoreSlim writes = new(1, 1);
 
@@ -170,8 +172,11 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
             string.IsNullOrWhiteSpace(hello.Version) || hello.Version.Length > 100)
             throw new ArgumentException("Hello name, pool and version are required and must fit their bounds.", nameof(hello));
         if (hello.Cores is 0 or > int.MaxValue || hello.RamMb is 0 or > int.MaxValue ||
-            hello.MaxTasks is 0 or > int.MaxValue || hello.Inflight.Count > hello.MaxTasks)
+            hello.MaxTasks is 0 or > int.MaxValue)
             throw new ArgumentException("Hello contains invalid machine capacity.", nameof(hello));
+        if (hello.Inflight.Count > MaximumHelloAttempts ||
+            new AgentMessage { Sequence = ulong.MaxValue, Hello = hello }.CalculateSize() > MaximumHelloMessageBytes)
+            throw new ArgumentException("Hello attempt inventory exceeds the protocol count or message-size limit.", nameof(hello));
         var os = hello.Os switch
         {
             "windows" => AgentOs.Windows, "linux" => AgentOs.Linux,
@@ -196,7 +201,8 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
         }
         return new AgentRecord(id, hello.Name, os, arch, (int)hello.Cores, (int)hello.RamMb, (int)hello.MaxTasks,
             hello.Labels.ToImmutableDictionary(StringComparer.Ordinal), hello.Pool, AgentStatus.Healthy, now, hello.Version,
-            Guid.NewGuid(), SlotsUsed: hello.Inflight.Count);
+            // Unacknowledged completions remain in the logical inventory but no longer occupy physical slots.
+            Guid.NewGuid(), SlotsUsed: Math.Min((int)hello.MaxTasks, hello.Inflight.Count));
     }
 
     public void Dispose() => writes.Dispose();

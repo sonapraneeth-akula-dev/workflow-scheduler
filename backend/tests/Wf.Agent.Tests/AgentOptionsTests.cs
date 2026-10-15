@@ -30,7 +30,8 @@ public sealed class AgentOptionsTests
         {
             ["Agent:Engines:0"] = "https://engine-1", ["Agent:Engines:1"] = "https://engine-2",
             ["Agent:Id"] = Id, ["Agent:Name"] = "Test", ["Agent:Pool"] = "ci",
-            ["Agent:MaxTasks"] = "2", ["Agent:Labels:dotnet"] = "10"
+            ["Agent:MaxTasks"] = "2", ["Agent:Labels:dotnet"] = "10",
+            ["Agent:ResultJournalDirectory"] = Path.Combine(".agent-artifacts", "configured-results")
         }).Build();
         var options = AgentOptions.FromConfiguration(configuration);
         Assert.Equal(2, options.Engines.Count);
@@ -40,6 +41,7 @@ public sealed class AgentOptionsTests
         Assert.Equal(2U, options.MaxTasks);
         Assert.Equal("10", options.Labels["dotnet"]);
         Assert.Equal(TimeSpan.FromSeconds(5), options.HeartbeatInterval);
+        Assert.Equal(Path.GetFullPath(Path.Combine(".agent-artifacts", "configured-results")), options.ResultJournalDirectory);
     }
 
     [Theory]

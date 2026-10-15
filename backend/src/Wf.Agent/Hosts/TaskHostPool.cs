@@ -71,7 +71,8 @@ public sealed class TaskHostPool(ILogger<TaskHostPool> logger) : IAsyncDisposabl
     }
 
     public async Task<TaskCompleted> ExecuteAsync(TaskHostPackage package, Dispatch dispatch,
-        ByteString? nodeOutputsJson = null, TimeSpan? cancellationGrace = null, CancellationToken cancellationToken = default)
+        ByteString? nodeOutputsJson = null, TimeSpan? cancellationGrace = null, CancellationToken cancellationToken = default,
+        Action<TaskCompleted>? journalResult = null)
     {
         ArgumentNullException.ThrowIfNull(package);
         ArgumentNullException.ThrowIfNull(dispatch);
@@ -133,6 +134,7 @@ public sealed class TaskHostPool(ILogger<TaskHostPool> logger) : IAsyncDisposabl
             if (result.Task is null || !result.Task.Equals(dispatch.Task) ||
                 result.Outcome == TaskOutcome.Unspecified || !System.Enum.IsDefined(result.Outcome))
                 throw new InvalidDataException("Task host returned an invalid attempt result.");
+            journalResult?.Invoke(result);
             using var acknowledgement = host.Client.AcknowledgeAsync(new AcknowledgeRequest { Task = dispatch.Task },
                 deadline: DateTime.UtcNow.AddSeconds(5));
             await acknowledgement.ResponseAsync;

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Wf.Agent.Hosts;
@@ -14,8 +15,10 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
     private readonly ConcurrentDictionary<AttemptKey, Execution> active = new();
     private readonly HashSet<AttemptKey> accepted = [];
     private bool disposed;
+    private readonly TaskCompletionSource failure = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public IReadOnlyList<AttemptRef> Inflight => active.Values.Select(item => item.Dispatch.Task.Clone()).ToArray();
+    public Task Failure => failure.Task;
 
     public ValueTask HandleAsync(ControlMessage message, CancellationToken cancellationToken)
     {
@@ -46,20 +49,30 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            if (accepted.Contains(key)) return;
+            if (accepted.Contains(key) || outbox.ContainsResult(dispatch.Task)) return;
             if (active.Count >= options.MaxTasks)
                 throw new InvalidDataException("Dispatch exceeds the agent's configured task capacity.");
             var execution = new Execution(dispatch.Clone(), CancellationTokenSource.CreateLinkedTokenSource(stoppingToken));
             accepted.Add(key);
             active[key] = execution;
-            execution.Work = Task.Run(() => ExecuteAsync(key, execution), CancellationToken.None);
+            execution.Work = Task.Run(async () =>
+            {
+                try { await ExecuteAsync(key, execution); }
+                catch (Exception exception)
+                {
+                    failure.TrySetException(exception);
+                    throw;
+                }
+            }, CancellationToken.None);
         }
     }
 
     private async Task ExecuteAsync(AttemptKey key, Execution execution)
     {
         var dispatch = execution.Dispatch;
-        TaskCompleted result;
+        TaskCompleted? result = null;
+        var persisted = false;
+        var publishing = false;
         try
         {
             outbox.Enqueue(new AgentMessage
@@ -68,19 +81,26 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
             });
             var package = await cache.GetAsync(dispatch.Version, new Uri(dispatch.PackageUri), dispatch.Sha256,
                 execution.Cancellation.Token);
-            result = await hosts.ExecuteAsync(package, dispatch, cancellationToken: execution.Cancellation.Token);
+            result = await hosts.ExecuteAsync(package, dispatch, cancellationToken: execution.Cancellation.Token,
+                journalResult: completion =>
+                {
+                    publishing = true;
+                    outbox.Enqueue(new AgentMessage { TaskCompleted = completion });
+                    persisted = true;
+                    publishing = false;
+                });
         }
         catch (OperationCanceledException) when (execution.Cancellation.IsCancellationRequested)
         {
             result = Failure(TaskOutcome.Cancelled, "Aborted", "Attempt cancelled before its task host completed.", true);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (!publishing)
         {
             logger.LogError(exception, "Task {RunId}/{NodeKey}/{TaskKey}/{Attempt} failed at the agent boundary.",
                 key.RunId, key.NodeKey, key.TaskKey, key.Attempt);
             result = Failure(TaskOutcome.Failed, "PlatformError", exception.Message, false);
         }
-        outbox.Enqueue(new AgentMessage { TaskCompleted = result });
+        if (!persisted) outbox.Enqueue(new AgentMessage { TaskCompleted = result });
         lock (gate)
         {
             active.TryRemove(key, out _);
@@ -99,7 +119,8 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
         if (task is null || !Guid.TryParse(task.RunId, out var runId) || runId == Guid.Empty ||
             string.IsNullOrWhiteSpace(task.NodeKey) || task.NodeKey.Contains('/') ||
             string.IsNullOrWhiteSpace(task.TaskKey) || task.TaskKey.Contains('/') ||
-            task.Attempt is 0 or > int.MaxValue)
+            Encoding.UTF8.GetByteCount(task.NodeKey) > 512 || Encoding.UTF8.GetByteCount(task.TaskKey) > 512 ||
+            task.Attempt is 0 or > 32767)
             throw new InvalidDataException("Command requires a valid run, node, task and positive attempt.");
         return new AttemptKey(runId, task.NodeKey, task.TaskKey, task.Attempt);
     }

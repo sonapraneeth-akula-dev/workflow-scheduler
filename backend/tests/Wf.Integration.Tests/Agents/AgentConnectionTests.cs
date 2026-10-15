@@ -9,6 +9,8 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Wf.Agent;
+using Wf.Agent.Journal;
+using Google.Protobuf.WellKnownTypes;
 using Wf.Contracts.Agent.V1;
 
 namespace Wf.Integration.Tests.Agents;
@@ -64,7 +66,10 @@ public sealed class AgentConnectionTests
     public async Task Unacknowledged_results_replay_with_original_sequences_after_connection_loss()
     {
         var outbox = new AgentOutbox();
-        outbox.Enqueue(new AgentMessage { TaskStarted = new TaskStarted { Task = new AttemptRef { TaskKey = "started" } } });
+        outbox.Enqueue(new AgentMessage { TaskStarted = new TaskStarted { Task = new AttemptRef
+        {
+            RunId = Guid.NewGuid().ToString(), NodeKey = "node", TaskKey = "started", Attempt = 1
+        } } });
         outbox.Enqueue(new AgentMessage { TaskCompleted = new TaskCompleted { Outcome = TaskOutcome.Succeeded } });
         var replayed = new TaskCompletionSource<AgentMessage[]>(TaskCreationOptions.RunContinuationsAsynchronously);
         var calls = 0;
@@ -104,6 +109,43 @@ public sealed class AgentConnectionTests
             await cancellation.CancelAsync();
             await running.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         }
+    }
+
+    [Fact]
+    public async Task New_connection_rejects_a_previously_observed_old_leader_without_deleting_the_durable_result()
+    {
+        var root = Path.GetFullPath(Path.Combine(".agent-artifacts", "journal-epoch", Guid.NewGuid().ToString("N")));
+        try
+        {
+            using (var outbox = new AgentOutbox(new ResultJournal(root, Id)))
+            {
+                outbox.Enqueue(new AgentMessage { TaskCompleted = new TaskCompleted
+                {
+                    Task = new AttemptRef { RunId = Guid.NewGuid().ToString(), NodeKey = "node", TaskKey = "task", Attempt = 1 },
+                    At = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow), Outcome = TaskOutcome.Succeeded
+                } });
+                outbox.ObserveLeaderEpoch(9);
+            }
+            await using var gateway = await Gateway.Start(async (requests, responses, context) =>
+            {
+                if (!await requests.MoveNext(context.CancellationToken)) return;
+                Assert.Single(requests.Current.Hello.Inflight);
+                await responses.WriteAsync(new ControlMessage
+                {
+                    Sequence = 1, LeaderEpoch = 8, Ack = new Ack { Sequence = 2 }
+                }, context.CancellationToken);
+                await Task.Delay(Timeout.InfiniteTimeSpan, context.CancellationToken);
+            });
+            var options = new AgentOptions([gateway.Address], Id, "Test", "ci", 1, resultJournalDirectory: root);
+            using var connection = new AgentConnection(options, new AgentTelemetry(TimeProvider.System), new Commands(_ => { }),
+                TimeProvider.System, NullLogger<AgentConnection>.Instance);
+            await Assert.ThrowsAsync<InvalidDataException>(() => connection.RunAsync(TestContext.Current.CancellationToken)
+                .WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+            using var restored = new AgentOutbox(new ResultJournal(root, Id));
+            Assert.Equal(2UL, restored.NextAfter(0)!.Sequence);
+            Assert.NotNull(restored.NextAfter(0)!.TaskCompleted);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
     }
 
     [Fact]
@@ -263,7 +305,7 @@ public sealed class AgentConnectionTests
         var options = new AgentOptions([gateway.Address], Id, "Test", "ci", 2,
             heartbeatInterval: TimeSpan.FromMilliseconds(50));
         var connection = new AgentConnection(options, new FailedTelemetry(), new Commands(_ => { }),
-            TimeProvider.System, NullLogger<AgentConnection>.Instance);
+            TimeProvider.System, NullLogger<AgentConnection>.Instance, new AgentOutbox());
         await Assert.ThrowsAsync<IOException>(() => connection.RunAsync(TestContext.Current.CancellationToken)
             .WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
     }
@@ -286,9 +328,11 @@ public sealed class AgentConnectionTests
             }
         });
         var start = new ProcessStartInfo(executable) { UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true };
+        var journalRoot = Path.GetFullPath(Path.Combine(".agent-artifacts", "native-heartbeat-journal", Guid.NewGuid().ToString("N")));
         start.Environment["Agent__Engines__0"] = gateway.Address.ToString();
         start.Environment["Agent__Id"] = Id;
         start.Environment["Agent__Labels__test"] = "aot";
+        start.Environment["Agent__ResultJournalDirectory"] = journalRoot;
         using var process = Process.Start(start)!;
         var stdout = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
         var stderr = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
@@ -310,6 +354,7 @@ public sealed class AgentConnectionTests
             if (!process.HasExited) process.Kill(entireProcessTree: true);
             await process.WaitForExitAsync(TestContext.Current.CancellationToken);
             await Task.WhenAll(stdout, stderr);
+            if (Directory.Exists(journalRoot)) Directory.Delete(journalRoot, recursive: true);
         }
     }
 
@@ -319,7 +364,7 @@ public sealed class AgentConnectionTests
 
     private static AgentConnection Create(AgentOptions options, IAgentCommandHandler? commands = null) =>
         new(options, new AgentTelemetry(TimeProvider.System), commands ?? new Commands(_ => { }),
-            TimeProvider.System, NullLogger<AgentConnection>.Instance);
+            TimeProvider.System, NullLogger<AgentConnection>.Instance, new AgentOutbox());
 
     private sealed class Commands(Action<ControlMessage> action) : IAgentCommandHandler
     {
