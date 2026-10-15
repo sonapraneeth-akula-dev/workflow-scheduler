@@ -64,6 +64,30 @@ Timeouts/backoff advance virtual time with deterministic midpoint jitter and no
 real delays. The testing-library build cache and fluent assertions follow in
 their own backlog items.
 
+Placement is authored at workflow, node or task level with `RunsOn` and
+`Affinity`. The innermost selector replaces the whole outer selector; affinity
+inherits independently. `RunsOn()` explicitly clears constraints; `Affinity.None`
+clears an inherited pin. Stages support the same settings.
+
+```csharp
+w.Variables(v => v.StringList("machines", ["worker-a", "worker-b"]))
+ .RunsOn(v => Machines.All(Os.Linux, Machines.Named(v["machines"]), Machines.Label("dotnet")))
+ .Affinity(Affinity.Node)
+ .Node("build", n => n.Task("compile", Compile,
+     t => t.RunsOn(Machines.Pool("ci")).Affinity(Affinity.None)));
+```
+
+`Os.Windows/Linux`, `Machines.Pool`, `Machines.Label` (presence or exact value)
+and `Machines.Named` compose with AND; names within one `Named` are alternatives.
+Selector callbacks build symbolic metadata once. Describing never reads run
+variables or invokes task delegates. Effective task selectors resolve from bound
+string/enum variables at run start; machine names also accept string lists.
+Missing/empty/secret/wrong-type values fail before execution. Described templates
+stay unchanged between runs. Affinity supports `None`, `Node`, `Run` and
+`SameMachineAs("node")`; unknown/self/deadlocking references are rejected.
+In-process local execution binds selectors but does not create or dispatch to
+named agents; machine matching belongs to distributed placement.
+
 ## Agent
 
 The Native AOT agent runs in a console, as Windows Service `wf-agent`, or under

@@ -73,7 +73,6 @@ public sealed class LocalEngine
         TimeSpan? cancellationGrace = null)
     {
         ArgumentNullException.ThrowIfNull(workflow);
-        this.workflow = workflow;
         this.reports = reports;
         this.artifacts = artifacts;
         renderer = new(output ?? Console.Out);
@@ -88,7 +87,9 @@ public sealed class LocalEngine
         foreach (var warning in diagnostics)
             renderer.Log($"Warning: {warning.Message}");
         this.variables = VariableBinder.Bind(workflow.Variables, variables ?? ImmutableDictionary<string, JsonElement>.Empty);
-        run = new(Guid.CreateVersion7(), workflow.Nodes, workflow.Metadata, renderer.Log,
+        this.workflow = new(workflow.Name, workflow.Version, PlacementResolver.Resolve(workflow.Nodes, this.variables),
+            workflow.Tasks, workflow.Variables, workflow.Metadata, workflow.RunTimeout, workflow.Placement);
+        run = new(Guid.CreateVersion7(), this.workflow.Nodes, workflow.Metadata, renderer.Log,
             this.variables.ToDictionary(p => p.Key,
                 p => JsonSerializer.SerializeToElement(p.Value, OutputJsonContext.Default.Object), StringComparer.Ordinal));
         registry = new(workflow);

@@ -16,7 +16,7 @@ public static class ManifestWriter
         return new(sdkVersion, workflow.Name, workflow.Version, workflow.Metadata, workflow.Variables,
             LifecycleStages.Before.Concat(LifecycleStages.After).Where(key => workflow.Nodes.Any(n => n.Key == key))
                 .ToImmutableArray(),
-            workflow.Nodes, workflow.RunTimeout);
+            workflow.Nodes, workflow.RunTimeout, workflow.Placement);
     }
 
     public static byte[] WriteUtf8(WorkflowDefinition workflow) =>

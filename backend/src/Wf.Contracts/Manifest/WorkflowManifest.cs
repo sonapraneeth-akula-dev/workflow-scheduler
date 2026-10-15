@@ -6,7 +6,8 @@ namespace Wf.Contracts.Manifest;
 
 public sealed record WorkflowManifest(string SdkVersion, string Name, string Version, WorkflowMetadata Metadata,
     ImmutableArray<VariableSchema> Variables, ImmutableArray<string> Stages, ImmutableArray<NodeDefinition> Nodes,
-    TimeSpan RunTimeout);
+    TimeSpan RunTimeout,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] PlacementPolicy? Placement = null);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     UseStringEnumConverter = true, WriteIndented = true)]

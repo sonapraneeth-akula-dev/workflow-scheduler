@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json.Serialization;
 
 namespace Wf.Contracts.Definition;
 
@@ -9,8 +10,11 @@ public sealed record TaskDefinition
     public string Key { get; }
     public FailurePolicy Failure { get; }
     public ExecutionPolicy Policy { get; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PlacementPolicy? Placement { get; }
 
-    public TaskDefinition(string key, FailurePolicy failure = FailurePolicy.Hard, ExecutionPolicy? policy = null)
+    public TaskDefinition(string key, FailurePolicy failure = FailurePolicy.Hard, ExecutionPolicy? policy = null,
+        PlacementPolicy? placement = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         if (!Enum.IsDefined(failure))
@@ -18,6 +22,7 @@ public sealed record TaskDefinition
         Key = key;
         Failure = failure;
         Policy = policy ?? ExecutionPolicy.Default;
+        Placement = placement;
     }
 }
 
@@ -31,11 +36,13 @@ public sealed record NodeDefinition
     public FailurePolicy Failure { get; }
     public ImmutableArray<InputBinding> Inputs { get; }
     public TimeSpan? Timeout { get; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PlacementPolicy? Placement { get; }
 
     public NodeDefinition(string key, ImmutableArray<DependencyDefinition> dependencies, ImmutableArray<TaskDefinition> tasks,
         NodeExecutionMode mode = NodeExecutionMode.Series, int? maxParallel = null,
         FailurePolicy failure = FailurePolicy.Hard, ImmutableArray<InputBinding> inputs = default,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null, PlacementPolicy? placement = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         if (dependencies.IsDefault || tasks.IsDefault)
@@ -58,5 +65,6 @@ public sealed record NodeDefinition
         Failure = failure;
         Inputs = inputs.IsDefault ? [] : inputs;
         Timeout = timeout;
+        Placement = placement;
     }
 }

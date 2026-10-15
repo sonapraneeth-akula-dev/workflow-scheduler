@@ -13,10 +13,11 @@ public sealed class WorkflowDefinition
     public WorkflowMetadata Metadata { get; }
     public string Type => Metadata.Type;
     public TimeSpan RunTimeout { get; }
+    public PlacementPolicy? Placement { get; }
 
     internal WorkflowDefinition(string name, string version, ImmutableArray<NodeDefinition> nodes,
         ImmutableDictionary<string, Func<TaskContext, Task>> tasks, ImmutableArray<VariableSchema> variables,
-        WorkflowMetadata metadata, TimeSpan runTimeout)
+        WorkflowMetadata metadata, TimeSpan runTimeout, PlacementPolicy? placement = null)
     {
         Name = name;
         Version = version;
@@ -25,5 +26,6 @@ public sealed class WorkflowDefinition
         Variables = variables;
         Metadata = metadata;
         RunTimeout = runTimeout;
+        Placement = placement;
     }
 }

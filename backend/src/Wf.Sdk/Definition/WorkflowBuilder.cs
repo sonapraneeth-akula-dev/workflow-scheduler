@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Wf.Contracts.Definition;
+using Wf.Validation;
 
 namespace Wf.Sdk;
 
@@ -13,8 +14,13 @@ public sealed class WorkflowBuilder
     private string? type;
     private PolicyOverrides defaults = new();
     private TimeSpan runTimeout = TimeSpan.FromHours(24);
+    private readonly PolicyBuilder placement = new();
 
     internal WorkflowBuilder(string name, string version) => (this.name, this.version) = (name, version);
+
+    public WorkflowBuilder RunsOn(params PlacementSelector[] selectors) { placement.RunsOn(selectors); return this; }
+    public WorkflowBuilder RunsOn(Func<PlacementVariables, PlacementSelector> configure) { placement.RunsOn(configure); return this; }
+    public WorkflowBuilder Affinity(PlacementAffinity value) { placement.Affinity(value); return this; }
 
     public WorkflowBuilder Defaults(Action<PolicyBuilder> configure)
     {
@@ -116,14 +122,16 @@ public sealed class WorkflowBuilder
     {
         if (type is null)
             throw new ArgumentException($"Workflow '{name}' must declare exactly one type.");
-        var definitions = nodes.Select(n => n.Build(defaults)).ToImmutableArray();
+        var workflowPlacement = PlacementPolicy.Inherit(defaults.Placement, placement.Build().Placement);
+        var definitions = nodes.Select(n => n.Build(defaults, workflowPlacement)).ToImmutableArray();
         DagValidator.Validate(definitions);
+        PlacementResolver.Validate(definitions, variables);
         var tasks = ImmutableDictionary.CreateBuilder<string, Func<TaskContext, Task>>(StringComparer.Ordinal);
         foreach (var node in nodes)
             foreach (var task in node.Handlers)
                 tasks.Add($"{node.Key}/{task.Key}", task.Value);
         return new(name, version, definitions, tasks.ToImmutable(), variables.ToImmutableArray(),
-            new(type, metadata.ToImmutableSortedDictionary(StringComparer.Ordinal)), runTimeout);
+            new(type, metadata.ToImmutableSortedDictionary(StringComparer.Ordinal)), runTimeout, workflowPlacement);
     }
 
     internal static void ValidateKey(string key)

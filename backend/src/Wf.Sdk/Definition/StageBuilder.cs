@@ -11,6 +11,9 @@ public sealed class StageBuilder
     public StageBuilder Retry(int count, BackoffPolicy? backoff = null, IEnumerable<FailureCategory>? on = null)
     { node.Retry(count, backoff, on); return this; }
     public StageBuilder NoAutoRetry() { node.NoAutoRetry(); return this; }
+    public StageBuilder RunsOn(params PlacementSelector[] selectors) { node.RunsOn(selectors); return this; }
+    public StageBuilder RunsOn(Func<PlacementVariables, PlacementSelector> configure) { node.RunsOn(configure); return this; }
+    public StageBuilder Affinity(PlacementAffinity value) { node.Affinity(value); return this; }
 
     public StageBuilder Task(string key, Action<TaskContext> execute, FailurePolicy failure = FailurePolicy.Hard)
     {

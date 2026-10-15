@@ -54,6 +54,9 @@ public sealed class NodeBuilder
     public NodeBuilder Retry(int count, BackoffPolicy? backoff = null, IEnumerable<FailureCategory>? on = null)
     { policy.Retry(count, backoff, on); return this; }
     public NodeBuilder NoAutoRetry() { policy.NoAutoRetry(); return this; }
+    public NodeBuilder RunsOn(params PlacementSelector[] selectors) { policy.RunsOn(selectors); return this; }
+    public NodeBuilder RunsOn(Func<PlacementVariables, PlacementSelector> configure) { policy.RunsOn(configure); return this; }
+    public NodeBuilder Affinity(PlacementAffinity value) { policy.Affinity(value); return this; }
 
     public NodeBuilder Task(string key, Func<TaskContext, Task> execute, FailurePolicy failure = FailurePolicy.Hard)
         => Task(key, execute, null, failure);
@@ -97,13 +100,15 @@ public sealed class NodeBuilder
         return this;
     }
 
-    internal NodeDefinition Build(PolicyOverrides defaults)
+    internal NodeDefinition Build(PolicyOverrides defaults, PlacementPolicy? workflowPlacement)
     {
         var overrides = policy.Build();
+        var nodePlacement = PlacementPolicy.Inherit(workflowPlacement, overrides.Placement);
         if (LifecycleStages.After.Contains(Key) && overrides.Timeout is null)
             overrides = overrides with { Timeout = TimeSpan.FromMinutes(15) };
         return new(Key, dependencies.ToImmutableArray(), tasks.Select(t =>
-            new TaskDefinition(t.Key, t.Failure, PolicyResolver.Resolve(defaults, overrides, t.Policy))).ToImmutableArray(),
-            mode, maxParallel, failure, inputs.ToImmutableArray(), overrides.Timeout);
+            new TaskDefinition(t.Key, t.Failure, PolicyResolver.Resolve(defaults, overrides, t.Policy),
+                PlacementPolicy.Inherit(nodePlacement, t.Policy.Placement))).ToImmutableArray(),
+            mode, maxParallel, failure, inputs.ToImmutableArray(), overrides.Timeout, nodePlacement);
     }
 }

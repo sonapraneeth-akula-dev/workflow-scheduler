@@ -83,7 +83,7 @@ public static class DryRunHost
             });
         }
         var mocked = new WorkflowDefinition(workflow.Name, workflow.Version, workflow.Nodes, handlers.ToImmutable(),
-            workflow.Variables, workflow.Metadata, workflow.RunTimeout);
+            workflow.Variables, workflow.Metadata, workflow.RunTimeout, workflow.Placement);
         var clock = new DryRunClock();
         var result = await new LocalEngine(mocked, spec.Variables, output: TextWriter.Null, timeProvider: clock)
             .RunAsync(cancellationToken).ConfigureAwait(false);

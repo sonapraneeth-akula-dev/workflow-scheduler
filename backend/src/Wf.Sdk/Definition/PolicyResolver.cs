@@ -3,13 +3,35 @@ using Wf.Contracts.Definition;
 
 namespace Wf.Sdk;
 
-public sealed record PolicyOverrides(TimeSpan? Timeout = null, RetryPolicy? Retry = null, bool? AutoRetry = null);
+public sealed record PolicyOverrides(TimeSpan? Timeout = null, RetryPolicy? Retry = null, bool? AutoRetry = null,
+    PlacementPolicy? Placement = null);
 
 public sealed class PolicyBuilder
 {
     private TimeSpan? timeout;
     private RetryPolicy? retry;
     private bool? autoRetry;
+    private PlacementSelector? selector;
+    private PlacementAffinity? affinity;
+
+    public PolicyBuilder RunsOn(params PlacementSelector[] selectors)
+    {
+        selector = Machines.All(selectors);
+        return this;
+    }
+
+    public PolicyBuilder RunsOn(Func<PlacementVariables, PlacementSelector> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        selector = configure(new PlacementVariables()) ?? throw new ArgumentException("RunsOn must return a selector.", nameof(configure));
+        return this;
+    }
+
+    public PolicyBuilder Affinity(PlacementAffinity value)
+    {
+        affinity = value ?? throw new ArgumentNullException(nameof(value));
+        return this;
+    }
 
     public PolicyBuilder Timeout(TimeSpan value)
     {
@@ -31,7 +53,8 @@ public sealed class PolicyBuilder
         return this;
     }
 
-    internal PolicyOverrides Build() => new(timeout, retry, autoRetry);
+    internal PolicyOverrides Build() => new(timeout, retry, autoRetry,
+        selector is null && affinity is null ? null : new(selector, affinity));
 }
 
 public static class Backoff
