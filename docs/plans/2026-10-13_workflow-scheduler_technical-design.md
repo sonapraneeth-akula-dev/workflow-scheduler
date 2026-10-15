@@ -141,7 +141,7 @@ Three deployment profiles are illustrated through five hosting diagrams. PNG and
 
 ![HLD 1: Local profile](diagrams/hld-local.png)
 
-**HLD 1b: Local Docker Compose** ([HTML](diagrams/hld-local-compose.html) · [SVG](diagrams/hld-local-compose.svg)). Optional `wf local up --env <env>` (default `ppe`): production builds in Docker behind a gateway Caddy on `127.2.6.<envId>`; the GrihaSetu edge serves `https://<env>.kardia.sonapraneeth.in` (prod: `https://kardia.sonapraneeth.in`) with its mkcert certificate; the Windows agent stays native; LAN machines can join. The diagram shows the `ppe` instance (§9.2).
+**HLD 1b: Local Docker Compose** ([HTML](diagrams/hld-local-compose.html) · [SVG](diagrams/hld-local-compose.svg)). Optional `wf local up --env <env>` (default `ppe`): production builds in Docker behind a gateway Caddy on `127.2.6.<envId>`; the GrihaSetu edge serves `https://<env>.kardia.sonapraneeth.in` (`dev` or `ppe`) with its mkcert certificate; the Windows agent stays native; LAN machines can join. The diagram shows the `ppe` instance (§9.2).
 
 ![HLD 1b: Local Docker Compose profile](diagrams/hld-local-compose.png)
 
@@ -1023,7 +1023,7 @@ The reference dev machine has these prerequisites (verified): Windows 11, 16 cor
 | Workflow only | `dotnet run workflow.cs -- --var env=dev` | SDK embedded engine (same `Wf.Engine.Core`) in the workflow process; no DB, agent or UI | Fastest authoring loop |
 | Dev stack | `aspire run` (or `dotnet run --project backend/src/Wf.AppHost` without the Aspire CLI) | PG container (persistent volume), `wf-host`, 1 native agent, Vite dev server (HMR), Aspire dashboard | Platform development; ready ≤ 2 min cold, ≤ 20 s warm (NFR-016) |
 | Multi-machine simulation | `aspire run -- --agents 3 --linux-agent` | Extra agents with distinct names, labels and work dirs; a Linux agent in a container (or WSL) | Placement, reservations, agent loss (kill one), cross-OS, perf shards, all on one box |
-| Docker Compose (prod-like, per environment) | `wf local up --env <env>` (default `ppe`; runs `aspire publish` to a compose file, then `docker compose up -d --wait`); `wf local down --env <env>` | Release builds only: gateway Caddy (with the SPA), `wf-api`, `wf-engine` ×2, PG, Linux agent(s), sample services A/B and the Aspire dashboard, all in Docker behind the GrihaSetu edge at `https://<env>.kardia.sonapraneeth.in` (prod: `https://kardia.sonapraneeth.in`). The Windows agent runs natively | Integration tests, demos, a team box other machines can join. Exercises TLS, cookies, OIDC redirects, WSS, gRPC over TLS and leader failover as in production |
+| Docker Compose (prod-like, per environment) | `wf local up --env <env>` (default `ppe`; runs `aspire publish` to a compose file, then `docker compose up -d --wait`); `wf local down --env <env>` | Release builds only: gateway Caddy (with the SPA), `wf-api`, `wf-engine` ×2, PG, Linux agent(s), sample services A/B and the Aspire dashboard, all in Docker behind the GrihaSetu edge at `https://<env>.kardia.sonapraneeth.in` (`dev` or `ppe`). The Windows agent runs natively | Integration tests, demos, a team box other machines can join. Exercises TLS, cookies, OIDC redirects, WSS, gRPC over TLS and leader failover as in production |
 | Standalone | `wf install --standalone` | `wf-host` + `wf-agent` as Windows Services / systemd units, native or container PG, built SPA served by `wf-host` at `http://localhost:5000` (raw IP with `--lan`) | Demo or small team box; no HA |
 
 - **Addresses (pure local: dev stack, multi-machine simulation, standalone)**: no domain name, hosts entry or edge. API and agent gRPC are on `http://localhost:5000`; the UI is on the Vite dev server (`http://localhost:5173`) in the dev stack, or on `:5000` when `wf-host` serves the built SPA (standalone). `--lan` adds an HTTPS listener on the machine's raw IP, `https://<raw-ip>:5001`, with an mkcert certificate whose SAN is that IP (`mkcert <raw-ip>`), so LAN agents and browsers can join while plain HTTP never leaves loopback (NFR-007). LAN clients trust the mkcert root once (same step as Compose mode below).
@@ -1048,15 +1048,10 @@ This mode follows the GrihaSetu platform pattern (`Projects\grihasetu\platform`)
 
 | Environment | ID | Domain URL | Loopback | Typical use |
 |---|---|---|---|---|
-| `demo` | 1 | `https://demo.kardia.sonapraneeth.in` | `127.2.6.1` | Standalone demonstration |
-| `local` | 3 | `https://local.kardia.sonapraneeth.in` | `127.2.6.3` | Production-style build for personal checks |
-| `test` | 4 | `https://test.kardia.sonapraneeth.in` | `127.2.6.4` | Automated tests and QA (nightly job) |
-| `stresstest` | 5 | `https://stresstest.kardia.sonapraneeth.in` | `127.2.6.5` | Load and stress (functional only, see perf note) |
-| `integration` | 6 | `https://integration.kardia.sonapraneeth.in` | `127.2.6.6` | Cross-service integration |
-| `ppe` | 7 | `https://ppe.kardia.sonapraneeth.in` | `127.2.6.7` | Pre-production; default |
-| `prod` | 8 | `https://kardia.sonapraneeth.in` | `127.2.6.8` | Production build on this box |
+| `dev` | 2 | `https://dev.kardia.sonapraneeth.in` | `127.2.6.2` | Development config on Release images (dev auth handler, verbose logs, sample data); automated tests (nightly job) |
+| `ppe` | 7 | `https://ppe.kardia.sonapraneeth.in` | `127.2.6.7` | Pre-production; production config; default |
 
-IDs and names are GrihaSetu's standard environment mapping. `dev` (ID 2, hot reload) is the pure-local dev stack, so it has no compose stack, domain or loopback address. Below, `<env>` is the environment name and `<E>` its ID.
+IDs and names are GrihaSetu's standard environment mapping; only these two environments are supported. The hot-reload inner loop stays pure local (`localhost`, no domain). Below, `<env>` is the environment name and `<E>` its ID.
 
 **Why it's optional, not the default**:
 - *Gains*: same process split, images, TLS, hostname and leader routing as production. Catches cookie/CORS, OIDC redirect, WSS and HTTP/2 issues that plain `localhost` hides. Other machines on the LAN (Windows test boxes, teammates) can join with a trusted certificate.
@@ -1107,32 +1102,17 @@ Gateway `80` and PostgreSQL `5432` are already GrihaSetu stable ports. Its rule 
     reverse_proxy http://{args[0]}:80
 }
 
-demo.kardia.sonapraneeth.in {
-    import kardia_site 127.2.6.1
-}
-local.kardia.sonapraneeth.in {
-    import kardia_site 127.2.6.3
-}
-test.kardia.sonapraneeth.in {
-    import kardia_site 127.2.6.4
-}
-stresstest.kardia.sonapraneeth.in {
-    import kardia_site 127.2.6.5
-}
-integration.kardia.sonapraneeth.in {
-    import kardia_site 127.2.6.6
+dev.kardia.sonapraneeth.in {
+    import kardia_site 127.2.6.2
 }
 ppe.kardia.sonapraneeth.in {
     import kardia_site 127.2.6.7
-}
-kardia.sonapraneeth.in {
-    import kardia_site 127.2.6.8
 }
 ```
 
 - gRPC gets its own h2c upstream because the default HTTP/1.1 transport can't carry gRPC. Everything else, including SignalR WebSockets, uses the plain proxy.
 - `flush_interval -1` streams immediately, and Caddy has no default read timeout, so long-lived agent streams stay open.
-- `EDGE_TRUSTED_CIDRS` must include the LAN subnets of agent machines; other callers get `403`, the same as GrihaSetu's non-prod routes. The `prod` block keeps this guard too, because this is a workstation, not public hosting.
+- `EDGE_TRUSTED_CIDRS` must include the LAN subnets of agent machines; other callers get `403`, the same as GrihaSetu's non-prod routes.
 - An environment that isn't running answers `502` from the edge; nothing else changes.
 
 **Gateway** (`kardia-<env>-gateway`: `caddy:2.11.x-alpine` with the `vite build` output baked in, `auto_https off`, server protocols `h1 h2c`):
@@ -1147,9 +1127,9 @@ kardia.sonapraneeth.in {
 
 **Certificate and DNS** (GrihaSetu flow, nothing kardia-specific):
 1. Add `kardia.caddy` to `platform/edge/services/`.
-2. Run `.\scripts\edge-up.ps1 -Action regen-cert`. `edge-up` discovers hostnames from every `edge/services/*.caddy`, so all seven kardia hostnames join the mkcert umbrella cert's SANs automatically (once; adding an environment later means editing `kardia.caddy` and regenerating).
+2. Run `.\scripts\edge-up.ps1 -Action regen-cert`. `edge-up` discovers hostnames from every `edge/services/*.caddy`, so both kardia hostnames join the mkcert umbrella cert's SANs automatically (once; adding an environment later means editing `kardia.caddy` and regenerating).
 3. Run `caddy reload --config edge/Caddyfile.edge --adapter caddyfile`; on Linux, use `edge-up.sh reload` or systemd.
-4. Run `.\scripts\apply-edge-hosts.ps1 -ServerIp <EDGE_BIND_IP>`, then `Clear-DnsClientCache`. Hosts entries are also generated from every `*.caddy` file, with a backup and a managed block; `-Environments ppe,test` limits them to the environments a client needs. Run it on this box and on each LAN client.
+4. Run `.\scripts\apply-edge-hosts.ps1 -ServerIp <EDGE_BIND_IP>`, then `Clear-DnsClientCache`. Hosts entries are also generated from every `*.caddy` file, with a backup and a managed block; `-Environments ppe` limits them to the environments a client needs. Run it on this box and on each LAN client.
 5. On LAN clients, trust only `rootCA.pem` from `mkcert -CAROOT`: `certutil -user -addstore Root rootCA.pem` (Windows) or `trust anchor --store rootCA.pem` (Linux). Never copy `rootCA-key.pem`.
 
 - **Valid where trusted**: the certificate is valid on every machine that trusts the mkcert root, which is all clients we control. A publicly trusted certificate (Let's Encrypt DNS-01, because a workstation can't pass HTTP-01) is out of scope for now. It would only matter for clients we can't install a root on.
@@ -1165,7 +1145,7 @@ kardia.sonapraneeth.in {
 - **Production builds only**:
   - `dotnet publish -c Release /t:PublishContainer` for `wf-api`, `wf-engine`, `wf-agent` and the sample services (SDK container build, no Dockerfile). Images are built once and shared by every environment.
   - `vite build` for the SPA.
-  - No source mounts, no `--watch`; `DOTNET_ENVIRONMENT` = the environment name in Pascal case (`Ppe`, `Test`, …), except `prod` → `Production`. Only per-environment config (`appsettings.<Environment>.json`, secrets, public URL) differs.
+  - No source mounts, no `--watch`; `DOTNET_ENVIRONMENT` = `Development` for `dev`, `Ppe` for `ppe`. Only per-environment config (`appsettings.<Environment>.json`, secrets, public URL) differs.
 - **Startup order**: a one-shot `kardia-<env>-migrate` container applies migrations as the **migrator** role. `wf-api` and the engines start on `condition: service_completed_successfully` and connect as the **runtime** role. Every service has a healthcheck. `wf local up` uses `docker compose up -d --wait` and never a fixed sleep.
 - **Networks**:
 
@@ -1290,7 +1270,7 @@ Alerts fire on:
 | Security | CodeQL, Dependabot, secret scanning, `dotnet list package --vulnerable`, `bun audit` | All code | PR, no high/critical |
 | Cross-OS | Matrix (windows-latest, ubuntu-latest) | Agent, task host, SDK, resource limits | PR |
 | Placement | Unit (engine core) + integration (3 simulated agents) | Selectors, affinity pins, reservation exclusion, warm-host preference, `Ready(reason=WaitingForMachine)` → `Failed(category=Placement)` on timeout, re-placement after agent loss | PR |
-| Deployment profiles | Local: `aspire run` smoke on Windows + Linux; `wf local up --env test` on a Linux runner (no edge: clients call the gateway at `127.2.6.4:80` directly) runs scenario A, then kills the engine leader; a second step starts `ppe` beside it and checks both answer on their own addresses. Self-hosted: 2 VMs + 3-node Patroni lab, `deploy/selfhosted.ps1` under load. PaaS: revision deploy under load | Deploy + rollback with 100 active runs and 200 clients: 0 failed runs, 0 HTTP 5xx; Patroni failover → runs resume ≤ failover time + 30 s | Local: PR. Self-hosted/PaaS: nightly + pre-release |
+| Deployment profiles | Local: `aspire run` smoke on Windows + Linux; `wf local up --env dev` on a Linux runner (no edge: clients call the gateway at `127.2.6.2:80` directly) runs scenario A, then kills the engine leader; a second step starts `ppe` beside it and checks both answer on their own addresses. Self-hosted: 2 VMs + 3-node Patroni lab, `deploy/selfhosted.ps1` under load. PaaS: revision deploy under load | Deploy + rollback with 100 active runs and 200 clients: 0 failed runs, 0 HTTP 5xx; Patroni failover → runs resume ≤ failover time + 30 s | Local: PR. Self-hosted/PaaS: nightly + pre-release |
 
 ## 11. Code Organization
 ```
@@ -1373,7 +1353,7 @@ teams/<team>/<type>/<workflow>/tests/*.cs    # workflow tests (xUnit + Wf.Sdk.Te
 | AD-024 | Self-hosted blob | Filesystem store on shared storage (SMB/NFS); uploads via api grant endpoint | MinIO/S3 now; DB large objects | No new dependency or service. An S3 adapter is added only if a site lacks shared storage. |
 | AD-025 | Self-hosted packaging | Versioned release folders + `current` symlink/junction; one PowerShell 7 deploy script | Containers on VMs; Ansible; MSI/deb packages | Works on Windows and Linux without a container runtime. Rollback = re-point the link. Fits Autopilot-style deployment tooling. |
 | AD-026 | Long-task survival | Task hosts outlive the agent process + opt-in task checkpoints (automatic for load/parity) | Restart tasks from scratch; host as agent child (dies with agent); process snapshotting (CRIU) | Agent restarts and updates become invisible to tasks. Checkpoints bound the loss on machine failure to seconds. CRIU is Linux-only and fragile with sockets. |
-| AD-027 | Local modes and addressing | Pure local (`aspire run`, standalone) has no domain: `localhost`, or the raw IP over HTTPS with an mkcert IP-SAN cert (`--lan`). Optional Docker Compose mode `wf local up --env <env>` (default `ppe`), one stack per GrihaSetu environment type at `https://<env>.kardia.sonapraneeth.in` (prod: `https://kardia.sonapraneeth.in`): AppHost-generated compose of Release builds behind a gateway Caddy on structured loopback `127.2.6.<E>`, fronted by the existing GrihaSetu edge Caddy and mkcert umbrella cert | Make containers the only local mode; a domain for pure local; one shared compose stack for all environments; hand-written compose; a separate edge and CA for kardia; Caddy `tls internal`; Let's Encrypt DNS-01 | Pure local stays fast with nothing to configure. Compose gives production-shaped TLS, hostname and process split per environment without slowing the inner loop; per-environment IPs keep ports, data and secrets apart. One topology source. Reusing the GrihaSetu edge means one trusted root, one hosts workflow and no port 443 conflicts with other local stacks. |
+| AD-027 | Local modes and addressing | Pure local (`aspire run`, standalone) has no domain: `localhost`, or the raw IP over HTTPS with an mkcert IP-SAN cert (`--lan`). Optional Docker Compose mode `wf local up --env <env>` (default `ppe`), one stack per GrihaSetu environment type (`dev`, `ppe`) at `https://<env>.kardia.sonapraneeth.in`: AppHost-generated compose of Release builds behind a gateway Caddy on structured loopback `127.2.6.<E>`, fronted by the existing GrihaSetu edge Caddy and mkcert umbrella cert | Make containers the only local mode; a domain for pure local; one shared compose stack for all environments; hand-written compose; a separate edge and CA for kardia; Caddy `tls internal`; Let's Encrypt DNS-01 | Pure local stays fast with nothing to configure. Compose gives production-shaped TLS, hostname and process split per environment without slowing the inner loop; per-environment IPs keep ports, data and secrets apart. One topology source. Reusing the GrihaSetu edge means one trusted root, one hosts workflow and no port 443 conflicts with other local stacks. |
 | AD-028 | Long-running remote API | Opt-in HTTP task in the existing task host; stable external idempotency key + operation checkpoint + bounded status polling | Hours-long open HTTP request; unconditional retry; new suspend/resume scheduler | Survives machine loss without duplicate remote jobs when the API honors its key. Reuses existing checkpoint/event path; consumes an agent slot while waiting, which is acceptable until capacity data warrants suspension. [Pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/asynchronous-request-reply). |
 
 ## 13. Risks & Open Questions
@@ -1413,7 +1393,7 @@ teams/<team>/<type>/<workflow>/tests/*.cs    # workflow tests (xUnit + Wf.Sdk.Te
 | Expand/contract | Schema migration pattern keeping old and new app versions compatible |
 | Deployment profile | Local, Self-hosted (bare metal / Azure VMs) or Azure PaaS; same versioned code with per-OS builds, different packaging and adapter configuration |
 | Pure local | Local mode without the compose stack, gateway or domain (PostgreSQL may still be a container): `aspire run` or standalone, reached at `localhost` or the machine's raw IP (`--lan`) |
-| Docker Compose mode | Local mode with production builds in Docker, one stack per environment type (`demo`, `local`, `test`, `stresstest`, `integration`, `ppe`, `prod`), each at `https://<env>.kardia.sonapraneeth.in` (prod: no prefix) |
+| Docker Compose mode | Local mode with production builds in Docker, one stack per environment type (`dev`, `ppe`), each at `https://<env>.kardia.sonapraneeth.in` |
 | Placement | Run-time choice of which agent runs a task attempt |
 | Checkpoint | Small state a long task saves so a retry on another machine resumes instead of restarting |
 | Remote operation | External asynchronous job identified by the remote API; its acceptance, status and cancellation are distinct from the local task's state |
