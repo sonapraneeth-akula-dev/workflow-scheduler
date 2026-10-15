@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <ItemGroup>
+    <PackageReference Include="Azure.Storage.Blobs" />
     <PackageReference Include="Grpc.AspNetCore" />
     <PackageReference Include="Npgsql" />
     <PackageReference Include="dbup-postgresql" />

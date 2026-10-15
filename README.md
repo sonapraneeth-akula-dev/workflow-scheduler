@@ -394,6 +394,42 @@ platform placement. Snapshots restore pins and rotation; `ForgetRun` releases
 terminal-run state. Placement timeout and API single-machine overrides follow
 in their own backlog task.
 
+## Blob storage
+
+`IBlobStore.UploadAsync(content, source)` and `DownloadAsync(content, destination)`
+stream with verified SHA-256 and exact length, using bounded buffers.
+`BlobContent(kind, sha256, sizeBytes)` generates content-addressed keys; callers
+cannot supply filesystem paths. Both stores default to a 5,000,000,000-byte
+limit. Publication is atomic/no-overwrite; identical concurrent uploads are
+idempotent, while corrupt existing content fails. Failed downloads may have
+written untrusted partial data: discard it or abort an already-started HTTP
+response rather than reporting success.
+
+`FileSystemBlobStore` requires a service-private root and an external stable
+HMAC key of at least 32 bytes. `CreateUploadGrant` returns a bearer token, not an
+HTTP URL; `UploadWithGrantAsync` verifies the signed content/size/expiry and
+streams to atomic publication. Grants last at most 15 minutes and deliberately
+permit identical immutable-content retries until expiry. Never log grants or
+keys. Reparse paths are rejected; filesystem ACLs must exclude untrusted writers.
+
+`AzureBlobStore` uses Azure.Storage.Blobs 12.30.1 and a configured
+`BlobServiceClient` with production Entra credentials or emulator SharedKey.
+Provision a private container externally. `CreateUploadGrantAsync` issues a
+short-lived, create-only SAS for a random staging object; expose only its URL,
+maximum bytes and expiry, retaining the grant descriptor as trusted server state
+on the same singleton. `CompleteUploadAsync` verifies actual bytes (not supplied
+SHA metadata) and a pinned ETag before final publication. Never reconstruct the
+descriptor from untrusted completion JSON. Direct SAS cannot enforce an ingress
+byte cap; completion enforces it, or use mediated `UploadAsync` for a strict cap.
+Create-only SAS requires a single raw Put Blob, not an SDK block-upload fallback;
+grants larger than the provider's 5,000 MiB single-PUT limit are rejected.
+
+Configure cleanup of abandoned staging objects/files after crashes or unused
+expired grants. Actual filesystem/Azurite tests cover streaming, cancellation,
+checksum/size failures, atomicity, grant scope and path safety. Live cloud managed
+identity and 5 GB throughput are not claimed. HTTP grant/registration/report
+routes and application-profile DI configuration remain their separate tasks.
+
 ## Agent
 
 The Native AOT agent runs in a console, as Windows Service `wf-agent`, or under
