@@ -9,5 +9,6 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\db\migrations\*.sql" Link="Migrations\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="LocalRun\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

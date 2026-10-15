@@ -44,6 +44,7 @@ are not implied by local task completion.
 | 2.1.2.2.2 | Complete | Queued/running/backoff/post/always abort cases pass; first accepted identity/reason/source survives duplicate requests and replay. Active attempts drain, later cleanup receives `ctx.Abort`, and `EndedAt` records actual stop. Real function cancellation/registry integration passes. |
 | 2.1.1.1.3 | Complete | FsCheck-generated DAGs and explicit 200-node boundaries exercise all dependency/failure policies, series/parallel tasks, timeouts and queued/running/backoff/post/duplicate aborts. Every entity has exactly one terminal event, no tasks are lost, and full/snapshot-tail replay matches. Windows passes; Linux execution remains CI verification. |
 | 1.2.2.1.2 | Complete | Local channel actor executes the shared core with committed in-memory events, live console states, all variable types, series/parallel/caps, retries/deadlines and abort cleanup. Scenario A runs with `--var env=dev`; real HTTP/command integration and failing exit-code cases pass. SDK line coverage 94.0%, definition/runtime 98.4%. Uncooperative in-process functions fail explicitly after grace; force-kill isolation follows in task-host work. |
+| 1.2.2.1.3 | Complete | Scenario A local execution matches all 62 ordered shared-core fixture events and checked-in golden JSON across five repetitions. Parallel branches remain active together; explicit completion barriers remove scheduling noise without sorting, dropping or coalescing events. |
 
 ## Summary Rollup
 
