@@ -79,6 +79,17 @@ Timeouts/backoff advance virtual time with deterministic midpoint jitter and no
 real delays. The testing-library build cache and fluent assertions follow in
 their own backlog items.
 
+Code-defined schedule files use the published editor schema at
+`backend/src/Wf.Contracts/Schemas/schedules.schema.json`; see
+`backend/samples/workflows/scenario-a.schedules.json`. `ScheduleFileSchema.Export()`
+generates it from the same strict, source-generated contracts used by the server.
+`defaults` groups variable values by category; each instance supplies a stable
+`id`, exactly one `cron` or constant-format `interval`, and an IANA `timezone`.
+Instance `variables` override defaults; optional `versionPin`, `overlap`
+(`Skip`, `Queue`, `Concurrent`) and `catchUp` (`None`, `Latest`) control execution.
+Default policies are `Skip` and `Latest`. Semantic expression/variable validation
+and registration follow in their dependent tasks.
+
 Placement is authored at workflow, node or task level with `RunsOn` and
 `Affinity`. The innermost selector replaces the whole outer selector; affinity
 inherits independently. `RunsOn()` explicitly clears constraints; `Affinity.None`

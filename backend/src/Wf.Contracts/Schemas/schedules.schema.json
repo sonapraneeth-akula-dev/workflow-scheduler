@@ -1,0 +1,105 @@
+{
+  "type": "object",
+  "properties": {
+    "instances": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "cron": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "interval": {
+            "$comment": "Represents a System.TimeSpan value.",
+            "type": "string",
+            "pattern": "^-?(\\d\u002B\\.)?\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,7})?$",
+            "default": null
+          },
+          "versionPin": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "overlap": {
+            "enum": [
+              "Skip",
+              "Queue",
+              "Concurrent"
+            ],
+            "default": "Skip"
+          },
+          "catchUp": {
+            "enum": [
+              "None",
+              "Latest"
+            ],
+            "default": "Latest"
+          },
+          "variables": {
+            "type": "object",
+            "default": null
+          }
+        },
+        "required": [
+          "id",
+          "timezone"
+        ],
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "cron"
+            ],
+            "not": {
+              "required": [
+                "interval"
+              ]
+            }
+          },
+          {
+            "required": [
+              "interval"
+            ],
+            "not": {
+              "required": [
+                "cron"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "$schema": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
+      },
+      "default": null
+    }
+  },
+  "required": [
+    "instances"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Kardia code-defined schedules"
+}
