@@ -36,6 +36,8 @@ request/response hooks to test their services on our machines.
 - Provisioning/autoscaling machines — _Rationale: phase 2 uses already-registered machines._
 - Service-specific request/response logic — _Rationale: owned by service teams via hooks._
 - Cross-region active-active HA — _Rationale: no stated need; single region with zone redundancy._
+- Suspending remote waits without occupying an agent slot — _Rationale: use existing task hosts and checkpoints first; revisit if waiting tasks exhaust capacity._
+- Recovering an hours-long synchronous HTTP request when the remote service provides no status or deduplication — _Rationale: its outcome after a disconnect cannot be proven._
 - Approval/allow-list for load targets — _Rationale: whatever is checked in is trusted._
 
 ## 3. User Personas
@@ -64,7 +66,7 @@ presentation, needed for team isolation), FR-112 (perf thresholds).
 | ID | Requirement | Priority | Problem it solves | Milestones | Est. AI |
 |----|-------------|----------|-------------------|------------|---------|
 | REQ-001 | Authors define workflows as single-file C# scripts with the SDK | Must | No common way to express multi-step, dependency-aware goals in code | M-001.1, M-001.2 | 05:35 |
-| REQ-002 | Durable, fast, fault-tolerant execution engine on Windows and Linux agents | Must | Runs get stuck, lost, or slow; no dependency handling | M-002.1, M-002.2, M-002.3 | 10:55 |
+| REQ-002 | Durable, fast, fault-tolerant execution engine on Windows and Linux agents | Must | Runs get stuck, lost, or slow; no dependency handling | M-002.1, M-002.2, M-002.3 | 11:40 |
 | REQ-003 | On-demand and recurring triggers (code-defined and user-defined) | Must | Runs cannot be started with chosen variables or on a reliable schedule | M-003.1, M-003.2, M-003.3 | 05:25 |
 | REQ-004 | Every workflow/config issue is caught by unit tests before check-in | Must | Errors found only at registration or at runtime | M-004.1, M-004.2 | 03:30 |
 | REQ-005 | Semantic versioning, automatic registration, instant activation, cloning | Must | Changes are untraceable and slow to go live | M-005.1, M-005.2 | 03:20 |
@@ -74,7 +76,7 @@ presentation, needed for team isolation), FR-112 (perf thresholds).
 | REQ-009 | Multiple reports per run and large artifacts | Must | Task results cannot be reviewed in the UI; raw data has nowhere to go | M-009.1, M-009.2 | 04:15 |
 | REQ-010 | SSO, team-scoped RBAC, secrets, audit, public API | Must | Anyone could operate anything; secrets could leak; changes untraceable | M-010.1, M-010.2 | 03:20 |
 | REQ-011 | Zero-downtime operations, local/cloud parity, retention | Must | Deploys interrupt users/runs; cloud not reproducible locally; storage grows unbounded | M-011.1, M-011.2, M-011.3 | 05:15 |
-| REQ-012 | Recovery: re-run from failed node, config rollback, missed-fire catch-up | Should | Long workflows re-run end to end; bad changes and outages need manual repair | M-012.1, M-012.2, M-012.3 | 02:20 |
+| REQ-012 | Recovery: re-run from failed node, workflow-version rollback, missed-fire catch-up | Should | Long workflows re-run end to end; bad changes and outages need manual repair | M-012.1, M-012.2, M-012.3 | 02:20 |
 | REQ-013 | Trends and metric dashboards | Should | Slow or flaky parts are invisible over time | M-013.1 | 01:35 |
 | REQ-014 | Run completion notifications | Should | Users must watch the UI to learn outcomes | M-014.1 | 00:55 |
 | REQ-015 | Machine registry, capacity, selection, exclusive reservation (phase 2) | Must | Tests cannot target machines; shared machines skew results | M-015.1, M-015.2 | 03:30 |
@@ -87,7 +89,7 @@ presentation, needed for team isolation), FR-112 (perf thresholds).
 | REQ-022 | Per-team quotas on machines and load rate (phase 2) | Could | One team can monopolise shared machines | M-022.1 | 00:50 |
 | REQ-023 | Step-load "find max" mode (phase 2) | Could | A service's max sustainable rate is unknown | M-023.1 | 00:55 |
 | REQ-024 | Recorded live traffic as a request source (phase 2) | Could | Synthetic/file requests may not reflect real traffic | M-024.1 | 01:00 |
-| **Total** | | | | | **79:20** |
+| **Total** | | | | | **80:05** |
 
 ### Won't Have
 - Drag-and-drop workflow editor — _Rationale: code-first by design._
@@ -155,6 +157,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 
 - **US-007** — **As an** Author **I want** built-in HTTP-call, command/script, and SDK-function tasks **So that** common steps need no custom plumbing (`Est. AI: 00:45`)
   - [ ] HTTP task: method, URL, headers, body, expected status; response captured as output.
+  - [ ] Ordinary HTTP calls stay synchronous; opt-in remote-operation mode is covered by US-112.
   - [ ] Command task: executable + args, working directory, env; exit code ≠ 0 fails the task; works on Windows and Linux.
   - [ ] SDK-function task: async C# delegate receiving a context (variables, outputs, logger, cancellation token, report/artifact publisher).
 
@@ -176,8 +179,8 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 
 ### REQ-002: Durable, fast, fault-tolerant execution engine (Must Have)
 - **Outcome**: Runs execute their DAG on Windows and Linux agents with dispatch p95 ≤ 50 ms, survive the loss of any single component, and always reach exactly one terminal status.
-- **Traces**: FR-012–015, FR-017, FR-037, FR-061, FR-102; NFR-003, NFR-004, NFR-028–NFR-034.
-- **Est. AI**: 10:55
+- **Traces**: FR-012–015, FR-017, FR-037, FR-061, FR-062, FR-063, FR-064, FR-102; NFR-003, NFR-004, NFR-028–NFR-034.
+- **Est. AI**: 11:40
 
 #### Milestone M-002.1: Dependency-aware execution core
 - **Problem solved**: No deterministic engine executes a DAG with policies, retries, timeouts, and abort.
@@ -200,7 +203,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
   - [ ] Set in the script at workflow (`.Defaults`), node, or task level; the innermost value wins; the resolved policy per task is in the manifest and shown in the UI.
   - [ ] Retry policy: max retries (0–10), fixed or exponential backoff with ±20% jitter and a max delay (≤ 10 min), and which failure kinds retry (default: TaskError, Timeout). Validation errors, aborts, resource-limit kills, and errors the task marks non-retryable are never retried.
   - [ ] Defaults when nothing is set: 0 retries, 1 h per attempt, no separate node timeout, 24 h per run; post-process stages default to 15 min.
-  - [ ] Timeouts per attempt, per node (all its tasks and retries), and per run. On timeout the attempt gets a cancellation signal, then is killed after the grace period (default 30 s); it ends `TimedOut` and is retried or fails per its failure policy (hard/soft). Run timeout ends the run `TimedOut` after post-process stages run.
+  - [ ] Timeouts per attempt, per node (all its tasks and retries), and per run. On timeout the attempt gets a cancellation signal, then is killed after the grace period (default 30 s); it ends `TimedOut` and is retried or fails per its failure policy (hard/soft). The task host persists the absolute attempt deadline and enforces it itself (cancel, then self-terminate after the grace period) even while the agent or engine is down; the agent and engine enforce it redundantly. Run timeout ends the run `TimedOut` after post-process stages run.
   - [ ] Platform faults (`AgentLost`, `PlatformError`) are re-placed on another eligible agent up to 2 times without using the author's retries, unless the task is marked `.NoAutoRetry()` (non-idempotent work).
   - [ ] Each attempt is recorded with agent, start/end, and failure reason; the task shows `Retrying` with "attempt 2/4, next in 12 s" live. Backoff waits hold no agent slot; a retry may run on another agent unless affinity pins it.
   - [ ] Deadlines and retry timers are stored, so they survive engine failover; a retry that cannot start before its node or run deadline is not scheduled; abort cancels pending retries immediately.
@@ -241,7 +244,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
   - [ ] Trigger → first task running p95 ≤ 1 s for a pre-compiled version (NFR-029); no per-run compilation.
 - **US-017** — **As an** Admin **I want** per-task CPU/RAM limits **So that** one task cannot starve others (`Est. AI: 00:40`)
   - [ ] Limits enforced via Job Objects (Windows) and cgroups v2 (Linux); exceeding RAM limit fails the task with reason `ResourceLimit`.
-  - [ ] Idle agent ≤ 1% CPU, ≤ 100 MB RAM; per-task harness overhead ≤ 50 MB (NFR-032).
+  - [ ] Idle agent ≤ 1% CPU, ≤ 100 MB RAM; per-task harness overhead ≤ 50 MB (NFR-032). Warm task hosts form one globally capped LRU pool (process count and RSS) that is released when the agent is idle.
 
 ##### FEAT-002.2.3: Run-time task placement
 - **Est. AI**: 00:45
@@ -249,54 +252,60 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - **US-107** — **As an** Author **I want** each task placed on a suitable machine at run time, with optional selectors (OS, labels, pool, machine names, variable-driven) and affinity (none, same node, whole run, same machine as another node) **So that** runs use the fleet in parallel yet tasks that share local state stay together (`Est. AI: 00:45`)
   - [ ] Default: each task attempt goes to a healthy, non-draining, selector-matching agent with a free slot, preferring one with a warm host for the run, then the least loaded.
   - [ ] Affinity pins hold for the run; after agent loss the task is re-placed and the pin moves.
-  - [ ] No eligible machine → task shows `WaitingForMachine` live; after the placement timeout (default 10 min) it fails with category `Placement`.
-  - [ ] Testing override: a run or re-run can be forced onto a single machine (auto-picked or named) from the UI, API, or CLI without changing the workflow; unsatisfiable selectors or multi-machine reservations are rejected at trigger with the conflicting nodes listed; the override is shown on the run.
+  - [ ] No eligible machine → task stays in state `Ready` with reason `WaitingForMachine`, shown live; after the placement timeout (default 10 min) it fails with category `Placement`.
+  - [ ] Testing override: a run or re-run can be forced onto a single machine (auto-picked or named) from the UI, API, or CLI without changing the workflow (a re-run without `placement` keeps the original run's override); unsatisfiable selectors or multi-machine reservations are rejected at trigger with the conflicting nodes listed; the override is shown on the run.
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
 - [ ] **Integration tests**: control plane + 2 agents (1 Windows, 1 Linux) run scenario A end to end; agent drain test fails 0 tasks.
-- [ ] **Integration tests**: US-107 placement suite on 3 simulated agents: selectors, each affinity mode, reservation exclusion, `WaitingForMachine` → `Placement` timeout, re-placement after agent kill, single-machine override (all tasks on one agent; unsatisfiable trigger → 400): all green.
+- [ ] **Integration tests**: US-107 placement suite on 3 simulated agents: selectors, each affinity mode, reservation exclusion, `Ready(reason=WaitingForMachine)` → `Failed(category=Placement)` timeout, re-placement after agent kill, single-machine override (all tasks on one agent; unsatisfiable trigger → 400): all green.
 - [ ] **Performance**: dispatch latency p95 ≤ 50 ms / p99 ≤ 200 ms over 10k dispatches; run start p95 ≤ 1 s; agent footprint within NFR-032.
 - [ ] **Unit tests**: resource-limit enforcement tests green on both OSes.
 
 #### Milestone M-002.3: Fault tolerance
-- **Problem solved**: Loss of an engine instance, agent, or database failover loses or stalls runs.
-- **Est. AI**: 04:15
+- **Problem solved**: Loss of an engine instance, agent, machine, or remote-operation response loses or stalls runs.
+- **Est. AI**: 05:00
 
 ##### FEAT-002.3.1: Highly available control plane
 - **Est. AI**: 01:15
 
 - **US-018** — **As an** Operator **I want** runs to continue when an engine instance dies **So that** no work is lost (`Est. AI: 00:45`)
-  - [ ] ≥ 2 control-plane instances; leader failover and run resumption ≤ 30 s; no run state lost (NFR-033, NFR-034).
+  - [ ] ≥ 2 control-plane instances; leader failover and run resumption ≤ 30 s; after a DB failover, resumption ≤ the database's failover time + 30 s; no run state lost (NFR-033, NFR-034).
 - **US-019** — **As the** platform **I want** duplicate task results to be applied once **So that** state stays correct under retries and reconnects (`Est. AI: 00:30`)
   - [ ] Each task attempt has an idempotency key; a duplicated completion message is acknowledged and ignored.
 
 ##### FEAT-002.3.2: Agent restart, agent loss, and long-task resume
-- **Est. AI**: 02:00
+- **Est. AI**: 02:45
 
 - **US-020** — **As an** Operator **I want** tasks on a lost agent to be retried or failed with a reason **So that** runs never hang (`Est. AI: 00:35`)
-  - [ ] Agent lost (heartbeat timeout) → its running attempts end `AgentLost` and are re-placed on another eligible agent (up to 2 platform retries, not counted against the author's retries, unless `.NoAutoRetry()`), else failed with reason.
-  - [ ] A disconnected agent's attempts stay `Running` for a grace period (default 60 s) so a restarting agent can reclaim them; only then do they end `AgentLost`.
+  - [ ] Agent lost (no heartbeat for 30 s) → its running attempts end `AgentLost` and are re-placed on another eligible agent (up to 2 platform retries, not counted against the author's retries, unless `.NoAutoRetry()`), else failed with reason.
+  - [ ] Timeline from the agent's last heartbeat: 15 s → agent Unhealthy (no new dispatch); its attempts stay `Running` and reclaimable by a restarting agent until 30 s; only then do they end `AgentLost`. A new engine leader applies the same per-attempt deadlines (no separate wait), so runs resume ≤ 30 s (NFR-033).
 - **US-109** — **As an** Operator **I want** running tasks to keep running when the agent process crashes, restarts, or is updated **So that** multi-hour tasks such as load tests are not lost (`Est. AI: 00:45`)
   - [ ] Task hosts run outside the agent's process lifetime (Windows: own job object, not killed with the agent; Linux: own cgroup, `KillMode=process`) and keep their results and logs in the attempt directory until acknowledged.
-  - [ ] A restarted agent re-adopts live task hosts within 10 s (pid + start-time check), reports them as in flight, and the engine keeps the attempts `Running`; no result, log line, or perf sample is lost or duplicated.
+  - [ ] A restarted agent re-adopts live task hosts within 10 s (pid + start-time check; well inside the 30 s reclaim window), reports them as in flight, and the engine keeps the attempts `Running`; no result, log line, or perf sample is lost or duplicated.
   - [ ] Hosts that died while the agent was down end `AgentLost` and follow platform retry (US-020).
 - **US-110** — **As an** Author **I want** to checkpoint a long task **So that** after a machine reboot or loss the retry resumes where it left off (`Est. AI: 00:40`)
-  - [ ] `await ctx.Checkpoint.SaveAsync(state)` stores JSON state (≤ 1 MB, at most once every 5 s) durably outside the machine; the latest checkpoint per task survives engine, agent, and machine failure.
+  - [ ] `await ctx.Checkpoint.SaveAsync(state)` stores JSON state (≤ 1 MB, at most once every 5 s) durably outside the machine; the agent journals the checkpoint record until the engine acknowledges it (highest sequence wins), so the latest checkpoint per task survives engine, agent, and machine failure.
   - [ ] A new attempt reads it with `ctx.Checkpoint.TryLoad<T>()` and `ctx.Attempt.ResumedFrom`; tasks without checkpoints restart from the beginning (default).
   - [ ] The UI shows "resumed from checkpoint at 01:42:10" on the attempt; dry-run mocks can supply a checkpoint so resume logic is unit-testable.
   - [ ] Checkpoints are deleted with the run (retention) and never contain secret values (validated by the secret-leak test).
+- **US-112** — **As an** Author **I want** an opt-in HTTP task that safely tracks a long-running remote job **So that** retries and machine loss do not silently start duplicate work (`Est. AI: 00:45`)
+  - [ ] A 202 response supplies a status URL (or an operation ID with a declared status URL template); the task records it durably, checks status at the service's suggested interval (bounded backoff otherwise), and completes with the remote result or fails with its error. An immediate terminal response completes normally. Individual HTTP calls time out within the remaining attempt deadline; the task obeys attempt, node, and run timeouts without holding the submit connection open.
+  - [ ] Before POST, durably record the intent and a stable key for the logical run and task, unchanged across attempts; after acceptance record the operation reference. After machine loss, the next attempt resumes the recorded operation. If the response was lost before that reference was saved, it re-submits only when the remote service deduplicates the same key throughout the retry window; otherwise it looks up an accepted job by key if supported.
+  - [ ] Without remote deduplication, a missing lookup result never triggers another POST: lookup-only services can reattach to a found job on platform retry, but otherwise report `RemoteOutcomeUnknown` for operator reconciliation. When the service supports neither deduplication nor lookup, require `.NoAutoRetry()` and zero author retries. A missing/expired status endpoint is reported, not treated as success. Internal run idempotency alone is insufficient.
+  - [ ] Abort or timeout requests remote cancellation if configured; only a remote confirmation is shown as remotely cancelled. Otherwise the task is locally cancelled/timed out and the remote outcome remains unknown. Run System Events show submit/wait/terminal/cancel transitions by task attempt; polling diagnostics stay in attempt logs, with no secrets in either view.
 
 ##### FEAT-002.3.3: Chaos suite
 - **Est. AI**: 00:45
 
 - **US-021** — **As an** Admin **I want** an automated fault-injection suite **So that** reliability claims are proven on every change (`Est. AI: 00:45`)
   - [ ] Scenarios: kill leader mid-run, kill agent process mid-task (task keeps running), restart agent for an update mid-task, kill task host, reboot a machine mid-task with a checkpointing task, network partition control plane ↔ DB and ↔ agent, DB failover, disk full on agent.
-  - [ ] Each scenario asserts: every run reaches a terminal state, no duplicate state transitions, resumption ≤ 30 s.
+  - [ ] Each scenario asserts: every run reaches a terminal state, no duplicate state transitions, resumption ≤ 30 s (agent killed and not restarted: `AgentLost` and re-placed ≤ 30 s after its last heartbeat; DB failover: ≤ the database's failover time + 30 s).
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
 - [ ] **Integration tests (chaos)**: US-021 suite green in CI nightly and on every engine change; 0 stuck runs over 1,000 randomised runs with injected faults.
 - [ ] **Unit tests**: idempotency tests for duplicated, reordered, and late messages green.
 - [ ] **Integration tests**: 1 h checkpointing task: leader killed, agent process killed, and the machine rebooted once each → task completes; agent kill loses 0 s of work; reboot resumes from the last checkpoint (≤ 10 s of work lost); exactly one result.
+- [ ] **Integration tests**: US-112 stub remote service: 202 → pending → success/failure, host loss after `SubmissionPending` but before POST (lookup miss remains unknown), lost submit response (dedup reattaches; lookup-only found resumes), host/machine loss after `RemoteSubmitted`, expiring status, abort and timeout with/without remote cancel → no duplicate remote job or blind retry; the System Events and logs remain separate. An agent slot remains occupied while waiting.
 - [ ] **Manual / UAT**: Admin kills the leader during a live demo run; run completes; sign-off from platform lead.
 
 ### REQ-003: On-demand and recurring triggers (Must Have)
@@ -313,7 +322,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 
 - **US-022** — **As an** Operator **I want** to trigger a workflow with a variable set from the UI or API **So that** I run it when needed (`Est. AI: 00:35`)
   - [ ] Form generated from the variables schema with defaults pre-filled; invalid values shown inline before submit.
-  - [ ] Trigger API p95 < 100 ms (NFR-018); returns run ID; optional idempotency key prevents duplicate runs on client retry.
+  - [ ] Trigger API p95 < 100 ms (NFR-018); returns 202 with a preallocated run ID; optional idempotency key prevents duplicate runs on client retry.
 - **US-023** — **As an** Operator **I want** "Run now" on a recurring instance in its history **So that** I re-run it with the same variables (`Est. AI: 00:25`)
   - [ ] Uses the instance's effective variables and latest (or pinned) version; run joins the same run series with trigger = manual (FR-045).
 
@@ -332,6 +341,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - **US-024** — **As an** Operator **I want** to create, edit, pause, resume, and delete cron or interval schedules with a timezone **So that** runs recur without manual triggers (`Est. AI: 00:45`)
   - [ ] Shows next 5 fire times before saving; DST transitions handled (no double/skipped fire beyond the cron's own semantics).
   - [ ] Edits take effect for the next fire; concurrent edits rejected via version check.
+  - [ ] Available only in the Kardia UI (FR-035): the backing endpoints are absent from the public OpenAPI document, the SDK and the CLI, and accept only delegated user tokens issued to the Kardia SPA client (`azp` check); app-only and other-client tokens get 403. This is a product/contract boundary, not a security boundary: a user scripting the UI's token can do nothing beyond what their role already allows in the UI. Code-defined schedules and registration never create or modify user-defined schedules.
 - **US-025** — **As an** Operator **I want** an overlap policy (skip, queue, allow concurrent) **So that** slow runs don't pile up (`Est. AI: 00:30`)
   - [ ] Default skip; skipped fires are recorded with reason in the series history.
 
@@ -364,6 +374,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 
 - **US-029** — **As an** Author **I want** schedule file changes applied atomically **So that** no fire is missed or duplicated during a change (`Est. AI: 00:40`)
   - [ ] Add/remove/modify of instances applied in one transaction; removed instances stop; series history kept.
+  - [ ] Schedule configs register independently of workflow versions: a schedule-file-only change records a new schedule config (source path, commit, content hash) without a workflow version bump.
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
 - [ ] **Unit tests**: schedule file schema + override resolution tests, including categorised defaults.
@@ -392,7 +403,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - **Est. AI**: 00:40
 
 - **US-032** — **As an** Author **I want** breaking changes to require a MAJOR bump **So that** schedules and callers aren't silently broken (`Est. AI: 00:40`)
-  - [ ] Variable removed/renamed/type-changed or node removed that a schedule references → MAJOR; additive → MINOR; other → PATCH; wrong bump fails validation with the required level.
+  - [ ] Variable removed/renamed/type-changed or node removed/renamed → MAJOR; additive variables or nodes → MINOR; implementation-only → PATCH; wrong bump fails validation with the required level. Schedule validation checks variable compatibility, not node references.
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
 - [ ] **Unit tests**: one test per validation rule (positive + negative); rule catalogue test asserts every server rule has an offline test.
@@ -465,7 +476,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 
 ### REQ-006: Live status and logs (Must Have)
 - **Outcome**: Users see run, stage, node, and task state and logs live (p95 ≤ 1 s) with no polling, including after reconnects.
-- **Traces**: FR-018, FR-019, FR-032; NFR-001, NFR-019, NFR-020.
+- **Traces**: FR-018, FR-019, FR-032, FR-064; NFR-001, NFR-009, NFR-019, NFR-020.
 - **Est. AI**: 03:35
 
 #### Milestone M-006.1: Live state push
@@ -478,17 +489,21 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - **US-040** — **As an** Operator **I want** state changes pushed to my browser **So that** I see progress as it happens (`Est. AI: 00:45`)
   - [ ] State change → UI p95 ≤ 1 s, p99 ≤ 2 s (NFR-001); no periodic polling.
   - [ ] Sustains ≥ 10k events/s fan-out to ≥ 500 clients without dropped updates (coalesced per entity) (NFR-019).
+  - [ ] A separate, read-only System Events view on each run shows ordered timestamps, the task attempt, selection of an agent and why, dispatch/start/completion, retries and failures. Filter by node, task or attempt; entries remain available after the run finishes and reconnects.
+  - [ ] For US-112, remote submit/wait/completion/failure/cancel transitions are visible without treating each poll or remote log as a system event.
 - **US-041** — **As an** Operator **I want** the view to resync after reconnect **So that** I never see stale state (`Est. AI: 00:35`)
   - [ ] Client resumes from its last sequence number; if the gap is too large, reloads the snapshot; UI shows a reconnecting indicator.
 
-##### FEAT-006.1.2: Live run graph
+##### FEAT-006.1.2: Live run graph and task plan
 - **Est. AI**: 00:45
 
 - **US-042** — **As an** Operator **I want** a read-only live DAG view **So that** I see where a run is (`Est. AI: 00:45`)
   - [ ] 200-node graph stays at 60 fps with 100 events/s; nodes keyboard-navigable; status conveyed by icon + text, not colour alone.
+  - [ ] From the workflow and any run, a separate read-only Task Plan page shows the task's declared command or action, node dependencies and order, placement rules, retries and timeouts for the version that run used; resolved secret values never appear. For SDK-function tasks it shows the declared function, not invented internal commands.
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
 - [ ] **Integration tests**: resync tests (drop connection mid-run, server restart) show 0 missed or out-of-order updates.
+- [ ] **UI / E2E tests**: System Events distinguishes selected agent from planned placement, shows every attempt in order after retry/failover, and links to the correct historical Task Plan after a new version is published; secret values are absent.
 - [ ] **Performance**: event latency p95 ≤ 1 s with 500 simulated clients at 10k events/s; graph 60 fps (Chrome performance trace) at 100 events/s.
 - [ ] **Accessibility**: zero axe critical/serious violations on run view; graph has a list alternative.
 
@@ -501,11 +516,13 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 
 - **US-043** — **As an** Operator **I want** live and historical task logs with search and download **So that** I can diagnose failures (`Est. AI: 00:40`)
   - [ ] Live tail ≤ 1 s behind; virtualised viewer handles 1M lines; logs stored outside the main DB.
+  - [ ] Logs are viewed by task attempt (including prior retries), separate from System Events; historical logs can be searched and downloaded after the run ends.
+  - [ ] Structured outputs per task attempt (JSON ≤ 64 KB, larger fails the task with a clear error) are stored with the attempt and visible in the UI and API during and after execution (FR-019).
 - **US-044** — **As an** Admin **I want** secret values masked in logs and outputs **So that** secrets never leak (`Est. AI: 00:20`)
   - [ ] Values resolved from secret references are replaced by `***` before leaving the agent.
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
-- [ ] **Integration tests**: log streaming from Windows and Linux agents; masking test with known secret values (0 occurrences in stored logs).
+- [ ] **Integration tests**: log streaming from Windows and Linux agents; masking test with known secret values (0 occurrences in stored logs); task outputs visible via UI and API, > 64 KB rejected.
 - [ ] **Performance**: 1M-line log opens < 1 s and scrolls at 60 fps.
 
 ### REQ-007: Team-isolated catalogue organised by type and metadata (Must Have)
@@ -588,9 +605,10 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - **Est. AI**: 01:20
 
 - **US-052** — **As a** Viewer **I want** queue wait, start/end/duration, retries, terminal status, and failure category per run/stage/node/task **So that** I can improve workflows (`Est. AI: 00:40`)
-  - [ ] Failure categories: TaskError, Timeout, Aborted, AgentLost, ResourceLimit, ValidationError, PlatformError.
+  - [ ] Failure categories: TaskError, Timeout, Aborted, AgentLost, ResourceLimit, ValidationError, Placement, PlatformError.
 - **US-053** — **As a** Viewer **I want** CPU and RAM per task process and per machine **So that** I can right-size work (`Est. AI: 00:40`)
   - [ ] Sampled every ≤ 5 s; summary (avg/max CPU, peak RAM) stored per task; series viewable per task.
+  - [ ] Network bytes sent/received per task process and per machine, with a rate series, captured the same way (FR-046; required by phase 2 load tasks).
 
 ##### FEAT-008.2.2: OpenTelemetry export
 - **Est. AI**: 00:30
@@ -599,7 +617,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
   - [ ] Exported to Azure Monitor in Azure and to the local dashboard locally; metric retention ≥ 90 days.
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
-- [ ] **Integration tests**: metrics recorded for a scenario A run on Windows and Linux agents; CPU/RAM samples present at ≤ 5 s intervals.
+- [ ] **Integration tests**: metrics recorded for a scenario A run on Windows and Linux agents; CPU/RAM and network-byte samples present at ≤ 5 s intervals.
 - [ ] **Performance**: metric capture adds ≤ 1% CPU on agents.
 
 ### REQ-009: Multiple reports per run and large artifacts (Must Have)
@@ -623,7 +641,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - **US-056** — **As a** Viewer **I want** Markdown, HTML, table, chart, image, JSON, text, diff, and PDF reports rendered inline **So that** I review without downloading (`Est. AI: 00:45`)
   - [ ] Reports ≤ 5 MB render < 1 s; larger load progressively without freezing the UI (NFR-023).
 - **US-057** — **As an** Admin **I want** HTML/SVG reports sandboxed **So that** report content cannot attack users (`Est. AI: 00:20`)
-  - [ ] Sandboxed iframe without scripts or same-origin access; served from a separate origin/CSP.
+  - [ ] Shown in a sandboxed iframe; content served with `Content-Security-Policy: sandbox allow-scripts; frame-ancestors 'self'` (no `allow-same-origin`, so it gets an opaque origin; only Kardia can frame it) and `X-Content-Type-Options: nosniff`, also when the content URL is opened directly. Only the report-content response omits `X-Frame-Options`; every other response keeps `DENY`.
 - **US-058** — **As a** frontend developer **I want** to add a report kind as a renderer only **So that** no backend/SDK change is needed (`Est. AI: 00:20`)
   - [ ] Unknown kinds fall back to download.
 
@@ -637,7 +655,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
 - [ ] **Unit tests**: SDK limit tests; each renderer has component tests with sample payloads.
-- [ ] **Security**: sandbox test — HTML report with script, form, and top-navigation attempts executes nothing; CSP verified.
+- [ ] **Security**: sandbox test — HTML report script cannot read Kardia cookies or storage or call the API (opaque origin), form submission and top navigation are blocked, also when the content URL is opened directly; CSP and `nosniff` headers verified.
 - [ ] **Performance**: 5 MB table report renders < 1 s; 10 MB loads progressively with 60 fps scrolling.
 - [ ] **UI / E2E tests**: US-056, US-059, US-060 flows; **Accessibility**: zero axe critical/serious on report views.
 
@@ -656,7 +674,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - [ ] **Performance**: ≥ 100 MB/s in-region throughput.
 
 ### REQ-010: SSO, team-scoped RBAC, secrets, audit, public API (Must Have)
-- **Outcome**: Only authenticated users act within their team/type roles; secrets are referenced, never stored or shown; every mutation is audited; everything in the UI is in the API.
+- **Outcome**: Only authenticated users act within their team/type roles; secrets are referenced, never stored or shown; every mutation is audited; everything in the UI is in the public API, except UI-only user-defined schedule mutations (FR-035).
 - **Traces**: FR-026, FR-027, FR-029, FR-031; NFR-007, NFR-008.
 - **Est. AI**: 03:20
 
@@ -700,14 +718,14 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - **Est. AI**: 00:30
 
 - **US-066** — **As an** automation engineer **I want** every UI capability in a documented, versioned API **So that** CI and phase 2 can automate it (`Est. AI: 00:30`)
-  - [ ] OpenAPI document published; contract test asserts every UI action maps to an API operation.
+  - [ ] OpenAPI document published; contract test asserts every UI action maps to a public API operation, except the UI-only user-defined schedule mutations (create, edit, pause, resume, delete; FR-035), which the test asserts are absent from the document and the CLI. Schedule reads (list, history) are public.
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
 - [ ] **Integration tests**: audit coverage test (100% of mutating endpoints produce an audit record); secret-leak test (DB, logs, events scanned for test secret values: 0 hits).
 - [ ] **Security**: OWASP ASVS L2 checklist for authn/authz/secrets reviewed; no high/critical SAST findings.
 
 ### REQ-011: Zero-downtime operations, local/cloud parity, retention (Must Have)
-- **Outcome**: The full stack runs locally with one command; deployments cause 0 s downtime and 0 failed runs and roll back in ≤ 5 min; data is retained 90 days (configurable per type).
+- **Outcome**: The full stack runs locally with one command; hosted production deployments cause 0 s downtime and 0 failed runs and roll back in ≤ 5 min; data is retained 90 days (configurable per type).
 - **Traces**: FR-030, FR-037; NFR-005, NFR-014–NFR-017 (extended to bare metal, 2026-10-13), NFR-025, NFR-026.
 - **Est. AI**: 05:15
 
@@ -722,10 +740,10 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
   - [ ] Starts DB, control plane, one agent, UI in ≤ 2 min on Windows and Linux; local stand-ins for blob, secrets, telemetry.
   - [ ] Docker optional: an existing/native PostgreSQL is used when a connection string is configured.
   - [ ] Options start extra simulated agents (distinct names/labels) and a Linux agent (container or WSL) on the same machine.
-- **US-111** — **As a** developer **I want** an optional prod-like local PPE mode with production builds of every component in containers behind the local HTTPS edge at `https://ppe.kardia.sonapraneeth.in` **So that** I can catch TLS, cookie, OIDC, WebSocket and failover issues locally and let other machines join (`Est. AI: 00:40`)
+- **US-111** — **As a** developer **I want** an optional prod-like local PPE mode with production builds of all Linux/server components in containers (the Windows agent runs natively) behind the local HTTPS edge at `https://ppe.kardia.sonapraneeth.in` **So that** I can catch TLS, cookie, OIDC, WebSocket and failover issues locally and let other machines join (`Est. AI: 00:40`)
   - [ ] `wf local up` / `wf local down` start and stop Release builds of api, two engines, PG, Linux agent(s), sample services, dashboard and a gateway Caddy in Docker, generated from the same AppHost and published only on `127.2.6.7`; a Windows agent can join natively.
   - [ ] `https://ppe.kardia.sonapraneeth.in` is served by the GrihaSetu edge with its mkcert umbrella certificate and opens without a certificate warning on this machine and on LAN clients that trust the mkcert root.
-  - [ ] UI, API and SignalR share one HTTPS origin; agents reach only the engine leader over gRPC/TLS; killing the leader container resumes runs on the standby.
+  - [ ] UI, API and SignalR share one HTTPS origin; agents reach only the engine leader; native and LAN agents use gRPC/TLS, in-compose agents may use h2c on the isolated gateway network; killing the leader container resumes runs on the standby.
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
 - [ ] **Integration tests**: CI job on Windows and Linux starts the stack and runs scenario A green in ≤ 2 min startup.
@@ -739,12 +757,12 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - **Est. AI**: 01:55
 
 - **US-068** — **As an** Admin **I want** to deploy the control plane, agents, and UI with no downtime **So that** users and runs are unaffected (`Est. AI: 00:45`)
-  - [ ] 0 s user-visible downtime, 0 failed in-flight runs; SignalR clients reconnect and resync automatically.
+  - [ ] In hosted production profiles (local single-instance mode exempt): 0 s user-visible downtime, 0 failed in-flight runs; SignalR clients reconnect and resync automatically; agents update in waves without draining, because running tasks survive the agent restart (US-109).
 - **US-069** — **As an** Admin **I want** to roll back any deployment in ≤ 5 min **So that** bad releases are cheap (`Est. AI: 00:25`)
   - [ ] One action switches traffic to the previous revision; no data loss.
 - **US-108** — **As an** Admin **I want** to run and upgrade the platform on bare metal or Azure VMs (Windows/Linux services, no containers) **So that** labs and VM fleets get the same zero-downtime behaviour as Azure PaaS (`Est. AI: 00:45`)
   - [ ] Rolling script upgrades api nodes one at a time (drain via health endpoint), engine standby first then leader handover ≤ 3 s, agents in waves; rollback re-points the release folder.
-  - [ ] Agents reach the leader via an endpoint list with `NotLeader` redirect; PG failover (Patroni) resumes runs ≤ 30 s.
+  - [ ] Agents reach the leader via an endpoint list with `NotLeader` redirect; PG failover (Patroni, ≈ 10–20 s) resumes runs ≤ the failover time + 30 s.
 
 ##### FEAT-011.2.2: Backward-compatible migrations and clients
 - **Est. AI**: 00:35
@@ -755,7 +773,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 **Exit Criteria** — milestone is done only when all boxes are checked:
 - [ ] **Integration tests**: deploy-under-load test: 100 active runs + 200 connected clients during deploy and rollback: 0 failed runs, 0 HTTP 5xx, all clients resynced.
 - [ ] **Performance**: rollback completes ≤ 5 min.
-- [ ] **Integration tests**: US-108 self-hosted lab (2 control-plane VMs, 3-node Patroni, 1 Windows + 1 Linux agent): same deploy-under-load test with 0 failed runs and 0 HTTP 5xx; Patroni primary kill → all runs reach a terminal state, resume ≤ 30 s.
+- [ ] **Integration tests**: US-108 self-hosted lab (2 control-plane VMs, 3-node Patroni, 1 Windows + 1 Linux agent): same deploy-under-load test with 0 failed runs and 0 HTTP 5xx; Patroni primary kill → all runs reach a terminal state, resume ≤ the Patroni failover time + 30 s.
 
 #### Milestone M-011.3: Data retention
 - **Problem solved**: Storage grows without bound.
@@ -771,7 +789,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - [ ] **Integration tests**: purge job removes expired data across DB and blob for a per-type override; live API p95 unaffected (< 10% change) during purge.
 
 ### REQ-012: Recovery (Should Have)
-- **Outcome**: Failed runs resume from the failed node, bad versions roll back instantly, and missed fires are recorded and caught up.
+- **Outcome**: Failed runs resume from the failed node, bad workflow versions roll back instantly, and missed fires are recorded and caught up.
 - **Traces**: FR-011, FR-016, FR-055.
 - **Est. AI**: 02:20
 
@@ -788,15 +806,16 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 **Exit Criteria** — milestone is done only when all boxes are checked:
 - [ ] **Integration tests**: scenario A re-run from Deploy-US reuses Build and Deploy-EU outputs; UI shows lineage.
 
-#### Milestone M-012.2: Instant config rollback
-- **Problem solved**: A bad workflow or schedule version keeps breaking runs until a fix is merged.
+#### Milestone M-012.2: Instant workflow-version rollback
+- **Problem solved**: A bad workflow version keeps breaking runs until a fix is merged.
 - **Est. AI**: 00:40
 
 ##### FEAT-012.2.1: Activate an older version
 - **Est. AI**: 00:25
 
-- **US-073** — **As an** Admin **I want** to activate a previous workflow or schedule version from UI/API **So that** I recover instantly (`Est. AI: 00:25`)
+- **US-073** — **As an** Admin **I want** to activate a previous workflow version from UI/API **So that** I recover instantly (`Est. AI: 00:25`)
   - [ ] Active ≤ 5 s; audited; the next merge re-activates the newest version only if it is newer.
+  - [ ] Rollback covers workflow versions only; code-defined schedule configs are rolled back through source control (revert, then re-register).
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
 - [ ] **Integration tests**: rollback during active schedules: 0 missed/duplicated fires; audit record present.
@@ -873,7 +892,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - **US-078** — **As an** Admin **I want** a machine list with OS, labels, pool, health, capacity, current reservation **So that** I manage the fleet (`Est. AI: 00:35`)
   - [ ] Labels and pools editable by Admin; changes audited.
 - **US-079** — **As an** Admin **I want** each machine's max requests/s set manually or measured by a calibration run **So that** load is split correctly (`Est. AI: 00:40`)
-  - [ ] Calibration runs a fixed loopback load and records sustainable req/s per codec/transport; manual value overrides.
+  - [ ] Calibration runs a fixed loopback load and records sustainable req/s per capacity profile (transport + codec + payload-size class + load settings); a manual value overrides per profile.
 
 ##### FEAT-015.1.2: Targeting
 - **Est. AI**: 00:35
@@ -893,12 +912,13 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - **Est. AI**: 01:10
 
 - **US-081** — **As a** Service Team engineer **I want** machines reserved exclusively for my test **So that** results are not skewed (`Est. AI: 00:45`)
-  - [ ] Reserved machines run only that run's tasks; released on success, failure, abort, engine failover, or reservation timeout; 0 leaked reservations.
+  - [ ] Reserved machines run only that run's tasks; released on run/node completion, failure, abort, or lease expiry; engine failover preserves the reservation (the new leader adopts and renews the current epoch before expiry); 0 leaked reservations.
+  - [ ] Reservations are renewable leases: the engine renews them while the node or run is active; every dispatch carries the reservation epoch; when a lease expires, its work is cancelled and fenced (stale-epoch dispatches and results rejected) before the machine is reassigned.
 - **US-082** — **As an** Operator **I want** to queue or reject (configurable) a run when machines are unavailable **So that** behaviour is predictable (`Est. AI: 00:25`)
   - [ ] Queued runs show position and the blocking reservation.
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
-- [ ] **Integration tests**: concurrent reservation race (20 runs competing for 4 machines): no double reservation; chaos test (kill leader mid-test) releases all reservations ≤ reservation timeout.
+- [ ] **Integration tests**: concurrent reservation race (20 runs competing for 4 machines): no double reservation; chaos test (kill leader mid-test): the new leader adopts and renews every reservation before expiry, with no reassignment and no double reservation.
 
 ### REQ-016: Pluggable transport/codec and versioned service hooks (Must Have — phase 2)
 - **Outcome**: New transports (ACS, gRPC) and codecs plug in without touching load/parity/hook code; service teams own only versioned C# request/response hooks, testable offline and isolated at runtime.
@@ -935,7 +955,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - **US-085** — **As a** Service Team engineer **I want** to implement request shaping, response normalisation, and comparator extensions against a versioned contract and register versions **So that** I onboard without core PRs (`Est. AI: 00:45`)
   - [ ] Contract package follows SemVer; incompatible hook versions are rejected at registration.
 - **US-086** — **As an** Admin **I want** a crashing hook to fail only its task **So that** the engine and other runs are safe (`Est. AI: 00:30`)
-  - [ ] Hooks run in the task host process (never in the control plane or agent process); crash → task Failed with `HookError`.
+  - [ ] Tasks that invoke hooks (request/response hooks, load and parity tasks) run in a dedicated task-host process per task attempt (never in the control plane, the agent process, or a host shared with other tasks); crash → task `Failed` with category `TaskError`, reason code `HookError`.
 
 ##### FEAT-016.2.2: Hook test harness
 - **Est. AI**: 00:30
@@ -945,7 +965,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
 - [ ] **Unit tests**: hook harness self-tests; sample hooks tests green.
-- [ ] **Integration tests**: crash/hang/OOM hook isolation tests: only the task fails; agent and control plane stay healthy.
+- [ ] **Integration tests**: crash/hang/OOM hook isolation tests: only the hook's task fails; other tasks of the same run, the agent, and the control plane stay healthy.
 
 ### REQ-017: Request sources (Must Have — phase 2)
 - **Outcome**: Requests are generated from a Bond schema or replayed from files fetched from local, HTTPS, Azure Files, Azure Blob, or Cosmos DB, by download-first or live streaming, with bounded memory.
@@ -1008,7 +1028,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 
 - **US-093** — **As a** Service Team engineer **I want** constant, ramp, step, and spike shapes with a target rate split across machines by capacity **So that** I test realistic load (`Est. AI: 00:55`)
   - [ ] Open-model scheduling (no coordinated omission); achieved rate within ±5% of target at steady state; generator overhead < 1 ms p99 per request.
-  - [ ] Load keeps running through engine failover, deploys, and agent restarts (US-109). Each shard checkpoints every 10 s (position in the load shape, request-source offset, counts); after a machine loss the shard resumes on a spare eligible machine at the current point of the shape (no replayed ramp), or the remaining shards continue and the reduced rate is flagged. The gap is shown in the perf report.
+  - [ ] Load and its reservations are kept through engine failover, deploys, and agent restarts (US-109). Each shard checkpoints every 10 s (position in the load shape, request-source offset, counts); after a machine loss the shard resumes on a spare eligible machine at the current point of the shape (no replayed ramp), or the remaining shards continue and the reduced rate is flagged. The gap is shown in the perf report.
 - **US-094** — **As an** Operator **I want** a kill switch **So that** I stop load immediately (`Est. AI: 00:25`)
   - [ ] All generators for the run stop sending within 1 s; run is aborted with source `KillSwitch` and who/when/reason recorded as in US-013.
 
@@ -1165,7 +1185,7 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 - **Est. AI**: 00:45
 
 - **US-106** — **As a** Service Team engineer **I want** to record live requests into a replay file **So that** parity tests use real traffic (`Est. AI: 00:45`)
-  - [ ] Capture via a service-side middleware hook writing the standard replay format; sampling rate configurable; secrets/PII fields redacted by hook.
+  - [ ] Capture uses a core-owned service middleware or sidecar writing the standard replay format; sampling rate and declarative secrets/PII redaction are configuration; no new service-team-owned hook contract.
 
 **Exit Criteria** — milestone is done only when all boxes are checked:
 - [ ] **Integration tests**: record from dummy service A, replay in a parity run, 100% parity against itself.
@@ -1192,7 +1212,8 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 |------|--------|-----------------|---------------|
 | Invalid variables | Trigger with wrong type | Inline error, no run created | User fixes and retries |
 | Engine failover | Leader killed mid-run | Runs resume ≤ 30 s; UI reconnects and resyncs | No lost or duplicated state |
-| Agent lost | Machine disconnects | Attempt ends `AgentLost`; retried elsewhere or failed with reason; reservation released | Run reaches terminal state |
+| DB failover | Primary database fails over | Runs resume ≤ the database's failover time + 30 s; UI resyncs | No lost or duplicated state |
+| Agent lost | Machine disconnects | At 15 s without a heartbeat the agent is Unhealthy and gets no new dispatches; attempts stay `Running` and reclaimable until 30 s, then end `AgentLost` and are retried elsewhere or failed with reason; reservation kept until the node/run ends or its lease expires | Run reaches terminal state |
 | Abort | Operator aborts a running run with a reason | Run shows Aborting; tasks signalled; post stages run; who/when/reason recorded | Run ends Aborted; details visible everywhere |
 | Overlap | Schedule fires while previous run active | Policy applied (default skip), recorded | History shows reason |
 | Missed fires | Scheduler outage | Misses recorded; latest-only catch-up | No silent gaps |
@@ -1207,8 +1228,8 @@ Fluent C# API for lifecycle stages, nodes, dependencies, and tasks in series or 
 | Home | Team areas, recent runs, my subscriptions |
 | Team area | Types in team order; latest status per workflow |
 | Type view | Workflows grouped/filtered by metadata per team presentation config |
-| Workflow | Overview, versions (diff, clone), schedules, run history, trends |
-| Run | Live graph, timeline, tasks, logs, reports, artifacts, metrics, variables |
+| Workflow | Overview, versions (diff, clone), schedules, run history, trends; read-only Task Plan for a selected version |
+| Run | Live graph, timeline, tasks, separate System Events, logs by attempt, reports, artifacts, metrics, variables; links to its version's Task Plan |
 | Schedule / run series | Origin, next fires, history with misses/skips, trends, Run now |
 | Report viewer | Inline renderers; compare across runs |
 | Machines (phase 2) | Registry, capacity, health, reservations, calibration |
@@ -1234,7 +1255,7 @@ Design detail lives in the technical design doc; constraints that shape requirem
 - Phase 2 onboarding: 0 core PRs per new service; ≤ 1 day to onboard — _onboarding log_.
 
 ## 9. Delivery Sequence
-Milestones in build order across all requirements. Phase 1 = 56:55; phase 2 = 22:25.
+Milestones in build order across all requirements. Phase 1 = 57:40; phase 2 = 22:25.
 
 | Order | Milestone | Requirement | Priority | Est. AI | Depends on | Exit criteria met |
 |-------|-----------|-------------|----------|---------|------------|-------------------|
@@ -1243,9 +1264,9 @@ Milestones in build order across all requirements. Phase 1 = 56:55; phase 2 = 22
 | 3 | M-001.2 Run locally with built-in tasks | REQ-001 | Must | 02:05 | M-002.1 | [ ] |
 | 4 | M-004.1 Shared validator | REQ-004 | Must | 02:05 | M-001.1 | [ ] |
 | 5 | M-004.2 Dry-run test harness | REQ-004 | Must | 01:25 | M-002.1, M-004.1 | [ ] |
-| 6 | M-011.1 One-command local stack | REQ-011 | Must | 01:45 | M-002.1 | [ ] |
-| 7 | M-010.1 Authentication and RBAC | REQ-010 | Must | 01:30 | M-011.1 | [ ] |
-| 8 | M-002.2 Distributed execution on agents | REQ-002 | Must | 03:30 | M-002.1, M-011.1 | [ ] |
+| 6 | M-002.2 Distributed execution on agents | REQ-002 | Must | 03:30 | M-002.1 | [ ] |
+| 7 | M-011.1 One-command local stack | REQ-011 | Must | 01:45 | M-002.2 | [ ] |
+| 8 | M-010.1 Authentication and RBAC | REQ-010 | Must | 01:30 | M-011.1 | [ ] |
 | 9 | M-005.1 Automatic registration, hot activation | REQ-005 | Must | 01:55 | M-004.1, M-002.2 | [ ] |
 | 10 | M-003.1 On-demand triggering | REQ-003 | Must | 01:15 | M-005.1, M-010.1 | [ ] |
 | 11 | M-006.1 Live state push | REQ-006 | Must | 02:20 | M-003.1 | [ ] |
@@ -1256,7 +1277,7 @@ Milestones in build order across all requirements. Phase 1 = 56:55; phase 2 = 22
 | 16 | M-003.2 User-defined schedules | REQ-003 | Must | 02:15 | M-003.1 | [ ] |
 | 17 | M-003.3 Code-defined schedules | REQ-003 | Must | 01:55 | M-003.2, M-005.1 | [ ] |
 | 18 | M-005.2 Version history and cloning | REQ-005 | Must | 01:25 | M-005.1 | [ ] |
-| 19 | M-002.3 Fault tolerance | REQ-002 | Must | 04:15 | M-002.2, M-003.2 | [ ] |
+| 19 | M-002.3 Fault tolerance | REQ-002 | Must | 05:00 | M-002.2, M-003.2 | [ ] |
 | 20 | M-009.1 Publish and view reports | REQ-009 | Must | 03:20 | M-006.1 | [ ] |
 | 21 | M-009.2 Large artifacts | REQ-009 | Must | 00:55 | M-002.2 | [ ] |
 | 22 | M-008.2 Execution metrics | REQ-008 | Must | 02:05 | M-002.2 | [ ] |
@@ -1264,7 +1285,7 @@ Milestones in build order across all requirements. Phase 1 = 56:55; phase 2 = 22
 | 24 | M-011.2 Zero-downtime deploy and rollback | REQ-011 | Must | 02:45 | M-002.3 | [ ] |
 | 25 | M-011.3 Data retention | REQ-011 | Must | 00:45 | M-008.1 | [ ] |
 | 26 | M-012.1 Re-run from failed node | REQ-012 | Should | 00:55 | M-002.1 | [ ] |
-| 27 | M-012.2 Instant config rollback | REQ-012 | Should | 00:40 | M-005.2 | [ ] |
+| 27 | M-012.2 Instant workflow-version rollback | REQ-012 | Should | 00:40 | M-005.2 | [ ] |
 | 28 | M-012.3 Missed-fire catch-up | REQ-012 | Should | 00:45 | M-003.2 | [ ] |
 | 29 | M-013.1 Trend insights | REQ-013 | Should | 01:35 | M-008.2 | [ ] |
 | 30 | M-014.1 Completion notifications | REQ-014 | Should | 00:55 | M-003.1 | [ ] |
@@ -1282,7 +1303,7 @@ Milestones in build order across all requirements. Phase 1 = 56:55; phase 2 = 22
 | 42 | M-022.1 Quota enforcement | REQ-022 | Could | 00:50 | M-015.2 | [ ] |
 | 43 | M-023.1 Find max sustainable rate | REQ-023 | Could | 00:55 | M-018.1 | [ ] |
 | 44 | M-024.1 Traffic recording source | REQ-024 | Could | 01:00 | M-017.2 | [ ] |
-| **Total** | | | | **79:20** | | |
+| **Total** | | | | **80:05** | | |
 
 ## 10. Open Questions
-- [ ] None blocking. Assumptions carried from discovery (validate during build): ≥ 1,000 workflow definitions and ≥ 200 concurrent tasks (NFR-003); Entra ID for SSO (NFR-007); Bond packages available from the internal feed.
+- [ ] None blocking. Assumptions carried from discovery (validate during build): ≥ 1,000 workflow definitions and ≥ 200 concurrent tasks (NFR-003); Entra ID for SSO (NFR-007); Bond packages available from the internal feed (nuget.org exact version as restore fallback, JSON over HTTP if unusable). Tracked as validation risk R-13 in the technical design.

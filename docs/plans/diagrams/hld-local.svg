@@ -145,7 +145,7 @@ body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -ap
 <text class="link-label" x="668" y="440" text-anchor="start">gRPC stream</text>
 <text class="link-label" x="774" y="556" text-anchor="middle">UDS</text>
 <text class="link-label" x="1038" y="556" text-anchor="middle">HTTP load</text>
-<text class="link-label" x="914" y="490" text-anchor="start">logs · artifacts</text>
+<text class="link-label" x="914" y="490" text-anchor="start">reports · artifacts</text>
 <text class="link-label" x="906" y="18" text-anchor="middle">OTLP · all processes</text>
 </svg>
 <div class="zone" style="--x:8px; --y:14px; --w:1274px; --h:618px"></div>
@@ -154,14 +154,14 @@ body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -ap
 <div class="zone-label right" style="--x:804px; --y:188px; --w:204px"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon" aria-hidden="true"><use href="#sd-container"/></svg>Docker (optional)</div>
 <div class="node n-client" style="--x:24px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-browser"/></svg></span><span class="node-title">Browser</span><span class="node-sub">React SPA · author / operator</span></div>
 <div class="node n-client" style="--x:24px; --y:360px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-desktop"/></svg></span><span class="node-title">wf CLI / workflow.cs</span><span class="node-sub">dotnet run · publish · run</span></div>
-<div class="node n-edge" style="--x:288px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-proxy"/></svg></span><span class="node-title">Vite dev server</span><span class="node-sub">HMR · proxies /api, /hub</span></div>
+<div class="node n-edge" style="--x:288px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-proxy"/></svg></span><span class="node-title">Vite dev server</span><span class="node-sub">HMR · proxies /api, /hubs</span></div>
 <div class="node n-compute" style="--x:552px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-monolith"/></svg></span><span class="node-title">wf-host</span><span class="node-sub">api + engine · in-proc SignalR</span></div>
-<div class="node n-data" style="--x:816px; --y:40px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-vault"/></svg></span><span class="node-title">Local secrets</span><span class="node-sub">user-secrets / DPAPI file</span></div>
+<div class="node n-data" style="--x:816px; --y:40px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-vault"/></svg></span><span class="node-title">Local secrets</span><span class="node-sub">user-secrets / protected file</span></div>
 <div class="node n-data" style="--x:816px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-database"/></svg></span><span class="node-title">PostgreSQL 17</span><span class="node-sub">container or native · volume</span></div>
-<div class="node n-data" style="--x:816px; --y:360px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-file-storage"/></svg></span><span class="node-title">Filesystem blobs</span><span class="node-sub">%LOCALAPPDATA%\wf\blobs</span></div>
+<div class="node n-data" style="--x:816px; --y:360px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-file-storage"/></svg></span><span class="node-title">Filesystem blobs</span><span class="node-sub">%LOCALAPPDATA% / XDG data dir</span></div>
 <div class="node n-observe" style="--x:1080px; --y:40px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-dashboard"/></svg></span><span class="node-title">Aspire dashboard</span><span class="node-sub">OTLP logs · metrics · traces</span></div>
-<div class="node n-compute" style="--x:552px; --y:520px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-worker"/></svg></span><span class="node-title">wf-agent ×1..N</span><span class="node-sub">native + Linux agent (WSL)</span></div>
-<div class="node n-compute" style="--x:816px; --y:520px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-batch-job"/></svg></span><span class="node-title">Task hosts</span><span class="node-sub">one child process per task</span></div>
+<div class="node n-compute" style="--x:552px; --y:520px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-worker"/></svg></span><span class="node-title">wf-agent ×1..N</span><span class="node-sub">native · Linux via WSL/Docker</span></div>
+<div class="node n-compute" style="--x:816px; --y:520px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-batch-job"/></svg></span><span class="node-title">Task hosts</span><span class="node-sub">per-run · hooks per attempt</span></div>
 <div class="node n-ext" style="--x:1080px; --y:520px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-external"/></svg></span><span class="node-title">Sample services</span><span class="node-sub">Service A / B · Bond types</span></div>
 </div>
 <div class="legend">

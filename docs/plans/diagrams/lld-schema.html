@@ -163,6 +163,12 @@
   .tbl .k { display: inline-block; width: 30px; font-weight: 700; color: var(--accent); }
   .zone-label.right { left: auto; right: calc(100% - var(--x) - var(--w) + 14px); }
 
+  .glossary { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--edge); font-size: 14px; line-height: 1.5; }
+  .glossary summary { cursor: pointer; font-size: 18px; font-weight: 650; }
+  .glossary dl { max-width: 1100px; margin: 12px 0 0; }
+  .glossary dt { font-weight: 650; margin-top: 10px; }
+  .glossary dd { margin: 0; color: var(--ink-2); }
+
   .sd-root { width: 1624px; }
   .sd-canvas, .sd-links { width: 1560px; height: 790px; }
 </style>
@@ -198,7 +204,7 @@
     <path d="M7.2 5.6V11M11.9 5.6V11M16.6 5.6V11M7.2 13v5.4M11.9 13v5.4M16.6 13v5.4"/>
   </symbol>
 </svg>
-<header class="sd-head"><h1>LLD 1: PostgreSQL schema map</h1><p>Key columns, keys and indexes per table, grouped by owner. ⧉ = range-partitioned monthly on run_day (derived from the UUID v7 run id). Full column list in §5.2.</p></header>
+<header class="sd-head"><h1>LLD 1: PostgreSQL schema map</h1><p>Key columns, keys and indexes per table, grouped by owner. ⧉ = monthly partitions (run tables by run_day from the UUID v7 run id; audit_log by ts). Full column list in §5.2.</p></header>
 <div class="sd-canvas">
 <svg class="sd-links" viewBox="0 0 1560 790" aria-hidden="true">
 <defs>
@@ -208,66 +214,68 @@
 <path class="link c-sync" d="M132,139 L132,173" marker-end="url(#m-arrow)"/>
 <path class="link c-sync" d="M132,290 L132,324" marker-end="url(#m-arrow)"/>
 <path class="link c-sync" d="M392,169 L392,203" marker-end="url(#m-arrow)"/>
-<path class="link c-sync" d="M392,501 L392,535" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M392,516 L392,550" marker-end="url(#m-arrow)"/>
 <path class="link c-sync" d="M652,188 L652,154" marker-end="url(#m-arrow)"/>
 <path class="link c-sync" d="M652,335 L652,369" marker-end="url(#m-arrow)"/>
 <path class="link c-sync" d="M652,471 L652,505" marker-end="url(#m-arrow)"/>
-<path class="link c-sync" d="M652,637 L652,671" marker-end="url(#m-arrow)"/>
-<path class="link c-sync" d="M912,199 L912,233" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M652,667 L652,701" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M912,184 L912,218" marker-end="url(#m-arrow)"/>
 <path class="link c-sync" d="M240,231.5 H262 V110.5 L284,110.5" marker-end="url(#m-arrow)"/>
-<path class="link c-sync" d="M284,130.5 H266 V435 L284,435" marker-end="url(#m-arrow)"/>
-<path class="link c-sync" d="M500,455 H514 V699.5 L500,699.5" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M284,130.5 H266 V442.5 L284,442.5" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M500,462.5 H514 V714.5 L500,714.5" marker-end="url(#m-arrow)"/>
 <path class="link c-sync" d="M500,269 H526 V241.5 L544,241.5" marker-end="url(#m-arrow)"/>
-<path class="link c-sync" d="M500,687.5 H538 V281.5 L544,281.5" marker-end="url(#m-arrow)"/>
-<path class="link c-sync" d="M804,155.5 H782 V571 L760,571" marker-end="url(#m-arrow)"/>
-<path class="link c-sync" d="M760,291.5 H770 V284 L804,284" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M500,702.5 H538 V281.5 L544,281.5" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M804,148 H782 V586 L760,586" marker-end="url(#m-arrow)"/>
+<path class="link c-sync" d="M760,291.5 H770 V276.5 L804,276.5" marker-end="url(#m-arrow)"/>
 <text class="link-label" x="140" y="160" text-anchor="start">1:N</text>
 <text class="link-label" x="140" y="311" text-anchor="start">1:N</text>
 <text class="link-label" x="400" y="190" text-anchor="start">1:N</text>
-<text class="link-label" x="400" y="522" text-anchor="start">1:N</text>
+<text class="link-label" x="400" y="537" text-anchor="start">1:N</text>
 <text class="link-label" x="660" y="175" text-anchor="start">1:N</text>
 <text class="link-label" x="660" y="356" text-anchor="start">1:N</text>
 <text class="link-label" x="660" y="492" text-anchor="start">1:N</text>
-<text class="link-label" x="660" y="658" text-anchor="start">1:1</text>
-<text class="link-label" x="920" y="220" text-anchor="start">1:N</text>
+<text class="link-label" x="660" y="688" text-anchor="start">1:1</text>
+<text class="link-label" x="920" y="205" text-anchor="start">1:N</text>
 <text class="link-label" x="259" y="160" text-anchor="end">1:N</text>
-<text class="link-label" x="260" y="282.75" text-anchor="end">1:N</text>
-<text class="link-label" x="520" y="577.25" text-anchor="start">1:1</text>
+<text class="link-label" x="260" y="286.5" text-anchor="end">1:N</text>
+<text class="link-label" x="520" y="588.5" text-anchor="start">1:1</text>
 <text class="link-label" x="520" y="261" text-anchor="end">1:N</text>
 <text class="link-label" x="534" y="480" text-anchor="end">1:N</text>
 <text class="link-label" x="771" y="492" text-anchor="middle">1:N</text>
-<text class="link-label" x="800" y="276" text-anchor="end">1:N</text>
+<text class="link-label" x="800" y="268.5" text-anchor="end">1:N</text>
 </svg>
-<div class="zone" style="--x:14px; --y:30px; --w:236px; --h:529px"></div>
+<div class="zone" style="--x:14px; --y:30px; --w:236px; --h:680px"></div>
 <div class="zone-label" style="--x:14px; --y:30px; --w:236px"><svg class="sd-icon" aria-hidden="true"><use href="#sd-registry"/></svg>Registry &amp; access</div>
-<div class="zone" style="--x:274px; --y:30px; --w:236px; --h:725px"></div>
+<div class="zone" style="--x:274px; --y:30px; --w:236px; --h:740px"></div>
 <div class="zone-label" style="--x:274px; --y:30px; --w:236px"><svg class="sd-icon" aria-hidden="true"><use href="#sd-scheduler"/></svg>Workflows &amp; schedules</div>
-<div class="zone" style="--x:534px; --y:30px; --w:236px; --h:740px"></div>
+<div class="zone" style="--x:534px; --y:30px; --w:236px; --h:770px"></div>
 <div class="zone-label" style="--x:534px; --y:30px; --w:236px"><svg class="sd-icon" aria-hidden="true"><use href="#sd-stream-log"/></svg>Run state ⧉</div>
-<div class="zone" style="--x:794px; --y:30px; --w:236px; --h:574px"></div>
+<div class="zone" style="--x:794px; --y:30px; --w:236px; --h:695px"></div>
 <div class="zone-label" style="--x:794px; --y:30px; --w:236px"><svg class="sd-icon" aria-hidden="true"><use href="#sd-server"/></svg>Machines &amp; control</div>
 <div class="zone" style="--x:1054px; --y:30px; --w:236px; --h:665px"></div>
 <div class="zone-label" style="--x:1054px; --y:30px; --w:236px"><svg class="sd-icon" aria-hidden="true"><use href="#sd-object-storage"/></svg>Results ⧉</div>
-<div class="zone" style="--x:1314px; --y:30px; --w:236px; --h:408px"></div>
+<div class="zone" style="--x:1314px; --y:30px; --w:236px; --h:529px"></div>
 <div class="zone-label" style="--x:1314px; --y:30px; --w:236px"><svg class="sd-icon" aria-hidden="true"><use href="#sd-logs"/></svg>Ops &amp; audit</div>
 <div class="node tbl n-data" style="--x:24px; --y:52px; --w:216px; --h:87px"><span class="node-title">teams</span><span class="col"><span class="k">PK</span>id (slug)</span><span class="col"><span class="k"></span>name</span><span class="col"><span class="k"></span>presentation jsonb</span></div>
 <div class="node tbl n-data" style="--x:24px; --y:173px; --w:216px; --h:117px"><span class="node-title">workflow_types</span><span class="col"><span class="k">PK</span>id  team/type</span><span class="col"><span class="k">FK</span>team_id → teams</span><span class="col"><span class="k">UQ</span>team_id, normalized_name</span><span class="col"><span class="k"></span>metadata_schema jsonb</span><span class="col"><span class="k"></span>retention_days, limits</span></div>
-<div class="node tbl n-data" style="--x:24px; --y:324px; --w:216px; --h:102px"><span class="node-title">role_bindings</span><span class="col"><span class="k">PK</span>team_id, type_id,</span><span class="col"><span class="k"></span>  role, principal_id</span><span class="col"><span class="k">idx</span>principal_id</span><span class="col"><span class="k"></span>null scope = global</span></div>
-<div class="node tbl n-data" style="--x:24px; --y:460px; --w:216px; --h:87px"><span class="node-title">registry_snapshots</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k"></span>git_commit</span><span class="col"><span class="k"></span>content jsonb</span></div>
-<div class="node tbl n-data" style="--x:284px; --y:52px; --w:216px; --h:117px"><span class="node-title">workflows</span><span class="col"><span class="k">PK</span>id  team/type/name</span><span class="col"><span class="k">FK</span>type_id → types</span><span class="col"><span class="k">FK</span>active_version_id</span><span class="col"><span class="k">FK</span>cloned_from_version_id</span><span class="col"><span class="k"></span>deleted_at (soft)</span></div>
+<div class="node tbl n-data" style="--x:24px; --y:324px; --w:216px; --h:117px"><span class="node-title">role_bindings</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k">UQ</span>scope_kind, scope_id,</span><span class="col"><span class="k"></span>  role, principal_id</span><span class="col"><span class="k">idx</span>principal_id</span><span class="col"><span class="k"></span>Global scope_id = &#x27;*&#x27;</span></div>
+<div class="node tbl n-data" style="--x:24px; --y:475px; --w:216px; --h:87px"><span class="node-title">registry_snapshots</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k"></span>git_commit</span><span class="col"><span class="k"></span>content jsonb</span></div>
+<div class="node tbl n-data" style="--x:24px; --y:596px; --w:216px; --h:102px"><span class="node-title">schedule_config_versions</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k">FK</span>workflow_id</span><span class="col"><span class="k">UQ</span>workflow_id, content_sha256</span><span class="col"><span class="k"></span>source_path, git_commit</span></div>
+<div class="node tbl n-data" style="--x:284px; --y:52px; --w:216px; --h:117px"><span class="node-title">workflows</span><span class="col"><span class="k">PK</span>id  team/type/name</span><span class="col"><span class="k">FK</span>type_id → workflow_types</span><span class="col"><span class="k">FK</span>active_version_id</span><span class="col"><span class="k">FK</span>cloned_from_version_id</span><span class="col"><span class="k"></span>deleted_at (soft)</span></div>
 <div class="node tbl n-data" style="--x:284px; --y:203px; --w:216px; --h:132px"><span class="node-title">workflow_versions</span><span class="col"><span class="k">PK</span>id uuid</span><span class="col"><span class="k">UQ</span>workflow_id, major,</span><span class="col"><span class="k"></span>  minor, patch</span><span class="col"><span class="k"></span>manifest jsonb (DAG)</span><span class="col"><span class="k"></span>package_uri, sha256</span><span class="col"><span class="k"></span>git_commit, registered_by</span></div>
-<div class="node tbl n-data" style="--x:284px; --y:369px; --w:216px; --h:132px"><span class="node-title">schedules</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k">FK</span>workflow_id</span><span class="col"><span class="k"></span>origin Code | User</span><span class="col"><span class="k"></span>cron | interval_s</span><span class="col"><span class="k">idx</span>next_fire_at</span><span class="col"><span class="k"></span>row_version (ETag)</span></div>
-<div class="node tbl n-data" style="--x:284px; --y:535px; --w:216px; --h:87px"><span class="node-title">schedule_fires</span><span class="col"><span class="k">PK</span>schedule_id, fire_at</span><span class="col"><span class="k"></span>outcome, run_id</span><span class="col"><span class="k"></span>exactly-once key</span></div>
-<div class="node tbl n-data" style="--x:284px; --y:656px; --w:216px; --h:87px"><span class="node-title">run_series</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k">UQ</span>schedule_id</span><span class="col"><span class="k">FK</span>workflow_id</span></div>
+<div class="node tbl n-data" style="--x:284px; --y:369px; --w:216px; --h:147px"><span class="node-title">schedules</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k">FK</span>workflow_id</span><span class="col"><span class="k"></span>origin Code | User</span><span class="col"><span class="k">FK</span>config_version_id (Code)</span><span class="col"><span class="k"></span>cron | interval_s</span><span class="col"><span class="k">idx</span>next_fire_at</span><span class="col"><span class="k"></span>row_version (ETag)</span></div>
+<div class="node tbl n-data" style="--x:284px; --y:550px; --w:216px; --h:87px"><span class="node-title">schedule_fires</span><span class="col"><span class="k">PK</span>schedule_id, fire_at</span><span class="col"><span class="k"></span>outcome, run_id</span><span class="col"><span class="k"></span>exactly-once key</span></div>
+<div class="node tbl n-data" style="--x:284px; --y:671px; --w:216px; --h:87px"><span class="node-title">run_series</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k">UQ</span>schedule_id</span><span class="col"><span class="k">FK</span>workflow_id</span></div>
 <div class="node tbl n-data" style="--x:544px; --y:52px; --w:216px; --h:102px"><span class="node-title">run_events ⧉</span><span class="col"><span class="k">PK</span>run_day, run_id, seq</span><span class="col"><span class="k"></span>kind, entity_key, attempt</span><span class="col"><span class="k"></span>payload bytea (protobuf)</span><span class="col"><span class="k"></span>append-only</span></div>
 <div class="node tbl n-data" style="--x:544px; --y:188px; --w:216px; --h:147px"><span class="node-title">runs ⧉</span><span class="col"><span class="k">PK</span>run_day, id</span><span class="col"><span class="k">FK</span>version_id, series_id</span><span class="col"><span class="k">idx</span>status WHERE active</span><span class="col"><span class="k">GIN</span>metadata</span><span class="col"><span class="k"></span>variables, placement</span><span class="col"><span class="k"></span>aborted_by/at/reason</span><span class="col"><span class="k"></span>last_seq, snapshot_seq</span></div>
 <div class="node tbl n-data" style="--x:544px; --y:369px; --w:216px; --h:102px"><span class="node-title">node_runs ⧉</span><span class="col"><span class="k">PK</span>run_day, run_id, node_key</span><span class="col"><span class="k"></span>status, attempts</span><span class="col"><span class="k"></span>outputs jsonb ≤ 64 KB</span><span class="col"><span class="k"></span>pinned_agent_id</span></div>
-<div class="node tbl n-data" style="--x:544px; --y:505px; --w:216px; --h:132px"><span class="node-title">task_attempts ⧉</span><span class="col"><span class="k">PK</span>run_day, run_id,</span><span class="col"><span class="k"></span>  task_key, attempt</span><span class="col"><span class="k">idx</span>agent_id, started_at</span><span class="col"><span class="k">idx</span>deadline_at, retry_at</span><span class="col"><span class="k"></span>status, failure_category</span><span class="col"><span class="k"></span>log_uri, log_bytes</span></div>
-<div class="node tbl n-data" style="--x:544px; --y:671px; --w:216px; --h:87px"><span class="node-title">task_checkpoints ⧉</span><span class="col"><span class="k">PK</span>run_day, run_id, task_key</span><span class="col"><span class="k"></span>attempt, seq</span><span class="col"><span class="k"></span>blob_uri ≤ 1 MB</span></div>
-<div class="node tbl n-data" style="--x:804px; --y:52px; --w:216px; --h:147px"><span class="node-title">agents</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k">UQ</span>name</span><span class="col"><span class="k"></span>os, arch, cores, ram_mb</span><span class="col"><span class="k">GIN</span>labels text[]</span><span class="col"><span class="k"></span>pool, max_tasks</span><span class="col"><span class="k"></span>capacity_rps (FR-125)</span><span class="col"><span class="k"></span>status, last_heartbeat_at</span></div>
-<div class="node tbl n-data" style="--x:804px; --y:233px; --w:216px; --h:102px"><span class="node-title">reservations</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k"></span>run_id, node_key</span><span class="col"><span class="k">UQ</span>agent_id WHERE active</span><span class="col"><span class="k"></span>expires_at, released_at</span></div>
+<div class="node tbl n-data" style="--x:544px; --y:505px; --w:216px; --h:162px"><span class="node-title">task_attempts ⧉</span><span class="col"><span class="k">PK</span>run_day, run_id,</span><span class="col"><span class="k"></span>  task_key, attempt</span><span class="col"><span class="k">idx</span>agent_id, started_at</span><span class="col"><span class="k">idx</span>deadline_at, retry_at</span><span class="col"><span class="k"></span>status, failure_category</span><span class="col"><span class="k"></span>outputs jsonb ≤ 64 KB</span><span class="col"><span class="k"></span>cpu, ram, net bytes</span><span class="col"><span class="k"></span>log_uri, log_bytes</span></div>
+<div class="node tbl n-data" style="--x:544px; --y:701px; --w:216px; --h:87px"><span class="node-title">task_checkpoints ⧉</span><span class="col"><span class="k">PK</span>run_day, run_id, task_key</span><span class="col"><span class="k"></span>attempt, seq</span><span class="col"><span class="k"></span>blob_uri ≤ 1 MB</span></div>
+<div class="node tbl n-data" style="--x:804px; --y:52px; --w:216px; --h:132px"><span class="node-title">agents</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k">UQ</span>name</span><span class="col"><span class="k"></span>os, arch, cores, ram_mb</span><span class="col"><span class="k">GIN</span>labels text[]</span><span class="col"><span class="k"></span>pool, max_tasks</span><span class="col"><span class="k"></span>status, last_heartbeat_at</span></div>
+<div class="node tbl n-data" style="--x:804px; --y:218px; --w:216px; --h:117px"><span class="node-title">reservations</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k"></span>run_id, node_key</span><span class="col"><span class="k">UQ</span>agent_id WHERE active</span><span class="col"><span class="k"></span>epoch, renewed_at (lease)</span><span class="col"><span class="k"></span>expires_at, released_at</span></div>
 <div class="node tbl n-data" style="--x:804px; --y:369px; --w:216px; --h:87px"><span class="node-title">leases</span><span class="col"><span class="k">PK</span>name = &#x27;engine&#x27;</span><span class="col"><span class="k"></span>holder, epoch (fencing)</span><span class="col"><span class="k"></span>expires_at</span></div>
-<div class="node tbl n-data" style="--x:804px; --y:490px; --w:216px; --h:102px"><span class="node-title">commands</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k"></span>kind, run_id, payload</span><span class="col"><span class="k">idx</span>WHERE processed_at IS NULL</span><span class="col"><span class="k">UQ</span>idempotency_key (24 h)</span></div>
+<div class="node tbl n-data" style="--x:804px; --y:490px; --w:216px; --h:102px"><span class="node-title">commands</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k"></span>kind, run_id, payload</span><span class="col"><span class="k">idx</span>WHERE processed_at IS NULL</span><span class="col"><span class="k">UQ</span>run_id WHERE Abort</span></div>
+<div class="node tbl n-data" style="--x:804px; --y:626px; --w:216px; --h:87px"><span class="node-title">agent_capacities</span><span class="col"><span class="k">PK</span>agent_id, profile_key</span><span class="col"><span class="k"></span>capacity_rps (FR-125)</span><span class="col"><span class="k"></span>source, calibrated_at</span></div>
 <div class="node tbl n-data" style="--x:1064px; --y:52px; --w:216px; --h:102px"><span class="node-title">reports ⧉</span><span class="col"><span class="k">PK</span>run_day, id</span><span class="col"><span class="k">idx</span>run_id</span><span class="col"><span class="k"></span>kind, title, tags</span><span class="col"><span class="k"></span>blob_uri, sha256</span></div>
 <div class="node tbl n-data" style="--x:1064px; --y:188px; --w:216px; --h:102px"><span class="node-title">artifacts ⧉</span><span class="col"><span class="k">PK</span>run_day, id</span><span class="col"><span class="k">idx</span>run_id</span><span class="col"><span class="k"></span>name, size_bytes</span><span class="col"><span class="k"></span>≤ 5 GB per run</span></div>
 <div class="node tbl n-data" style="--x:1064px; --y:324px; --w:216px; --h:102px"><span class="node-title">perf_results ⧉</span><span class="col"><span class="k">PK</span>run_day, run_id, node_key</span><span class="col"><span class="k"></span>target / achieved rps</span><span class="col"><span class="k"></span>p50/p95/p99, error_rate</span><span class="col"><span class="k"></span>histogram_uri</span></div>
@@ -276,13 +284,46 @@
 <div class="node tbl n-data" style="--x:1324px; --y:52px; --w:216px; --h:102px"><span class="node-title">audit_log ⧉ (ts)</span><span class="col"><span class="k">PK</span>ts, id</span><span class="col"><span class="k">idx</span>target_kind, target_id, ts</span><span class="col"><span class="k">idx</span>actor, ts</span><span class="col"><span class="k"></span>13 monthly partitions</span></div>
 <div class="node tbl n-data" style="--x:1324px; --y:188px; --w:216px; --h:102px"><span class="node-title">subscriptions</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k">idx</span>scope_kind, scope_id</span><span class="col"><span class="k"></span>events, channel</span><span class="col"><span class="k"></span>secret_ref</span></div>
 <div class="node tbl n-data" style="--x:1324px; --y:324px; --w:216px; --h:102px"><span class="node-title">notification_outbox</span><span class="col"><span class="k">PK</span>id</span><span class="col"><span class="k">FK</span>subscription_id, run_id</span><span class="col"><span class="k">idx</span>WHERE delivered_at IS NULL</span><span class="col"><span class="k"></span>attempts, next_attempt_at</span></div>
+<div class="node tbl n-data" style="--x:1324px; --y:460px; --w:216px; --h:87px"><span class="node-title">idempotency_keys</span><span class="col"><span class="k">PK</span>principal_id, route, key</span><span class="col"><span class="k"></span>status_code, result</span><span class="col"><span class="k">idx</span>expires_at (24 h)</span></div>
 </div>
 <div class="legend">
 <section><h2>Connections</h2><ul><li><svg class="lg-line" width="44" height="12" aria-hidden="true"><path class="link c-sync" d="M1,6 H36" marker-end="url(#m-arrow)"/></svg> Synchronous call (HTTPS, SQL)</li></ul></section>
 <section><h2>Component roles</h2><ul><li><span class="swatch" style="--accent:var(--c-data)"></span> Data store</li></ul></section>
 
-<section><h2>Notation</h2><ul><li><span class="lg-zone"></span> Boundary: hosts, network, region or domain</li><li><span class="lg-sub">abc</span> Sub-label: count, product or key property</li><li><span class="lg-sub">PK</span> Primary key</li><li><span class="lg-sub">FK</span> References another table</li><li><span class="lg-sub">UQ</span> Unique constraint</li><li><span class="lg-sub">idx</span> Index (partial where shown)</li><li><span class="lg-sub">GIN</span> GIN index (jsonb / array)</li><li><span class="lg-sub">⧉</span> Monthly partition on run_day</li><li><span class="lg-sub">1:N</span> Cardinality, arrow parent → child</li></ul></section>
+<section><h2>Notation</h2><ul><li><span class="lg-zone"></span> Boundary: hosts, network, region or domain</li><li><span class="lg-sub">abc</span> Sub-label: count, product or key property</li><li><span class="lg-sub">PK</span> Primary key</li><li><span class="lg-sub">FK</span> References another table</li><li><span class="lg-sub">UQ</span> Unique constraint</li><li><span class="lg-sub">idx</span> Index (partial where shown)</li><li><span class="lg-sub">GIN</span> GIN index (jsonb / array)</li><li><span class="lg-sub">⧉</span> Monthly partition (run_day, or ts for audit_log)</li><li><span class="lg-sub">1:N</span> Cardinality, arrow parent → child</li></ul></section>
 </div>
+<details class="glossary" open>
+<summary>Glossary: terms in this diagram</summary>
+<dl>
+<dt>LLD / schema / table / row / column</dt><dd>Low-level design of the database. A schema organizes tables; each table holds rows (records) made of columns (fields).</dd>
+<dt>PostgreSQL / SQL / HTTPS</dt><dd>PostgreSQL is the database holding workflow information; Structured Query Language (SQL) reads and changes it. HTTPS in the legend means encrypted web requests.</dd>
+<dt>PK / FK / UQ</dt><dd>Primary key (PK) uniquely identifies a row; foreign key (FK) points to another table; unique constraint (UQ) prevents duplicate values.</dd>
+<dt>Index / <code>idx</code> / partial index / GIN</dt><dd>An index speeds up searches. A partial index covers only selected rows; GIN is an index suited to searching lists or JSON fields.</dd>
+<dt>1:N / 1:1 / arrow</dt><dd>One parent row can have many child rows (1:N) or one child (1:1); an arrow points from parent to child.</dd>
+<dt>⧉ / <code>run_day</code> / <code>ts</code> / UUID v7</dt><dd>⧉ means divided into monthly partitions. Run tables use <code>run_day</code> from a time-ordered unique run ID (UUID v7); the audit log uses its timestamp (<code>ts</code>).</dd>
+<dt><code>jsonb</code> / <code>bytea</code> / protobuf</dt><dd>PostgreSQL types for searchable JSON documents and raw bytes; Protocol Buffers (protobuf) is the compact format used inside some byte fields.</dd>
+<dt>Team / workflow type / workflow / slug</dt><dd>Teams own categories (types) of named workflows; a slug is a short text identifier used in a workflow's name or address.</dd>
+<dt><code>role_bindings</code> / principal / scope</dt><dd>Who may do what: a principal is a user or service, a role is its permission level, and scope says which resources it applies to.</dd>
+<dt><code>registry_snapshots</code> / <code>git_commit</code></dt><dd>A saved copy of registered configuration and the source-control revision from which it came.</dd>
+<dt><code>workflow_versions</code> / manifest / DAG / package</dt><dd>A version fixes the workflow definition; its manifest describes a directed acyclic graph (DAG) of steps, and its package contains executable code.</dd>
+<dt><code>schedule_config_versions</code> / content SHA-256</dt><dd>Saved versions of schedule settings identified by a SHA-256 fingerprint of their contents.</dd>
+<dt><code>schedules</code> / origin / cron / interval / <code>next_fire_at</code></dt><dd>Automatic run rules: origin says whether a rule came from workflow code or a user; cron specifies calendar times, interval repeats after a duration, and <code>next_fire_at</code> is the next planned time.</dd>
+<dt>ETag / <code>row_version</code></dt><dd>A change counter used to detect when another person edited the same schedule before your update.</dd>
+<dt><code>schedule_fires</code> / <code>run_series</code></dt><dd>A fire records a scheduled occurrence only once; a run series groups runs produced by the same schedule.</dd>
+<dt><code>runs</code> / <code>run_events</code> / snapshot / <code>seq</code></dt><dd>A run is one execution. Events record its changes in order (<code>seq</code>); the run row is a current-state snapshot.</dd>
+<dt><code>node_runs</code> / <code>task_attempts</code> / <code>task_checkpoints</code></dt><dd>Records for each step, each try of a task, and saved progress that lets a task resume after interruption.</dd>
+<dt><code>agents</code> / labels / pool / <code>agent_capacities</code></dt><dd>Available worker machines, their searchable properties, their assigned group, and measured throughput limits.</dd>
+<dt>CPU / RAM / FR-125</dt><dd>Processor and memory measurements for a task. FR-125 is the requirement number for measuring agent capacity.</dd>
+<dt><code>reservations</code> / <code>leases</code> / epoch / fencing</dt><dd>Time-limited claims on a worker slot or engine leadership. An increasing epoch prevents an old owner from acting after its claim expires (fencing).</dd>
+<dt><code>commands</code> / <code>idempotency_keys</code></dt><dd>Requested actions such as start or abort; keys make repeated requests return the same result instead of doing the action twice.</dd>
+<dt><code>reports</code> / <code>artifacts</code> / <code>blob_uri</code></dt><dd>Readable summaries and output files; a blob URI is the stored file's location rather than its contents in the database.</dd>
+<dt><code>perf_results</code> / p50, p95, p99 / RPS</dt><dd>Performance results: half, 95% or 99% of requests complete within each reported latency; requests per second (RPS) is the traffic rate.</dd>
+<dt><code>parity_results</code> / <code>samples_uri</code></dt><dd>Comparison results between baseline and candidate services, with a file location for saved examples of differences.</dd>
+<dt><code>daily_rollups</code></dt><dd>Daily summaries of run counts, failures and performance, refreshed from detailed records.</dd>
+<dt><code>audit_log</code> / <code>subscriptions</code> / <code>notification_outbox</code></dt><dd>History of who changed what, rules for sending alerts, and pending messages waiting to be delivered.</dd>
+<dt>Soft delete / <code>deleted_at</code> / <code>expires_at</code> / retention</dt><dd>Mark a record as removed without erasing it immediately; expiry limits how long temporary records are valid, while retention says how long stored records are kept.</dd>
+</dl>
+</details>
 </div>
 </body>
 </html>

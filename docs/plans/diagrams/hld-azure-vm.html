@@ -163,6 +163,12 @@
   .tbl .k { display: inline-block; width: 30px; font-weight: 700; color: var(--accent); }
   .zone-label.right { left: auto; right: calc(100% - var(--x) - var(--w) + 14px); }
 
+  .glossary { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--edge); font-size: 14px; line-height: 1.5; }
+  .glossary summary { cursor: pointer; font-size: 18px; font-weight: 650; }
+  .glossary dl { max-width: 1100px; margin: 12px 0 0; }
+  .glossary dt { font-weight: 650; margin-top: 10px; }
+  .glossary dd { margin: 0; color: var(--ink-2); }
+
   .sd-root { width: 1354px; }
   .sd-canvas, .sd-links { width: 1290px; height: 650px; }
 </style>
@@ -301,6 +307,29 @@
 <section><h2>Shape language</h2><ul class="split"><li><svg class="sd-icon"><use href="#sd-auth"/></svg> Shield: identity provider</li><li><svg class="sd-icon"><use href="#sd-batch-job"/></svg> Job: task host / one-shot job</li><li><svg class="sd-icon"><use href="#sd-cicd"/></svg> Loop: CI/CD</li><li><svg class="sd-icon"><use href="#sd-database"/></svg> Cylinder: database / table</li><li><svg class="sd-icon"><use href="#sd-external"/></svg> Plug: system outside the platform</li><li><svg class="sd-icon"><use href="#sd-load-balancer"/></svg> Splitter: load balancer</li><li><svg class="sd-icon"><use href="#sd-metrics"/></svg> Bars: telemetry collector</li><li><svg class="sd-icon"><use href="#sd-object-storage"/></svg> Bucket: blob / object storage</li><li><svg class="sd-icon"><use href="#sd-users"/></svg> People: user group</li><li><svg class="sd-icon"><use href="#sd-vault"/></svg> Vault: secrets store</li><li><svg class="sd-icon"><use href="#sd-vm"/></svg> VM</li></ul></section>
 <section><h2>Notation</h2><ul><li><span class="lg-zone"></span> Boundary: hosts, network, region or domain</li><li><span class="lg-sub">abc</span> Sub-label: count, product or key property</li></ul></section>
 </div>
+<details class="glossary" open>
+<summary>Glossary: terms in this diagram</summary>
+<dl>
+<dt>HLD / self-hosted on Azure VMs</dt><dd>High-level design: the team runs its own software on Azure virtual machines (VMs), computers rented in the cloud.</dd>
+<dt>VNet / region / availability zone</dt><dd>A virtual network (VNet) connects private Azure resources. A region is a geographic area; zones are separate facilities within it to reduce shared failures.</dd>
+<dt>Azure Load Balancer / zone-redundant</dt><dd>A service routing visitors to healthy API machines. Zone-redundant means it can keep working when one zone fails.</dd>
+<dt>GitHub Actions / CI/CD / Bicep</dt><dd>Automated build/test/deployment jobs (continuous integration and delivery, CI/CD) and the file format used to define Azure infrastructure, respectively.</dd>
+<dt>Entra ID / OIDC / managed identity (MI)</dt><dd>Entra ID handles sign-in using OpenID Connect (OIDC). Managed identity gives Azure-hosted software an identity without storing a password.</dd>
+<dt>Key Vault / secret refs</dt><dd>Azure service for passwords and keys; a reference tells software where to fetch a secret without placing it in the diagram or source code.</dd>
+<dt><code>cp1</code> / <code>cp2</code> / <code>wf-api</code> / <code>wf-engine</code></dt><dd>Two control-plane VMs, each running the web application programming interface (API) and the workflow engine that schedules runs.</dd>
+<dt>Leader / standby / lease poll</dt><dd>One engine controls runs; the other can take over. They check a time-limited database record (lease) to decide who leads.</dd>
+<dt>PG Flexible Server / SQL / NOTIFY / HA</dt><dd>Azure-managed PostgreSQL database for run state. SQL accesses it; NOTIFY signals new work; high availability (HA) keeps a standby database ready.</dd>
+<dt>PITR</dt><dd>Point-in-time recovery: restore the database to a chosen earlier time after a mistake or failure.</dd>
+<dt>Agent VMSS / fixed perf pools</dt><dd>Virtual Machine Scale Sets (VMSS) group Windows/Linux agent machines; fixed performance pools keep comparable test machines together.</dd>
+<dt><code>wf-agent</code> / task host</dt><dd>The agent connects to the engine and manages local processes; a task host actually runs workflow tasks against the services under test.</dd>
+<dt>gRPC / UDS / HTTPS / WSS</dt><dd>gRPC carries engine-to-agent messages; Unix domain sockets (UDS) connect local processes. HTTPS encrypts web requests; WSS encrypts WebSocket live connections.</dd>
+<dt>Azure Blob / ZRS / cool tier</dt><dd>File-like object storage for outputs. Zone-redundant storage (ZRS) copies data across zones; cool tier is a lower-cost class for older, less-used files.</dd>
+<dt>SAS upload / blob grant</dt><dd>A Shared Access Signature (SAS) is a short-lived, limited permission to upload a file to an allowed storage location; a grant controls what may be uploaded.</dd>
+<dt>Azure Monitor / OTel / OTLP</dt><dd>Monitoring service or an OpenTelemetry (OTel) alternative for logs, measurements and request traces; OTLP is the format used to send them.</dd>
+<dt>Services under test / baseline / candidate</dt><dd>Applications the tasks call; baseline is the known version, candidate the version being compared.</dd>
+<dt>Arrows / dashed boxes</dt><dd>Arrows show communication or file uploads; dashed boxes group resources by region, zone or machine fleet.</dd>
+</dl>
+</details>
 </div>
 </body>
 </html>

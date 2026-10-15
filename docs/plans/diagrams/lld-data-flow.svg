@@ -55,9 +55,14 @@ body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -ap
 .tbl .col { font-family: Consolas, "Cascadia Mono", monospace; font-size: 11px; color: var(--ink-2); line-height: 15px; white-space: nowrap; }
 .tbl .k { display: inline-block; width: 30px; font-weight: 700; color: var(--accent); }
 .zone-label.right { left: auto; right: calc(100% - var(--x) - var(--w) + 14px); }
+.glossary { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--edge); font-size: 14px; line-height: 1.5; }
+.glossary summary { cursor: pointer; font-size: 18px; font-weight: 650; }
+.glossary dl { max-width: 1100px; margin: 12px 0px 0px; }
+.glossary dt { font-weight: 650; margin-top: 10px; }
+.glossary dd { margin: 0px; color: var(--ink-2); }
 .sd-root { width: 1614px; }
 .sd-canvas, .sd-links { width: 1550px; height: 650px; }</style>
-<div class="sd-root" data-diagram-root="" aria-label="Data flow: registration writes registry tables and packages; commands go through the commands table and NOTIFY to the engine, which group-commits run events and snapshot tables; agents return results that become pointer rows; task hosts upload logs, artifacts, reports and checkpoints to blob storage; the scheduler records fires exactly once." xmlns="http://www.w3.org/1999/xhtml">
+<div class="sd-root" data-diagram-root="" aria-label="Data flow: registration writes registry tables and packages; commands go through the commands table and NOTIFY to the engine, which group-commits run events and snapshot tables; agents return results that become pointer rows; agents upload logs and resource series and task hosts upload artifacts, reports and checkpoints to blob storage; the engine writes merged perf histograms; the scheduler records fires exactly once." xmlns="http://www.w3.org/1999/xhtml">
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
   <symbol id="sd-batch-job" viewBox="0 0 24 24">
     <path d="M3 6.6h11M3 11h11M3 15.4h7"/>
@@ -138,6 +143,8 @@ body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -ap
 <path class="link c-duplex" d="M860,292 V330 H642 V360" marker-start="url(#m-arrow)" marker-end="url(#m-arrow)"/>
 <path class="link c-duplex" d="M552,406 L468,406" marker-start="url(#m-arrow)" marker-end="url(#m-arrow)"/>
 <path class="link c-bulk" d="M288,406 L204,406" marker-end="url(#m-bulk)"/>
+<path class="link c-bulk" d="M836,292 V306 H114 L114,360" marker-end="url(#m-bulk)"/>
+<path class="link c-bulk" d="M642,452 V478 H114 L114,452" marker-end="url(#m-bulk)"/>
 <path class="link c-sync" d="M996,276 H1038 V406 L1080,406" marker-end="url(#m-arrow)"/>
 <path class="link c-sync" d="M940,520 L940,292" marker-end="url(#m-arrow)"/>
 <path class="link c-sync" d="M996,566 L1080,566" marker-end="url(#m-arrow)"/>
@@ -153,7 +160,9 @@ body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -ap
 <text class="link-label" x="1302" y="236" text-anchor="middle">project</text>
 <text class="link-label" x="751" y="322" text-anchor="middle">Dispatch ⇄ Result</text>
 <text class="link-label" x="510" y="396" text-anchor="middle">UDS</text>
-<text class="link-label" x="246" y="396" text-anchor="middle">SAS chunks</text>
+<text class="link-label" x="246" y="396" text-anchor="middle">outputs</text>
+<text class="link-label" x="330" y="324" text-anchor="middle">merged perf histograms</text>
+<text class="link-label" x="378" y="496" text-anchor="middle">logs · resources</text>
 <text class="link-label" x="1044" y="340" text-anchor="start">blob_uri</text>
 <text class="link-label" x="948" y="470" text-anchor="start">start run</text>
 <text class="link-label" x="1038" y="556" text-anchor="middle">ON CONFLICT</text>
@@ -164,7 +173,7 @@ body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -ap
 <div class="zone-label right" style="--x:1064px; --y:174px; --w:474px"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon" aria-hidden="true"><use href="#sd-lock"/></svg>Same transaction</div>
 <div class="node n-client" style="--x:24px; --y:40px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-desktop"/></svg></span><span class="node-title">workflow.cs + SDK</span><span class="node-sub">describe → manifest.json</span></div>
 <div class="node n-client" style="--x:288px; --y:40px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-cicd"/></svg></span><span class="node-title">wf publish (CI)</span><span class="node-sub">validate · test · package</span></div>
-<div class="node n-compute" style="--x:552px; --y:40px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-service"/></svg></span><span class="node-title">api · /register</span><span class="node-sub">schema + metadata checks</span></div>
+<div class="node n-compute" style="--x:552px; --y:40px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-service"/></svg></span><span class="node-title">api · registrations</span><span class="node-sub">POST /api/v1/registrations</span></div>
 <div class="node n-data" style="--x:816px; --y:40px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-db-cluster"/></svg></span><span class="node-title">Registry tables</span><span class="node-sub">versions · schedules</span></div>
 <div class="node n-data" style="--x:1080px; --y:40px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-object-storage"/></svg></span><span class="node-title">packages/</span><span class="node-sub">{sha256}.zip · immutable</span></div>
 <div class="node n-client" style="--x:24px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-browser"/></svg></span><span class="node-title">UI / API / CLI</span><span class="node-sub">Trigger · Abort · Rerun</span></div>
@@ -172,11 +181,11 @@ body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -ap
 <div class="node n-data" style="--x:552px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-database"/></svg></span><span class="node-title">commands</span><span class="node-sub">INSERT + NOTIFY, one tx</span></div>
 <div class="node n-compute" style="--x:816px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-scheduler"/></svg></span><span class="node-title">engine leader</span><span class="node-sub">run actors · single writer</span></div>
 <div class="node n-data" style="--x:1080px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-stream-log"/></svg></span><span class="node-title">run_events ⧉</span><span class="node-sub">append-only · protobuf · seq</span></div>
-<div class="node n-data" style="--x:1344px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-db-cluster"/></svg></span><span class="node-title">Snapshot tables ⧉</span><span class="node-sub">runs · node_runs · attempts</span></div>
-<div class="node n-data" style="--x:24px; --y:360px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-object-storage"/></svg></span><span class="node-title">Run blobs</span><span class="node-sub">logs/ artifacts/ reports/ ckpt/</span></div>
+<div class="node n-data" style="--x:1344px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-db-cluster"/></svg></span><span class="node-title">Snapshot tables ⧉</span><span class="node-sub">runs · node_runs · task_attempts</span></div>
+<div class="node n-data" style="--x:24px; --y:360px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-object-storage"/></svg></span><span class="node-title">Run blobs</span><span class="node-sub">logs/ · checkpoints/ · …</span></div>
 <div class="node n-compute" style="--x:288px; --y:360px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-batch-job"/></svg></span><span class="node-title">task host</span><span class="node-sub">ctx: outputs · checkpoint</span></div>
 <div class="node n-compute" style="--x:552px; --y:360px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-worker"/></svg></span><span class="node-title">agent</span><span class="node-sub">disk journal until acked</span></div>
-<div class="node n-data" style="--x:1080px; --y:360px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-database"/></svg></span><span class="node-title">Pointer rows ⧉</span><span class="node-sub">reports · artifacts · ckpt · perf</span></div>
+<div class="node n-data" style="--x:1080px; --y:360px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-database"/></svg></span><span class="node-title">Pointer rows ⧉</span><span class="node-sub">log · report · artifact · ckpt · perf · parity</span></div>
 <div class="node n-compute" style="--x:816px; --y:520px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-scheduler"/></svg></span><span class="node-title">scheduler (in engine)</span><span class="node-sub">heap on next_fire_at</span></div>
 <div class="node n-data" style="--x:1080px; --y:520px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-database"/></svg></span><span class="node-title">schedule_fires</span><span class="node-sub">PK(schedule_id, fire_at)</span></div>
 </div>
@@ -186,6 +195,7 @@ body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -ap
 <section><h2>Shape language</h2><ul class="split"><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-batch-job"/></svg> Job: task host / one-shot job</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-browser"/></svg> Window: browser</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-cicd"/></svg> Loop: CI/CD</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-database"/></svg> Cylinder: database / table</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-db-cluster"/></svg> Stacked cylinders: replicated DB / table group</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-desktop"/></svg> Monitor: developer tooling</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-object-storage"/></svg> Bucket: blob / object storage</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-scheduler"/></svg> Clock: orchestrator / scheduler</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-service"/></svg> Hexagon: service</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-stream-log"/></svg> Segments: append-only log</li><li><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-worker"/></svg> Gear: agent</li></ul></section>
 <section><h2>Notation</h2><ul><li><span class="lg-zone"></span> Boundary: hosts, network, region or domain</li><li><span class="lg-sub">abc</span> Sub-label: count, product or key property</li></ul></section>
 </div>
+
 </div>
 </foreignObject>
 </svg>

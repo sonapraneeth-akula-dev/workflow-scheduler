@@ -147,7 +147,7 @@ body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -ap
 <text class="link-label" x="250" y="476" text-anchor="end">gRPC · TLS</text>
 <text class="link-label" x="386" y="170" text-anchor="start">HTTPS · gRPC</text>
 <text class="link-label" x="502" y="236" text-anchor="middle">HTTP</text>
-<text class="link-label" x="774" y="236" text-anchor="middle">/api · /hub</text>
+<text class="link-label" x="774" y="236" text-anchor="middle">/api · /hubs</text>
 <text class="link-label" x="778" y="350" text-anchor="end">grpc → leader</text>
 <text class="link-label" x="1038" y="236" text-anchor="middle">SQL · NOTIFY</text>
 <text class="link-label" x="1054" y="330" text-anchor="start">SQL</text>
@@ -155,7 +155,7 @@ body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -ap
 <text class="link-label" x="914" y="486" text-anchor="start">gRPC</text>
 <text class="link-label" x="1038" y="556" text-anchor="middle">UDS</text>
 <text class="link-label" x="1302" y="556" text-anchor="middle">HTTP load</text>
-<text class="link-label" x="1178" y="490" text-anchor="start">logs · artifacts</text>
+<text class="link-label" x="1178" y="490" text-anchor="start">reports · artifacts</text>
 <text class="link-label" x="1308" y="226" text-anchor="end">OTLP</text>
 </svg>
 <div class="zone" style="--x:8px; --y:140px; --w:1538px; --h:500px"></div>
@@ -173,7 +173,7 @@ body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -ap
 <div class="node n-compute" style="--x:816px; --y:520px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-worker"/></svg></span><span class="node-title">wf-agent (Linux) ×N</span><span class="node-sub">container · Linux tasks</span></div>
 <div class="node n-data" style="--x:1080px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-database"/></svg></span><span class="node-title">PostgreSQL 17</span><span class="node-sub">named volume · TLS</span></div>
 <div class="node n-data" style="--x:1080px; --y:360px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-file-storage"/></svg></span><span class="node-title">Blob volume</span><span class="node-sub">filesystem store</span></div>
-<div class="node n-compute" style="--x:1080px; --y:520px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-batch-job"/></svg></span><span class="node-title">Task hosts</span><span class="node-sub">one child process per task</span></div>
+<div class="node n-compute" style="--x:1080px; --y:520px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-batch-job"/></svg></span><span class="node-title">Task hosts</span><span class="node-sub">per-run · hooks per attempt</span></div>
 <div class="node n-observe" style="--x:1344px; --y:200px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-dashboard"/></svg></span><span class="node-title">Aspire dashboard</span><span class="node-sub">standalone container · OTLP</span></div>
 <div class="node n-ext" style="--x:1344px; --y:520px"><span class="node-icon"><svg xmlns="http://www.w3.org/2000/svg" class="sd-icon"><use href="#sd-external"/></svg></span><span class="node-title">Sample services A / B</span><span class="node-sub">containers · Bond types</span></div>
 </div>
