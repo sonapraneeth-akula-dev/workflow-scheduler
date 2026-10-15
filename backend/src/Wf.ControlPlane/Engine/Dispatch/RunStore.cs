@@ -36,19 +36,25 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await FenceAsync(connection, transaction, lease, cancellationToken);
+        await CreateAsync(connection, run, workflowId, versionId, deadline, DateTimeOffset.UtcNow, "engine", cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    internal static async Task CreateAsync(NpgsqlConnection connection, RunState run, string workflowId, Guid versionId,
+        DateTimeOffset deadline, DateTimeOffset createdAt, string createdBy, CancellationToken cancellationToken)
+    {
         await ExecuteAsync(connection, "SELECT ensure_run_partitions(uuid_v7_run_day($1))", cancellationToken, run.Snapshot.RunId);
         await ExecuteAsync(connection, """
             INSERT INTO runs(run_day,id,workflow_id,version_id,trigger,triggered_by,variables,metadata,status,created_at,deadline_at)
-            VALUES(uuid_v7_run_day($1),$1,$2,$3,0,'engine',$6::jsonb,$7::jsonb,0,$4,$5)
-            """, cancellationToken, run.Snapshot.RunId, workflowId, versionId, DateTimeOffset.UtcNow, deadline,
+            VALUES(uuid_v7_run_day($1),$1,$2,$3,0,$8,$6::jsonb,$7::jsonb,0,$4,$5)
+            """, cancellationToken, run.Snapshot.RunId, workflowId, versionId, createdAt, deadline,
             JsonSerializer.Serialize(run.Snapshot.Variables, RunStoreJson.Default.ImmutableDictionaryStringJsonElement),
-            JsonSerializer.Serialize(run.Snapshot.Metadata, RunStoreJson.Default.WorkflowMetadata));
+            JsonSerializer.Serialize(run.Snapshot.Metadata, RunStoreJson.Default.WorkflowMetadata), createdBy);
         await WriteSnapshotAsync(connection, run, cancellationToken);
         foreach (var node in run.Snapshot.Nodes)
             await ExecuteAsync(connection, """
                 INSERT INTO node_runs(run_day,run_id,node_key,status) VALUES(uuid_v7_run_day($1),$1,$2,$3)
                 """, cancellationToken, run.Snapshot.RunId, node.Key, (short)node.Value);
-        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task<RunState> LoadAsync(Guid runId, CancellationToken cancellationToken = default)

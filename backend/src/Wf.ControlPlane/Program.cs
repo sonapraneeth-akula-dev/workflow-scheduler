@@ -5,6 +5,7 @@ using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Events;
 using Wf.ControlPlane.Engine.Leadership;
+using Wf.ControlPlane.Engine.Recovery;
 using Wf.Engine.Core.Placement;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -23,6 +24,9 @@ builder.Services.AddSingleton<LeaseManager>();
 builder.Services.AddHostedService<LeaseManager>(services => services.GetRequiredService<LeaseManager>());
 builder.Services.AddSingleton<AgentRegistry>();
 builder.Services.AddSingleton<RunStore>();
+builder.Services.AddSingleton<CommandInbox>();
+builder.Services.AddSingleton<RunRecovery>();
+builder.Services.AddHostedService<RunRecovery>(services => services.GetRequiredService<RunRecovery>());
 builder.Services.AddSingleton<GroupCommitAppender>();
 builder.Services.AddSingleton<PlacementEngine>();
 builder.Services.AddSingleton<Dispatcher>();
@@ -30,6 +34,6 @@ builder.Services.AddHostedService<AgentRegistryService>();
 var app = builder.Build();
 app.MapGrpcService<AgentGatewayService>();
 app.MapGet("/healthz", () => Results.Ok());
-app.MapGet("/healthz/leader", (LeaseManager leadership) =>
-    leadership.IsLeader ? Results.Ok() : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
+app.MapGet("/healthz/leader", (LeaseManager leadership, RunRecovery recovery) =>
+    leadership.IsLeader && recovery.IsReady ? Results.Ok() : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
 await app.RunAsync();

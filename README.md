@@ -152,12 +152,25 @@ and group-commit transactions fence their captured epoch before persistence;
 PostgreSQL bounds fenced transactions to the lesser of 1 second or remaining
 lease lifetime, so a paused client cannot hold takeover indefinitely. A database
 authority failure disables writes until reacquisition.
-`/healthz/leader` returns 503 on standby; gRPC sends `NotLeader` with the known
+`/healthz/leader` returns 503 on standby or until recovery completes; gRPC sends `NotLeader` with the known
 leader hint and uses the actual epoch on commands/ACKs. Configure `Engine:Port`
 (default 5000) and `Engine:PublicEndpoint` for multiple instances. Standalone
 persistence test/benchmark modules may omit the lease manager; hosted DI always
-supplies it. Run recovery and database-outage retry buffering remain separate
-backlog tasks.
+supplies it.
+
+`0010_commands.sql` adds the durable trigger/abort inbox. `CommandInbox` accepts
+preallocated UUIDv7 run IDs and preserves the first command of each kind per run.
+`RunRecovery` drains pending commands transactionally on acquisition, restores
+active queued/running/aborting snapshots plus their committed event tails, and
+rebuilds `DeadlineTracker` entries from absolute run/node/attempt deadlines,
+retry timestamps and persisted cancellation/kill phases. An outage never resets
+the retry time or cancellation grace. Command effects and `processed_at` commit
+together; failed or fenced recovery never publishes a ready cache. New commands
+are drained while leadership remains current, and reacquisition rebuilds the
+bootstrap state. `RecoveredRuns` supplies this state and due-timer proposals to
+the hosted orchestration actor; dispatch/cancel/kill effects are not executed by
+the recovery loader. Full hosted coordination and database-outage commit
+buffering remain separate backlog tasks.
 
 Placement is authored at workflow, node or task level with `RunsOn` and
 `Affinity`. The innermost selector replaces the whole outer selector; affinity
