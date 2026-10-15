@@ -76,8 +76,25 @@ needs its own mock unless the spec explicitly supplies `default`; missing mocks,
 unknown keys and unknown JSON properties are errors, not automatic success.
 Spec `variables` override workflow defaults; command-line `--var` values win.
 Timeouts/backoff advance virtual time with deterministic midpoint jitter and no
-real delays. The testing-library build cache and fluent assertions follow in
-their own backlog items.
+real delays. The testing library publishes file apps once through `ScriptBuildCache`:
+
+```csharp
+var workflow = await WorkflowUnderTest.BuildAsync("workflow.cs",
+    additionalInputs: localDependencyDirectories, cancellationToken: cancellationToken);
+var mocks = new MockSpec().FailNThenSucceed("build/compile", 2);
+var log = await workflow.RunAsync(mocks, cancellationToken);
+```
+
+`WorkflowUnderTest` launches the actual published assembly out of process for
+each run, avoiding file-app entry-point limitations. `MockSpec` is immutable,
+requires explicit task mocks or an explicit default, and supports outputs,
+variables, succeed/fail/timeout/throw and fail-N-then-succeed. Workflow retry
+budgets still apply; timeouts/backoff use virtual time. Valid failing workflow
+logs return normally; invalid host responses and exit/log mismatches throw
+`WorkflowRunException` with stdout/stderr. Cancellation kills/reaps the owned
+process tree and removes invocation files. Workflows are trusted code, not a
+sandbox; use cancellation to bound real host lifetime. Fluent assertions remain
+their own backlog task.
 
 Code-defined schedule files use the published editor schema at
 `backend/src/Wf.Contracts/Schemas/schedules.schema.json`; see
