@@ -6,11 +6,13 @@ public sealed class TaskContext
 {
     private readonly ImmutableDictionary<string, object> variables;
     public CancellationToken CancellationToken { get; }
+    public NodeOutputs Outputs { get; }
 
     public TaskContext(CancellationToken cancellationToken = default,
-        IReadOnlyDictionary<string, object>? variables = null)
+        IReadOnlyDictionary<string, object>? variables = null, NodeOutputs? outputs = null)
     {
         CancellationToken = cancellationToken;
+        Outputs = outputs ?? new("task");
         this.variables = variables?.ToImmutableDictionary(StringComparer.Ordinal) ??
             ImmutableDictionary<string, object>.Empty;
     }

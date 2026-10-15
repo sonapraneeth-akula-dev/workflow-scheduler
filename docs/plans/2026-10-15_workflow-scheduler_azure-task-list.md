@@ -26,6 +26,7 @@ are not implied by local task completion.
 | 1.1.2.1.2 | Complete | 26 binder cases pass; invalid/unknown/missing-required values rejected by name without value leakage; immutable typed values reach every stage/task through `ctx.Var`. Trigger/local-run call sites follow in their own tasks. |
 | 1.1.2.2.1 | Implemented; run verification pending | Exactly one explicit type required; immutable ordinal metadata and JSON round-trip tested. Metadata propagation to an actual run awaits LocalEngine (1.2.2.1.2); manifest propagation awaits 1.2.2.2.1. |
 | 1.1.3.1.1 | Implemented; manifest verification pending | Defaults and all Hard/Soft × dependency-condition combinations pass JSON-contract tests; conflicting duplicate dependencies rejected. Manifest checks follow in 1.2.2.2.1. |
+| 1.1.3.2.1 | Complete | Typed outputs, concurrent writes, immutable snapshots and shared task context tested; exactly 65,536 serialized UTF-8 bytes accepted, 65,537 rejected with node/size/artifact hint and no lost output. |
 
 ## Summary Rollup
 
