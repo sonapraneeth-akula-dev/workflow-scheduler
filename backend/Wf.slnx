@@ -17,6 +17,7 @@
     <Project Path="tests/Wf.Benchmarks/Wf.Benchmarks.csproj" />
     <Project Path="tests/Wf.Engine.Core.Tests/Wf.Engine.Core.Tests.csproj" />
     <Project Path="tests/Wf.Integration.Tests/Wf.Integration.Tests.csproj" />
+    <Project Path="tests/Wf.Recovery.Fixture/Wf.Recovery.Fixture.csproj" />
     <Project Path="tests/Wf.Sdk.Testing.Tests/Wf.Sdk.Testing.Tests.csproj" />
     <Project Path="tests/Wf.Sdk.Tests/Wf.Sdk.Tests.csproj" />
     <Project Path="tests/Wf.Validation.Tests/Wf.Validation.Tests.csproj" />

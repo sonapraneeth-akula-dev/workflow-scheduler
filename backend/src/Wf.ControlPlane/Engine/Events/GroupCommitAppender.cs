@@ -20,6 +20,7 @@ public sealed class GroupCommitAppender : IAsyncDisposable
     private readonly TimeSpan window;
     private readonly int maxBatchSize;
     private readonly Channel<Request> requests;
+    private readonly CancellationTokenSource shutdown = new();
     private readonly Task worker;
     private long batchId;
     private int disposed;
@@ -103,7 +104,7 @@ public sealed class GroupCommitAppender : IAsyncDisposable
                 // After persistence begins, cancellation cannot turn a committed write into a cancelled acknowledgement.
                 if (active.Any(request => request.Lease != active[0].Lease))
                     throw new NotLeaderException(leadership?.LeaderHint ?? "");
-                var receipt = await PersistAsync(active.SelectMany(item => item.Events).ToArray(), active[0].Lease).ConfigureAwait(false);
+                var receipt = await PersistWithRetryAsync(active.SelectMany(item => item.Events).ToArray(), active[0].Lease).ConfigureAwait(false);
                 foreach (var request in active) request.Completed.TrySetResult(receipt);
             }
             catch (Exception exception)
@@ -114,16 +115,41 @@ public sealed class GroupCommitAppender : IAsyncDisposable
         }
     }
 
+    private async Task<GroupCommitReceipt> PersistWithRetryAsync(Entry[] entries, LeaseToken? lease)
+    {
+        var started = Stopwatch.GetTimestamp();
+        var delay = TimeSpan.FromMilliseconds(100);
+        while (true)
+        {
+            shutdown.Token.ThrowIfCancellationRequested();
+            if (leadership?.Current is { } current && current != lease)
+                throw new NotLeaderException(leadership.LeaderHint);
+            try
+            {
+                var receipt = await PersistAsync(entries, lease).ConfigureAwait(false);
+                return receipt with { PersistenceTime = Stopwatch.GetElapsedTime(started) };
+            }
+            catch (Exception exception) when (exception is NpgsqlException { IsTransient: true } or TimeoutException or IOException)
+            {
+                logger.LogWarning(exception, "Durable group commit is unavailable; retaining {EventCount} events and retrying in {Delay}.",
+                    entries.Length, delay);
+                await Task.Delay(delay, time, shutdown.Token).ConfigureAwait(false);
+                delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, 1000));
+            }
+        }
+    }
+
     private async Task<GroupCommitReceipt> PersistAsync(Entry[] entries, LeaseToken? lease)
     {
         var started = Stopwatch.GetTimestamp();
-        await using var connection = await dataSource.OpenConnectionAsync().ConfigureAwait(false);
-        await using var transaction = await connection.BeginTransactionAsync().ConfigureAwait(false);
+        var cancellationToken = shutdown.Token;
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         if (leadership is not null)
-            await leadership.FenceAsync(connection, transaction, lease ?? throw new NotLeaderException(leadership.LeaderHint))
+            await leadership.FenceAsync(connection, transaction, lease ?? throw new NotLeaderException(leadership.LeaderHint), cancellationToken)
                 .ConfigureAwait(false);
         await using (var synchronous = new NpgsqlCommand("SET LOCAL synchronous_commit=on", connection))
-            await synchronous.ExecuteNonQueryAsync().ConfigureAwait(false);
+            await synchronous.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         await using var command = new NpgsqlCommand("""
             WITH input AS (
                 SELECT uuid_v7_run_day(run_id) AS run_day,* FROM unnest(
@@ -150,17 +176,33 @@ public sealed class GroupCommitAppender : IAsyncDisposable
         command.Parameters.AddWithValue(entries.Select(entry => entry.Event.Key).ToArray());
         command.Parameters.AddWithValue(entries.Select(entry => entry.Payload).ToArray());
         command.Parameters.AddWithValue(entries.Select(entry => checked((short)entry.Event.State)).ToArray());
-        if (await command.ExecuteNonQueryAsync().ConfigureAwait(false) != entries.Length)
-            throw new InvalidOperationException("Group commit rejected missing, terminal, stale or noncontiguous run events; the entire batch was rolled back.");
-        await transaction.CommitAsync().ConfigureAwait(false);
+        var inserted = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        if (inserted != entries.Length)
+        {
+            // COMMIT may have succeeded before the connection died. Only byte-identical full replays may be acknowledged.
+            await using var replay = new NpgsqlCommand("""
+                SELECT count(*) FROM unnest($1::uuid[],$2::bigint[],$3::bytea[]) AS i(run_id,seq,payload)
+                JOIN run_events e ON e.run_day=uuid_v7_run_day(i.run_id) AND e.run_id=i.run_id AND e.seq=i.seq
+                WHERE e.payload=i.payload
+                """, connection);
+            replay.Parameters.AddWithValue(entries.Select(entry => entry.Event.RunId).ToArray());
+            replay.Parameters.AddWithValue(entries.Select(entry => entry.Event.Sequence).ToArray());
+            replay.Parameters.AddWithValue(entries.Select(entry => entry.Payload).ToArray());
+            if (inserted != 0 || (long)(await replay.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) ?? 0L) != entries.Length)
+                throw new InvalidOperationException("Group commit rejected missing, terminal, stale or noncontiguous run events; the entire batch was rolled back.");
+        }
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return new(Interlocked.Increment(ref batchId), entries.Length, Stopwatch.GetElapsedTime(started));
     }
 
     public async ValueTask DisposeAsync()
     {
-        Interlocked.Exchange(ref disposed, 1);
+        if (Interlocked.Exchange(ref disposed, 1) != 0) { await worker.ConfigureAwait(false); return; }
         requests.Writer.TryComplete();
+        if (await Task.WhenAny(worker, Task.Delay(TimeSpan.FromSeconds(5))).ConfigureAwait(false) != worker)
+            await shutdown.CancelAsync().ConfigureAwait(false);
         await worker.ConfigureAwait(false);
+        shutdown.Dispose();
     }
 
     private sealed record Entry(RunEvent Event, byte[] Payload);

@@ -314,9 +314,12 @@ public sealed class RegistrationTests(AgentDatabase database) : IClassFixture<Ag
 public class AgentDatabase : IAsyncLifetime
 {
     protected virtual IReadOnlyList<string> Migrations => ["0005_agents.sql"];
+    protected virtual PostgreSqlBuilder ConfigurePostgres(PostgreSqlBuilder builder) => builder;
     private PostgreSqlContainer? postgres;
+    protected PostgreSqlContainer? Postgres => postgres;
     private string? schema;
     private string connectionString = "";
+    protected string DatabaseConnectionString => connectionString;
     public NpgsqlDataSource DataSource { get; private set; } = null!;
 
     public async ValueTask InitializeAsync()
@@ -325,8 +328,8 @@ public class AgentDatabase : IAsyncLifetime
         var external = Environment.GetEnvironmentVariable("WF_TEST_POSTGRES");
         if (external is null)
         {
-            postgres = new PostgreSqlBuilder("postgres:17-alpine")
-                .WithCommand("-c", "fsync=on", "-c", "full_page_writes=on", "-c", "synchronous_commit=on").Build();
+            postgres = ConfigurePostgres(new PostgreSqlBuilder("postgres:17-alpine")
+                .WithCommand("-c", "fsync=on", "-c", "full_page_writes=on", "-c", "synchronous_commit=on")).Build();
             await postgres.StartAsync(token);
             connectionString = postgres.GetConnectionString();
         }

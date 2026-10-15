@@ -169,8 +169,18 @@ together; failed or fenced recovery never publishes a ready cache. New commands
 are drained while leadership remains current, and reacquisition rebuilds the
 bootstrap state. `RecoveredRuns` supplies this state and due-timer proposals to
 the hosted orchestration actor; dispatch/cancel/kill effects are not executed by
-the recovery loader. Full hosted coordination and database-outage commit
-buffering remain separate backlog tasks.
+the recovery loader. Full hosted workflow/agent coordination remains separate.
+The event appender buffers transient database failures within its bounded queue
+and retries after 100 ms up to 1 s, retaining the captured lease epoch. An
+expired/superseded writer is rejected, never silently transferred to a new epoch.
+A lost COMMIT acknowledgement is safe to retry: only an exact, full persisted
+event replay succeeds; conflicting or partially replayed batches roll back.
+Normal disposal drains; an outage lasting beyond the 5 s shutdown drain budget
+fails remaining requests explicitly rather than hanging or acknowledging them.
+The failover fixture kills a real leader process while a shared-core no-op run
+is active; a second process acquires and completes it within 30 s. Disposable
+PostgreSQL stop/start and dropped wire-level COMMIT acknowledgements are tested
+separately. Shared external PostgreSQL instances are never stopped by tests.
 
 Placement is authored at workflow, node or task level with `RunsOn` and
 `Affinity`. The innermost selector replaces the whole outer selector; affinity
@@ -388,7 +398,7 @@ The R-2 spike measures actual PostgreSQL event appends with `fsync`,
 requested 2 ms batching compare one/32 actors; each configuration also collects
 1,024 individual acknowledgements and verifies snapshot-tail recovery.
 `GroupCommitAppender` backpressures its bounded queue, commits contiguous event
-groups atomically, acknowledges only after COMMIT and drains on disposal.
+groups atomically, acknowledges only after COMMIT and drains on normal disposal.
 Cancellation before persistence skips a request; cancellation after persistence
 starts cannot turn a committed write into a cancelled acknowledgement.
 

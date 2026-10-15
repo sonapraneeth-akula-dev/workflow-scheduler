@@ -11,6 +11,7 @@
     <ProjectReference Include="..\..\src\Wf.Agent\Wf.Agent.csproj" />
     <ProjectReference Include="..\..\src\Wf.ControlPlane\Wf.ControlPlane.csproj" />
     <ProjectReference Include="..\Wf.TaskHost.Fixture\Wf.TaskHost.Fixture.csproj" />
+    <ProjectReference Include="..\Wf.Recovery.Fixture\Wf.Recovery.Fixture.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\db\migrations\*.sql" Link="Migrations\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
