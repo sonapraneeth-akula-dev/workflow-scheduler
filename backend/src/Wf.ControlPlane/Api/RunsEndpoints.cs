@@ -16,7 +16,8 @@ using Wf.Validation.SemVer;
 
 namespace Wf.ControlPlane.Api;
 
-internal sealed record AuthorizedRunRequest(TriggerRunRequest Request, Guid Actor);
+internal sealed record AuthorizedRunRequest(TriggerRunRequest Request, Guid Actor, Guid? SeriesId = null,
+    JsonElement? IdempotencyRequest = null, bool ScheduleDeleted = false);
 
 public static class RunsEndpoints
 {
@@ -63,12 +64,14 @@ public static class RunsEndpoints
         return await next(invocation);
     }
 
-    private static async Task<IResult> Trigger(HttpContext context,
+    internal static async Task<IResult> Trigger(HttpContext context,
         ActiveVersionCache versions, NpgsqlDataSource source, CommandInbox inbox, TimeProvider time)
     {
         var authorized = context.Features.Get<AuthorizedRunRequest>()
             ?? throw new InvalidOperationException("A run request must be authorized before acceptance.");
-        var (request, actor) = authorized;
+        var request = authorized.Request;
+        var actor = authorized.Actor;
+        if (authorized.ScheduleDeleted) return Results.Problem(statusCode: 404, title: "Schedule not found");
         if (!versions.IsReady) return Unavailable();
         Guid versionId;
         WorkflowManifest manifest;
@@ -92,7 +95,36 @@ public static class RunsEndpoints
                     if (request.Version.Length > 256) throw new ArgumentException("Version is too long.");
                     _ = new ApiBaseline(request.Version, [], []);
                 }
-                catch (ArgumentException) { return Invalid("$.version", "Use an exact workflow version UUID or SemVer 2.0.0."); }
+                catch (ArgumentException)
+                {
+                    if (authorized.SeriesId is null)
+                        return Invalid("$.version", "Use an exact workflow version UUID or SemVer 2.0.0.");
+                    VersionConstraint constraint;
+                    try { constraint = VersionConstraint.Parse(request.Version); }
+                    catch (FormatException)
+                    {
+                        return Results.Problem(statusCode: 400, title: "Invalid schedule version pin",
+                            extensions: new Dictionary<string, object?>
+                            {
+                                ["errors"] = new[] { RuleCatalog.ScheduleVersionPin.CreateError("schedule", "$.schedule.versionPin") }
+                            });
+                    }
+                    var candidates = new Dictionary<string, Guid>(StringComparer.Ordinal);
+                    await using (var versionsQuery = source.CreateCommand("""
+                        SELECT v.id,v.semver FROM workflow_versions v JOIN workflows w ON w.id=v.workflow_id
+                        WHERE w.id=$1 AND w.deleted_at IS NULL
+                        """))
+                    {
+                        versionsQuery.Parameters.AddWithValue(request.WorkflowId);
+                        await using var versionsReader = await versionsQuery.ExecuteReaderAsync(context.RequestAborted);
+                        while (await versionsReader.ReadAsync(context.RequestAborted))
+                            candidates.Add(versionsReader.GetString(1), versionsReader.GetGuid(0));
+                    }
+                    var selected = constraint.SelectHighest(candidates.Keys);
+                    if (selected is null) return NotFound();
+                    id = candidates[selected];
+                    isId = true;
+                }
             }
             await using var query = source.CreateCommand($"""
                 SELECT v.id,v.semver,v.manifest::text FROM workflow_versions v
@@ -110,14 +142,15 @@ public static class RunsEndpoints
             if (manifest.Name != request.WorkflowId || manifest.Version != reader.GetString(1))
                 throw new InvalidDataException("The selected workflow manifest does not match its stored identity.");
         }
-        var variables = VariableBinder.Resolve(manifest.Variables, request.Variables, cancellationToken: context.RequestAborted);
+        var variables = VariableBinder.Resolve(manifest.Variables, request.Variables,
+            path: authorized.SeriesId is null ? "$.variables" : "$.schedule.variables", cancellationToken: context.RequestAborted);
         if (!variables.IsValid)
             return Results.Problem(statusCode: 400, title: "Run validation failed",
                 extensions: new Dictionary<string, object?> { ["errors"] = variables.Errors });
         var now = time.GetUtcNow();
         var runId = Guid.CreateVersion7(now);
         var run = new RunState(runId, manifest.Nodes, manifest.Metadata, _ => { }, variables.Values);
-        var command = new TriggerRunCommand(run.Snapshot, request.WorkflowId, versionId, now.Add(manifest.RunTimeout));
+        var command = new TriggerRunCommand(run.Snapshot, request.WorkflowId, versionId, now.Add(manifest.RunTimeout), authorized.SeriesId);
         if (context.Features.Get<NpgsqlTransaction>() is { } transaction)
             await inbox.TriggerAsync(command, actor.ToString("D"), transaction, context.RequestAborted);
         else
@@ -125,7 +158,7 @@ public static class RunsEndpoints
         return Results.Json(new TriggerRunResponse(runId), RunJsonContext.Default.TriggerRunResponse, statusCode: 202);
     }
 
-    private static IResult Invalid(string path, string hint) => Results.Problem(statusCode: 400,
+    internal static IResult Invalid(string path, string hint) => Results.Problem(statusCode: 400,
         title: "Invalid run request", extensions: new Dictionary<string, object?>
         {
             ["errors"] = new[] { new ValidationError("RUN001", "request", path, "The run request does not match its contract.", hint) }

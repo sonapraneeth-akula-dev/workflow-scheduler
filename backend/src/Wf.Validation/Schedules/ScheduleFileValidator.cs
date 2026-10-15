@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Text.Json;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Schedules;
+using Wf.Validation.SemVer;
 
 namespace Wf.Validation.Schedules;
 
@@ -87,8 +88,8 @@ public static class ScheduleFileValidator
             foreach (var optional in new[] { "cron", "interval", "versionPin" })
                 if (raw.TryGetProperty(optional, out var property) && property.ValueKind == JsonValueKind.Null)
                     errors.Add(RuleCatalog.ScheduleShape.CreateError(file, path + "." + optional));
-            if (instance.VersionPin is { } pin && (string.IsNullOrWhiteSpace(pin) || pin.Any(char.IsControl)))
-                errors.Add(RuleCatalog.ScheduleShape.CreateError(file, path + ".versionPin"));
+            if (instance.VersionPin is { } pin && !ValidVersionPin(pin))
+                errors.Add(RuleCatalog.ScheduleVersionPin.CreateError(file, path + ".versionPin"));
             ScheduleExpression? expression = null;
             try
             {
@@ -128,6 +129,13 @@ public static class ScheduleFileValidator
             errors.Add(RuleCatalog.ScheduleShape.CreateError(file, exception.Path ?? "$"));
             return null;
         }
+    }
+
+    private static bool ValidVersionPin(string pin)
+    {
+        if (Guid.TryParseExact(pin, "D", out var id)) return id != Guid.Empty;
+        try { _ = VersionConstraint.Parse(pin); return true; }
+        catch (FormatException) { return false; }
     }
 
     private static bool ValidValue(string key, JsonElement value, string path,

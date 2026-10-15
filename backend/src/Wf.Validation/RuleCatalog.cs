@@ -74,11 +74,15 @@ public static class RuleCatalog
         "A run variable is unknown, invalid, or required but missing.",
         "Use a declared variable key and its JSON type and allowed values; supply required values without defaults. Values cannot contain NUL characters.");
 
+    public static readonly ValidationRule ScheduleVersionPin = new("WFV026",
+        "The schedule version pin is invalid.",
+        "Use an exact version UUID or SemVer, comparison ranges such as >=1.0.0 <2.0.0, || alternatives, or *, major.* or major.minor.* wildcards, within 256 characters.");
+
     public static ImmutableArray<ValidationRule> All { get; } =
         [DirectoryNotFound, WorkflowNotFound, BuildFailed, DescribeFailed, DependencyCycle, UnknownDependency,
             DuplicateKey, VariableType, VariableRequired, VersionBump, ScheduleShape, ScheduleExpression,
             ScheduleVariable, ScheduleIdentity, TeamRegistryRules.RegistryShape, TeamRegistryRules.DuplicateType,
             TeamRegistryRules.TypeQuota, TeamRegistryRules.InvalidMetadataSchema, TeamRegistryRules.UnknownType,
             TeamRegistryRules.InvalidMetadata, HttpOperationRules.InvalidContract, HttpOperationRules.UnsafeRetry,
-            HttpOperationRules.InsufficientRetention, PresentationValidator.InvalidPresentation, TriggerVariable];
+            HttpOperationRules.InsufficientRetention, PresentationValidator.InvalidPresentation, TriggerVariable, ScheduleVersionPin];
 }

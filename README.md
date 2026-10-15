@@ -100,6 +100,27 @@ persistence failures cannot leave an orphan run command or consume the key.
 Expired rows stop deduplicating immediately; general physical retention
 cleanup remains a maintenance task.
 
+`POST /api/v1/schedules/{id}/run-now` accepts no body or `{}`. Scoped Operators
+and Admins can manually launch code- or UI-origin instances, including paused
+ones, without resuming them or changing their next-fire cursor. The command
+captures the instance's effective variables and existing permanent series;
+leader recovery persists it with the Manual trigger. Removed instances return
+404 for new requests. Keyed retries return the original run even after edits
+or removal, subject to fresh scope authorization; reusing that route's key for
+a different instance returns 409.
+
+An omitted schedule pin selects the active version. Pins accept an exact UUID
+or SemVer, comparisons (`=`, `>`, `>=`, `<`, `<=`) joined by spaces (AND),
+`||` alternatives, and `*`, `major.*` or `major.minor.*` wildcards. Ranges select
+the highest matching published version from the same undeleted workflow,
+excluding prereleases unless a comparison explicitly names a prerelease with
+the same major/minor/patch. Numeric components have no Int32/Int64 ceiling;
+build metadata does not affect precedence. Pins are limited to 256 characters;
+caret/tilde/npm shorthand is not supported. Shared WFV026 validation reports
+invalid pins before code schedules are registered. Invalid effective values
+or unavailable pins fail without creating a command; run-now does not create
+a scheduled-fire row or apply recurring overlap decisions.
+
 `dotnet run --project backend\tests\Wf.Benchmarks -c Release -- --trigger-api-bench`
 starts an isolated real API/PostgreSQL benchmark: 50 warmups, then 500 fresh-key
 submissions at open-loop 50 requests/second. JSON output includes HTTP latency,

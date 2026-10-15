@@ -110,7 +110,7 @@ public static class BreakingChangeClassifier
         !current.AllowedValues.IsEmpty && (old.AllowedValues.IsEmpty ||
             !current.AllowedValues.ToHashSet(StringComparer.Ordinal).IsSupersetOf(old.AllowedValues));
 
-    private static int CompareVersions(VersionParts current, VersionParts previous)
+    internal static int CompareVersions(VersionParts current, VersionParts previous)
     {
         for (var index = 0; index < current.Core.Length; index++)
         {
@@ -139,7 +139,7 @@ public static class BreakingChangeClassifier
     private static int CompareNumber(string left, string right) =>
         left.Length != right.Length ? left.Length.CompareTo(right.Length) : StringComparer.Ordinal.Compare(left, right);
 
-    private readonly record struct VersionParts(string[] Core, string[] Prerelease)
+    internal readonly record struct VersionParts(string[] Core, string[] Prerelease)
     {
         internal static VersionParts Parse(string version)
         {

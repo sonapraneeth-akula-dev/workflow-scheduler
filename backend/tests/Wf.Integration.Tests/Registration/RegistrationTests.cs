@@ -590,7 +590,11 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
             app.UseAuthentication();
             app.UseAuthorization();
             app.MapRegistrationEndpoints();
-            if (runs) app.MapRunsEndpoints();
+            if (runs)
+            {
+                app.MapRunsEndpoints();
+                app.MapSchedulesEndpoints();
+            }
             await app.StartAsync(TestContext.Current.CancellationToken);
             var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
             return new(app, new HttpClient { BaseAddress = new(address), Timeout = TimeSpan.FromSeconds(20) }, rsa, key, root, clock, failures);

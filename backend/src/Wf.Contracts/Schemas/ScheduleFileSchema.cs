@@ -17,6 +17,9 @@ public static class ScheduleFileSchema
         var properties = instance["properties"]!;
         foreach (var key in new[] { "id", "timezone", "cron", "versionPin" })
             properties[key] = new JsonObject { ["type"] = "string", ["minLength"] = 1, ["pattern"] = "\\S" };
+        properties["versionPin"]!["maxLength"] = 256;
+        properties["versionPin"]!["description"] =
+            "Exact SemVer or version UUID, comparison ranges joined by spaces (AND) or || (OR), or *, major.* and major.minor.* wildcards.";
         properties["interval"]!["type"] = "string";
         properties["interval"]!["pattern"] = "^(\\d+\\.)?\\d{2}:\\d{2}:\\d{2}(\\.0{1,7})?$";
         properties["overlap"]!["default"] = nameof(ScheduleOverlapPolicy.Skip);

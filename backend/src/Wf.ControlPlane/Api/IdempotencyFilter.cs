@@ -23,7 +23,8 @@ public sealed class IdempotencyFilter(NpgsqlDataSource source, TimeProvider time
             ?? throw new InvalidOperationException("Idempotency requires an authorized run request.");
         var route = context.Request.Method + " " +
             (context.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText;
-        var fingerprint = Fingerprint(authorized.Request);
+        var fingerprint = Fingerprint(authorized.IdempotencyRequest ??
+            JsonSerializer.SerializeToElement(authorized.Request, RunJsonContext.Default.TriggerRunRequest));
         var now = time.GetUtcNow();
         var token = context.RequestAborted;
         await using var connection = await source.OpenConnectionAsync(token);
@@ -100,11 +101,11 @@ public sealed class IdempotencyFilter(NpgsqlDataSource source, TimeProvider time
         command.Parameters.AddWithValue(key);
     }
 
-    private static byte[] Fingerprint(TriggerRunRequest request)
+    private static byte[] Fingerprint(JsonElement request)
     {
         var buffer = new ArrayBufferWriter<byte>();
         using (var writer = new Utf8JsonWriter(buffer))
-            Write(JsonSerializer.SerializeToElement(request, RunJsonContext.Default.TriggerRunRequest), writer);
+            Write(request, writer);
         return SHA256.HashData(buffer.WrittenSpan);
 
         static void Write(JsonElement value, Utf8JsonWriter writer)

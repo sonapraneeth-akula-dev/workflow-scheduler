@@ -142,13 +142,38 @@ public sealed class ScheduleFileValidatorTests
         Assert.True(Validate($$"""{"instances":[{"id":"x","interval":"{{interval}}","timezone":"Etc/UTC"}]}""").IsValid);
 
     [Theory]
+    [InlineData("")]
+    [InlineData("latest")]
+    [InlineData("^1.0.0")]
+    [InlineData("~1.0.0")]
+    [InlineData("1.x")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public void ScheduleFileRejectsInvalidVersionPinsWithPreciseHints(string pin)
+    {
+        var result = Validate($$"""{"instances":[{"id":"x","interval":"00:01:00","timezone":"Etc/UTC","versionPin":"{{pin}}"}]}""");
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("WFV026", error.RuleId);
+        Assert.Equal("$.instances[0].versionPin", error.Path);
+        Assert.Contains(">=1.0.0 <2.0.0", error.Hint);
+    }
+
+    [Theory]
+    [InlineData("1.0.0+build")]
+    [InlineData(">=1.0.0 <2.0.0")]
+    [InlineData("1.*")]
+    [InlineData("1.2.*")]
+    [InlineData("1.0.0 || 2.0.0")]
+    [InlineData("11111111-1111-1111-1111-111111111111")]
+    public void ScheduleFileAcceptsSupportedVersionPins(string pin) =>
+        Assert.True(Validate($$"""{"instances":[{"id":"x","interval":"00:01:00","timezone":"Etc/UTC","versionPin":"{{pin}}"}]}""").IsValid);
+
+    [Theory]
     [InlineData("not-json")]
     [InlineData("null")]
     [InlineData("""{"instances":[null]}""")]
     [InlineData("""{"defaults":{"category":null},"instances":[]}""")]
     [InlineData("""{"defaults":{" ":{}},"instances":[]}""")]
     [InlineData("""{"instances":[{"id":"x","cron":"* * * * *"}]}""")]
-    [InlineData("""{"instances":[{"id":"x","cron":"* * * * *","timezone":"Etc/UTC","versionPin":""}]}""")]
     [InlineData("""{"instances":[{"id":"x","cron":"* * * * *","timezone":"Etc/UTC","interval":null}]}""")]
     [InlineData("""{"instances":[{"id":"x","cron":"* * * * *","timezone":"Etc/UTC","versionPin":null}]}""")]
     [InlineData("""{"instances":[],"unexpected":"DO-NOT-LEAK"}""")]

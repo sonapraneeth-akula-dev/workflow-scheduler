@@ -30,7 +30,9 @@
           "versionPin": {
             "type": "string",
             "minLength": 1,
-            "pattern": "\\S"
+            "pattern": "\\S",
+            "maxLength": 256,
+            "description": "Exact SemVer or version UUID, comparison ranges joined by spaces (AND) or || (OR), or *, major.* and major.minor.* wildcards."
           },
           "overlap": {
             "enum": [

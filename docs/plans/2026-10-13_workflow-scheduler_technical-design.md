@@ -441,6 +441,27 @@ scope access prevents replay. Expiry is logical on lookup; physical expired-row
 purging remains part of maintenance. Placement overrides, pending-command
 reads and full execution dispatch below remain their dependent tasks.
 
+Implemented run-now (`3.1.1.2.1`): public
+`POST /api/v1/schedules/{id}/run-now` accepts no body or an empty object, with
+fresh scoped Operator/Admin authorization. Both origins and paused instances
+are supported; deleted instances reject new submissions. The existing trigger
+handler captures effective instance variables, the selected immutable version
+and permanent `run_series.id`; the optional series UUID survives the command
+and fenced recovery into `runs.series_id`, with `trigger=0` (Manual).
+No scheduled-fire row, pause change, overlap decision or cursor advance occurs.
+The original instance UUID, not its editable configuration, fingerprints keyed
+retries; edits/removal therefore preserve replay while another instance under
+the same principal/route/key conflicts.
+
+Schedule pins support exact UUID/SemVer or a bounded (256-character) range
+grammar: full-version `=`, `>`, `>=`, `<`, `<=` comparisons joined by spaces,
+`||` alternatives, and `*`, `major.*`, `major.minor.*` wildcards. Ranges select
+the highest eligible same-workflow published version, independent of the
+active pointer; omitted pins use the active cache. Prereleases require an
+explicit same-core prerelease comparison. Shared WFV026 validates syntax
+offline and at registration; no integer-size limit is imposed on components.
+Caret/tilde/npm shorthand is deliberately unsupported rather than guessed.
+
 ```mermaid
 sequenceDiagram
   participant U as Browser
@@ -654,7 +675,7 @@ Conventions:
 | | name, timezone | text | N | | |
 | | cron / interval_s | text / int | Y | CHECK exactly one | file/registration intervals require positive whole seconds, at most 2,147,483,647; no rounding |
 | | variables | jsonb | N | | effective (defaults ← overrides) |
-| | version_pin | text | Y | | SemVer range or exact |
+| | version_pin | text | Y | | Exact UUID/SemVer or comparison/wildcard range; null selects active |
 | | overlap_policy, catchup_policy | smallint | N | | skip/queue/concurrent · none/latest |
 | | paused | bool | N | | |
 | | next_fire_at | timestamptz | Y | idx WHERE NOT paused AND deleted_at IS NULL | scheduler heap source |

@@ -101,7 +101,7 @@ public sealed class RunRecovery(NpgsqlDataSource dataSource, RunStore runs, Leas
                     throw new InvalidDataException($"Trigger command '{id}' has a mismatched run or invalid deadline.");
                 var run = RunState.Restore(trigger.InitialState, [], message => logger.LogWarning("{RunStateError}", message));
                 await RunStore.CreateAsync(connection, run, trigger.WorkflowId, trigger.VersionId,
-                    trigger.DeadlineAt, createdAt, createdBy, cancellationToken);
+                    trigger.DeadlineAt, createdAt, createdBy, cancellationToken, trigger.SeriesId);
             }
             else if (kind == 1)
             {

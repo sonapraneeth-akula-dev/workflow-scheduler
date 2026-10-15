@@ -80,6 +80,7 @@ app.MapGrpcService<AgentGatewayService>().RequireAuthorization(AuthExtensions.Ag
 app.MapRegistryEndpoints();
 app.MapRegistrationEndpoints();
 app.MapRunsEndpoints();
+app.MapSchedulesEndpoints();
 app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
 app.MapGet("/healthz", () => Results.Ok()).AllowAnonymous();
 app.MapGet("/healthz/leader", (LeaseManager leadership, RunRecovery recovery, ActiveVersionCache versions) =>

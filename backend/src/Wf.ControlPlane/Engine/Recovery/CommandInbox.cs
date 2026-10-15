@@ -6,7 +6,8 @@ using Wf.Engine.Core;
 
 namespace Wf.ControlPlane.Engine.Recovery;
 
-public sealed record TriggerRunCommand(RunSnapshot InitialState, string WorkflowId, Guid VersionId, DateTimeOffset DeadlineAt);
+public sealed record TriggerRunCommand(RunSnapshot InitialState, string WorkflowId, Guid VersionId, DateTimeOffset DeadlineAt,
+    Guid? SeriesId = null);
 
 public sealed class CommandInbox(NpgsqlDataSource dataSource, TimeProvider time)
 {
@@ -42,7 +43,7 @@ public sealed class CommandInbox(NpgsqlDataSource dataSource, TimeProvider time)
         if (snapshot.Status != RunStatus.Queued || snapshot.LastSequence != 0 || snapshot.Abort is not null ||
             snapshot.EndedAt is not null || snapshot.Nodes.Values.Any(state => state != ExecutionStatus.Pending) ||
             snapshot.Tasks.Values.Any(state => state != ExecutionStatus.Pending) || command.VersionId == Guid.Empty ||
-            command.DeadlineAt.Offset != TimeSpan.Zero)
+            command.DeadlineAt.Offset != TimeSpan.Zero || command.SeriesId == Guid.Empty)
             throw new ArgumentException("A trigger requires an initial queued snapshot, version and UTC deadline.", nameof(command));
     }
 
