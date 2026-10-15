@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1354" height="1004" viewBox="0 0 1354 1004">
+<svg xmlns="http://www.w3.org/2000/svg" width="1354" height="1023" viewBox="0 0 1354 1023">
 
-<foreignObject x="0" y="0" width="1354" height="1004">
+<foreignObject x="0" y="0" width="1354" height="1023">
 <style xmlns="http://www.w3.org/1999/xhtml">:root { --canvas: #ffffff; --surface: #f8fafc; --ink: #0f172a; --ink-2: #475569; --ink-3: #94a3b8; --edge: #cbd5e1; --sync: #2563eb; --async: #7c3aed; --data: #0d9488; --telemetry: #94a3b8; --bulk: #b45309; --fail: #dc2626; --c-client: #0369a1; --c-edge: #7c3aed; --c-compute: #2563eb; --c-data: #0d9488; --c-async: #c2410c; --c-observe: #64748b; }
 * { box-sizing: border-box; }
 body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; }
@@ -55,6 +55,11 @@ body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -ap
 .tbl .col { font-family: Consolas, "Cascadia Mono", monospace; font-size: 11px; color: var(--ink-2); line-height: 15px; white-space: nowrap; }
 .tbl .k { display: inline-block; width: 30px; font-weight: 700; color: var(--accent); }
 .zone-label.right { left: auto; right: calc(100% - var(--x) - var(--w) + 14px); }
+.glossary { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--edge); font-size: 14px; line-height: 1.5; }
+.glossary summary { cursor: pointer; font-size: 18px; font-weight: 650; }
+.glossary dl { max-width: 1100px; margin: 12px 0px 0px; }
+.glossary dt { font-weight: 650; margin-top: 10px; }
+.glossary dd { margin: 0px; color: var(--ink-2); }
 .sd-root { width: 1354px; }
 .sd-canvas, .sd-links { width: 1290px; height: 640px; }</style>
 <div class="sd-root" data-diagram-root="" aria-label="Local profile: browser and wf CLI talk to wf-host, which runs api and engine roles in one process, backed by PostgreSQL, filesystem blobs and local secrets; local agents run task hosts that load the sample services." xmlns="http://www.w3.org/1999/xhtml">
@@ -114,7 +119,7 @@ body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -ap
     <path d="M12 6.6v2M12 15.4v2M6.6 12h2M15.4 12h2M8.2 8.2l1.4 1.4M14.4 14.4l1.4 1.4M15.8 8.2l-1.4 1.4M9.6 14.4l-1.4 1.4"/>
   </symbol>
 </svg>
-<header class="sd-head"><h1>HLD 1: Local profile (single machine)</h1><p>Developer workstation or small demo box (Windows 11 or Linux), started with `aspire run`. No Kubernetes; Docker is optional and used only for PostgreSQL.</p></header>
+<header class="sd-head"><h1>HLD 1: Local profile (single machine)</h1><p>Developer workstation or small demo box (Windows 11 or Linux), started with `aspire run`. No Kubernetes; Docker is optional and used only for PostgreSQL. No domain name: UI at http://localhost:5173 (Vite), API and agents at http://localhost:5000; `--lan` adds https://&lt;raw-ip&gt;:5001 for LAN agents.</p></header>
 <div class="sd-canvas">
 <svg xmlns="http://www.w3.org/2000/svg" class="sd-links" viewBox="0 0 1290 640" aria-hidden="true">
 <defs>

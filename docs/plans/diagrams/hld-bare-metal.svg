@@ -55,6 +55,11 @@ body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -ap
 .tbl .col { font-family: Consolas, "Cascadia Mono", monospace; font-size: 11px; color: var(--ink-2); line-height: 15px; white-space: nowrap; }
 .tbl .k { display: inline-block; width: 30px; font-weight: 700; color: var(--accent); }
 .zone-label.right { left: auto; right: calc(100% - var(--x) - var(--w) + 14px); }
+.glossary { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--edge); font-size: 14px; line-height: 1.5; }
+.glossary summary { cursor: pointer; font-size: 18px; font-weight: 650; }
+.glossary dl { max-width: 1100px; margin: 12px 0px 0px; }
+.glossary dt { font-weight: 650; margin-top: 10px; }
+.glossary dd { margin: 0px; color: var(--ink-2); }
 .sd-root { width: 1614px; }
 .sd-canvas, .sd-links { width: 1550px; height: 650px; }</style>
 <div class="sd-root" data-diagram-root="" aria-label="Bare-metal profile: users reach two control-plane hosts through an HAProxy pair; engines use a three-node Patroni PostgreSQL cluster with pgBackRest backups and a shared blob share; agents on Windows/Linux machines run task hosts that load services under test." xmlns="http://www.w3.org/1999/xhtml">
@@ -142,7 +147,7 @@ body { margin: 0px; background: rgb(238, 242, 246); font-family: "Segoe UI", -ap
     <rect x="7" y="9" width="10" height="6" rx="1.5"/>
   </symbol>
 </svg>
-<header class="sd-head"><h1>HLD 2: Self-hosted on bare metal</h1><p>Labs, on-prem and Autopilot-style fleets. wf-api and wf-engine run as OS services (systemd / Windows Service) on two hosts; PostgreSQL HA via Patroni.</p></header>
+<header class="sd-head"><h1>HLD 2: Self-hosted on bare metal</h1><p>Labs, on-prem and Autopilot-style fleets. wf-api and wf-engine run as OS services (systemd / Windows Service) on two hosts; PostgreSQL HA via Patroni. Supported by the same code, but not the first build target (that is a single workstation).</p></header>
 <div class="sd-canvas">
 <svg xmlns="http://www.w3.org/2000/svg" class="sd-links" viewBox="0 0 1550 650" aria-hidden="true">
 <defs>
