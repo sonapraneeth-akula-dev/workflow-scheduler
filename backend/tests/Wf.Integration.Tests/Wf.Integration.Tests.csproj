@@ -3,6 +3,8 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Testcontainers.PostgreSql" />
     <PackageReference Include="Npgsql" />
+    <PackageReference Include="Grpc.AspNetCore" />
+    <PackageReference Include="Grpc.Net.Client" />
     <ProjectReference Include="..\..\src\Wf.Sdk\Wf.Sdk.csproj" />
     <ProjectReference Include="..\..\src\Wf.Validation\Wf.Validation.csproj" />
     <ProjectReference Include="..\..\src\Wf.Engine.Core\Wf.Engine.Core.csproj" />

@@ -1,0 +1,153 @@
+syntax = "proto3";
+
+package wf.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Wf.Contracts.Agent.V1";
+
+service AgentGateway {
+  rpc Connect(stream AgentMessage) returns (stream ControlMessage);
+}
+
+// Sequence numbers are positive and ordered within a sender's journal.
+// Results retain their original sequence on reconnect; receivers deduplicate.
+message AgentMessage {
+  uint64 sequence = 1;
+  oneof payload {
+    Hello hello = 10;
+    Heartbeat heartbeat = 11;
+    TaskStarted task_started = 12;
+    TaskCompleted task_completed = 13;
+    Ack ack = 14;
+  }
+}
+
+message ControlMessage {
+  uint64 sequence = 1;
+  // Fences commands and acknowledgements from a previous leader.
+  uint64 leader_epoch = 2;
+  oneof payload {
+    Dispatch dispatch = 10;
+    Cancel cancel = 11;
+    Drain drain = 12;
+    Ack ack = 13;
+    NotLeader not_leader = 14;
+  }
+}
+
+message Hello {
+  string id = 1;
+  string name = 2;
+  string os = 3;
+  string arch = 4;
+  uint32 cores = 5;
+  uint64 ram_mb = 6;
+  uint32 max_tasks = 7;
+  map<string, string> labels = 8;
+  string version = 9;
+  repeated AttemptRef inflight = 10;
+  uint32 protocol_version = 11;
+  string pool = 12;
+}
+
+message Heartbeat {
+  google.protobuf.Timestamp at = 1;
+  double cpu_percent = 2;
+  uint64 ram_used_mb = 3;
+  uint64 disk_free_mb = 4;
+  uint32 slots_used = 5;
+}
+
+// The idempotency key is (run_id, node_key, task_key, attempt).
+message AttemptRef {
+  string run_id = 1;
+  string node_key = 2;
+  string task_key = 3;
+  uint32 attempt = 4;
+}
+
+message Dispatch {
+  AttemptRef task = 1;
+  string version = 2;
+  string package_uri = 3;
+  string sha256 = 4;
+  google.protobuf.Timestamp deadline_at = 5;
+  uint64 reservation_epoch = 6;
+  // UTF-8 JSON objects, parsed using the workflow's declared variable/input types.
+  bytes inputs_json = 7;
+  ResourceLimits limits = 8;
+  repeated string secret_refs = 9;
+  repeated UploadGrant grants = 10;
+  bytes variables_json = 11;
+}
+
+message ResourceLimits {
+  // Zero means no task-specific limit.
+  double cpu_cores = 1;
+  uint64 ram_mb = 2;
+}
+
+message UploadGrant {
+  string kind = 1;
+  string upload_uri = 2;
+  uint64 max_bytes = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+message Cancel {
+  AttemptRef task = 1;
+  uint32 grace_ms = 2;
+  string reason = 3;
+}
+
+message Drain {
+  google.protobuf.Timestamp deadline_at = 1;
+  string reason = 2;
+}
+
+// Cumulative: all messages through sequence were durably accepted.
+// Ack-only messages must not themselves trigger an Ack.
+message Ack {
+  uint64 sequence = 1;
+  // For agent acknowledgements of control messages; zero in the other direction.
+  uint64 leader_epoch = 2;
+}
+
+message NotLeader {
+  string leader_hint = 1;
+}
+
+message TaskStarted {
+  AttemptRef task = 1;
+  google.protobuf.Timestamp at = 2;
+}
+
+message TaskCompleted {
+  AttemptRef task = 1;
+  google.protobuf.Timestamp at = 2;
+  TaskOutcome outcome = 3;
+  bytes outputs_json = 4;
+  TaskError error = 5;
+  ResourceSummary resource_summary = 6;
+}
+
+enum TaskOutcome {
+  TASK_OUTCOME_UNSPECIFIED = 0;
+  TASK_OUTCOME_SUCCEEDED = 1;
+  TASK_OUTCOME_FAILED = 2;
+  TASK_OUTCOME_CANCELLED = 3;
+  TASK_OUTCOME_TIMED_OUT = 4;
+}
+
+message TaskError {
+  string category = 1;
+  string message = 2;
+  bool non_retryable = 3;
+}
+
+message ResourceSummary {
+  uint64 peak_ram_mb = 1;
+  uint64 cpu_time_ms = 2;
+  uint64 elapsed_ms = 3;
+}
