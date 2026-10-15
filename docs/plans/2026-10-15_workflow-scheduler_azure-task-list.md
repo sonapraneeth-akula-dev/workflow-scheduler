@@ -19,6 +19,7 @@ are not implied by local task completion.
 | Task | Status | Evidence |
 |------|--------|----------|
 | 1.1.1.1.1 | Complete | Backend solution builds without warnings; 11 SDK unit tests and 1 definition/delegate integration test pass; scenario A DAG sample compiles and prints four nodes. Full runtime/sample features follow in their own tasks. |
+| 1.1.1.1.2 | Complete | 9 DAG cases pass, including 10,000-node depth, cycles naming all members, unknown dependencies and duplicate keys; integration test confirms invalid definitions cannot execute. |
 
 ## Summary Rollup
 

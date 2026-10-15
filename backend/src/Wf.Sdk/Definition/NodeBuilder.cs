@@ -7,11 +7,11 @@ public sealed class NodeBuilder
 {
     private readonly List<string> dependencies = [];
     private readonly List<TaskDefinition> tasks = [];
-    private readonly Dictionary<string, Func<TaskContext, Task>> handlers = new(StringComparer.Ordinal);
+    private readonly List<KeyValuePair<string, Func<TaskContext, Task>>> handlers = [];
     private NodeExecutionMode mode;
     private int? maxParallel;
     internal string Key { get; }
-    internal IReadOnlyDictionary<string, Func<TaskContext, Task>> Handlers => handlers;
+    internal IEnumerable<KeyValuePair<string, Func<TaskContext, Task>>> Handlers => handlers;
 
     internal NodeBuilder(string key) => Key = key;
 
@@ -28,7 +28,7 @@ public sealed class NodeBuilder
     {
         WorkflowBuilder.ValidateKey(key);
         ArgumentNullException.ThrowIfNull(execute);
-        handlers.Add(key, execute);
+        handlers.Add(new(key, execute));
         tasks.Add(new(key));
         return this;
     }

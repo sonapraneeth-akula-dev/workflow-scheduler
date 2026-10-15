@@ -25,4 +25,14 @@ public sealed class ScenarioADefinitionTests
                 await workflow.Tasks[$"{node.Key}/{task.Key}"](new());
         Assert.Equal(7, calls.Count);
     }
+
+    [Fact]
+    public void InvalidDagIsRejectedBeforeAnyDelegateCanExecute()
+    {
+        var executed = false;
+        Assert.Throws<ArgumentException>(() => Workflow.Define("invalid", "1", w => w
+            .Node("a", n => n.DependsOn("b").Task("work", _ => executed = true))
+            .Node("b", n => n.DependsOn("a"))));
+        Assert.False(executed);
+    }
 }
