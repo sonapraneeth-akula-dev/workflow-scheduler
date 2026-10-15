@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" />
+    <PackageReference Include="Npgsql" />
+    <ProjectReference Include="..\Wf.Contracts\Wf.Contracts.csproj" />
+  </ItemGroup>
+</Project>

@@ -30,7 +30,8 @@ public sealed class AgentOptions
             if (endpoint.Scheme == "http" && !endpoint.IsLoopback && !allowInsecureTransport)
                 throw new ArgumentException("Non-loopback agent engines require HTTPS. Explicitly opt in only for an isolated container network.", nameof(engines));
         }
-        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        if (!Guid.TryParse(id, out var identity) || identity == Guid.Empty)
+            throw new ArgumentException("Agent:Id must be a stable, non-empty UUID.", nameof(id));
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentException.ThrowIfNullOrWhiteSpace(pool);
         if (maxTasks == 0) throw new ArgumentOutOfRangeException(nameof(maxTasks));
@@ -63,7 +64,7 @@ public sealed class AgentOptions
         if (section["MaxTasks"] is { } text &&
             !uint.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out maxTasks))
             throw new ArgumentException("Agent:MaxTasks must be a positive unsigned integer.");
-        return new AgentOptions(engines, section["Id"] ?? Environment.MachineName,
+        return new AgentOptions(engines, section["Id"] ?? throw new ArgumentException("Agent:Id is required. Generate a UUID once and retain it across restarts."),
             section["Name"] ?? Environment.MachineName, section["Pool"] ?? "default", maxTasks,
             section.GetSection("Labels").GetChildren().ToDictionary(item => item.Key,
                 item => item.Value ?? throw new ArgumentException("An agent label is empty."), StringComparer.Ordinal),

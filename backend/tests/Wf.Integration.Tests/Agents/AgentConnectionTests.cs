@@ -15,6 +15,7 @@ namespace Wf.Integration.Tests.Agents;
 
 public sealed class AgentConnectionTests
 {
+    private const string Id = "f2111fd3-f78e-455b-bbe0-75aeae01fdd1";
     [Fact]
     public async Task Hello_precedes_live_heartbeats_and_duplicate_commands_execute_once()
     {
@@ -45,7 +46,7 @@ public sealed class AgentConnectionTests
         {
             var received = await messages.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
             Assert.Equal(AgentMessage.PayloadOneofCase.Hello, received[0].PayloadCase);
-            Assert.Equal("test-agent", received[0].Hello.Id);
+            Assert.Equal(Id, received[0].Hello.Id);
             Assert.True(received[0].Hello.RamMb > 0);
             Assert.Equal(1U, received[0].Hello.ProtocolVersion);
             Assert.All(received[1..], item => Assert.Equal(AgentMessage.PayloadOneofCase.Heartbeat, item.PayloadCase));
@@ -81,12 +82,12 @@ public sealed class AgentConnectionTests
             }
         });
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        var options = new AgentOptions([standby.Address, leader.Address], "test-agent", "Test", "ci", 2);
+        var options = new AgentOptions([standby.Address, leader.Address], Id, "Test", "ci", 2);
         var running = Create(options).RunAsync(cancellation.Token);
         try
         {
             var message = await leaderHello.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
-            Assert.Equal("test-agent", message.Hello.Id);
+            Assert.Equal(Id, message.Hello.Id);
             Assert.True(message.Sequence > standbySequence);
         }
         finally
@@ -179,7 +180,7 @@ public sealed class AgentConnectionTests
             }, context.CancellationToken);
         });
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        var running = Create(new AgentOptions([standby.Address, leader.Address], "test-agent", "Test", "ci", 2))
+        var running = Create(new AgentOptions([standby.Address, leader.Address], Id, "Test", "ci", 2))
             .RunAsync(cancellation.Token);
         try { await hello.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken); }
         finally
@@ -213,7 +214,7 @@ public sealed class AgentConnectionTests
         {
             await foreach (var message in requests.ReadAllAsync(context.CancellationToken)) { }
         });
-        var options = new AgentOptions([gateway.Address], "test-agent", "Test", "ci", 2,
+        var options = new AgentOptions([gateway.Address], Id, "Test", "ci", 2,
             heartbeatInterval: TimeSpan.FromMilliseconds(50));
         var connection = new AgentConnection(options, new FailedTelemetry(), new Commands(_ => { }),
             TimeProvider.System, NullLogger<AgentConnection>.Instance);
@@ -240,7 +241,7 @@ public sealed class AgentConnectionTests
         });
         var start = new ProcessStartInfo(executable) { UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true };
         start.Environment["Agent__Engines__0"] = gateway.Address.ToString();
-        start.Environment["Agent__Id"] = "native-smoke";
+        start.Environment["Agent__Id"] = Id;
         start.Environment["Agent__Labels__test"] = "aot";
         using var process = Process.Start(start)!;
         var stdout = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
@@ -252,7 +253,7 @@ public sealed class AgentConnectionTests
             Assert.True(completed == received.Task, process.HasExited
                 ? $"Agent exited {process.ExitCode}: {await stdout} {await stderr}" : "Agent did not send a heartbeat within 20 seconds.");
             var (hello, heartbeat) = await received.Task;
-            Assert.Equal("native-smoke", hello.Id);
+            Assert.Equal(Id, hello.Id);
             Assert.Equal("aot", hello.Labels["test"]);
             Assert.Equal(OperatingSystem.IsWindows() ? "windows" : "linux", hello.Os);
             Assert.True(hello.RamMb > 0);
@@ -267,7 +268,7 @@ public sealed class AgentConnectionTests
     }
 
     private static AgentConnection Create(Uri address, IAgentCommandHandler? commands = null) =>
-        Create(new AgentOptions([address], "test-agent", "Test", "ci", 2,
+        Create(new AgentOptions([address], Id, "Test", "ci", 2,
             heartbeatInterval: TimeSpan.FromMilliseconds(50)), commands);
 
     private static AgentConnection Create(AgentOptions options, IAgentCommandHandler? commands = null) =>

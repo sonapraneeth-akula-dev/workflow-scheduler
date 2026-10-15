@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Wf.Agent/Wf.Agent.csproj" />
     <Project Path="src/Wf.Contracts/Wf.Contracts.csproj" />
+    <Project Path="src/Wf.ControlPlane/Wf.ControlPlane.csproj" />
     <Project Path="src/Wf.Engine.Core/Wf.Engine.Core.csproj" />
     <Project Path="src/Wf.Sdk/Wf.Sdk.csproj" />
     <Project Path="src/Wf.Validation/Wf.Validation.csproj" />
@@ -9,6 +10,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Wf.Agent.Tests/Wf.Agent.Tests.csproj" />
     <Project Path="tests/Wf.Contracts.Tests/Wf.Contracts.Tests.csproj" />
+    <Project Path="tests/Wf.ControlPlane.Tests/Wf.ControlPlane.Tests.csproj" />
     <Project Path="tests/Wf.Benchmarks.Tests/Wf.Benchmarks.Tests.csproj" />
     <Project Path="tests/Wf.Benchmarks/Wf.Benchmarks.csproj" />
     <Project Path="tests/Wf.Engine.Core.Tests/Wf.Engine.Core.Tests.csproj" />

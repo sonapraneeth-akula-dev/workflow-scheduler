@@ -4,8 +4,8 @@ using Microsoft.Extensions.Logging;
 using Wf.Agent;
 using Wf.Contracts.Agent.V1;
 
-var builder = Host.CreateApplicationBuilder(args);
-builder.Services.AddWindowsService(options => options.ServiceName = "wf-agent");
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = args, ContentRootPath = AppContext.BaseDirectory });
+builder.Services.AddWindowsService(options => options.ServiceName = builder.Configuration["Agent:ServiceName"] ?? "wf-agent");
 builder.Services.AddSystemd();
 builder.Services.AddSingleton(AgentOptions.FromConfiguration(builder.Configuration));
 builder.Services.AddSingleton(TimeProvider.System);

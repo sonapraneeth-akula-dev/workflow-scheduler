@@ -8,10 +8,11 @@ public sealed class AgentTelemetryTests
     public void Hello_reports_real_machine_and_configured_identity()
     {
         var telemetry = new AgentTelemetry(TimeProvider.System);
-        var options = new AgentOptions([new Uri("http://localhost:5000")], "id", "name", "ci", 2,
+        const string id = "f2111fd3-f78e-455b-bbe0-75aeae01fdd1";
+        var options = new AgentOptions([new Uri("http://localhost:5000")], id, "name", "ci", 2,
             new Dictionary<string, string> { ["dotnet"] = "10" });
         var hello = telemetry.CreateHello(options);
-        Assert.Equal("id", hello.Id);
+        Assert.Equal(id, hello.Id);
         Assert.Equal("name", hello.Name);
         Assert.Equal("ci", hello.Pool);
         Assert.Equal(2U, hello.MaxTasks);

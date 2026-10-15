@@ -36,4 +36,43 @@ jobs:
           $suffix = if ($IsWindows) { ".exe" } else { "" }
           "WF_AGENT_EXECUTABLE=${{ runner.temp }}/wf-agent/wf-agent$suffix" >> $env:GITHUB_ENV
       - run: dotnet test backend/Wf.slnx --configuration Release --no-build --collect:"XPlat Code Coverage"
+      - name: Install and start Windows service
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $name = "wf-agent-ci-${{ github.run_id }}-${{ github.run_attempt }}"
+          $directory = Join-Path $env:ProgramData "Kardia\Agents\$name"
+          if ((Get-Service -Name $name -ErrorAction SilentlyContinue) -or (Test-Path -LiteralPath $directory)) {
+            throw "CI service installation already exists."
+          }
+          try {
+            & .\infra\agent\install-agent.ps1 -Executable $env:WF_AGENT_EXECUTABLE -Engines http://localhost:5000 -ServiceName $name -AgentName $name
+            if ((Get-Service -Name $name).Status -ne 'Running') { throw 'Agent service is not running.' }
+          } finally {
+            if (Get-Service -Name $name -ErrorAction SilentlyContinue) {
+              Stop-Service -Name $name
+              Remove-Service -Name $name
+            }
+            foreach ($file in @('wf-agent.exe', 'appsettings.json')) {
+              $path = Join-Path $directory $file
+              if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path }
+            }
+            if (Test-Path -LiteralPath $directory) { Remove-Item -LiteralPath $directory }
+          }
+      - name: Install and start systemd service
+        if: runner.os == 'Linux'
+        env:
+          AGENT_BINARY: ${{ env.WF_AGENT_EXECUTABLE }}
+        run: |
+          test ! -e /etc/systemd/system/wf-agent.service
+          test ! -e /etc/kardia/wf-agent.env
+          test ! -e /opt/kardia/wf-agent/wf-agent
+          cleanup() {
+            if systemctl cat wf-agent.service >/dev/null 2>&1; then sudo systemctl disable --now wf-agent.service; fi
+            sudo rm -f /etc/systemd/system/wf-agent.service /etc/kardia/wf-agent.env /opt/kardia/wf-agent/wf-agent
+            sudo systemctl daemon-reload
+          }
+          trap cleanup EXIT
+          sudo bash infra/agent/install-agent.sh --executable "$AGENT_BINARY" --engine http://localhost:5000 --name ci-linux
+          sudo systemctl is-active --quiet wf-agent.service
       - run: dotnet run --file backend/samples/workflows/scenario-a.cs

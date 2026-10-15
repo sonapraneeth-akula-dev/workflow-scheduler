@@ -67,12 +67,12 @@ their own backlog items.
 ## Agent
 
 The Native AOT agent runs in a console, as Windows Service `wf-agent`, or under
-systemd. Service lifetime integration is built in; installers and the persistent
-engine registry follow in task 2.2.1.1.3.
+systemd. Service lifetime integration, installers and the persistent engine
+registry are implemented.
 
 ```powershell
 $env:Agent__Engines__0 = "http://localhost:5000"
-$env:Agent__Id = "worker-1"
+$env:Agent__Id = "f2111fd3-f78e-455b-bbe0-75aeae01fdd1"
 $env:Agent__Labels__dotnet = "10"
 dotnet run --project backend\src\Wf.Agent
 dotnet publish backend\src\Wf.Agent -c Release -r win-x64
@@ -85,8 +85,9 @@ the published executable before `dotnet test`.
 
 `Agent__Engines__1`, etc. configure additional engine origins. Optional settings:
 `Agent__Name`, `Agent__Pool` (default `default`), `Agent__MaxTasks` (default CPU
-count), `Agent__Labels__<key>`. Identity defaults to the machine name; configure
-distinct IDs for multiple agents on one machine. Hello reports OS, architecture,
+count), `Agent__Labels__<key>`. `Agent__Id` is a required stable UUID; generate
+it once and retain it across restarts. Names default to the machine name and
+must be unique in the registry. Hello reports OS, architecture,
 CPU count, physical RAM, labels and binary version. Five-second heartbeats report
 machine CPU/RAM/disk and slots. Disconnects retry configured engines within one
 second; leader hints are followed only when they match a configured endpoint.
@@ -97,6 +98,23 @@ Agent-role token acquisition is a separate authentication backlog item. This
 increment registers and heartbeats only: dispatch/drain commands fail explicitly
 until their task-host/coordinator implementations are installed, never claim
 successful execution. Results journaling and host re-adoption follow separately.
+
+The control-plane agent gateway listens on loopback HTTP/2 port 5000. Configure
+`ConnectionStrings__Workflow`, apply `backend\db\migrations\0005_agents.sql` to
+the target PostgreSQL schema, then run `dotnet run --project
+backend\src\Wf.ControlPlane`. This is a single local gateway, not the HA/auth
+control plane delivered by later tasks. Registration and heartbeat acknowledgements
+follow durable writes. Agents lose health at exactly 15 seconds without a
+heartbeat; dispatch eligibility checks the deadline even before the sweeper runs.
+Reconnecting Hello replaces the session token, fencing old connections.
+
+`infra\agent\install-agent.ps1` installs a Native AOT executable and persistent
+UUID/configuration as a Windows LocalService service (elevated PowerShell).
+`-WhatIf` validates inputs without changes. On Linux, run
+`sudo bash infra/agent/install-agent.sh --executable <published-path> --engine
+<origin>` to install the restricted `wf-agent` system user and systemd unit;
+`--validate-only` makes no changes. Both refuse to overwrite an existing install.
+CI installs, starts, checks and removes services on its disposable runners.
 
 ## Benchmarks
 
