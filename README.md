@@ -178,6 +178,34 @@ Elapsed intervals must advance from the last intended fire, not scheduler poll
 time. Hosts need ICU/timezone data; schedule persistence, APIs and the leader
 scheduler remain separate tasks.
 
+## Script build cache spike
+
+`Wf.Validation.Build.ScriptBuildCache.BuildAsync(new ScriptBuildRequest(script,
+sourceRoot, additionalInputs), token)` publishes framework-dependent IL once,
+runs the compiled `--describe` entrypoint, and returns the typed manifest, exact
+JSON, assembly and publish paths. Content/configuration/dependency fingerprints,
+cross-process locking, atomic publication and an integrity inventory protect
+cache hits; corruption, source changes, compiler/describe failure and cancellation
+fail explicitly, never serve stale success. Callers must declare external
+dependencies; floating feeds, undeclared files and nondeterministic descriptions
+are not tracked. No eviction, sandbox or implicit timeout is provided by this spike.
+
+Local R-5 measurements: .NET SDK 10.0.402, Windows x64, real 20-node SDK workflow
+plus schedule JSON, cached NuGet, concurrent shared-machine work. Totals for cache
+operations include fingerprinting and integrity verification; not a full
+Validator CLI benchmark.
+
+| Path | Publish | Describe | Total |
+|------|---------|----------|-------|
+| Raw cold | 37.550 s | 0.679 s | 38.229 s |
+| Raw incremental warm | 7.996 s | 0.572 s | 8.569 s |
+| Cache miss | 31.744 s | 0.948 s | 35.523 s |
+| Cache hit | skipped | skipped | 1.050 s |
+
+The warm < 10 s gate passes. Twenty-six cache cases include real compilation,
+schedule invalidation, concurrent builders, corruption and owned process-tree
+cancellation. Timing evidence is kept here until a PR is explicitly requested.
+
 ## Benchmarks
 
 ```powershell
