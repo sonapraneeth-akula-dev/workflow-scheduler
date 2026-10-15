@@ -110,6 +110,16 @@ schedule compatibility; removed variables still referenced by defaults or
 overrides do, even after a valid MAJOR bump. Version-pin resolution chooses the
 target API before this check; the rule does not silently select another version.
 
+`TeamRegistryRules` validates strict `team.json` contracts: owning team, type
+name/description, metadata keys with required/allowed values, and optional
+free-form metadata. Duplicate/normalization/edit-distance conflicts and the
+trusted per-team type quota (default 10) fail with WFV015-WFV020 diagnostics.
+`Validator` checks the nearest optional `team.json` in the workflow directory or
+its first two parents, matching `teams/<team>/<type>/<workflow>`. It checks the
+manifest's type and metadata against that registry; invalid registry and schedule
+errors accumulate rather than hiding one another. An absent registry remains
+allowed for standalone workflows; registration supplies its authoritative scope.
+
 Placement is authored at workflow, node or task level with `RunsOn` and
 `Affinity`. The innermost selector replaces the whole outer selector; affinity
 inherits independently. `RunsOn()` explicitly clears constraints; `Affinity.None`

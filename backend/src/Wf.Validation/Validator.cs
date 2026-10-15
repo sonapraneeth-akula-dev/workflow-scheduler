@@ -6,8 +6,8 @@ namespace Wf.Validation;
 
 /// <summary>
 /// Publishes a trusted workflow.cs and reads its --describe manifest without executing tasks.
-/// Validates manifest and optional schedule-file semantics. This is not a sandbox.
-/// Registry and SemVer comparisons are separate steps.
+/// Validates manifest, optional schedule-file and optional team-registry semantics. This is not a sandbox.
+/// SemVer comparisons are a separate step.
 /// </summary>
 public static class Validator
 {
@@ -54,6 +54,19 @@ public static class Validator
                 errors = errors.AddRange(ScheduleFileValidator.Validate(contents, build.Manifest.Variables,
                     cancellationToken: cancellationToken).Errors);
             }
+            var team = FindTeamRegistry(root);
+            if (team is not null)
+            {
+                var file = Path.GetRelativePath(root, team).Replace(Path.DirectorySeparatorChar, '/');
+                if (HasAttributes(team, FileAttributes.Directory, expected: true))
+                    errors = errors.Add(TeamRegistryRules.RegistryShape.CreateError(file, "$"));
+                else
+                {
+                    var contents = await File.ReadAllBytesAsync(team, cancellationToken).ConfigureAwait(false);
+                    errors = errors.AddRange(TeamRegistryRules.ValidateWorkflow(contents, build.Manifest.Metadata,
+                        file: file, cancellationToken: cancellationToken));
+                }
+            }
             return new(errors, build);
         }
         catch (ManifestValidationException error)
@@ -66,6 +79,21 @@ public static class Validator
             var rule = error.Stage == "publish" ? RuleCatalog.BuildFailed : RuleCatalog.DescribeFailed;
             return new([rule.CreateError("workflow.cs", "$")], buildFailure: error);
         }
+    }
+
+    private static string? FindTeamRegistry(string root)
+    {
+        // teams/<team>/<type>/<workflow> keeps team.json two levels above the workflow.
+        string? directory = root;
+        for (var level = 0; directory is not null && level <= 2;
+             directory = Path.GetDirectoryName(directory), level++)
+        {
+            var candidate = Path.Combine(directory, "team.json");
+            if (HasAttributes(candidate, FileAttributes.Directory, expected: true) ||
+                HasAttributes(candidate, FileAttributes.Directory, expected: false))
+                return candidate;
+        }
+        return null;
     }
 
     private static bool HasAttributes(string path, FileAttributes attributes, bool expected)

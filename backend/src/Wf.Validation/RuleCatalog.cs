@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Wf.Validation.Rules;
 
 namespace Wf.Validation;
 
@@ -72,5 +73,7 @@ public static class RuleCatalog
     public static ImmutableArray<ValidationRule> All { get; } =
         [DirectoryNotFound, WorkflowNotFound, BuildFailed, DescribeFailed, DependencyCycle, UnknownDependency,
             DuplicateKey, VariableType, VariableRequired, VersionBump, ScheduleShape, ScheduleExpression,
-            ScheduleVariable, ScheduleIdentity];
+            ScheduleVariable, ScheduleIdentity, TeamRegistryRules.RegistryShape, TeamRegistryRules.DuplicateType,
+            TeamRegistryRules.TypeQuota, TeamRegistryRules.InvalidMetadataSchema, TeamRegistryRules.UnknownType,
+            TeamRegistryRules.InvalidMetadata];
 }
