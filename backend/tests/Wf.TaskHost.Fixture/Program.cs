@@ -3,7 +3,6 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using Wf.Contracts;
 using Wf.Sdk;
-using Wf.Sdk.Hosting;
 
 var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test")
     .Variables(v => v.Int("amount", 10))
@@ -60,9 +59,7 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
             Thread.Sleep(Timeout.Infinite);
         })));
 
-if (args.Length == 3 && args[0] == "--task-host" && args[1] == "--socket")
-    return await TaskHostServer.RunAsync(workflow, args[2]);
-return 2;
+return await workflow.RunAsync(args);
 
 namespace Wf.TaskHost.Fixture
 {

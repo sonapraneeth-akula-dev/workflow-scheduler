@@ -22,8 +22,23 @@ Node/task states print live. Exit code is 0 only for `Succeeded`; failures,
 timeouts and aborts return 1. Ctrl+C requests an abort and allows cleanup.
 `LocalVariables.Parse` accepts repeated `--var key=value` pairs; strings, enums,
 durations and secret-reference names use plain text, other types use JSON.
-All policies and variables validate before tasks start. General remote/task-host
-mode dispatch follows in its own backlog items.
+All policies and variables validate before tasks start.
+
+`await workflow.RunAsync(args)` selects local execution by default, `--describe`,
+`--engine <origin>`, `--task-host --socket <absolute-path>`, or
+`--dry-run <mocks.json>`. Modes are exclusive; repeated `--var key=value` pairs
+work before or after local/remote/dry-run mode flags. Describe emits only the
+manifest, without binding required run values or executing tasks.
+Remote mode validates variables and POSTs `workflowId`, exact `version` and
+overrides to `/api/v1/runs` with an idempotency key, then prints the accepted
+run UUID. It does not upload/register the workflow or wait for completion.
+Non-loopback HTTP, redirects, invalid/oversized replies and rejection statuses
+fail explicitly; the full hosted trigger API remains its own backlog task.
+
+The all-mode entrypoint requires ordinary, untrimmed IL because it includes the
+gRPC task-host server. File-based workflows use `#:property PublishAot=false`,
+as the sample does. The standalone SDK definition, manifest and local APIs
+retain their AOT-compatible implementations; the agent still publishes native.
 
 Unit and integration tests cover authoring, real task execution and PostgreSQL
 event replay. CI runs on Windows and Linux. Frontend tests will accompany the
@@ -54,7 +69,7 @@ original task delegate or external service:
 dotnet run --file backend\samples\workflows\scenario-a.cs -- --dry-run backend\samples\workflows\scenario-a.mocks.json --var env=ppe
 ```
 
-Stdout contains one source-generated JSON event log, including snapshot, outputs,
+Dry-run stdout contains one source-generated JSON event log, including snapshot, outputs,
 attempts and final exit code. Mocks support `Succeed` with outputs, `Fail`,
 `Timeout`, `Throw`, and `FailThenSucceed` with `failuresBeforeSuccess`. Each task
 needs its own mock unless the spec explicitly supplies `default`; missing mocks,
