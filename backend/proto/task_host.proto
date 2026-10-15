@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package wf.host.v1;
+
+import "agent.proto";
+
+option csharp_namespace = "Wf.Contracts.Host.V1";
+
+// One prewarmed process executes exactly one attempt. A result remains available
+// until acknowledged; reconnect/re-adoption can extend this protocol later.
+service TaskHost {
+  rpc Ready(ReadyRequest) returns (HostReady);
+  rpc Execute(ExecuteRequest) returns (wf.agent.v1.TaskCompleted);
+  rpc Cancel(CancelRequest) returns (HostReply);
+  rpc Acknowledge(AcknowledgeRequest) returns (HostReply);
+}
+
+message ReadyRequest {}
+
+message HostReady {
+  uint32 protocol_version = 1;
+  uint32 process_id = 2;
+  string workflow_version = 3;
+  bool bound = 4;
+}
+
+message ExecuteRequest {
+  wf.agent.v1.Dispatch dispatch = 1;
+  // Outputs already committed for this node (series tasks/retries).
+  bytes node_outputs_json = 2;
+}
+
+message CancelRequest {
+  wf.agent.v1.AttemptRef task = 1;
+  bool timed_out = 2;
+}
+
+message AcknowledgeRequest {
+  wf.agent.v1.AttemptRef task = 1;
+}
+
+message HostReply {}

@@ -23,6 +23,8 @@ ConsoleCancelEventHandler cancel = (_, e) => { e.Cancel = true; cancellation.Can
 Console.CancelKeyPress += cancel;
 try
 {
+    if (args.Length == 3 && args[0] == "--task-host" && args[1] == "--socket")
+        return await TaskHostServer.RunAsync(workflow, args[2], cancellation.Token);
     if (args.Length > 0 && args[0] == "--dry-run")
         return await DryRunHost.RunAsync(workflow, args, cancellationToken: cancellation.Token);
     return (await new LocalEngine(workflow, LocalVariables.Parse(workflow.Variables, args)).RunAsync(cancellation.Token)).ExitCode;

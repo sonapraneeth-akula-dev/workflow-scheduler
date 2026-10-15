@@ -9,6 +9,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Wf.Agent.Tests/Wf.Agent.Tests.csproj" />
+    <Project Path="tests/Wf.TaskHost.Fixture/Wf.TaskHost.Fixture.csproj" />
     <Project Path="tests/Wf.Contracts.Tests/Wf.Contracts.Tests.csproj" />
     <Project Path="tests/Wf.ControlPlane.Tests/Wf.ControlPlane.Tests.csproj" />
     <Project Path="tests/Wf.Benchmarks.Tests/Wf.Benchmarks.Tests.csproj" />

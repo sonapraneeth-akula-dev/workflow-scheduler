@@ -7,5 +7,6 @@
     <PackageReference Include="Grpc.Core.Api" />
     <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
     <Protobuf Include="..\..\proto\agent.proto" ProtoRoot="..\..\proto" GrpcServices="Both" />
+    <Protobuf Include="..\..\proto\task_host.proto" ProtoRoot="..\..\proto" GrpcServices="Both" />
   </ItemGroup>
 </Project>

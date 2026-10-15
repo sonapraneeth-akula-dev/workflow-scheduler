@@ -43,9 +43,9 @@ Abort targets and the original record survive snapshot/event replay.
 Attempt/node/run deadlines and retry backoff use a `TimeProvider`; cleanup gets
 fresh cancellation tokens and its own deadlines. A function that ignores
 cancellation beyond grace causes an explicit error, not a false terminal result:
-an in-process host cannot forcibly kill managed code. Process isolation belongs
-to the task-host backlog; built-in command cancellation kills and reaps its own
-process tree.
+the in-process local engine cannot forcibly kill managed code. Distributed task
+hosts provide process isolation; built-in command cancellation also kills and
+reaps its own process tree.
 
 Dry-run executes the same core using explicit task mocks, without invoking any
 original task delegate or external service:
@@ -134,6 +134,19 @@ Agent-role token acquisition is a separate authentication backlog item. This
 increment registers and heartbeats only: dispatch/drain commands fail explicitly
 until their task-host/coordinator implementations are installed, never claim
 successful execution. Results journaling and host re-adoption follow separately.
+
+`TaskHostPool` prewarms compiled workflow processes and verifies their PID,
+protocol and workflow version over owner-only Unix domain sockets on Windows
+and Linux. Warm dispatch starts no process. Each host binds once to one attempt:
+parallel tasks cannot share mutable memory, limits or forced cancellation.
+The SDK server executes real registry delegates with typed variables, declared
+inputs and bounded outputs; completion waits for acknowledgement before exit.
+Cancellation is cooperative first, then kills that host's process tree after
+grace (default 30 seconds). Workflow hosts use ordinary, untrimmed .NET IL, not
+Native AOT, and require the ASP.NET Core runtime. Package download, coordinator
+dispatch wiring, resource-limit enforcement and durable result recovery remain
+their separate backlog items. The sample accepts `--task-host --socket <path>`;
+normal local execution is unchanged.
 
 The control-plane agent gateway listens on loopback HTTP/2 port 5000. Configure
 `ConnectionStrings__Workflow`, apply `backend\db\migrations\0005_agents.sql` to
