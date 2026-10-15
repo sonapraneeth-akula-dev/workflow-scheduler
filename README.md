@@ -190,9 +190,27 @@ as `AgentLost`, records the stop time/reason and removes undelivered dispatches.
 On reconnect, the gateway reconciles the full run/task/attempt identities in
 `Hello.inflight` before acknowledging Hello; omitted attempts are lost immediately,
 reported attempts remain reclaimable. Superseded sessions cannot reconcile.
-Attempt classification and dispatch removal roll back together. Retry/final
-core-task disposition belongs to the platform re-placement handler, not this
-liveness classifier.
+Attempt classification and dispatch removal roll back together.
+
+`0011_attempt_replacement.sql` retains the original dispatch, placement request
+and resolved execution policy on each attempt. `Dispatcher.DispatchAsync` has
+an overload accepting that policy; the original overload preserves default
+timeouts and the placement request's `AutoRetry` setting. The hosted
+`AgentLossHandler` reconstructs lost work from PostgreSQL, re-places on another
+eligible agent with at most two platform retries, and never consumes author
+retries. `NoAutoRetry`, exhausted budgets and elapsed run/node deadlines fail
+the core task with an explicit stored reason. Missing legacy recovery inputs
+fail safely rather than inventing a dispatch. No eligible agent leaves work
+pending without spending budget. Retry events, attempt, dispatch outbox and
+processing marker commit atomically; a failed transaction changes no placement
+cache. A fresh attempt timeout is bounded by the original run/node deadlines.
+
+Tests kill an actual agent during an SDK delegate, advance the virtual liveness
+clock through the 30 s reclaim window, then execute the replacement successfully
+on a second actual agent. This verifies recovery, not a strict wall-clock
+heartbeat-to-completion limit. The plan's simultaneous 30 s reclaim window and
+30 s total replacement/completion target conflict; timing sign-off remains
+blocked pending clarification, without shortening the approved reclaim window.
 
 Placement is authored at workflow, node or task level with `RunsOn` and
 `Affinity`. The innermost selector replaces the whole outer selector; affinity

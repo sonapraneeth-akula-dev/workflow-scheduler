@@ -1,25 +1,43 @@
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Npgsql;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Wf.Contracts;
 using Wf.Contracts.Agent.V1;
+using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
 using Wf.ControlPlane.Engine.Agents;
 using Wf.Engine.Core;
 using Wf.Engine.Core.Placement;
+using Wf.Engine.Core.Retries;
 using DispatchCommand = Wf.Contracts.Agent.V1.Dispatch;
 
 namespace Wf.ControlPlane.Engine.Dispatch;
+
+public enum AgentLossDisposition { AlreadyHandled, WaitingForMachine, Replaced, Failed }
 
 public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, AgentRegistry agents,
     PlacementEngine placement, TimeProvider timeProvider) : IDisposable
 {
     private readonly SemaphoreSlim gate = new(1, 1);
 
-    public async Task<PlacementDecision> DispatchAsync(RunState run, PlacementRequest request, DispatchCommand command,
+    public Task<PlacementDecision> DispatchAsync(RunState run, PlacementRequest request, DispatchCommand command,
         CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return DispatchAsync(run, request, command, new ExecutionPolicy(ExecutionPolicy.Default.AttemptTimeout,
+            ExecutionPolicy.Default.Retry, request.AutoRetry), cancellationToken);
+    }
+
+    public async Task<PlacementDecision> DispatchAsync(RunState run, PlacementRequest request, DispatchCommand command,
+        ExecutionPolicy executionPolicy, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(command);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(executionPolicy);
+        request = request with { AutoRetry = executionPolicy.AutoRetry };
         var key = $"{request.NodeKey}/{request.TaskKey}";
         if (request.RunId != run.Snapshot.RunId || command.Task is null ||
             command.Task.RunId != request.RunId.ToString("D") || command.Task.NodeKey != request.NodeKey ||
@@ -42,34 +60,11 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
                 !durable.Snapshot.Tasks.TryGetValue(key, out var state) || state != ExecutionStatus.Ready ||
                 durable.Snapshot.Status != RunStatus.Running)
                 throw new InvalidOperationException("Only a committed Ready task in a running run can be dispatched.");
-            var capacity = agents.DispatchableAgents().Select(agent => agent.Capacity(timeProvider.GetUtcNow())).ToDictionary(agent => agent.Id);
-            await using (var pending = new NpgsqlCommand("""
-                SELECT agent_id,count(*),sum(required_ram_mb) FROM task_attempts WHERE status IN (2,3) GROUP BY agent_id
-                """, connection))
-            await using (var reader = await pending.ExecuteReaderAsync(cancellationToken))
-                while (await reader.ReadAsync(cancellationToken))
-                    if (!reader.IsDBNull(0) && capacity.TryGetValue(reader.GetGuid(0), out var agent))
-                        capacity[agent.Id] = agent with
-                        {
-                            SlotsUsed = Math.Min(agent.MaxTasks, Math.Max(agent.SlotsUsed, checked((int)reader.GetInt64(1)))),
-                            AvailableRamMb = (long)Math.Max(0m, agent.AvailableRamMb - reader.GetFieldValue<decimal>(2))
-                        };
-            var decision = placement.Propose(request, capacity.Values.ToArray());
+            var decision = await ChooseAsync(connection, request, cancellationToken);
             if (decision.Agent is null) return decision;
             var dispatch = command.Clone();
             dispatch.ReservationEpoch = 1;
-            var change = durable.CreateEvent(EventEntity.Task, key, (int)ExecutionStatus.Dispatched, timeProvider.GetUtcNow());
-            await RunStore.AppendAsync(connection, durable, change, cancellationToken);
-            await RunStore.ExecuteAsync(connection, """
-                WITH attempt AS (
-                    INSERT INTO task_attempts(run_day,run_id,task_key,attempt,agent_id,status,queued_at,deadline_at,required_ram_mb)
-                    VALUES(uuid_v7_run_day($1),$1,$2,$3,$4,2,$5,$6,$7)
-                    RETURNING run_day,run_id,task_key,attempt,agent_id
-                )
-                INSERT INTO dispatch_outbox(run_day,run_id,task_key,attempt,agent_id,payload)
-                SELECT run_day,run_id,task_key,attempt,agent_id,$8 FROM attempt
-                """, cancellationToken, request.RunId, key, (short)request.Attempt, decision.Agent.Id,
-                timeProvider.GetUtcNow(), dispatch.DeadlineAt.ToDateTimeOffset(), request.RequiredRamMb, dispatch.ToByteArray());
+            var change = await SaveDispatchAsync(connection, durable, request, dispatch, decision.Agent.Id, executionPolicy, 0, 0, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             run.Apply(change);
             placement.Apply(decision);
@@ -78,5 +73,161 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
         finally { gate.Release(); }
     }
 
+    public async Task<AgentLossDisposition> ReplaceLostAsync(Guid runId, string taskKey, short attempt,
+        CancellationToken cancellationToken = default)
+    {
+        if (runId == Guid.Empty || string.IsNullOrWhiteSpace(taskKey) || attempt <= 0)
+            throw new ArgumentException("Agent-loss replacement requires a run, task and positive attempt.");
+        var lease = runs.CaptureLease();
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await runs.FenceAsync(connection, transaction, lease, cancellationToken);
+            await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock(746312081)", cancellationToken);
+            var run = await runs.LoadAsync(connection, runId, true, cancellationToken);
+            if (run.Snapshot.Status != RunStatus.Running ||
+                !run.Snapshot.Tasks.TryGetValue(taskKey, out var taskStatus) ||
+                taskStatus is not (ExecutionStatus.Dispatched or ExecutionStatus.Running))
+                return AgentLossDisposition.AlreadyHandled;
+            DispatchCommand? original = null;
+            PlacementRequest? previous = null;
+            ExecutionPolicy? policy = null;
+            Guid previousAgent;
+            short platformRetries, authorRetries;
+            DateTimeOffset runDeadline, nodeDeadline;
+            await using (var command = new NpgsqlCommand("""
+                SELECT a.dispatch_payload,a.placement_request::text,a.execution_policy::text,a.agent_id,
+                       a.platform_retries,a.author_retries,r.deadline_at,COALESCE(n.deadline_at,r.deadline_at)
+                FROM task_attempts a JOIN runs r ON r.run_day=a.run_day AND r.id=a.run_id
+                JOIN node_runs n ON n.run_day=a.run_day AND n.run_id=a.run_id AND n.node_key=split_part(a.task_key,'/',1)
+                WHERE a.run_day=uuid_v7_run_day($1) AND a.run_id=$1 AND a.task_key=$2 AND a.attempt=$3
+                    AND a.status=7 AND a.failure_category=2 AND a.replacement_processed_at IS NULL
+                    AND NOT EXISTS(SELECT 1 FROM task_attempts newer WHERE newer.run_day=a.run_day
+                        AND newer.run_id=a.run_id AND newer.task_key=a.task_key AND newer.attempt>a.attempt)
+                FOR UPDATE OF a
+                """, connection))
+            {
+                command.Parameters.AddWithValue(runId);
+                command.Parameters.AddWithValue(taskKey);
+                command.Parameters.AddWithValue(attempt);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                if (!await reader.ReadAsync(cancellationToken)) return AgentLossDisposition.AlreadyHandled;
+                if (!reader.IsDBNull(0))
+                {
+                    original = DispatchCommand.Parser.ParseFrom(reader.GetFieldValue<byte[]>(0));
+                    previous = JsonSerializer.Deserialize(reader.GetString(1), DispatchJson.Default.PlacementRequest);
+                    policy = JsonSerializer.Deserialize(reader.GetString(2), DispatchJson.Default.ExecutionPolicy);
+                }
+                previousAgent = reader.GetGuid(3);
+                platformRetries = reader.GetInt16(4);
+                authorRetries = reader.GetInt16(5);
+                runDeadline = reader.GetFieldValue<DateTimeOffset>(6);
+                nodeDeadline = reader.GetFieldValue<DateTimeOffset>(7);
+            }
+            var now = timeProvider.GetUtcNow();
+            if (original is not null && previous is not null &&
+                (previous.RunId != runId || $"{previous.NodeKey}/{previous.TaskKey}" != taskKey || previous.Attempt != attempt ||
+                 original.Task is null || original.Task.RunId != runId.ToString("D") ||
+                 original.Task.NodeKey != previous.NodeKey || original.Task.TaskKey != previous.TaskKey ||
+                 original.Task.Attempt != attempt || original.Sha256 != previous.PackageSha256 ||
+                 string.IsNullOrWhiteSpace(original.Version) || !Uri.TryCreate(original.PackageUri, UriKind.Absolute, out var packageUri) ||
+                 packageUri.Scheme is not ("https" or "http") || packageUri.Scheme == "http" && !packageUri.IsLoopback))
+                throw new InvalidDataException("Persisted dispatch recovery inputs do not match their attempt identity.");
+            string? failure = original is null || previous is null || policy is null
+                ? "Original dispatch recovery inputs are unavailable; automatic re-placement is unsafe."
+                : !policy.AutoRetry ? "Automatic re-placement is disabled by NoAutoRetry."
+                : platformRetries >= RetryPolicyEvaluator.PlatformRetryBudget ? "The two platform retries are exhausted."
+                : attempt == short.MaxValue ? "The attempt identity range is exhausted." : null;
+            if (failure is null)
+            {
+                var retry = RetryPolicyEvaluator.Evaluate(policy!, new(FailureCategory.AgentLost, authorRetries,
+                    platformRetries, now, runDeadline, nodeDeadline), 0.5);
+                if (!retry.Retry || retry.Budget != RetryBudget.Platform) failure = retry.Reason;
+            }
+            if (failure is not null)
+            {
+                await RunStore.AppendAsync(connection, run,
+                    run.CreateEvent(EventEntity.Task, taskKey, (int)ExecutionStatus.Failed, now), cancellationToken);
+                await RunStore.ExecuteAsync(connection, """
+                    UPDATE task_attempts SET error=$4,replacement_processed_at=$5
+                    WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 AND attempt=$3
+                    """, cancellationToken, runId, taskKey, attempt, failure, now);
+                await transaction.CommitAsync(cancellationToken);
+                return AgentLossDisposition.Failed;
+            }
+            var request = previous! with { Attempt = attempt + 1, RePlacement = true,
+                PreviousAgentId = previousAgent, AutoRetry = true };
+            var decision = await ChooseAsync(connection, request, cancellationToken);
+            if (decision.Agent is null) return AgentLossDisposition.WaitingForMachine;
+            var dispatch = original!.Clone();
+            dispatch.Task.Attempt = checked((uint)request.Attempt);
+            var deadline = now + TimeSpan.FromTicks(Math.Min(policy!.AttemptTimeout.Ticks,
+                (DateTimeOffset.MaxValue - now).Ticks));
+            deadline = deadline < runDeadline ? deadline : runDeadline;
+            deadline = deadline < nodeDeadline ? deadline : nodeDeadline;
+            dispatch.DeadlineAt = Timestamp.FromDateTimeOffset(deadline);
+            dispatch.ReservationEpoch = 1;
+            await RunStore.AppendAsync(connection, run,
+                run.CreateEvent(EventEntity.Task, taskKey, (int)ExecutionStatus.Retrying, now), cancellationToken);
+            await SaveDispatchAsync(connection, run, request, dispatch, decision.Agent.Id, policy,
+                checked((short)(platformRetries + 1)), authorRetries, cancellationToken);
+            await RunStore.ExecuteAsync(connection, """
+                UPDATE task_attempts SET replacement_processed_at=$4
+                WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 AND attempt=$3
+                """, cancellationToken, runId, taskKey, attempt, now);
+            await transaction.CommitAsync(cancellationToken);
+            placement.Apply(decision);
+            return AgentLossDisposition.Replaced;
+        }
+        finally { gate.Release(); }
+    }
+
+    private async Task<PlacementDecision> ChooseAsync(NpgsqlConnection connection, PlacementRequest request,
+        CancellationToken cancellationToken)
+    {
+        var capacity = agents.DispatchableAgents().Select(agent => agent.Capacity(timeProvider.GetUtcNow())).ToDictionary(agent => agent.Id);
+        await using (var pending = new NpgsqlCommand("""
+            SELECT agent_id,count(*),sum(required_ram_mb) FROM task_attempts WHERE status IN (2,3) GROUP BY agent_id
+            """, connection))
+        await using (var reader = await pending.ExecuteReaderAsync(cancellationToken))
+            while (await reader.ReadAsync(cancellationToken))
+                if (!reader.IsDBNull(0) && capacity.TryGetValue(reader.GetGuid(0), out var agent))
+                    capacity[agent.Id] = agent with
+                    {
+                        SlotsUsed = Math.Min(agent.MaxTasks, Math.Max(agent.SlotsUsed, checked((int)reader.GetInt64(1)))),
+                        AvailableRamMb = (long)Math.Max(0m, agent.AvailableRamMb - reader.GetFieldValue<decimal>(2))
+                    };
+        return placement.Propose(request, capacity.Values.ToArray());
+    }
+
+    private async Task<RunEvent> SaveDispatchAsync(NpgsqlConnection connection, RunState run, PlacementRequest request,
+        DispatchCommand dispatch, Guid agentId, ExecutionPolicy policy, short platformRetries, short authorRetries,
+        CancellationToken cancellationToken)
+    {
+        var key = $"{request.NodeKey}/{request.TaskKey}";
+        var change = run.CreateEvent(EventEntity.Task, key, (int)ExecutionStatus.Dispatched, timeProvider.GetUtcNow());
+        await RunStore.AppendAsync(connection, run, change, cancellationToken);
+        await RunStore.ExecuteAsync(connection, """
+            WITH attempt AS (
+                INSERT INTO task_attempts(run_day,run_id,task_key,attempt,agent_id,status,queued_at,deadline_at,required_ram_mb,
+                    dispatch_payload,placement_request,execution_policy,platform_retries,author_retries)
+                VALUES(uuid_v7_run_day($1),$1,$2,$3,$4,2,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12)
+                RETURNING run_day,run_id,task_key,attempt,agent_id
+            )
+            INSERT INTO dispatch_outbox(run_day,run_id,task_key,attempt,agent_id,payload)
+            SELECT run_day,run_id,task_key,attempt,agent_id,$8 FROM attempt
+            """, cancellationToken, request.RunId, key, (short)request.Attempt, agentId,
+            timeProvider.GetUtcNow(), dispatch.DeadlineAt.ToDateTimeOffset(), request.RequiredRamMb, dispatch.ToByteArray(),
+            JsonSerializer.Serialize(request, DispatchJson.Default.PlacementRequest),
+            JsonSerializer.Serialize(policy, DispatchJson.Default.ExecutionPolicy), platformRetries, authorRetries);
+        return change;
+    }
+
     public void Dispose() => gate.Dispose();
 }
+
+[JsonSerializable(typeof(PlacementRequest))]
+[JsonSerializable(typeof(ExecutionPolicy))]
+internal sealed partial class DispatchJson : JsonSerializerContext;

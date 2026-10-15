@@ -177,6 +177,15 @@ graph LR
 - **Recovery**: on leadership acquisition, the engine loads active runs (`status in (Queued, Running, Aborting)`) from snapshot tables plus events after `snapshot_seq`, applies unprocessed commands (pending triggers and aborts), re-arms timers, and applies the same per-attempt agent-loss deadline as in normal operation (no separate blanket wait): attempts of an agent that has not reconnected stay reclaimable until 30 s after its last heartbeat (`agents.last_heartbeat_at`), then become `AgentLost`; attempts a reconnected agent does not list in `Hello.inflight` end `AgentLost` at once.
 - **Leader lease**: row in `leases` (`engine`, holder, expires_at), renewed every 3 s, TTL 10 s. Fencing: every engine write includes the lease epoch (`WHERE epoch = $current`) so a paused ex-leader cannot write. Agents find the leader as follows. On ACA, the standby's readiness probe fails until it holds the lease, so ingress routes agents only to the leader. Self-hosted agents hold an endpoint list; a standby answers `NotLeader{leaderHint}` and closes the stream.
 
+**Agent-loss timing verification pending (October 15, 2026):** the implementation
+preserves the approved 30 s absolute reclaim deadline. Task 2.3.2.1.2 also asks
+replacement and completion within those same 30 s from the last heartbeat, which
+leaves no time to dispatch or execute after classification. Functional recovery
+is verified with actual agent processes and a virtual liveness clock; that does
+not establish the conflicting wall-clock bound. Timing sign-off awaits a choice
+between retaining this reclaim window with an additional dispatch allowance or
+shortening it. No approved deadline or NFR has been silently changed.
+
 ### Crash and restart recovery (NFR-033, FR-061–FR-064)
 Tasks execute on agents, never inside the engine or api, so control-plane failures do not stop work.
 

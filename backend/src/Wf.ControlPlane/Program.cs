@@ -34,6 +34,8 @@ builder.Services.AddSingleton<Dispatcher>();
 builder.Services.AddHostedService<AgentRegistryService>();
 builder.Services.AddSingleton<AgentLossSweeper>();
 builder.Services.AddHostedService<AgentLossSweeper>(services => services.GetRequiredService<AgentLossSweeper>());
+builder.Services.AddSingleton<AgentLossHandler>();
+builder.Services.AddHostedService<AgentLossHandler>(services => services.GetRequiredService<AgentLossHandler>());
 var app = builder.Build();
 app.MapGrpcService<AgentGatewayService>();
 app.MapGet("/healthz", () => Results.Ok());

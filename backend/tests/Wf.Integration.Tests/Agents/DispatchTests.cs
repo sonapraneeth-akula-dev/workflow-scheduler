@@ -332,5 +332,5 @@ public sealed class DispatchTests(DispatchDatabase database) : IClassFixture<Dis
 public sealed class DispatchDatabase : AgentDatabase
 {
     protected override IReadOnlyList<string> Migrations =>
-        ["0002_runs_events.sql", "0003_attempt_timers.sql", "0005_agents.sql", "0006_dispatch_outbox.sql"];
+        ["0002_runs_events.sql", "0003_attempt_timers.sql", "0005_agents.sql", "0006_dispatch_outbox.sql", "0011_attempt_replacement.sql"];
 }

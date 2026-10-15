@@ -34,6 +34,13 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
                 (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         })
         .Task("delay", async ctx => await Task.Delay(TimeSpan.FromSeconds(30), ctx.CancellationToken))
+        .Task("agentloss", async ctx =>
+        {
+            var delay = Environment.GetEnvironmentVariable("WF_FIXTURE_AGENT_LOSS_HOLD") == "true"
+                ? TimeSpan.FromSeconds(30) : TimeSpan.Zero;
+            await Task.Delay(delay, ctx.CancellationToken);
+            ctx.Outputs["pid"] = Environment.ProcessId;
+        })
         .Task("badcallback", async ctx =>
         {
             using var registration = ctx.CancellationToken.Register(() => throw new InvalidOperationException("fixture bad cancellation callback"));
