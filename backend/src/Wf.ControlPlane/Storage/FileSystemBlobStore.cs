@@ -1,7 +1,3 @@
-using System.Security.Cryptography;
-using System.Text.Json;
-using Microsoft.AspNetCore.WebUtilities;
-
 namespace Wf.ControlPlane.Storage;
 
 /// <summary>
@@ -12,9 +8,8 @@ public sealed class FileSystemBlobStore
     : IBlobStore, IDisposable
 {
     private readonly string root;
-    private readonly byte[] signingKey;
+    private readonly BlobUploadGrants grants;
     private readonly long maximumBytes;
-    private readonly TimeProvider time;
     private bool disposed;
 
     public FileSystemBlobStore(string rootDirectory, ReadOnlySpan<byte> hmacKey,
@@ -26,9 +21,8 @@ public sealed class FileSystemBlobStore
         RejectLinks(root);
         Directory.CreateDirectory(root);
         RejectLinks(root);
-        signingKey = hmacKey.ToArray();
+        grants = new(hmacKey, maximumBytes, timeProvider);
         this.maximumBytes = maximumBytes;
-        time = timeProvider ?? TimeProvider.System;
     }
 
     public async Task UploadAsync(BlobContent content, Stream source, CancellationToken cancellationToken = default)
@@ -59,7 +53,8 @@ public sealed class FileSystemBlobStore
     public async Task DownloadAsync(BlobContent content, Stream destination, CancellationToken cancellationToken = default)
     {
         var path = GetPath(content);
-        await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+        // Duplicate no-overwrite publishers may open rename handles while we verify immutable bytes.
+        await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete,
             BlobStreaming.BufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
         await BlobStreaming.CopyVerifiedAsync(input, destination, content, maximumBytes, cancellationToken);
     }
@@ -71,39 +66,13 @@ public sealed class FileSystemBlobStore
     public string CreateUploadGrant(BlobContent content, long maxBytes, TimeSpan lifetime)
     {
         _ = GetPath(content);
-        if (maxBytes < content.SizeBytes || maxBytes > maximumBytes)
-            throw new ArgumentOutOfRangeException(nameof(maxBytes));
-        var payload = JsonSerializer.SerializeToUtf8Bytes(new GrantPayload(content.Kind, content.Sha256,
-            content.SizeBytes, content.Key, maxBytes, BlobStreaming.Expiry(time, lifetime).UtcTicks,
-            Guid.NewGuid().ToString("N")));
-        return $"{WebEncoders.Base64UrlEncode(payload)}.{WebEncoders.Base64UrlEncode(HMACSHA256.HashData(signingKey, payload))}";
+        return grants.Create(content, maxBytes, lifetime);
     }
 
     public Task UploadWithGrantAsync(string grant, Stream source, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        try
-        {
-            if (string.IsNullOrEmpty(grant) || grant.Length > 2048) throw new FormatException();
-            var parts = grant.Split('.');
-            if (parts.Length != 2) throw new FormatException();
-            var payload = WebEncoders.Base64UrlDecode(parts[0]);
-            var signature = WebEncoders.Base64UrlDecode(parts[1]);
-            if (!CryptographicOperations.FixedTimeEquals(HMACSHA256.HashData(signingKey, payload), signature))
-                throw new FormatException();
-            var data = JsonSerializer.Deserialize<GrantPayload>(payload) ?? throw new FormatException();
-            var content = new BlobContent(data.Kind, data.Sha256, data.SizeBytes);
-            var now = time.GetUtcNow().UtcTicks;
-            if (data.Key != content.Key || data.MaxBytes < content.SizeBytes || data.MaxBytes > maximumBytes ||
-                data.ExpiresUtcTicks <= now || data.ExpiresUtcTicks - now > BlobStreaming.MaximumGrantLifetime.Ticks ||
-                data.Nonce is not { Length: 32 })
-                throw new FormatException();
-            return UploadAsync(content, source, cancellationToken);
-        }
-        catch (Exception error) when (error is FormatException or JsonException or ArgumentException)
-        {
-            throw new UnauthorizedAccessException("Invalid or expired upload grant.");
-        }
+        return UploadAsync(grants.Read(grant), source, cancellationToken);
     }
 
     private string GetPath(BlobContent content)
@@ -133,9 +102,6 @@ public sealed class FileSystemBlobStore
     {
         if (disposed) return;
         disposed = true;
-        CryptographicOperations.ZeroMemory(signingKey);
+        grants.Dispose();
     }
-
-    private sealed record GrantPayload(BlobKind Kind, string Sha256, long SizeBytes, string Key,
-        long MaxBytes, long ExpiresUtcTicks, string Nonce);
 }

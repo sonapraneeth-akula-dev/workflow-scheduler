@@ -12,6 +12,7 @@ using Wf.ControlPlane.Engine.Sweeper;
 using Wf.ControlPlane.Hosting;
 using Wf.ControlPlane.Live;
 using Wf.ControlPlane.Registry;
+using Wf.ControlPlane.Registration;
 using Wf.Engine.Core.Placement;
 
 if (args.Count(argument => argument == "--migrate") > 1)
@@ -21,10 +22,18 @@ if (args.Count(argument => argument == "--dev") > 1)
 var migrate = args.Contains("--migrate", StringComparer.Ordinal);
 var developmentAuth = args.Contains("--dev", StringComparer.Ordinal);
 var builder = WebApplication.CreateBuilder(args.Where(argument => argument is not ("--migrate" or "--dev")).ToArray());
+// Upload paths and live query strings carry bearer capabilities; suppress raw framework request/route logs.
+builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 var port = builder.Configuration.GetValue("Engine:Port", 5000);
 if (port is < 1 or > 65535) throw new InvalidOperationException("Engine:Port must be between 1 and 65535.");
-builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, port,
-    listen => listen.Protocols = HttpProtocols.Http2));
+var apiPort = builder.Configuration.GetValue("Api:Port", 5001);
+if (apiPort is < 1 or > 65535 || apiPort == port)
+    throw new InvalidOperationException("Api:Port must be between 1 and 65535 and differ from Engine:Port.");
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Listen(IPAddress.Loopback, port, listen => listen.Protocols = HttpProtocols.Http2);
+    options.Listen(IPAddress.Loopback, apiPort, listen => listen.Protocols = HttpProtocols.Http1);
+});
 builder.Services.AddGrpc(options => options.MaxReceiveMessageSize = 1024 * 1024);
 var connectionString = builder.Configuration.GetConnectionString("Workflow")
     ?? throw new InvalidOperationException("ConnectionStrings:Workflow is required; run --migrate before starting the host.");
@@ -40,6 +49,7 @@ builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
 builder.Services.AddTeamAuthorization();
 builder.Services.AddSignalR();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddWorkflowRegistrations(builder.Configuration);
 builder.Services.AddSingleton(new LeaseOptions(Guid.NewGuid().ToString("N"),
     new Uri(builder.Configuration["Engine:PublicEndpoint"] ?? $"http://localhost:{port}", UriKind.Absolute)));
 builder.Services.AddSingleton<LeaseManager>();
@@ -49,7 +59,6 @@ builder.Services.AddHostedService<EngineShutdownService>();
 builder.Services.AddSingleton<AgentRegistry>();
 builder.Services.AddSingleton<RunStore>();
 builder.Services.AddSingleton<CommandInbox>();
-builder.Services.AddSingleton<RegistryWriter>();
 builder.Services.AddSingleton<RunRecovery>();
 builder.Services.AddHostedService<RunRecovery>(services => services.GetRequiredService<RunRecovery>());
 builder.Services.AddSingleton<GroupCommitAppender>();
@@ -65,6 +74,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapGrpcService<AgentGatewayService>().RequireAuthorization(AuthExtensions.Agent);
 app.MapRegistryEndpoints();
+app.MapRegistrationEndpoints();
 app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
 app.MapGet("/healthz", () => Results.Ok()).AllowAnonymous();
 app.MapGet("/healthz/leader", (LeaseManager leadership, RunRecovery recovery) =>

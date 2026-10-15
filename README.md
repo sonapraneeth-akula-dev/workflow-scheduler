@@ -114,7 +114,8 @@ policies require `idtyp=app`, the exact app role, and no delegated `scp`.
 Signed JWT issuer, audience, tenant and lifetime are validated; untrusted tokens
 receive 401 and authenticated callers missing the required policy receive 403.
 Fallback authorization protects new endpoints; only explicit health endpoints
-are anonymous. The agent gRPC gateway requires the `Agent` policy.
+and capability-protected raw upload routes are anonymous. The agent gRPC
+gateway requires the `Agent` policy.
 
 For isolated local development, set `DOTNET_ENVIRONMENT=Development` and pass
 `--dev` (or `Authentication__Mode=Development`). This deliberately bypasses
@@ -484,8 +485,81 @@ grants larger than the provider's 5,000 MiB single-PUT limit are rejected.
 Configure cleanup of abandoned staging objects/files after crashes or unused
 expired grants. Actual filesystem/Azurite tests cover streaming, cancellation,
 checksum/size failures, atomicity, grant scope and path safety. Live cloud managed
-identity and 5 GB throughput are not claimed. HTTP grant/registration/report
-routes and application-profile DI configuration remain their separate tasks.
+identity and 5 GB throughput are not claimed. Report routes and complete
+application-profile configuration remain their separate tasks.
+
+## Registration
+
+The actual host exposes loopback HTTP/1.1 REST/SignalR on `Api:Port` (default
+5001), beside the unchanged HTTP/2 agent/engine listener on `Engine:Port`
+(default 5000). Ports must differ. Configure `Storage__UploadHmacKey` with an
+externally generated, stable base64 key containing at least 32 random bytes;
+missing, malformed or short keys fail startup without echoing key material.
+Use the same protected key across API replicas/restarts. `Storage__Root`
+defaults to `wf-data/blobs` under the executable directory; configure a
+service-private, writable shared root explicitly outside isolated local use.
+Migration mode still needs neither authentication nor an upload key.
+
+`POST /api/v1/upload-grants` requires the app-only `Registrar` policy and
+accepts `{kind:"package",sha256,size}` (1 byte to 512 MiB).
+A verified existing blob returns `200 {exists:true}`; otherwise 201 supplies
+a relative `uploadUri`, exact `maxBytes`, and expiry. PUT raw bytes to that
+URI without an Authorization header. Its HMAC bearer capability binds kind,
+digest, exact size and expiry, permits identical retries for ten minutes,
+and never authorizes arbitrary paths or content. Known and chunked oversized
+bodies return 413; short/wrong-hash bodies return 400; invalid/expired grants
+return 403. Partial uploads are never published. `BlobUploadGrants` is shared
+with the filesystem adapter; mediated uploads also work with an injected
+`AzureBlobStore` without process-local SAS completion state. The default host
+uses the filesystem store; Azure profile/credential wiring follows separately.
+Never log upload URLs, grants or HMAC keys.
+The host restricts raw ASP.NET Core request/routing logs to Warning so
+capabilities in paths and live access-token query strings are not logged.
+
+`POST /api/v1/registrations` also requires app-only `Registrar`. The strict
+contract requires `gitCommit` (40 or 64 lowercase hex characters) and
+`gitAuthor`; optional `changeNote` is limited to 4000 characters. A workflow
+registration supplies `workflowId` (`team/type/name`), `manifest`, package
+`{sha256,size}` and the single-file `source`. Manifest `name` must equal the
+complete workflow ID and metadata `type` its type segment. Include the optional
+complete `registry` team snapshot, or register the team/type first. Registry-only
+requests omit workflow fields. Unknown/duplicate fields, missing/null mandatory
+values and malformed contracts fail explicitly; JSON body limits are 8 MiB for
+registrations and 4 KiB for grant issuance. Non-JSON content types return 415.
+
+The service runs shared DAG/variable/HTTP/policy/type-metadata/SemVer checks,
+verifies actual stored package bytes, and archives at most 1 MiB of UTF-8 source
+as a deterministic `workflow.cs` ZIP. Source keys follow the blob store's
+`sources/{sha256}` convention, not user paths. Uploaded immutable source blobs
+can remain unreferenced after a rejected transaction; clean those up through
+the later storage lifecycle policy.
+
+Migration `0017` adds workflow/version persistence, registry history and the
+registration audit foundation. Team-scoped transaction locking makes version
+insertion, active/latest pointers, registry/group replacement, history, audit
+and `NOTIFY registry` atomic. Versions record source/package hashes and sizes,
+SDK version, Git commit/author, change note and the authenticated principal's
+`oid`, never a supplied registering identity. Audit summaries retain pointers
+and registry fingerprints, not source or variable values. Failure to audit
+rolls back the mutation. In-use workflow types cannot be removed by a registry
+replacement.
+
+SemVer text preserves prereleases, build metadata and large numeric components,
+with a 256-character API/storage bound; build metadata cannot create a second
+identity. Reusing a version with different immutable content returns 409.
+New versions must satisfy the shared classifier against the latest registered
+version, even if an administrator later rolls the active pointer back; 409
+responses preserve WFV010 diagnostics/hints. Identical requests return 200 with
+no rewrites, history or audit duplication and never reactivate an old version.
+201 responses include only changed `workflowVersion` and/or `registrySnapshot`
+UUIDs. Existing runs retain their version IDs.
+
+Schedule configuration registration/application, publish CLI/merge automation,
+active-version caches, catalogue/version reads, proactive live revocation,
+general audit middleware/partition maintenance and cloud profiles remain their
+dependent tasks. Unknown schedule fields are deliberately rejected until the
+schedule-registration contract is added; no schedule-only support is implied
+by this workflow/registry persistence task.
 
 ## Agent
 

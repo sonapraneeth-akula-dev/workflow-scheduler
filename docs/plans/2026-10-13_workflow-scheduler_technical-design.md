@@ -603,11 +603,12 @@ Conventions:
 | workflows | id | text | N | PK | `team/type/name` |
 | | type_id | text | N | FK, idx | |
 | | active_version_id | uuid | Y | FK | hot-swap pointer (FR-053) |
+| | latest_version_id | uuid | Y | same-workflow FK | latest registration baseline; unchanged by a manual active-version rollback |
 | | cloned_from_version_id | uuid | Y | FK | lineage (FR-044) |
 | | deleted_at | timestamptz | Y | | soft delete |
 | workflow_versions | id | uuid | N | PK | |
-| | workflow_id | text | N | UQ(workflow_id, major, minor, patch) | |
-| | major, minor, patch | int | N | | SemVer |
+| | workflow_id | text | N | UQ(workflow_id, semver_key) | |
+| | semver, semver_key | text | N | | Full SemVer and generated identity without build metadata; 256-character API/storage bound preserves prereleases and arbitrary-size numeric components supported by the shared validator |
 | | manifest | jsonb | N | | DAG, variables, policies, hook package refs |
 | | package_uri, package_sha256 | text, bytea | N | | content-addressed zip |
 | | source_uri | text | N | | script source for diff |
@@ -722,7 +723,7 @@ Node runs and task attempts come to about 40 M rows each. Logs, reports, artifac
 | Prefix | Path | Pointer column | Writer | Deleted |
 |---|---|---|---|---|
 | packages | `packages/{sha256}.zip` | `workflow_versions.package_uri` | CI (`wf publish`) via api upload grant on register | never (content-addressed) |
-| sources | `sources/{versionId}.zip` | `workflow_versions.source_uri` | api on register | never |
+| sources | `sources/{sha256}` | `workflow_versions.source_uri` + hash/size | api on register; immutable single-file source ZIP | never |
 | logs | `logs/{runId}/{taskKey}/{attempt}/{n:D6}.log.gz` + `index.json` | `task_attempts.log_uri` (prefix) | agent (§4.7) | with the run |
 | resources | `resources/{runId}/{taskKey}/{attempt}.bin` | `task_attempts.resource_series_uri` | agent | with the run |
 | checkpoints | `checkpoints/{runId}/{taskKey}/{seq}.json` | `task_checkpoints.blob_uri` | task host via SDK | with the run |
