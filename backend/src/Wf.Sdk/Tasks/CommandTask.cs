@@ -1,13 +1,13 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
+using Wf.Contracts;
 
 namespace Wf.Sdk;
 
 public sealed class CommandTaskException(int exitCode, bool retryable)
-    : Exception($"Command task exited with code {exitCode}.")
+    : TaskFailureException($"Command task exited with code {exitCode}.", retryable)
 {
     public int ExitCode { get; } = exitCode;
-    public bool Retryable { get; } = retryable;
 }
 
 public static partial class Tasks
