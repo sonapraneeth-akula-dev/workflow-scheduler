@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+**/TestResults/
+**/coverage/
+.vs/
+.idea/
+node_modules/
+dist/
+.env
+.env.*
+!.env.example

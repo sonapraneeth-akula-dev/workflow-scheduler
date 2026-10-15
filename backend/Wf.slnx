@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Wf.Contracts/Wf.Contracts.csproj" />
+    <Project Path="src/Wf.Sdk/Wf.Sdk.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Wf.Integration.Tests/Wf.Integration.Tests.csproj" />
+    <Project Path="tests/Wf.Sdk.Tests/Wf.Sdk.Tests.csproj" />
+  </Folder>
+</Solution>

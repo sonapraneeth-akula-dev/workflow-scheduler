@@ -1,0 +1,19 @@
+# Kardia Workflow Scheduler
+
+Implementation follows `docs/plans/2026-10-15_workflow-scheduler_azure-task-list.md`.
+
+## Backend
+
+Requires the .NET 10 SDK.
+
+```powershell
+dotnet build backend\Wf.slnx
+dotnet test backend\Wf.slnx --collect:"XPlat Code Coverage"
+dotnet run --file backend\samples\workflows\scenario-a.cs
+```
+
+The sample currently builds scenario A's immutable DAG only; it does not run
+workflow tasks. Execution, built-in tasks and other authoring features follow
+in their individual backlog items. Unit tests cover the SDK; integration tests
+cover definition-to-delegate resolution. CI runs both suites on Windows and Linux.
+Frontend tests will accompany the frontend implementation.

@@ -10,6 +10,16 @@
 
 **Estimation rules**: Task estimates are `hh:mm`. Est. Manual is a developer's hands-on time (1–4 h per item); Est. AI is AI-agent execution plus prompting/review (10–45 min per item). Story = Σ items; Feature = Σ stories; Milestone = Σ features + exit verification (01:00 manual / 00:15 AI); Requirement = Σ milestones. Numbers `R.M.F.S.I` are Requirement.Milestone.Feature.Story.Item within this list; PRD IDs are unchanged.
 
+## Implementation progress
+
+Each completed item is committed separately with its task ID in the commit body.
+Items not listed here remain pending. Milestone sign-off and remote CI results
+are not implied by local task completion.
+
+| Task | Status | Evidence |
+|------|--------|----------|
+| 1.1.1.1.1 | Complete | Backend solution builds without warnings; 11 SDK unit tests and 1 definition/delegate integration test pass; scenario A DAG sample compiles and prints four nodes. Full runtime/sample features follow in their own tasks. |
+
 ## Summary Rollup
 
 | Requirement | Milestone | Est. Manual | Est. AI | Savings (%) |
