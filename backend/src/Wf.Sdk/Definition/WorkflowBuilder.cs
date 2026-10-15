@@ -59,18 +59,18 @@ public sealed class WorkflowBuilder
         return this;
     }
 
-    public WorkflowBuilder SystemInit(Action<TaskContext> execute) => Stage("$init", execute);
-    public WorkflowBuilder SystemInit(Func<TaskContext, Task> execute) => Stage("$init", execute);
-    public WorkflowBuilder SystemInit(Func<StageBuilder, StageBuilder> configure) => Stage("$init", configure);
-    public WorkflowBuilder PreSetup(Action<TaskContext> execute) => Stage("$pre", execute);
-    public WorkflowBuilder PreSetup(Func<TaskContext, Task> execute) => Stage("$pre", execute);
-    public WorkflowBuilder PreSetup(Func<StageBuilder, StageBuilder> configure) => Stage("$pre", configure);
-    public WorkflowBuilder PostProcess(Action<TaskContext> execute) => Stage("$post", execute);
-    public WorkflowBuilder PostProcess(Func<TaskContext, Task> execute) => Stage("$post", execute);
-    public WorkflowBuilder PostProcess(Func<StageBuilder, StageBuilder> configure) => Stage("$post", configure);
-    public WorkflowBuilder SystemPostProcess(Action<TaskContext> execute) => Stage("$sys-post", execute);
-    public WorkflowBuilder SystemPostProcess(Func<TaskContext, Task> execute) => Stage("$sys-post", execute);
-    public WorkflowBuilder SystemPostProcess(Func<StageBuilder, StageBuilder> configure) => Stage("$sys-post", configure);
+    public WorkflowBuilder SystemInit(Action<TaskContext> execute) => Stage(LifecycleStages.SystemInit, execute);
+    public WorkflowBuilder SystemInit(Func<TaskContext, Task> execute) => Stage(LifecycleStages.SystemInit, execute);
+    public WorkflowBuilder SystemInit(Func<StageBuilder, StageBuilder> configure) => Stage(LifecycleStages.SystemInit, configure);
+    public WorkflowBuilder PreSetup(Action<TaskContext> execute) => Stage(LifecycleStages.PreSetup, execute);
+    public WorkflowBuilder PreSetup(Func<TaskContext, Task> execute) => Stage(LifecycleStages.PreSetup, execute);
+    public WorkflowBuilder PreSetup(Func<StageBuilder, StageBuilder> configure) => Stage(LifecycleStages.PreSetup, configure);
+    public WorkflowBuilder PostProcess(Action<TaskContext> execute) => Stage(LifecycleStages.PostProcess, execute);
+    public WorkflowBuilder PostProcess(Func<TaskContext, Task> execute) => Stage(LifecycleStages.PostProcess, execute);
+    public WorkflowBuilder PostProcess(Func<StageBuilder, StageBuilder> configure) => Stage(LifecycleStages.PostProcess, configure);
+    public WorkflowBuilder SystemPostProcess(Action<TaskContext> execute) => Stage(LifecycleStages.SystemPostProcess, execute);
+    public WorkflowBuilder SystemPostProcess(Func<TaskContext, Task> execute) => Stage(LifecycleStages.SystemPostProcess, execute);
+    public WorkflowBuilder SystemPostProcess(Func<StageBuilder, StageBuilder> configure) => Stage(LifecycleStages.SystemPostProcess, configure);
 
     private WorkflowBuilder Stage(string key, Action<TaskContext> execute)
     {
