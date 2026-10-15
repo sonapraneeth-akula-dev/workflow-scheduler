@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text.Json;
+using System.Text;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Registry;
 
@@ -13,7 +14,7 @@ public static class TeamRegistryRules
 
     public static readonly ValidationRule RegistryShape = new("WFV015",
         "The team registry does not match its JSON contract.",
-        "Provide a team and types with matching owning team, nonempty name, description and metadataSchema; use supported properties without duplicate JSON keys.");
+        "Provide a team and types with matching owning team, nonempty name, description and metadataSchema; identifiers must be at most 128 characters without path separators or control characters. Use supported properties without duplicate JSON keys.");
 
     public static readonly ValidationRule DuplicateType = new("WFV016",
         "A type duplicates or closely resembles another type in this team.",
@@ -93,7 +94,7 @@ public static class TeamRegistryRules
     private static void CheckRegistry(TeamRegistry registry, string file, int typeQuota,
         List<ValidationError> errors, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(registry.Team))
+        if (!ValidIdentifier(registry.Team))
             errors.Add(RegistryShape.CreateError(file, "$.team"));
         CheckRoleBindings(registry.RoleBindings, "$.roleBindings", file, errors, cancellationToken);
         if (registry.Types.IsDefault)
@@ -121,7 +122,7 @@ public static class TeamRegistryRules
                 !StringComparer.Ordinal.Equals(type.Team, registry.Team))
                 errors.Add(RegistryShape.CreateError(file, path + ".team"));
             var normalized = TypeNameSimilarity.Normalize(type.Name);
-            if (string.IsNullOrWhiteSpace(type.Name) || normalized.Length == 0)
+            if (!ValidIdentifier(type.Name) || normalized.Length == 0)
                 errors.Add(RegistryShape.CreateError(file, path + ".name"));
             else
             {
@@ -147,6 +148,10 @@ public static class TeamRegistryRules
         if (errors.Count == 0)
             errors.AddRange(PresentationValidator.Validate(registry, file, cancellationToken));
     }
+
+    private static bool ValidIdentifier(string? value) => !string.IsNullOrWhiteSpace(value) &&
+        value.EnumerateRunes().Take(129).Count() <= 128 &&
+        !value.Any(character => character is '/' or '\\' || char.IsControl(character));
 
     private static void CheckRoleBindings(ImmutableArray<RegistryRoleBinding> bindings, string path, string file,
         List<ValidationError> errors, CancellationToken cancellationToken)

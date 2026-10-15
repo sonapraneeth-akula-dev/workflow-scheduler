@@ -10,6 +10,7 @@ using Wf.ControlPlane.Engine.Leadership;
 using Wf.ControlPlane.Engine.Recovery;
 using Wf.ControlPlane.Engine.Sweeper;
 using Wf.ControlPlane.Hosting;
+using Wf.ControlPlane.Registry;
 using Wf.Engine.Core.Placement;
 
 if (args.Count(argument => argument == "--migrate") > 1)
@@ -45,6 +46,7 @@ builder.Services.AddHostedService<EngineShutdownService>();
 builder.Services.AddSingleton<AgentRegistry>();
 builder.Services.AddSingleton<RunStore>();
 builder.Services.AddSingleton<CommandInbox>();
+builder.Services.AddSingleton<RegistryWriter>();
 builder.Services.AddSingleton<RunRecovery>();
 builder.Services.AddHostedService<RunRecovery>(services => services.GetRequiredService<RunRecovery>());
 builder.Services.AddSingleton<GroupCommitAppender>();
@@ -59,6 +61,7 @@ var app = builder.Build();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapGrpcService<AgentGatewayService>().RequireAuthorization(AuthExtensions.Agent);
+app.MapRegistryEndpoints();
 app.MapGet("/healthz", () => Results.Ok()).AllowAnonymous();
 app.MapGet("/healthz/leader", (LeaseManager leadership, RunRecovery recovery) =>
     leadership.IsLeader && recovery.IsReady ? Results.Ok() : Results.StatusCode(StatusCodes.Status503ServiceUnavailable)).AllowAnonymous();

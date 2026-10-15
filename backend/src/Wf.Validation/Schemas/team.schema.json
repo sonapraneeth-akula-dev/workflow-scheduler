@@ -6,7 +6,7 @@
   "required": ["team", "types"],
   "properties": {
     "$schema": { "type": ["string", "null"] },
-    "team": { "$ref": "#/$defs/nonemptyText" },
+    "team": { "$ref": "#/$defs/identifier" },
     "types": {
       "type": "array",
       "items": { "$ref": "#/$defs/workflowType" }
@@ -56,13 +56,18 @@
       "minLength": 1,
       "pattern": "\\S"
     },
+    "identifier": {
+      "allOf": [{ "$ref": "#/$defs/nonemptyText" }],
+      "maxLength": 128,
+      "pattern": "^[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
     "workflowType": {
       "type": "object",
       "additionalProperties": false,
       "required": ["team", "name", "description", "metadataSchema"],
       "properties": {
-        "team": { "$ref": "#/$defs/nonemptyText" },
-        "name": { "$ref": "#/$defs/nonemptyText" },
+        "team": { "$ref": "#/$defs/identifier" },
+        "name": { "$ref": "#/$defs/identifier" },
         "description": { "$ref": "#/$defs/nonemptyText" },
         "metadataSchema": { "$ref": "#/$defs/metadataSchema" },
         "roleBindings": {

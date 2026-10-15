@@ -7,6 +7,7 @@
     <PackageReference Include="Microsoft.Identity.Web" />
     <ProjectReference Include="..\Wf.Contracts\Wf.Contracts.csproj" />
     <ProjectReference Include="..\Wf.Engine.Core\Wf.Engine.Core.csproj" />
+    <ProjectReference Include="..\Wf.Validation\Wf.Validation.csproj" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="..\..\db\migrations\*.sql" LogicalName="Wf.Migrations.%(Filename)%(Extension)" />

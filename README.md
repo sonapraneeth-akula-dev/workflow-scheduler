@@ -259,6 +259,22 @@ group may hold different roles or appear at both scopes. Sample UUIDs are
 placeholders, not deployed groups. Registration/RBAC synchronization follows
 separately; declaring a map does not itself grant access to the running API.
 
+Migration `0015_team_type_registry.sql` adds `teams` and `workflow_types`.
+`RegistryWriter.UpsertAsync(connection, transaction, registry)` uses the same
+shared rules and trusted constructor quota (default 10), serializes updates per
+team, and replaces the complete team/type snapshot in the caller's registration
+transaction. It never commits: commit with all other registration work, or
+roll back on any error. JSON-equivalent snapshots return false without updating
+row versions or notifying; changed snapshots issue transaction-scoped
+`NOTIFY registry`. Removed types are deleted, not silently retained; future
+workflow foreign keys must prevent removal of in-use types.
+IDs preserve exact declared names as `team/type`; shared validation and editor
+schema now bound both segments to 128 Unicode code points and reject path
+separators/control characters, avoiding ambiguous IDs and oversized index keys.
+The host exposes `GET /api/v1/teams` for global Admins only as a bootstrap read;
+scope-filtered catalogue expansion, role-binding synchronization and the full
+workflow-registration endpoint remain separate tasks.
+
 Optional team `presentation` config supplies ordered `typeOrder`, `groupingKeys`
 and metadata `listColumns`, plus metadata-keyed `defaultFilters` and display
 `labels`; the demo `team.json` includes an example. Type names and metadata keys
