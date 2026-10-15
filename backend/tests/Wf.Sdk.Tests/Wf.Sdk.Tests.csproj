@@ -2,4 +2,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Wf.Sdk\Wf.Sdk.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="Snapshots\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

@@ -80,5 +80,5 @@ public sealed class RunStateTests
 
     private static RunState Create(Action<string>? log = null) => new(Guid.CreateVersion7(),
         [new("node", [], [new("task")])], new WorkflowMetadata("test", new Dictionary<string, string>
-            { ["area"] = "checkout" }.ToImmutableDictionary()), log ?? Assert.Fail);
+            { ["area"] = "checkout" }.ToImmutableSortedDictionary()), log ?? Assert.Fail);
 }

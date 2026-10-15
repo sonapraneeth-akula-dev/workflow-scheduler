@@ -1,0 +1,26 @@
+{
+  "sdkVersion": "1.0.0",
+  "name": "payments/release/deploy",
+  "version": "1.0.0",
+  "metadata": {
+    "type": "release",
+    "values": {
+      "area": "checkout"
+    }
+  },
+  "variables": [],
+  "stages": [],
+  "nodes": [
+    {
+      "key": "build",
+      "dependencies": [],
+      "tasks": [],
+      "mode": "Series",
+      "maxParallel": null,
+      "failure": "Hard",
+      "inputs": [],
+      "timeout": null
+    }
+  ],
+  "runTimeout": "1.00:00:00"
+}

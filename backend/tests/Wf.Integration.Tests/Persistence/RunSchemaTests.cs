@@ -59,7 +59,7 @@ public sealed class RunSchemaTests : IAsyncLifetime
         var now = DateTimeOffset.UtcNow;
         var id = Guid.CreateVersion7(now);
         var run = new RunState(id, [new("node", [], [new("task")])],
-            new("test", ImmutableDictionary<string, string>.Empty), Assert.Fail);
+            new("test", ImmutableSortedDictionary<string, string>.Empty), Assert.Fail);
         var initial = run.Snapshot;
         var @event = run.CreateEvent(EventEntity.Run, null, (int)RunStatus.Running, now);
         await using var connection = new NpgsqlConnection(connectionString);

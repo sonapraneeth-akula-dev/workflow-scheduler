@@ -123,7 +123,7 @@ public sealed class WorkflowBuilder
             foreach (var task in node.Handlers)
                 tasks.Add($"{node.Key}/{task.Key}", task.Value);
         return new(name, version, definitions, tasks.ToImmutable(), variables.ToImmutableArray(),
-            new(type, metadata.ToImmutableDictionary(StringComparer.Ordinal)), runTimeout);
+            new(type, metadata.ToImmutableSortedDictionary(StringComparer.Ordinal)), runTimeout);
     }
 
     internal static void ValidateKey(string key)

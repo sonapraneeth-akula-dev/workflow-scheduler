@@ -25,7 +25,7 @@ are not implied by local task completion.
 | 1.1.2.1.1 | Complete | All nine variable types, defaults, required flags, allowed values, immutability and name-only secret references covered by unit tests; schema JSON round-trip integration passes. |
 | 1.1.2.1.2 | Complete | 26 binder cases pass; invalid/unknown/missing-required values rejected by name without value leakage; immutable typed values reach every stage/task through `ctx.Var`. Trigger/local-run call sites follow in their own tasks. |
 | 1.1.2.2.1 | Implemented; run verification pending | Exactly one explicit type required; immutable ordinal metadata and JSON round-trip tested. Metadata propagation to an actual run awaits LocalEngine (1.2.2.1.2); manifest propagation awaits 1.2.2.2.1. |
-| 1.1.3.1.1 | Implemented; manifest verification pending | Defaults and all Hard/Soft × dependency-condition combinations pass JSON-contract tests; conflicting duplicate dependencies rejected. Manifest checks follow in 1.2.2.2.1. |
+| 1.1.3.1.1 | Complete | Defaults and all Hard/Soft × dependency-condition combinations pass JSON-contract tests; conflicting duplicate dependencies rejected. Source-generated manifest tests verify both policies and conditions. |
 | 1.1.3.2.1 | Complete | Typed outputs, concurrent writes, immutable snapshots and shared task context tested; exactly 65,536 serialized UTF-8 bytes accepted, 65,537 rejected with node/size/artifact hint and no lost output. |
 | 1.1.3.2.2 | Complete | 9 output-read cases pass, including all dependency conditions, unknown/unrelated/transitive sources and duplicate bindings; producer-to-consumer typed output integration passes. |
 | 2.1.1.1.1 | Complete | Exhaustive run/node/task transition matrices pass; every allowed edge exercised, terminal states absorbing, invalid transitions logged/rejected. Implemented early to unblock stage ordering. |
@@ -33,7 +33,8 @@ are not implied by local task completion.
 | 2.1.1.2.1 | Complete | Every dependency condition × execution state tested; diamond/fan-out readiness, all-dependencies-terminal skip safety and stage eligibility covered. `SoftFailed` satisfies `OnSuccess`; `OnFailure` matches `Failed`/`TimedOut`. |
 | 1.1.3.1.2 | Complete | 17 failure-policy cases pass, including node/task policy × condition combinations, timeout policy, cancellation of unstarted siblings and draining active siblings; SDK function soft-failure integration continues the next task. |
 | 2.1.1.1.2 | Complete | Live/rebuilt/snapshot-tail states match; proposals do not mutate before commit; sequence gaps/duplicates/late events rejected. Monthly-partitioned PG migration and persisted snapshot/event replay pass against Testcontainers and external-server modes. |
-| 2.1.2.1.1 | Implemented; manifest verification pending | Innermost-wins timeout/retry/platform-retry resolution tested across workflow/node/task/stages; defaults 0 retries, 1 h attempt, 24 h run, 15 min post stages. Resolved contract round-trip passes; manifest follows in 1.2.2.2.1. |
+| 2.1.2.1.1 | Complete | Innermost-wins timeout/retry/platform-retry resolution tested across workflow/node/task/stages; defaults 0 retries, 1 h attempt, 24 h run, 15 min post stages. Source-generated manifest preserves resolved policies. |
+| 1.2.2.2.1 | Complete | Golden JSON snapshot, all contract fields, no eager task execution, stable metadata ordering and manifest-to-core-run integration pass. CLI `--describe` mode dispatch is wired with 1.2.2.1.1. |
 
 ## Summary Rollup
 

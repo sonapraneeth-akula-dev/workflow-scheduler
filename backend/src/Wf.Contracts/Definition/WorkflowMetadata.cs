@@ -5,9 +5,9 @@ namespace Wf.Contracts.Definition;
 public sealed record WorkflowMetadata
 {
     public string Type { get; }
-    public ImmutableDictionary<string, string> Values { get; }
+    public ImmutableSortedDictionary<string, string> Values { get; }
 
-    public WorkflowMetadata(string type, ImmutableDictionary<string, string> values)
+    public WorkflowMetadata(string type, ImmutableSortedDictionary<string, string> values)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(type);
         ArgumentNullException.ThrowIfNull(values);
