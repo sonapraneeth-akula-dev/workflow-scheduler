@@ -1,6 +1,7 @@
 using System.Net;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Npgsql;
+using Wf.ControlPlane.Auth;
 using Wf.ControlPlane.Data;
 using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Dispatch;
@@ -12,8 +13,11 @@ using Wf.Engine.Core.Placement;
 
 if (args.Count(argument => argument == "--migrate") > 1)
     throw new ArgumentException("--migrate cannot be repeated.", nameof(args));
+if (args.Count(argument => argument == "--dev") > 1)
+    throw new ArgumentException("--dev cannot be repeated.", nameof(args));
 var migrate = args.Contains("--migrate", StringComparer.Ordinal);
-var builder = WebApplication.CreateBuilder(args.Where(argument => argument != "--migrate").ToArray());
+var developmentAuth = args.Contains("--dev", StringComparer.Ordinal);
+var builder = WebApplication.CreateBuilder(args.Where(argument => argument is not ("--migrate" or "--dev")).ToArray());
 var port = builder.Configuration.GetValue("Engine:Port", 5000);
 if (port is < 1 or > 65535) throw new InvalidOperationException("Engine:Port must be between 1 and 65535.");
 builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, port,
@@ -27,6 +31,8 @@ if (migrate)
     Migrator.Upgrade(connectionString, logging.CreateLogger("Wf.Migrations"));
     return;
 }
+if (developmentAuth) builder.Configuration["Authentication:Mode"] = "Development";
+builder.Services.AddWorkflowAuthentication(builder.Configuration, builder.Environment);
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(new LeaseOptions(Guid.NewGuid().ToString("N"),
@@ -47,8 +53,10 @@ builder.Services.AddHostedService<AgentLossSweeper>(services => services.GetRequ
 builder.Services.AddSingleton<AgentLossHandler>();
 builder.Services.AddHostedService<AgentLossHandler>(services => services.GetRequiredService<AgentLossHandler>());
 var app = builder.Build();
-app.MapGrpcService<AgentGatewayService>();
-app.MapGet("/healthz", () => Results.Ok());
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapGrpcService<AgentGatewayService>().RequireAuthorization(AuthExtensions.Agent);
+app.MapGet("/healthz", () => Results.Ok()).AllowAnonymous();
 app.MapGet("/healthz/leader", (LeaseManager leadership, RunRecovery recovery) =>
-    leadership.IsLeader && recovery.IsReady ? Results.Ok() : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
+    leadership.IsLeader && recovery.IsReady ? Results.Ok() : Results.StatusCode(StatusCodes.Status503ServiceUnavailable)).AllowAnonymous();
 await app.RunAsync();

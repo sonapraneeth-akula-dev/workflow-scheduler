@@ -102,6 +102,31 @@ release later. Initial migration `0003` now supplies the default needed by old
 writers; `0013` supplies it to existing schemas without changing existing
 deadlines. Normal run creation still writes its resolved policy deadline.
 
+The control plane authenticates with Microsoft.Identity.Web 4.16.1 by default.
+Set `AzureAd__TenantId` to the tenant UUID and `AzureAd__ClientId` to the API
+application UUID; optional `AzureAd__Instance` defaults to
+`https://login.microsoftonline.com/`. Configure the API audience in the Entra
+application (and `AzureAd__Audience` when using a custom application ID URI).
+Register app roles `Admin` (users/groups or applications), `Registrar` and
+`Agent` (applications only), assign them to the appropriate principals and add
+the optional `idtyp` access-token claim to the API app registration. Machine
+policies require `idtyp=app`, the exact app role, and no delegated `scp`.
+Signed JWT issuer, audience, tenant and lifetime are validated; untrusted tokens
+receive 401 and authenticated callers missing the required policy receive 403.
+Fallback authorization protects new endpoints; only explicit health endpoints
+are anonymous. The agent gRPC gateway requires the `Agent` policy.
+
+For isolated local development, set `DOTNET_ENVIRONMENT=Development` and pass
+`--dev` (or `Authentication__Mode=Development`). This deliberately bypasses
+tokens with one fixed local identity holding all three global roles; never
+expose this mode to untrusted callers. It throws outside Development, including
+Production, Staging and Ppe. Development alone does not enable the bypass.
+No identity or role is taken from caller-supplied development headers. Migration
+mode does not need identity configuration. Live corporate sign-in, browser
+MSAL and agent token acquisition remain separate tasks; offline integration
+tests use real RSA-signed tokens and the normal validators with local metadata,
+not a live Entra tenant or mocked authentication handler.
+
 Task delegates resolve by stable `node/task` keys through `TaskRegistry`; no
 assembly scanning. Contexts expose `Var<T>`, AOT-safe `VarEnum<T>`, declared
 `Input<T>`, bounded `Outputs`, cancellation, logging and injected report/artifact
@@ -410,10 +435,11 @@ and node/run coordination are explicit caller responsibilities; this is not yet
 the full hosted run actor or HA leader loop.
 
 The control-plane agent gateway listens on loopback HTTP/2 port 5000. Configure
-`ConnectionStrings__Workflow`, apply the numbered scripts in
-`backend\db\migrations` to the target PostgreSQL schema, then run `dotnet run --project
-backend\src\Wf.ControlPlane`. This is a single local gateway, not the HA/auth
-control plane delivered by later tasks. Registration and heartbeat acknowledgements
+`ConnectionStrings__Workflow` and authentication as above, run the explicit
+`--migrate` deployment mode, then run `dotnet run --project
+backend\src\Wf.ControlPlane` (with `-- --dev` only in isolated Development).
+This is not yet the full hosted run-actor/scope-RBAC control plane.
+Registration and heartbeat acknowledgements
 follow durable writes. Agents lose health at exactly 15 seconds without a
 heartbeat; dispatch eligibility checks the deadline even before the sweeper runs.
 Reconnecting Hello replaces the session token, fencing old connections.
