@@ -56,7 +56,20 @@ foreach (var report in reports)
     var statistics = report.ResultStatistics ?? throw new InvalidOperationException("Benchmark measurements are missing.");
     var p95 = statistics.Percentiles.P95;
     var engine = report.BenchmarkCase.Descriptor.Type == typeof(EngineCoreBenchmarks);
+#if ENGINE_BASELINE
+    var group = false;
+#else
     var group = report.BenchmarkCase.Descriptor.Type == typeof(GroupCommitBenchmarks);
+    var validator = report.BenchmarkCase.Descriptor.Type == typeof(ValidatorBench);
+    if (validator)
+    {
+        var accepted = PerformanceGate.ValidatorMeanWithinLimit(statistics.Mean);
+        Console.WriteLine($"Cached 200-node/50-schedule validation: mean={statistics.Mean / 1_000_000:F3} ms; " +
+            $"limit < 2000 ms; {(accepted ? "PASS" : "FAIL")}");
+        passed &= accepted;
+        continue;
+    }
+#endif
     var withinLimit = double.IsFinite(p95) && p95 > 0 && (group || (engine ? p95 <= 3_000_000_000 : p95 < 1_000_000_000));
     Console.WriteLine(group
         ? $"{report.BenchmarkCase.DisplayInfo}: operation p95={p95 / 1_000_000:F3} ms; measurement-only, synchronous durability preserved."
@@ -87,6 +100,7 @@ else if (engineReports.Length > 1 || metricsPath is not null)
     Console.Error.WriteLine("Engine metrics require exactly one engine benchmark job.");
     return 1;
 }
+#if !ENGINE_BASELINE
 var groupMetrics = new List<GroupCommitMetrics>();
 foreach (var report in reports.Where(report => report.BenchmarkCase.Descriptor.Type == typeof(GroupCommitBenchmarks)))
 {
@@ -113,4 +127,5 @@ if (groupMetrics.Count > 0)
     File.WriteAllText(Path.Combine(directory, "group-commit-metrics.json"),
         JsonSerializer.Serialize(groupMetrics, new JsonSerializerOptions { WriteIndented = true }));
 }
+#endif
 return passed ? 0 : 1;

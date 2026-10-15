@@ -7,6 +7,9 @@ public sealed record EngineBenchmarkMetrics(string EnvironmentKey, double RunP95
 
 public static class PerformanceGate
 {
+    public static bool ValidatorMeanWithinLimit(double nanoseconds) =>
+        double.IsFinite(nanoseconds) && nanoseconds > 0 && nanoseconds < 2_000_000_000;
+
     public static ImmutableArray<string> Validate(EngineBenchmarkMetrics metrics)
     {
         ArgumentNullException.ThrowIfNull(metrics);

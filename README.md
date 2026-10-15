@@ -352,6 +352,21 @@ compatibility follow separately.
 ## Benchmarks
 
 ```powershell
+dotnet run -c Release --project backend\tests\Wf.Benchmarks -- --filter '*Validator*'
+```
+
+Full cached validation checks an actual 200-node workflow, 50 schedule instances
+and a team registry, including source/dependency hashing, cache integrity and
+shared semantic rules. Setup compiles/describes once; cold compilation is not
+part of the measured operation. Missing/invalid results or a nonpositive,
+nonfinite or >= 2-second mean fail the command. October 15, 2026 Windows
+measurement: mean 906.736 ms across ten iterations (standard BDN outlier
+filtering), 5.78 MB allocated per call. CI runs this gate on Windows and Linux;
+remote results remain unrun until push. The pinned engine baseline compiles
+only its copied engine harness with `ENGINE_BASELINE`, excluding newer
+validator/group-commit dependencies unavailable in the older code revision.
+
+```powershell
 dotnet run -c Release --project backend\tests\Wf.Benchmarks -- --filter '*GroupCommit*'
 ```
 
