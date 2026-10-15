@@ -93,8 +93,12 @@ budgets still apply; timeouts/backoff use virtual time. Valid failing workflow
 logs return normally; invalid host responses and exit/log mismatches throw
 `WorkflowRunException` with stdout/stderr. Cancellation kills/reaps the owned
 process tree and removes invocation files. Workflows are trusted code, not a
-sandbox; use cancellation to bound real host lifetime. Fluent assertions remain
-their own backlog task.
+sandbox; use cancellation to bound real host lifetime.
+`Wf.Sdk.Testing.Assertions` supplies framework-independent `DryRunLog` extensions
+for run/node/task status, skipped work, completion-before-start order, persisted
+retry attempts, lifecycle stages and structural/type-sensitive JSON outputs.
+Assertions return the original log for chaining; mismatches or unknown keys
+throw `RunAssertionException`, rather than silently passing.
 
 Code-defined schedule files use the published editor schema at
 `backend/src/Wf.Contracts/Schemas/schedules.schema.json`; see
