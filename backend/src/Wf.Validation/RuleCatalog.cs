@@ -29,6 +29,27 @@ public static class RuleCatalog
         "The workflow script failed during --describe.",
         "Fix the workflow definition or --describe diagnostics and validate again.");
 
+    public static readonly ValidationRule DependencyCycle = new("WFV005",
+        "The workflow contains a dependency cycle.",
+        "Remove circular node dependencies so the workflow is a directed acyclic graph.");
+
+    public static readonly ValidationRule UnknownDependency = new("WFV006",
+        "A dependency refers to an unknown node.",
+        "Reference an existing node key or remove the dependency.");
+
+    public static readonly ValidationRule DuplicateKey = new("WFV007",
+        "A key is duplicated within its scope.",
+        "Use unique node and variable keys, task keys within each node, and dependency references.");
+
+    public static readonly ValidationRule VariableType = new("WFV008",
+        "A variable declaration or default does not match its type or allowed values.",
+        "Use a supported variable type, compatible allowed values, and a default matching those constraints.");
+
+    public static readonly ValidationRule VariableRequired = new("WFV009",
+        "A variable required constraint is not a boolean.",
+        "Set required to true or false; required variables without defaults must be supplied when starting a run.");
+
     public static ImmutableArray<ValidationRule> All { get; } =
-        [DirectoryNotFound, WorkflowNotFound, BuildFailed, DescribeFailed];
+        [DirectoryNotFound, WorkflowNotFound, BuildFailed, DescribeFailed, DependencyCycle, UnknownDependency,
+            DuplicateKey, VariableType, VariableRequired];
 }

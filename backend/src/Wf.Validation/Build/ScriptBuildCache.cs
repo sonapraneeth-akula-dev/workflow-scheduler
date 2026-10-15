@@ -173,6 +173,7 @@ public sealed class ScriptBuildCache
                 new[] { "sdkVersion", "name", "version", "metadata", "variables", "stages", "nodes", "runTimeout" }
                     .Any(field => !document.RootElement.TryGetProperty(field, out _)))
                 throw new InvalidDataException("--describe output is missing required manifest fields.");
+            Wf.Validation.Rules.ManifestRules.ThrowIfInvalid(document.RootElement);
             var manifest = JsonSerializer.Deserialize(bytes, WorkflowManifestJsonContext.Default.WorkflowManifest);
             if (manifest is null || string.IsNullOrWhiteSpace(manifest.SdkVersion) ||
                 string.IsNullOrWhiteSpace(manifest.Name) || string.IsNullOrWhiteSpace(manifest.Version) ||

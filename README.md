@@ -245,10 +245,15 @@ cache for a directory containing `workflow.cs`. `Wf.Sdk.Testing.WorkflowValidati
 exposes the same API to xUnit and other callers. Results contain immutable errors
 with rule ID, file, path, message and hint, plus the successful build or original
 compiler/describe diagnostics. WFV001-WFV004 cover missing directory/script,
-publish failure and describe failure. Cancellation, infrastructure/cache errors
-and malformed description contracts propagate, not turn into validation success.
-Validation executes trusted workflow code; it is not a sandbox. Manifest,
-team, schedule and version rules follow in separate backlog tasks.
+publish failure and describe failure. WFV005-WFV009 cover DAG cycles, unknown
+dependencies, duplicate keys, variable type/default/allowed-value constraints and
+required-flag shape. Raw manifest checks precede typed contract construction on
+both fresh and cached descriptions; errors sort by rule ID and indexed JSON path.
+Required variables without defaults are valid definitions; runtime binding checks
+their supplied values. Cancellation, infrastructure/cache errors and malformed
+description contracts propagate, not turn into validation success.
+Validation executes trusted workflow code; it is not a sandbox. Team, schedule
+and version rules follow in separate backlog tasks.
 
 ## Benchmarks
 

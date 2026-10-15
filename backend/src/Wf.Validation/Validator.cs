@@ -1,10 +1,11 @@
 using Wf.Validation.Build;
+using Wf.Validation.Rules;
 
 namespace Wf.Validation;
 
 /// <summary>
 /// Publishes a trusted workflow.cs and reads its --describe manifest without executing tasks.
-/// This is not a sandbox. Manifest, schedule, registry and SemVer rules are separate implementation steps.
+/// Validates manifest semantics. This is not a sandbox. Schedule, registry and SemVer rules are separate steps.
 /// </summary>
 public static class Validator
 {
@@ -17,6 +18,7 @@ public static class Validator
     /// <summary>
     /// Expected missing inputs and publish/describe nonzero exits return errors. Cancellation, process-start,
     /// SDK, filesystem, cache-integrity and malformed manifest-contract failures propagate as exceptions.
+    /// Manifest semantic errors return structured errors before contract construction.
     /// Defaults cache published output under bin and isolated build intermediates under obj in directory.
     /// Supply additionalInputs for local references/imports outside directory; include their complete dependency closure.
     /// Cache behavior and declared-input limitations follow ScriptBuildCache.
@@ -39,7 +41,13 @@ public static class Validator
         {
             var build = await buildCache.BuildAsync(new(script, root, additionalInputs), cancellationToken)
                 .ConfigureAwait(false);
-            return new([], build);
+            cancellationToken.ThrowIfCancellationRequested();
+            return new(ManifestRules.Validate(build.Manifest, cancellationToken: cancellationToken), build);
+        }
+        catch (ManifestValidationException error)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return new(error.Errors);
         }
         catch (ScriptBuildException error) when (error.Stage is "publish" or "describe")
         {
