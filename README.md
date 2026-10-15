@@ -315,6 +315,32 @@ Elapsed intervals must advance from the last intended fire, not scheduler poll
 time. Hosts need ICU/timezone data; schedule persistence, APIs and the leader
 scheduler remain separate tasks.
 
+## Validation CLI and packages
+
+```powershell
+dotnet run --project backend\src\Wf.Cli -- validate C:\workflows\team\example --package C:\artifacts\example.zip
+```
+
+The directory must contain `workflow.cs`. `wf validate` reuses the shared
+validator, including schedules, team registry and optional API-baseline checks.
+Use repeated `--input <file-or-directory>` for dependencies outside the source
+root, `--baseline <workflow.api.json>` for compatibility validation, and
+`--work-directory <directory>` for build-cache artifacts. Exit codes: 0 valid,
+1 validation/compiler/describe failure, 2 usage/infrastructure/integrity failure,
+130 cancellation. Diagnostics retain rule, file, JSON path, message and hint;
+compiler diagnostics remain visible.
+
+`--package` emits a sorted ZIP with fixed entry metadata, every published file
+and `wf-package.json` containing the workflow version and actual entry assembly.
+The command prints the actual ZIP's SHA-256. Writes replace atomically; unsafe
+paths, links, inventory changes and agent package-limit violations fail without
+destroying an existing package. Compilation disables debug symbols to remove
+random intermediate PDB-path changes from assemblies. Reproducibility requires
+the same SDK/OS, source paths/environment, pinned dependencies, complete declared
+inputs and deterministic workflow code. Tests compare two independent cold
+builds byte-for-byte and execute the package through the real agent cache and
+warm task hosts. Publishing/registration commands remain separate tasks.
+
 ## Script build cache spike
 
 `Wf.Validation.Build.ScriptBuildCache.BuildAsync(new ScriptBuildRequest(script,

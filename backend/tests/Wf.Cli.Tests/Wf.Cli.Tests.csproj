@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Wf.Cli\Wf.Cli.csproj" />
+    <ProjectReference Include="..\..\src\Wf.Agent\Wf.Agent.csproj" />
+  </ItemGroup>
+</Project>

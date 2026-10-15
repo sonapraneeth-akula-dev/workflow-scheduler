@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Wf.Agent/Wf.Agent.csproj" />
+    <Project Path="src/Wf.Cli/Wf.Cli.csproj" />
     <Project Path="src/Wf.Contracts/Wf.Contracts.csproj" />
     <Project Path="src/Wf.ControlPlane/Wf.ControlPlane.csproj" />
     <Project Path="src/Wf.Engine.Core/Wf.Engine.Core.csproj" />
@@ -11,6 +12,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Wf.Agent.Tests/Wf.Agent.Tests.csproj" />
     <Project Path="tests/Wf.TaskHost.Fixture/Wf.TaskHost.Fixture.csproj" />
+    <Project Path="tests/Wf.Cli.Tests/Wf.Cli.Tests.csproj" />
     <Project Path="tests/Wf.Contracts.Tests/Wf.Contracts.Tests.csproj" />
     <Project Path="tests/Wf.ControlPlane.Tests/Wf.ControlPlane.Tests.csproj" />
     <Project Path="tests/Wf.Benchmarks.Tests/Wf.Benchmarks.Tests.csproj" />

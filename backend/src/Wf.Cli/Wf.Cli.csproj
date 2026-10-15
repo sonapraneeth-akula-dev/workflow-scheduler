@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>wf</AssemblyName>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>wf</ToolCommandName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Wf.Validation\Wf.Validation.csproj" />
+  </ItemGroup>
+</Project>
