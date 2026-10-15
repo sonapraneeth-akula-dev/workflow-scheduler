@@ -592,6 +592,19 @@ Started=0, Skipped=1, Missed=2, CaughtUp=3. History references existing schedule
 retention removes the corresponding run. Timestamps must be finite, and all
 callers must use PostgreSQL's microsecond precision for slot identity.
 
+`Wf.Agent.Secrets.SecretMasker` takes resolved secret values, never reference
+names. `Redact` masks complete text; create a separate text stream for each
+attempt/stdout/stderr, append decoded chunks and publish `Complete()` before
+EOF. Streaming retains at most the longest value minus one UTF-16 characters,
+preventing chunk boundaries from exposing matches; overlapping/adjacent matches
+collapse to `***`. Use a stateful UTF-8 decoder before supplying byte chunks.
+Matching is literal, ordinal and case-sensitive, not an encoding/URL/base64
+detector. `RedactJson` masks decoded string values and property names while
+keeping JSON valid; matching non-string scalars become strings. Key collisions
+fail explicitly rather than discard outputs. Secret resolution, production
+log/output transport wiring and stored-data masking verification remain
+dependent tasks; existing transport paths are not yet protected by this helper.
+
 ## Workflow project template
 
 Pack `backend\src\Wf.Templates\Wf.Templates.csproj`, install the resulting NuGet
