@@ -15,6 +15,14 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+      - uses: ankane/setup-postgres@v1
+        if: runner.os == 'Windows'
+        with:
+          postgres-version: 17
+      - name: Configure Windows service PostgreSQL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '"WF_TEST_POSTGRES=Host=localhost;Username=postgres;Database=postgres" >> $env:GITHUB_ENV'
       - run: dotnet build backend/Wf.slnx --configuration Release
       - run: dotnet test backend/Wf.slnx --configuration Release --no-build --collect:"XPlat Code Coverage"
       - run: dotnet run --file backend/samples/workflows/scenario-a.cs

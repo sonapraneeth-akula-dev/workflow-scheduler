@@ -1,7 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Npgsql" />
     <ProjectReference Include="..\..\src\Wf.Sdk\Wf.Sdk.csproj" />
     <ProjectReference Include="..\..\src\Wf.Validation\Wf.Validation.csproj" />
     <ProjectReference Include="..\..\src\Wf.Engine.Core\Wf.Engine.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\db\migrations\*.sql" Link="Migrations\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

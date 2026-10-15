@@ -4,7 +4,11 @@ Implementation follows `docs/plans/2026-10-15_workflow-scheduler_azure-task-list
 
 ## Backend
 
-Requires the .NET 10 SDK.
+Requires the .NET 10 SDK. PostgreSQL integration tests require Docker with Linux
+containers, or `WF_TEST_POSTGRES` pointing at a PostgreSQL 17+ test server.
+External-server tests create and remove only their own unique schemas; the test
+user needs schema-creation permission. CI uses Testcontainers on Linux and a
+service PostgreSQL on Windows.
 
 ```powershell
 dotnet build backend\Wf.slnx

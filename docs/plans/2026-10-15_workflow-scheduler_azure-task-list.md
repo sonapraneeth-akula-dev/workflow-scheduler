@@ -32,6 +32,7 @@ are not implied by local task completion.
 | 1.1.1.2.2 | Complete | 15 stage-order cases plus SDK/core integration pass; canonical order independent of declaration, cleanup after hard failure/abort/timeout, active-work drain and `always` preservation; stage changes use ordinary node states. |
 | 2.1.1.2.1 | Complete | Every dependency condition × execution state tested; diamond/fan-out readiness, all-dependencies-terminal skip safety and stage eligibility covered. `SoftFailed` satisfies `OnSuccess`; `OnFailure` matches `Failed`/`TimedOut`. |
 | 1.1.3.1.2 | Complete | 17 failure-policy cases pass, including node/task policy × condition combinations, timeout policy, cancellation of unstarted siblings and draining active siblings; SDK function soft-failure integration continues the next task. |
+| 2.1.1.1.2 | Complete | Live/rebuilt/snapshot-tail states match; proposals do not mutate before commit; sequence gaps/duplicates/late events rejected. Monthly-partitioned PG migration and persisted snapshot/event replay pass against Testcontainers and external-server modes. |
 
 ## Summary Rollup
 
