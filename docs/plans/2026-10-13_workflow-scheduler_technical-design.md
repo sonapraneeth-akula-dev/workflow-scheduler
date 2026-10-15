@@ -963,6 +963,8 @@ Status colours always pair with an icon and label (never colour alone). Typograp
 - **Authorisation**:
   - Global roles are Entra app roles (Admin, Registrar, Agent).
   - Team/type roles (Author/Operator/Viewer) come from `team.json` → Entra group mappings, synced into `role_bindings` on registration.
+  - Author and Operator independently include Viewer; neither includes the other. Scoped Admin includes all roles within its exact team/type scope. Team grants inherit to their types, never in reverse. Only the exact Entra `Admin` app role is global; database global bindings do not substitute for it.
+  - User-scoped grants require a delegated user identity and match user `oid` or complete `groups` claims. App-only Agent/Registrar identities cannot inherit them; malformed/overage group claims fail closed without Graph expansion. Resource ownership comes from stored registry/run data, not submitted team metadata.
   - Policy checks are made per request on resource scope, including on SignalR subscribe. Teams never see other teams' data unless granted (FR-021 isolation).
 - **Secrets**: references only (`secret://<store>/name`). The store is Key Vault, HashiCorp Vault, or a protected file (DPAPI on Windows, 0600 on Linux), chosen per profile. An agent resolves secrets at task start using its own identity. Values never enter the DB, events or the manifest. The log masker redacts resolved values (exact + base64 forms).
 - **Report content**:

@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
 using Microsoft.Identity.Web;
+using Wf.ControlPlane.Live;
 
 namespace Wf.ControlPlane.Auth;
 
@@ -46,6 +47,14 @@ public static class AuthExtensions
                     options.TokenValidationParameters.NameClaimType = "name";
                     options.IncludeErrorDetails = false;
                     options.RequireHttpsMetadata = true;
+                    options.Events.OnMessageReceived = context =>
+                    {
+                        if (context.Request.Path.StartsWithSegments(LiveHub.Path) &&
+                            !context.Request.Headers.ContainsKey("Authorization") &&
+                            context.Request.Query["access_token"] is { Count: 1 } accessToken)
+                            context.Token = accessToken[0];
+                        return Task.CompletedTask;
+                    };
                     options.Events.OnTokenValidated = context =>
                     {
                         if (!Guid.TryParse(context.Principal?.FindFirstValue("tid"), out var tokenTenant) || tokenTenant != tenantId)

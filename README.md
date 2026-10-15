@@ -274,7 +274,7 @@ IDs preserve exact declared names as `team/type`; shared validation and editor
 schema now bound both segments to 128 Unicode code points and reject path
 separators/control characters, avoiding ambiguous IDs and oversized index keys.
 The host exposes `GET /api/v1/teams` for global Admins only as a bootstrap read;
-scope-filtered catalogue expansion, role enforcement and the full
+scope-filtered catalogue expansion and the full
 workflow-registration endpoint remain separate tasks.
 
 Migration `0016_role_bindings.sql` adds global/team/type scopes (0/1/2), shared
@@ -286,6 +286,35 @@ Even an unchanged JSON snapshot reconciles missing bindings after an upgrade;
 unchanged binding rows retain their UUIDs and row versions. Registry and role
 changes become visible together only at commit, with no permission cache to
 leave stale entries behind.
+
+`AddTeamAuthorization` registers `Team.Viewer`/`Operator`/`Author`/`Admin`
+policies. HTTP routes use `RequireTeamRole(role, resourceKind, routeParameter)`;
+non-HTTP callers pass `TeamResource` to `IAuthorizationService`. Resources are
+resolved from stored teams/types or the persisted run/series workflow identity,
+never a caller's team metadata. Ambiguous or unresolved series fail closed.
+Team grants include their types; type grants never grant team-wide visibility.
+Author and Operator each include Viewer, but neither includes the other.
+Scoped Admin includes every role only within its scope; only the exact Entra
+app role `Admin` bypasses scoped grants. Database global bindings do not replace
+that app role. Delegated users match `oid` user grants and `groups` group grants;
+app-only, Agent/Registrar, malformed and group-overage claims cannot acquire
+user-scoped roles. Group overage requires a fresh complete token; no Graph
+expansion or permission cache is used.
+
+Scoped HTTP denials return 403 `application/problem+json` with a sanitized
+`detail` and `reason: insufficient_scope_role`; missing authentication remains
+401. The initial `/hubs/live/v1` hub authorizes every `Subscribe(scope,id)` for
+`team`, `type`, `run`, `series` and global-Admin-only `machines` (`id="*"`).
+Subscribe returns null on success, otherwise a Problem Details object with
+`status` 403 (or 400 for unsupported input): an upgraded SignalR invocation
+cannot change its HTTP status. Denied subscriptions never join groups; a
+denied re-subscribe removes earlier membership. UUID group IDs are canonical.
+JWT query tokens are accepted only under the exact hub path segment, never on
+REST routes or in preference to an Authorization header; connections close at
+token expiration. MessagePack, event fan-out/coalescing, proactive revocation
+of existing subscriptions, logs subscriptions and the separate browser-facing
+hosting topology remain live/hosting tasks, not implied by this authorization
+foundation.
 
 Optional team `presentation` config supplies ordered `typeOrder`, `groupingKeys`
 and metadata `listColumns`, plus metadata-keyed `defaultFilters` and display

@@ -10,6 +10,7 @@ using Wf.ControlPlane.Engine.Leadership;
 using Wf.ControlPlane.Engine.Recovery;
 using Wf.ControlPlane.Engine.Sweeper;
 using Wf.ControlPlane.Hosting;
+using Wf.ControlPlane.Live;
 using Wf.ControlPlane.Registry;
 using Wf.Engine.Core.Placement;
 
@@ -36,6 +37,8 @@ if (migrate)
 if (developmentAuth) builder.Configuration["Authentication:Mode"] = "Development";
 builder.Services.AddWorkflowAuthentication(builder.Configuration, builder.Environment);
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
+builder.Services.AddTeamAuthorization();
+builder.Services.AddSignalR();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(new LeaseOptions(Guid.NewGuid().ToString("N"),
     new Uri(builder.Configuration["Engine:PublicEndpoint"] ?? $"http://localhost:{port}", UriKind.Absolute)));
@@ -62,6 +65,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapGrpcService<AgentGatewayService>().RequireAuthorization(AuthExtensions.Agent);
 app.MapRegistryEndpoints();
+app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
 app.MapGet("/healthz", () => Results.Ok()).AllowAnonymous();
 app.MapGet("/healthz/leader", (LeaseManager leadership, RunRecovery recovery) =>
     leadership.IsLeader && recovery.IsReady ? Results.Ok() : Results.StatusCode(StatusCodes.Status503ServiceUnavailable)).AllowAnonymous();
