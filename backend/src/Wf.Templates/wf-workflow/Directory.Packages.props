@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="Wf.Sdk" Version="SDK_PACKAGE_VERSION" />
+    <PackageVersion Include="Wf.Sdk.Testing" Version="SDK_PACKAGE_VERSION" />
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />
+  </ItemGroup>
+</Project>

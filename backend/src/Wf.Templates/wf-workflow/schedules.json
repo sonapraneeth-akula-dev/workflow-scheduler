@@ -1,0 +1,27 @@
+{
+  "$schema": "schemas/schedules.schema.json",
+  "defaults": {
+    "environment": {
+      "env": "dev"
+    }
+  },
+  "instances": [
+    {
+      "id": "daily-dev",
+      "cron": "0 9 * * *",
+      "timezone": "Etc/UTC",
+      "overlap": "Skip",
+      "catchUp": "Latest"
+    },
+    {
+      "id": "ppe-check",
+      "interval": "00:15:00",
+      "timezone": "Etc/UTC",
+      "overlap": "Queue",
+      "catchUp": "None",
+      "variables": {
+        "env": "ppe"
+      }
+    }
+  ]
+}

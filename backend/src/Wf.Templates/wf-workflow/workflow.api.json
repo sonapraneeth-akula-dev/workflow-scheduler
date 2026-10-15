@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0",
+  "variables": [
+    {
+      "key": "env",
+      "type": "String",
+      "required": false,
+      "default": "dev",
+      "allowedValues": ["dev", "ppe"]
+    }
+  ],
+  "nodes": ["check", "prepare"]
+}

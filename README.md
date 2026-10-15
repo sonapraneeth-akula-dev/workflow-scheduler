@@ -315,6 +315,30 @@ Elapsed intervals must advance from the last intended fire, not scheduler poll
 time. Hosts need ICU/timezone data; schedule persistence, APIs and the leader
 scheduler remain separate tasks.
 
+## Workflow project template
+
+Pack `backend\src\Wf.Templates\Wf.Templates.csproj`, install the resulting NuGet
+package with `dotnet new install <package-path>`, then generate a workflow:
+
+```powershell
+dotnet new wf-workflow -n Example --sdkVersion 1.0.0
+dotnet test
+```
+
+The configured NuGet source must provide matching `Wf.Sdk` and `Wf.Sdk.Testing`
+packages. The template includes `workflow.cs`, `schedules.json`,
+`workflow.api.json`, a local schedule schema and four runnable dry-run tests.
+Generated tests use one assembly fixture and the built-in Microsoft Testing
+Platform MSBuild integration, preserving the real out-of-process workflow
+harness without VSTest startup overhead. Workflow compilation uses ordinary IL.
+
+Isolated install/generate tests prepare actual SDK NuGet packages and enforce
+the exact warm generated `dotnet test` command below 10 s, including restore/build
+checks and unchanged workflow-cache integrity. Local Windows measurement:
+5.916 s warm, 25.320 s with an empty isolated package cache; package/feed preparation
+16.547 s separately. Cold download/compilation is not claimed below 10 s.
+Windows/Linux CI runs the same integration; local Linux results remain unverified.
+
 ## Validation CLI and packages
 
 ```powershell

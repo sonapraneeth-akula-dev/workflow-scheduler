@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>Wf.Templates</PackageId>
+    <PackageVersion>1.0.0</PackageVersion>
+    <PackageType>Template</PackageType>
+    <Title>Workflow scheduler templates</Title>
+    <Description>Single-file .NET 10 workflow with schedules, API baseline and offline tests.</Description>
+    <IncludeContentInPack>true</IncludeContentInPack>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="wf-workflow\**\*" Exclude="wf-workflow\**\bin\**;wf-workflow\**\obj\**"
+             Pack="true" PackagePath="content" />
+  </ItemGroup>
+</Project>

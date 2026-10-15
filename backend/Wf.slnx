@@ -7,6 +7,7 @@
     <Project Path="src/Wf.Engine.Core/Wf.Engine.Core.csproj" />
     <Project Path="src/Wf.Sdk.Testing/Wf.Sdk.Testing.csproj" />
     <Project Path="src/Wf.Sdk/Wf.Sdk.csproj" />
+    <Project Path="src/Wf.Templates/Wf.Templates.csproj" />
     <Project Path="src/Wf.Validation/Wf.Validation.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -22,6 +23,7 @@
     <Project Path="tests/Wf.Recovery.Fixture/Wf.Recovery.Fixture.csproj" />
     <Project Path="tests/Wf.Sdk.Testing.Tests/Wf.Sdk.Testing.Tests.csproj" />
     <Project Path="tests/Wf.Sdk.Tests/Wf.Sdk.Tests.csproj" />
+    <Project Path="tests/Wf.Templates.Tests/Wf.Templates.Tests.csproj" />
     <Project Path="tests/Wf.Validation.Tests/Wf.Validation.Tests.csproj" />
   </Folder>
 </Solution>
