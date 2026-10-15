@@ -51,4 +51,21 @@ public sealed class ScenarioADefinitionTests
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             JsonSerializer.Deserialize<NodeDefinition>(json.Replace("\"MaxParallel\":3", "\"MaxParallel\":0")));
     }
+
+    [Fact]
+    public async Task StageDelegatesReceiveTheSameCancellationContextAsNodeTasks()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var tokens = new List<CancellationToken>();
+        var workflow = Workflow.Define("stages", "1", w => w
+            .SystemInit(ctx => { tokens.Add(ctx.CancellationToken); })
+            .Node("node", n => n.Task("work", ctx => { tokens.Add(ctx.CancellationToken); }))
+            .SystemPostProcess(ctx => { tokens.Add(ctx.CancellationToken); }));
+        cancellation.Cancel();
+        foreach (var node in workflow.Nodes)
+            foreach (var task in node.Tasks)
+                await workflow.Tasks[$"{node.Key}/{task.Key}"](new(cancellation.Token));
+        Assert.Equal(3, tokens.Count);
+        Assert.All(tokens, token => Assert.True(token.IsCancellationRequested));
+    }
 }
