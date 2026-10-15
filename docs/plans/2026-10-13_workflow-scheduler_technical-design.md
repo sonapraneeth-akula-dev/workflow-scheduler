@@ -604,6 +604,7 @@ Conventions:
 | | type_id | text | N | FK, idx | |
 | | active_version_id | uuid | Y | FK | hot-swap pointer (FR-053) |
 | | latest_version_id | uuid | Y | same-workflow FK | latest registration baseline; unchanged by a manual active-version rollback |
+| | active_schedule_config_id | uuid | Y | same-workflow FK | active independently versioned code schedule file; known-content reverts reuse historical config IDs |
 | | cloned_from_version_id | uuid | Y | FK | lineage (FR-044) |
 | | deleted_at | timestamptz | Y | | soft delete |
 | workflow_versions | id | uuid | N | PK | |
@@ -618,6 +619,7 @@ Conventions:
 | schedule_config_versions | id | uuid | N | PK | one row per registered schedule-file content |
 | | workflow_id | text | N | UQ(workflow_id, content_sha256) | |
 | | source_path, git_commit, content_sha256 | text, text, bytea | N | | registered independently of workflow versions (FR-053/054) |
+| | content | text | Y (legacy only) | SHA-256 check | exact UTF-8 JSON retained for revalidation against new workflow variables/defaults; new registrations require 1 byte to 1 MiB |
 | | git_author, registered_by, registered_at | text, text, timestamptz | N | | |
 | schedules | id | uuid | N | PK | |
 | | workflow_id | text | N | FK | |
@@ -625,7 +627,7 @@ Conventions:
 | | code_key | text | Y | UQ(workflow_id, code_key) WHERE origin=Code | instance ID from schedule file |
 | | config_version_id | uuid | Y | FK | Code: current `schedule_config_versions` row (source path, commit, hash); null for User |
 | | name, timezone | text | N | | |
-| | cron / interval_s | text / int | Y | CHECK exactly one | |
+| | cron / interval_s | text / int | Y | CHECK exactly one | file/registration intervals require positive whole seconds, at most 2,147,483,647; no rounding |
 | | variables | jsonb | N | | effective (defaults ← overrides) |
 | | version_pin | text | Y | | SemVer range or exact |
 | | overlap_policy, catchup_policy | smallint | N | | skip/queue/concurrent · none/latest |

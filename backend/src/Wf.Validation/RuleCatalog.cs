@@ -60,15 +60,15 @@ public static class RuleCatalog
 
     public static readonly ValidationRule ScheduleExpression = new("WFV012",
         "A schedule expression or timezone is invalid.",
-        "Provide exactly one valid five-field cron or positive constant-format interval and a recognized IANA timezone.");
+        "Provide exactly one valid five-field cron or positive whole-second constant-format interval (at most 2147483647 seconds) and a recognized IANA timezone.");
 
     public static readonly ValidationRule ScheduleVariable = new("WFV013",
         "A schedule variable is unknown, invalid, duplicated across categories, or required but missing.",
         "Use declared variable keys and valid values; declare each default once and supply required instance values.");
 
     public static readonly ValidationRule ScheduleIdentity = new("WFV014",
-        "A schedule instance ID is empty or duplicated.",
-        "Give every instance a nonempty, stable, unique ID.");
+        "A schedule instance ID is empty, duplicated, or contains control characters.",
+        "Give every instance a nonempty, stable, unique ID without control characters.");
 
     public static ImmutableArray<ValidationRule> All { get; } =
         [DirectoryNotFound, WorkflowNotFound, BuildFailed, DescribeFailed, DependencyCycle, UnknownDependency,

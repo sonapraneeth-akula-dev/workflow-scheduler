@@ -28,7 +28,8 @@ public sealed class RegistrationConflictException(string message, ImmutableArray
     public ImmutableArray<ValidationError> Errors { get; } = errors.IsDefault ? [] : errors;
 }
 
-public sealed class RegistrationService(NpgsqlDataSource dataSource, IBlobStore blobs, RegistryWriter registryWriter)
+public sealed class RegistrationService(NpgsqlDataSource dataSource, IBlobStore blobs, RegistryWriter registryWriter,
+    TimeProvider timeProvider)
 {
     public const long MaximumPackageBytes = 512L * 1024 * 1024;
     private const int MaximumSourceBytes = 1024 * 1024;
@@ -46,6 +47,7 @@ public sealed class RegistrationService(NpgsqlDataSource dataSource, IBlobStore 
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(actor);
         ValidateProvenance(request);
+        ScheduleFileApplier.ValidateRequest(request);
         WorkflowManifest? manifest = null;
         BlobContent? package = null;
         byte[]? sourceZip = null;
@@ -99,8 +101,8 @@ public sealed class RegistrationService(NpgsqlDataSource dataSource, IBlobStore 
         else if (request.Package is not null || request.Source is not null)
             throw Invalid("$.manifest", "Package and source must accompany a manifest.");
 
-        if (manifest is null && registry is null)
-            throw Invalid("$", "Supply a workflow manifest or a team registry.");
+        if (manifest is null && registry is null && request.Schedules is null)
+            throw Invalid("$", "Supply a workflow manifest, schedule file, or team registry.");
         var team = identity?[0] ?? registry!.Team;
         if (registry is not null && registry.Team != team)
             throw Invalid("$.registry.team", "Registry ownership must match the workflow identity.");
@@ -239,7 +241,10 @@ public sealed class RegistrationService(NpgsqlDataSource dataSource, IBlobStore 
             }
         }
 
-        var response = new RegistrationResponse(versionId, snapshotId);
+        var schedules = request.WorkflowId is not null && (manifest is not null || request.Schedules is not null)
+            ? await ScheduleFileApplier.ApplyAsync(connection, transaction, request, actor, timeProvider.GetUtcNow(), cancellationToken)
+            : null;
+        var response = new RegistrationResponse(versionId, snapshotId, schedules?.ChangedVersion);
         if (response.Changed)
         {
             await using (var audit = new NpgsqlCommand("""
@@ -248,12 +253,13 @@ public sealed class RegistrationService(NpgsqlDataSource dataSource, IBlobStore 
                 """, connection, transaction))
             {
                 audit.Parameters.AddWithValue(actor);
-                audit.Parameters.AddWithValue(manifest is null ? "Team" : "Workflow");
-                audit.Parameters.AddWithValue(manifest is null ? team : request.WorkflowId!);
+                audit.Parameters.AddWithValue(request.WorkflowId is null ? "Team" : "Workflow");
+                audit.Parameters.AddWithValue(request.WorkflowId ?? team);
                 audit.Parameters.AddWithValue(team);
                 audit.Parameters.AddWithValue(NpgsqlDbType.Jsonb, JsonSerializer.Serialize(new
                 {
-                    before = new { workflowVersion = previousVersion, registrySha256 = previousRegistryHash },
+                    before = new { workflowVersion = previousVersion, registrySha256 = previousRegistryHash,
+                        scheduleConfigVersion = schedules?.PreviousVersion },
                     after = new
                     {
                         changes = JsonSerializer.SerializeToElement(response, RegistrationJsonContext.Default.RegistrationResponse),

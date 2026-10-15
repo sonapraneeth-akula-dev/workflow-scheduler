@@ -24,7 +24,7 @@
           "interval": {
             "$comment": "Represents a System.TimeSpan value.",
             "type": "string",
-            "pattern": "^-?(\\d\u002B\\.)?\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,7})?$",
+            "pattern": "^(\\d\u002B\\.)?\\d{2}:\\d{2}:\\d{2}(\\.0{1,7})?$",
             "default": null
           },
           "versionPin": {

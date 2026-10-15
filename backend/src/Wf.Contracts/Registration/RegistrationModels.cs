@@ -7,14 +7,16 @@ public sealed record PackageReference(string Sha256, long Size);
 
 public sealed record RegistrationRequest(string GitCommit, string GitAuthor, string? WorkflowId = null,
     JsonElement? Manifest = null, PackageReference? Package = null, string? Source = null,
-    JsonElement? Registry = null, string? ChangeNote = null);
+    JsonElement? Registry = null, string? ChangeNote = null, string? Schedules = null,
+    string? ScheduleSourcePath = null);
 
 public sealed record RegistrationResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? WorkflowVersion = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? RegistrySnapshot = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? RegistrySnapshot = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? ScheduleConfigVersion = null)
 {
     [JsonIgnore]
-    public bool Changed => WorkflowVersion is not null || RegistrySnapshot is not null;
+    public bool Changed => WorkflowVersion is not null || RegistrySnapshot is not null || ScheduleConfigVersion is not null;
 }
 
 public sealed record UploadGrantRequest(string Kind, string Sha256, long Size);

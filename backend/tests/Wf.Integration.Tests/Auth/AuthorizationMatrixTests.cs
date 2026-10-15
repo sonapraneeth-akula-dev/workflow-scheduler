@@ -238,6 +238,50 @@ public sealed class AuthorizationMatrixTests(AuthorizationDatabase database) : I
     }
 
     [Fact]
+    public async Task ScheduleFileApplier_series_authorization_uses_permanent_owner_before_first_run_and_after_removal()
+    {
+        var group = Guid.NewGuid();
+        var seed = await Seed(RegistryRole.Viewer, group, true);
+        var schedule = Guid.CreateVersion7();
+        var series = Guid.CreateVersion7();
+        await using (var insert = database.DataSource.CreateCommand("""
+            INSERT INTO schedules(id,workflow_id,origin,code_key,name,timezone,interval_s,created_by,updated_by)
+            VALUES($1,$2,0,'stable','schedule','Etc/UTC',60,'test','test')
+            """))
+        {
+            insert.Parameters.AddWithValue(schedule);
+            insert.Parameters.AddWithValue(seed.Type + "/workflow");
+            await insert.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+        await using (var insert = database.DataSource.CreateCommand(
+            "INSERT INTO run_series(id,workflow_id,schedule_id) VALUES($1,$2,$3)"))
+        {
+            insert.Parameters.AddWithValue(series);
+            insert.Parameters.AddWithValue(seed.Type + "/workflow");
+            insert.Parameters.AddWithValue(schedule);
+            await insert.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+        await using var server = await Server.Start(database.DataSource);
+        var jwt = server.Token(group: group);
+        using (var response = await server.Get("series", RegistryRole.Viewer, series.ToString(), jwt))
+            await Check(response, true);
+        using (var denied = await server.Get("series", RegistryRole.Viewer, series.ToString(), server.Token(group: Guid.NewGuid())))
+            await Check(denied, false);
+        await using var live = await server.Connect(jwt);
+        Assert.Equal(JsonValueKind.Null, (await live.Subscribe("series", series.ToString())).ValueKind);
+        await using (var remove = database.DataSource.CreateCommand("UPDATE schedules SET deleted_at=now(),paused=true WHERE id=$1"))
+        {
+            remove.Parameters.AddWithValue(schedule);
+            await remove.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+        using (var historical = await server.Get("series", RegistryRole.Viewer, series.ToString(), jwt))
+            await Check(historical, true);
+        await Run(seed.OtherType, series);
+        using var ambiguous = await server.Get("series", RegistryRole.Viewer, series.ToString(), jwt);
+        await Check(ambiguous, false);
+    }
+
+    [Fact]
     public async Task Missing_authentication_is_401_and_query_tokens_work_only_on_hub_segment_with_header_precedence()
     {
         var seed = await Seed(RegistryRole.Viewer, Guid.NewGuid(), false);

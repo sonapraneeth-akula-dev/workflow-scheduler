@@ -18,6 +18,7 @@ public static class ScheduleFileSchema
         foreach (var key in new[] { "id", "timezone", "cron", "versionPin" })
             properties[key] = new JsonObject { ["type"] = "string", ["minLength"] = 1, ["pattern"] = "\\S" };
         properties["interval"]!["type"] = "string";
+        properties["interval"]!["pattern"] = "^(\\d+\\.)?\\d{2}:\\d{2}:\\d{2}(\\.0{1,7})?$";
         properties["overlap"]!["default"] = nameof(ScheduleOverlapPolicy.Skip);
         properties["catchUp"]!["default"] = nameof(ScheduleCatchUpPolicy.Latest);
         instance["oneOf"] = new JsonArray(

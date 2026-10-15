@@ -33,7 +33,7 @@ using Wf.Sdk;
 
 namespace Wf.Integration.Tests.Registration;
 
-public sealed class RegistrationTests(RegistrationDatabase database) : IClassFixture<RegistrationDatabase>
+public sealed partial class RegistrationTests(RegistrationDatabase database) : IClassFixture<RegistrationDatabase>
 {
     [Fact]
     public async Task Http_registration_persists_real_sdk_manifest_source_package_provenance_active_pointer_audit_and_notify()

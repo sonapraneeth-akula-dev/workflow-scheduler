@@ -106,10 +106,13 @@ public sealed class TeamRoleHandler(NpgsqlDataSource dataSource) : Authorization
                   AND r.workflow_id ~ '^[^/]+/[^/]+/[^/]+$'
                 """,
             TeamResourceKind.Series => """
-                SELECT DISTINCT t.team_id,t.id FROM runs r LEFT JOIN workflow_types t
-                  ON t.id=split_part(r.workflow_id,'/',1)||'/'||split_part(r.workflow_id,'/',2)
-                    AND r.workflow_id ~ '^[^/]+/[^/]+/[^/]+$'
-                WHERE r.series_id=$1 LIMIT 2
+                WITH owners AS (
+                    SELECT workflow_id FROM run_series WHERE id=$1
+                    UNION SELECT workflow_id FROM runs WHERE series_id=$1)
+                SELECT DISTINCT t.team_id,t.id FROM owners o LEFT JOIN workflow_types t
+                  ON t.id=split_part(o.workflow_id,'/',1)||'/'||split_part(o.workflow_id,'/',2)
+                    AND o.workflow_id ~ '^[^/]+/[^/]+/[^/]+$'
+                LIMIT 2
                 """,
             _ => throw new InvalidOperationException("Unsupported resource kind.")
         };

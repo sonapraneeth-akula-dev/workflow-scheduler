@@ -13,6 +13,9 @@ public sealed class ScheduleSchemaTests
         var schema = JsonNode.Parse(File.ReadAllText(Path.Combine(BackendRoot(),
             "src", "Wf.Contracts", "Schemas", "schedules.schema.json")));
         Assert.True(JsonNode.DeepEquals(schema, ScheduleFileSchema.Export()));
+        var template = JsonNode.Parse(File.ReadAllText(Path.Combine(BackendRoot(),
+            "src", "Wf.Templates", "wf-workflow", "schemas", "schedules.schema.json")));
+        Assert.True(JsonNode.DeepEquals(schema, template));
         var instance = schema!["properties"]!["instances"]!["items"]!;
         Assert.Contains("id", instance["required"]!.AsArray().Select(node => node!.GetValue<string>()));
         Assert.Contains("timezone", instance["required"]!.AsArray().Select(node => node!.GetValue<string>()));

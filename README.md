@@ -207,7 +207,8 @@ Code-defined schedule files use the published editor schema at
 `backend/samples/workflows/scenario-a.schedules.json`. `ScheduleFileSchema.Export()`
 generates it from the same strict, source-generated contracts used by the server.
 `defaults` groups variable values by category; each instance supplies a stable
-`id`, exactly one `cron` or constant-format `interval`, and an IANA `timezone`.
+`id`, exactly one `cron` or positive whole-second constant-format `interval`
+(at most 2,147,483,647 seconds), and an IANA `timezone`.
 Instance `variables` override defaults; optional `versionPin`, `overlap`
 (`Skip`, `Queue`, `Concurrent`) and `catchUp` (`None`, `Latest`) control execution.
 Default policies are `Skip` and `Latest`.
@@ -217,8 +218,8 @@ immutable effective JSON values and shared `ScheduleExpression` objects, or
 file/path/message/hint errors without partial instances. Unknown or invalid
 values, required-but-missing variables and duplicate defaults across categories
 fail even when another override would hide them. `Validator` and the testing
-facade automatically check optional `schedules.json`; registration remains its
-own backlog task.
+facade automatically check optional `schedules.json`; registration uses the same
+validation and retains the exact UTF-8 file bytes.
 
 Migration `0007_schedules.sql` adds durable code/UI schedule rows, stable code
 keys, expression/policy checks, optimistic `row_version` and a partial due-fire
@@ -228,8 +229,11 @@ Migration `0008_schedule_config_versions.sql` adds independent content-addressed
 schedule-file provenance (source path, Git SHA, SHA-256 and attribution).
 Composite foreign keys prohibit cross-workflow links; UI schedules cannot link
 code configs, and old code rows remain valid during upgrade.
-Workflow-registry foreign keys, atomic registration, API mutations and the
-leader scheduler follow in their own tasks.
+Migration `0018_schedule_file_application.sql` retains file content with a
+database-checked SHA-256, adds the workflow's same-workflow active-config pointer,
+and creates/backfills one permanent `run_series` per schedule. Atomic code-file
+application is part of registration; UI mutations and leader execution remain
+their own tasks.
 
 `ScheduleCompatibilityRule.Validate(scheduleUtf8, targetApi)` applies those same
 variable checks to a target `ApiBaseline`. Removed/renamed nodes do not affect
@@ -551,15 +555,32 @@ New versions must satisfy the shared classifier against the latest registered
 version, even if an administrator later rolls the active pointer back; 409
 responses preserve WFV010 diagnostics/hints. Identical requests return 200 with
 no rewrites, history or audit duplication and never reactivate an old version.
-201 responses include only changed `workflowVersion` and/or `registrySnapshot`
-UUIDs. Existing runs retain their version IDs.
+201 responses include only changed `workflowVersion`, `registrySnapshot` and/or
+`scheduleConfigVersion` UUIDs. Existing runs retain their version IDs.
 
-Schedule configuration registration/application, publish CLI/merge automation,
-active-version caches, catalogue/version reads, proactive live revocation,
-general audit middleware/partition maintenance and cloud profiles remain their
-dependent tasks. Unknown schedule fields are deliberately rejected until the
-schedule-registration contract is added; no schedule-only support is implied
-by this workflow/registry persistence task.
+Schedule-only registration supplies `workflowId`, `schedules` (a string containing
+the complete original JSON file), `scheduleSourcePath`, and Git provenance;
+omit manifest/package/source. Paths are bounded repository-relative logical
+paths using `/`, without dot segments, backslashes or control characters.
+The file is limited to 1 MiB of valid UTF-8. Schedule-only changes leave workflow
+versions untouched and return only `scheduleConfigVersion`. Code keys keep their
+schedule UUID and permanent series through edits, removal and re-addition;
+removal soft-deletes/pauses the schedule and clears its cursor, preserving fires
+and run history. UI schedules remain untouched. An unchanged expression retains
+its existing due cursor and pause state; a changed expression or revived
+instance gets a new cursor from the registration clock. Identical content
+returns 200 without rewrites; reverting to known content reuses its historical
+config UUID and reactivates that snapshot. Provenance remains that of the first
+registration of those exact bytes. New workflow registrations also revalidate
+the retained schedule file against the active workflow's variables and refresh
+effective defaults, without creating a schedule config for unchanged file bytes.
+Every file/config/series mutation shares the registry/version/audit/NOTIFY
+transaction. Version pins and execution policies are retained for the dependent
+trigger/scheduler implementation; apply-under-load firing verification is separate.
+
+Publish CLI/merge automation, active-version caches, catalogue/version reads,
+proactive live revocation, general audit middleware/partition maintenance and
+cloud profiles remain their dependent tasks.
 
 ## Agent
 

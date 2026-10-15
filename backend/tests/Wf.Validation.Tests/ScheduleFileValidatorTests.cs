@@ -66,6 +66,9 @@ public sealed class ScheduleFileValidatorTests
     [InlineData(VariableType.StringList, "[\"a\",1]")]
     [InlineData(VariableType.Duration, "\"not-a-duration\"")]
     [InlineData(VariableType.Secret, "{\"Name\":\"ref\",\"Value\":\"DO-NOT-LEAK\"}")]
+    [InlineData(VariableType.String, "\"\\u0000\"")]
+    [InlineData(VariableType.StringList, "[\"\\u0000\"]")]
+    [InlineData(VariableType.Secret, "{\"Name\":\"\\u0000\"}")]
     public void ScheduleFileRejectsEachInvalidVariableType(VariableType type, string value)
     {
         var schema = new VariableSchema("value", type,
@@ -119,6 +122,9 @@ public sealed class ScheduleFileValidatorTests
     [InlineData("""{"id":"x","cron":"bad","timezone":"Etc/UTC"}""")]
     [InlineData("""{"id":"x","interval":"00:00:00","timezone":"Etc/UTC"}""")]
     [InlineData("""{"id":"x","interval":"-00:00:01","timezone":"Etc/UTC"}""")]
+    [InlineData("""{"id":"x","interval":"00:00:00.0000001","timezone":"Etc/UTC"}""")]
+    [InlineData("""{"id":"x","interval":"00:00:01.5","timezone":"Etc/UTC"}""")]
+    [InlineData("""{"id":"x","interval":"24855.03:14:08","timezone":"Etc/UTC"}""")]
     [InlineData("""{"id":"x","cron":"* * * * *","timezone":"Eastern Standard Time"}""")]
     [InlineData("""{"id":"x","cron":"* * * * *","timezone":"Unknown/Zone"}""")]
     public void ScheduleFileUsesSharedExpressionValidation(string instance)
@@ -127,6 +133,13 @@ public sealed class ScheduleFileValidatorTests
         Assert.Equal(RuleCatalog.ScheduleExpression.CreateError("schedules.json", "$.instances[0]"),
             Assert.Single(result.Errors));
     }
+
+    [Theory]
+    [InlineData("00:00:01")]
+    [InlineData("00:00:01.0000000")]
+    [InlineData("24855.03:14:07")]
+    public void ScheduleFileAcceptsWholeSecondStorageBoundaries(string interval) =>
+        Assert.True(Validate($$"""{"instances":[{"id":"x","interval":"{{interval}}","timezone":"Etc/UTC"}]}""").IsValid);
 
     [Theory]
     [InlineData("not-json")]
@@ -160,6 +173,7 @@ public sealed class ScheduleFileValidatorTests
     [InlineData("")]
     [InlineData(" ")]
     [InlineData("same")]
+    [InlineData("\\u0000")]
     public void ScheduleFileIdsAreStableNonemptyAndUnique(string second)
     {
         var result = Validate($$"""

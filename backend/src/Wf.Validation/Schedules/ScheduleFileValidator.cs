@@ -81,17 +81,20 @@ public static class ScheduleFileValidator
                 errors.Add(RuleCatalog.ScheduleShape.CreateError(file, path));
                 continue;
             }
-            if (string.IsNullOrWhiteSpace(instance.Id) || !ids.Add(instance.Id))
+            if (string.IsNullOrWhiteSpace(instance.Id) || instance.Id.Any(char.IsControl) || !ids.Add(instance.Id))
                 errors.Add(RuleCatalog.ScheduleIdentity.CreateError(file, path + ".id"));
             var raw = document.RootElement.GetProperty("instances")[index];
             foreach (var optional in new[] { "cron", "interval", "versionPin" })
                 if (raw.TryGetProperty(optional, out var property) && property.ValueKind == JsonValueKind.Null)
                     errors.Add(RuleCatalog.ScheduleShape.CreateError(file, path + "." + optional));
-            if (instance.VersionPin is { } pin && string.IsNullOrWhiteSpace(pin))
+            if (instance.VersionPin is { } pin && (string.IsNullOrWhiteSpace(pin) || pin.Any(char.IsControl)))
                 errors.Add(RuleCatalog.ScheduleShape.CreateError(file, path + ".versionPin"));
             ScheduleExpression? expression = null;
             try
             {
+                if (instance.Interval is { } interval &&
+                    (interval.Ticks % TimeSpan.TicksPerSecond != 0 || interval.TotalSeconds > int.MaxValue))
+                    throw new ArgumentException("Intervals must fit the whole-second storage contract.");
                 expression = ScheduleExpression.Create(instance.Cron, instance.Interval, instance.Timezone);
             }
             catch (ArgumentException)
@@ -134,6 +137,8 @@ public static class ScheduleFileValidator
         {
             try
             {
+                if (ContainsNul(value))
+                    throw new ArgumentException("Schedule values cannot contain NUL characters.");
                 schema.Validate(value);
                 return true;
             }
@@ -145,6 +150,15 @@ public static class ScheduleFileValidator
         errors.Add(RuleCatalog.ScheduleVariable.CreateError(file, path));
         return false;
     }
+
+    private static bool ContainsNul(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.String => value.GetString()!.Contains('\0'),
+        JsonValueKind.Array => value.EnumerateArray().Any(ContainsNul),
+        JsonValueKind.Object => value.EnumerateObject().Any(property =>
+            property.Name.Contains('\0') || ContainsNul(property.Value)),
+        _ => false
+    };
 
     private static string Property(string parent, string key) => $"{parent}[\"{JsonEncodedText.Encode(key)}\"]";
 }
