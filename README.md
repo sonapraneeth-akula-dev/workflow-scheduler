@@ -206,6 +206,16 @@ The warm < 10 s gate passes. Twenty-six cache cases include real compilation,
 schedule invalidation, concurrent builders, corruption and owned process-tree
 cancellation. Timing evidence is kept here until a PR is explicitly requested.
 
+`Wf.Validation.Validator.Validate(directory)` and `ValidateAsync` use this
+cache for a directory containing `workflow.cs`. `Wf.Sdk.Testing.WorkflowValidation`
+exposes the same API to xUnit and other callers. Results contain immutable errors
+with rule ID, file, path, message and hint, plus the successful build or original
+compiler/describe diagnostics. WFV001-WFV004 cover missing directory/script,
+publish failure and describe failure. Cancellation, infrastructure/cache errors
+and malformed description contracts propagate, not turn into validation success.
+Validation executes trusted workflow code; it is not a sandbox. Manifest,
+team, schedule and version rules follow in separate backlog tasks.
+
 ## Benchmarks
 
 ```powershell

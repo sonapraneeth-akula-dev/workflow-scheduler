@@ -4,6 +4,7 @@
     <Project Path="src/Wf.Contracts/Wf.Contracts.csproj" />
     <Project Path="src/Wf.ControlPlane/Wf.ControlPlane.csproj" />
     <Project Path="src/Wf.Engine.Core/Wf.Engine.Core.csproj" />
+    <Project Path="src/Wf.Sdk.Testing/Wf.Sdk.Testing.csproj" />
     <Project Path="src/Wf.Sdk/Wf.Sdk.csproj" />
     <Project Path="src/Wf.Validation/Wf.Validation.csproj" />
   </Folder>
