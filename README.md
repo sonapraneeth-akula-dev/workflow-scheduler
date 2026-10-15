@@ -145,6 +145,20 @@ manifest's type and metadata against that registry; invalid registry and schedul
 errors accumulate rather than hiding one another. An absent registry remains
 allowed for standalone workflows; registration supplies its authoritative scope.
 
+The hosted control plane acquires the `0009_leases.sql` engine lease, renews
+every 3 seconds and expires after 10 seconds of database time. Each acquisition
+has a monotonically increasing epoch. All hosted registry/run/dispatch/result
+and group-commit transactions fence their captured epoch before persistence;
+PostgreSQL bounds fenced transactions to the lesser of 1 second or remaining
+lease lifetime, so a paused client cannot hold takeover indefinitely. A database
+authority failure disables writes until reacquisition.
+`/healthz/leader` returns 503 on standby; gRPC sends `NotLeader` with the known
+leader hint and uses the actual epoch on commands/ACKs. Configure `Engine:Port`
+(default 5000) and `Engine:PublicEndpoint` for multiple instances. Standalone
+persistence test/benchmark modules may omit the lease manager; hosted DI always
+supplies it. Run recovery and database-outage retry buffering remain separate
+backlog tasks.
+
 Placement is authored at workflow, node or task level with `RunsOn` and
 `Affinity`. The innermost selector replaces the whole outer selector; affinity
 inherits independently. `RunsOn()` explicitly clears constraints; `Affinity.None`

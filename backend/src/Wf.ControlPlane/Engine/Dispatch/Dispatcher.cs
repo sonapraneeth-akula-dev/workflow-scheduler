@@ -29,11 +29,13 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             string.IsNullOrWhiteSpace(command.Version) || !Uri.TryCreate(command.PackageUri, UriKind.Absolute, out var uri) ||
             uri.Scheme is not ("https" or "http") || uri.Scheme == "http" && !uri.IsLoopback)
             throw new ArgumentException("Dispatch does not match its placement request or has invalid package/deadline data.", nameof(command));
+        var lease = runs.CaptureLease();
         await gate.WaitAsync(cancellationToken);
         try
         {
             await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await runs.FenceAsync(connection, transaction, lease, cancellationToken);
             await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock(746312081)", cancellationToken);
             var durable = await runs.LoadAsync(connection, request.RunId, true, cancellationToken);
             if (durable.Snapshot.LastSequence != run.Snapshot.LastSequence ||

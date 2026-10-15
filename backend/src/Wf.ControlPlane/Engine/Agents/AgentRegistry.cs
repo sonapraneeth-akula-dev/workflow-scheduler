@@ -2,10 +2,11 @@ using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Npgsql;
 using Wf.Contracts.Agent.V1;
+using Wf.ControlPlane.Engine.Leadership;
 
 namespace Wf.ControlPlane.Engine.Agents;
 
-public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider timeProvider) : IDisposable
+public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider timeProvider, LeaseManager? leadership = null) : IDisposable
 {
     public static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromSeconds(15);
     private readonly ConcurrentDictionary<Guid, AgentRecord> agents = new();
@@ -46,10 +47,14 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
     public async Task<AgentSession> RegisterAsync(Hello hello, CancellationToken cancellationToken)
     {
         var agent = ValidateHello(hello, timeProvider.GetUtcNow());
+        var lease = leadership?.RequireLease();
         await writes.WaitAsync(cancellationToken);
         try
         {
-            await using var command = dataSource.CreateCommand("""
+            await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            if (leadership is not null) await leadership.FenceAsync(connection, transaction, lease!, cancellationToken);
+            await using var command = new NpgsqlCommand("""
                 INSERT INTO agents
                     (id,name,os,arch,cores,ram_mb,max_tasks,labels,pool,status,last_heartbeat_at,agent_version,session_id,slots_used)
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$11,$12,$13)
@@ -60,7 +65,7 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
                     last_heartbeat_at=EXCLUDED.last_heartbeat_at,agent_version=EXCLUDED.agent_version,
                     session_id=EXCLUDED.session_id,slots_used=EXCLUDED.slots_used,cpu_percent=0,ram_used_mb=0,disk_free_mb=0
                 RETURNING status
-                """);
+                """, connection, transaction);
             command.Parameters.AddWithValue(agent.Id);
             command.Parameters.AddWithValue(agent.Name);
             command.Parameters.AddWithValue((short)agent.Os);
@@ -75,6 +80,7 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
             command.Parameters.AddWithValue(agent.SessionId);
             command.Parameters.AddWithValue(agent.SlotsUsed);
             var status = (short)(await command.ExecuteScalarAsync(cancellationToken))!;
+            await transaction.CommitAsync(cancellationToken);
             agents[agent.Id] = agent with { Status = (AgentStatus)status };
             return new AgentSession(agent.Id, agent.SessionId);
         }
@@ -84,6 +90,7 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
     public async Task<bool> HeartbeatAsync(AgentSession session, Heartbeat heartbeat, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(heartbeat);
+        var lease = leadership?.RequireLease();
         await writes.WaitAsync(cancellationToken);
         try
         {
@@ -98,11 +105,14 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
                 throw new ArgumentException("Heartbeat contains an invalid timestamp.", nameof(heartbeat));
             }
             var now = timeProvider.GetUtcNow();
-            await using var command = dataSource.CreateCommand("""
+            await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            if (leadership is not null) await leadership.FenceAsync(connection, transaction, lease!, cancellationToken);
+            await using var command = new NpgsqlCommand("""
                 UPDATE agents SET last_heartbeat_at=$3,status=CASE WHEN status=1 THEN 0 ELSE status END,
                     cpu_percent=$4,ram_used_mb=$5,disk_free_mb=$6,slots_used=$7
                 WHERE id=$1 AND session_id=$2
-                """);
+                """, connection, transaction);
             command.Parameters.AddWithValue(session.AgentId);
             command.Parameters.AddWithValue(session.SessionId);
             command.Parameters.AddWithValue(now);
@@ -111,6 +121,7 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
             command.Parameters.AddWithValue((long)heartbeat.DiskFreeMb);
             command.Parameters.AddWithValue((int)heartbeat.SlotsUsed);
             if (await command.ExecuteNonQueryAsync(cancellationToken) != 1) return false;
+            await transaction.CommitAsync(cancellationToken);
             agents[agent.Id] = agent with
             {
                 LastHeartbeatAt = now, Status = agent.Status == AgentStatus.Unhealthy ? AgentStatus.Healthy : agent.Status,
@@ -124,17 +135,22 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
 
     public async Task<int> SweepAsync(CancellationToken cancellationToken)
     {
+        var lease = leadership?.RequireLease();
         await writes.WaitAsync(cancellationToken);
         try
         {
-            await using var command = dataSource.CreateCommand("""
+            await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            if (leadership is not null) await leadership.FenceAsync(connection, transaction, lease!, cancellationToken);
+            await using var command = new NpgsqlCommand("""
                 UPDATE agents SET status=1 WHERE status=0 AND last_heartbeat_at <= $1 RETURNING id
-                """);
+                """, connection, transaction);
             command.Parameters.AddWithValue(timeProvider.GetUtcNow() - HeartbeatTimeout);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             var expired = new List<Guid>();
             while (await reader.ReadAsync(cancellationToken)) expired.Add(reader.GetGuid(0));
             await reader.DisposeAsync();
+            await transaction.CommitAsync(cancellationToken);
             foreach (var id in expired)
                 if (agents.TryGetValue(id, out var agent)) agents[id] = agent with { Status = AgentStatus.Unhealthy };
             return expired.Count;

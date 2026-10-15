@@ -3,10 +3,12 @@ using Npgsql;
 using System.Threading.Channels;
 using Wf.Contracts.Agent.V1;
 using Wf.ControlPlane.Engine.Dispatch;
+using Wf.ControlPlane.Engine.Leadership;
 
 namespace Wf.ControlPlane.Engine.Agents;
 
-public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGatewayService> logger, RunStore? runs = null)
+public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGatewayService> logger, RunStore? runs = null,
+    LeaseManager? leadership = null)
     : AgentGateway.AgentGatewayBase
 {
     public override async Task Connect(IAsyncStreamReader<AgentMessage> requestStream,
@@ -14,8 +16,11 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
     {
         using var stopping = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
         var token = stopping.Token;
+        long sequence = 0;
         try
         {
+            var lease = leadership?.RequireLease();
+            var epoch = checked((ulong)(lease?.Epoch ?? 1));
             using var helloTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             helloTimeout.CancelAfter(TimeSpan.FromSeconds(5));
             if (!await requestStream.MoveNext(helloTimeout.Token)) return;
@@ -23,7 +28,6 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
             if (first.Sequence == 0 || first.Hello is null) throw Invalid("The first agent message must be a sequenced Hello.");
             var session = await registry.RegisterAsync(first.Hello, token);
             logger.LogInformation("Agent {AgentId} registered.", session.AgentId);
-            long sequence = 0;
             var received = first.Sequence;
             var acknowledgements = Channel.CreateBounded<ulong>(32);
             await acknowledgements.Writer.WriteAsync(received, token);
@@ -43,6 +47,7 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                 {
                     await foreach (var message in requestStream.ReadAllAsync(token))
                     {
+                        CheckLeadership();
                         if (message.Sequence == 0) throw Invalid("Agent sequence must be positive.");
                         if (message.Sequence <= received)
                         {
@@ -64,7 +69,7 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                                 break;
                             case AgentMessage.PayloadOneofCase.Ack:
                                 if (message.Ack.Sequence == 0 || message.Ack.Sequence > (ulong)Volatile.Read(ref sequence) ||
-                                    message.Ack.LeaderEpoch != 1)
+                                    message.Ack.LeaderEpoch != epoch)
                                     throw Invalid("Invalid control acknowledgement.");
                                 received = message.Sequence;
                                 continue;
@@ -85,10 +90,11 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                 {
                     while (!token.IsCancellationRequested)
                     {
+                        CheckLeadership();
                         while (acknowledgements.Reader.TryRead(out var accepted))
                             await responseStream.WriteAsync(new ControlMessage
                             {
-                                Sequence = checked((ulong)Interlocked.Increment(ref sequence)), LeaderEpoch = 1,
+                                Sequence = checked((ulong)Interlocked.Increment(ref sequence)), LeaderEpoch = epoch,
                                 Ack = new Ack { Sequence = accepted }
                             }, token);
                         if (runs is not null)
@@ -97,7 +103,7 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                                     await responseStream.WriteAsync(new ControlMessage
                                     {
                                         Sequence = checked((ulong)Interlocked.Increment(ref sequence)),
-                                        LeaderEpoch = 1, Dispatch = command
+                                        LeaderEpoch = epoch, Dispatch = command
                                     }, token);
                         using var wait = CancellationTokenSource.CreateLinkedTokenSource(token);
                         wait.CancelAfter(TimeSpan.FromMilliseconds(25));
@@ -107,6 +113,21 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { }
             }
+
+            void CheckLeadership()
+            {
+                if (leadership is not null && leadership.Current != lease)
+                    throw new NotLeaderException(leadership.LeaderHint);
+            }
+        }
+        catch (NotLeaderException exception)
+        {
+            logger.LogInformation("Agent connection redirected because this engine is not leader.");
+            await responseStream.WriteAsync(new ControlMessage
+            {
+                Sequence = checked((ulong)Interlocked.Increment(ref sequence)),
+                NotLeader = new NotLeader { LeaderHint = exception.LeaderHint }
+            }, context.CancellationToken);
         }
         catch (ArgumentException exception)
         {

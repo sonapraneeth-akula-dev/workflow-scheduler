@@ -9,14 +9,22 @@ using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Events;
 using Wf.Contracts.Definition;
 using Wf.ControlPlane.Engine.Agents;
+using Wf.ControlPlane.Engine.Leadership;
 using Wf.Engine.Core;
 using Wf.Engine.Core.StateMachine;
 using DispatchCommand = Wf.Contracts.Agent.V1.Dispatch;
 
 namespace Wf.ControlPlane.Engine.Dispatch;
 
-public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logger)
+public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logger, LeaseManager? leadership = null)
 {
+    internal LeaseToken? CaptureLease() => leadership?.RequireLease();
+
+    internal Task FenceAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, LeaseToken? lease,
+        CancellationToken cancellationToken) => leadership is null ? Task.CompletedTask :
+        leadership.FenceAsync(connection, transaction, lease ?? throw new NotLeaderException(leadership.LeaderHint),
+            cancellationToken);
+
     public async Task CreateAsync(RunState run, string workflowId, Guid versionId, DateTimeOffset deadline,
         CancellationToken cancellationToken = default)
     {
@@ -24,8 +32,10 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
         ArgumentException.ThrowIfNullOrWhiteSpace(workflowId);
         if (run.Snapshot.LastSequence != 0 || versionId == Guid.Empty || deadline <= DateTimeOffset.UtcNow)
             throw new ArgumentException("A new run requires an initial snapshot, version and future deadline.");
+        var lease = CaptureLease();
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await FenceAsync(connection, transaction, lease, cancellationToken);
         await ExecuteAsync(connection, "SELECT ensure_run_partitions(uuid_v7_run_day($1))", cancellationToken, run.Snapshot.RunId);
         await ExecuteAsync(connection, """
             INSERT INTO runs(run_day,id,workflow_id,version_id,trigger,triggered_by,variables,metadata,status,created_at,deadline_at)
@@ -76,8 +86,10 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
     public async Task AppendAsync(RunState run, EventEntity entity, string? key, int state, DateTimeOffset at,
         CancellationToken cancellationToken = default)
     {
+        var lease = CaptureLease();
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await FenceAsync(connection, transaction, lease, cancellationToken);
         var durable = await LoadAsync(connection, run.Snapshot.RunId, true, cancellationToken);
         if (durable.Snapshot.LastSequence != run.Snapshot.LastSequence)
             throw new InvalidOperationException("Run changed since it was loaded.");
@@ -121,16 +133,22 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
     public async Task<IReadOnlyList<(long Id, DispatchCommand Command)>> PendingAsync(AgentSession session,
         CancellationToken cancellationToken)
     {
-        await using var command = dataSource.CreateCommand("""
+        var lease = CaptureLease();
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await FenceAsync(connection, transaction, lease, cancellationToken);
+        await using var command = new NpgsqlCommand("""
             SELECT o.id,o.payload FROM dispatch_outbox o JOIN agents a ON a.id=o.agent_id
             WHERE o.agent_id=$1 AND a.session_id=$2 ORDER BY o.id LIMIT 100
-            """);
+            """, connection, transaction);
         command.Parameters.AddWithValue(session.AgentId);
         command.Parameters.AddWithValue(session.SessionId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var pending = new List<(long, DispatchCommand)>();
         while (await reader.ReadAsync(cancellationToken))
             pending.Add((reader.GetInt64(0), DispatchCommand.Parser.ParseFrom(reader.GetFieldValue<byte[]>(1))));
+        await reader.DisposeAsync();
+        await transaction.CommitAsync(cancellationToken);
         return pending;
     }
 
@@ -159,8 +177,10 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
                     throw new ArgumentException("Task outputs must be a JSON object.", nameof(message));
             }
         }
+        var lease = CaptureLease();
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await FenceAsync(connection, transaction, lease, cancellationToken);
         await using (var fence = new NpgsqlCommand("SELECT session_id FROM agents WHERE id=$1 FOR UPDATE", connection))
         {
             fence.Parameters.AddWithValue(session.AgentId);

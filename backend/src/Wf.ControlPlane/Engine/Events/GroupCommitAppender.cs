@@ -5,6 +5,7 @@ using Npgsql;
 using Wf.Contracts;
 using Wf.Contracts.Events;
 using Wf.ControlPlane.Engine.Dispatch;
+using Wf.ControlPlane.Engine.Leadership;
 
 namespace Wf.ControlPlane.Engine.Events;
 
@@ -15,6 +16,7 @@ public sealed class GroupCommitAppender : IAsyncDisposable
     private readonly NpgsqlDataSource dataSource;
     private readonly ILogger<GroupCommitAppender> logger;
     private readonly TimeProvider time;
+    private readonly LeaseManager? leadership;
     private readonly TimeSpan window;
     private readonly int maxBatchSize;
     private readonly Channel<Request> requests;
@@ -23,11 +25,13 @@ public sealed class GroupCommitAppender : IAsyncDisposable
     private int disposed;
 
     public GroupCommitAppender(NpgsqlDataSource dataSource, ILogger<GroupCommitAppender> logger,
-        TimeProvider? timeProvider = null, TimeSpan? window = null, int maxBatchSize = 512, int queueCapacity = 256)
+        TimeProvider? timeProvider = null, TimeSpan? window = null, int maxBatchSize = 512, int queueCapacity = 256,
+        LeaseManager? leadership = null)
     {
         this.dataSource = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
         time = timeProvider ?? TimeProvider.System;
+        this.leadership = leadership;
         this.window = window ?? TimeSpan.Zero;
         if (this.window < TimeSpan.Zero || this.window > TimeSpan.FromMilliseconds(2))
             throw new ArgumentOutOfRangeException(nameof(window), "Group-commit collection window must be between zero and 2 ms.");
@@ -49,6 +53,7 @@ public sealed class GroupCommitAppender : IAsyncDisposable
         ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
         ArgumentNullException.ThrowIfNull(changes);
         cancellationToken.ThrowIfCancellationRequested();
+        var lease = leadership?.RequireLease();
         if (changes.Count < 1 || changes.Count > maxBatchSize)
             throw new ArgumentException("An atomic event request must fit the configured batch size.", nameof(changes));
         var events = new Entry[changes.Count];
@@ -68,7 +73,7 @@ public sealed class GroupCommitAppender : IAsyncDisposable
                 throw new ArgumentException("An atomic event request exceeds 64 KiB.", nameof(changes));
             events[index] = new Entry(change, payload);
         }
-        var request = new Request(events, cancellationToken);
+        var request = new Request(events, lease, cancellationToken);
         await requests.Writer.WriteAsync(request, cancellationToken).ConfigureAwait(false);
         return await request.Completed.Task.ConfigureAwait(false);
     }
@@ -96,7 +101,9 @@ public sealed class GroupCommitAppender : IAsyncDisposable
             try
             {
                 // After persistence begins, cancellation cannot turn a committed write into a cancelled acknowledgement.
-                var receipt = await PersistAsync(active.SelectMany(item => item.Events).ToArray()).ConfigureAwait(false);
+                if (active.Any(request => request.Lease != active[0].Lease))
+                    throw new NotLeaderException(leadership?.LeaderHint ?? "");
+                var receipt = await PersistAsync(active.SelectMany(item => item.Events).ToArray(), active[0].Lease).ConfigureAwait(false);
                 foreach (var request in active) request.Completed.TrySetResult(receipt);
             }
             catch (Exception exception)
@@ -107,11 +114,14 @@ public sealed class GroupCommitAppender : IAsyncDisposable
         }
     }
 
-    private async Task<GroupCommitReceipt> PersistAsync(Entry[] entries)
+    private async Task<GroupCommitReceipt> PersistAsync(Entry[] entries, LeaseToken? lease)
     {
         var started = Stopwatch.GetTimestamp();
         await using var connection = await dataSource.OpenConnectionAsync().ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync().ConfigureAwait(false);
+        if (leadership is not null)
+            await leadership.FenceAsync(connection, transaction, lease ?? throw new NotLeaderException(leadership.LeaderHint))
+                .ConfigureAwait(false);
         await using (var synchronous = new NpgsqlCommand("SET LOCAL synchronous_commit=on", connection))
             await synchronous.ExecuteNonQueryAsync().ConfigureAwait(false);
         await using var command = new NpgsqlCommand("""
@@ -154,9 +164,10 @@ public sealed class GroupCommitAppender : IAsyncDisposable
     }
 
     private sealed record Entry(RunEvent Event, byte[] Payload);
-    private sealed class Request(Entry[] events, CancellationToken cancellation)
+    private sealed class Request(Entry[] events, LeaseToken? lease, CancellationToken cancellation)
     {
         public Entry[] Events { get; } = events;
+        public LeaseToken? Lease { get; } = lease;
         public CancellationToken Cancellation { get; } = cancellation;
         public TaskCompletionSource<GroupCommitReceipt> Completed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
