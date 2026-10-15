@@ -13,22 +13,37 @@ public sealed class PackageCache : IDisposable
 {
     public const long MaxArchiveBytes = 512L * 1024 * 1024;
     public const long MaxExpandedBytes = 1024L * 1024 * 1024;
+    public const long DefaultMaxCacheBytes = 4L * 1024 * 1024 * 1024;
+    public const int DefaultMaxPackages = 32;
     public const string ManifestName = "wf-package.json";
     private readonly string root;
     private readonly HttpClient http;
     private readonly ILogger<PackageCache> logger;
     private readonly SemaphoreSlim writes = new(1);
+    private readonly Dictionary<string, PackageLease.Pin> pins = new(StringComparer.Ordinal);
+    private readonly long maxCacheBytes;
+    private readonly int maxPackages;
+    private readonly TimeProvider timeProvider;
+    private bool disposed;
 
-    public PackageCache(string root, ILogger<PackageCache> logger, HttpMessageHandler? handler = null)
+    public PackageCache(string root, ILogger<PackageCache> logger, HttpMessageHandler? handler = null,
+        long maxCacheBytes = DefaultMaxCacheBytes, int maxPackages = DefaultMaxPackages, TimeProvider? timeProvider = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         if (!Path.IsPathFullyQualified(root)) throw new ArgumentException("Package-cache root must be absolute.", nameof(root));
-        this.root = root;
-        http = new HttpClient(handler ?? new SocketsHttpHandler { AllowAutoRedirect = false, ConnectTimeout = TimeSpan.FromSeconds(30) });
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxCacheBytes);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPackages);
+        this.root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        this.maxCacheBytes = maxCacheBytes;
+        this.maxPackages = maxPackages;
+        this.timeProvider = timeProvider ?? TimeProvider.System;
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        Directory.CreateDirectory(root);
+        ValidateRoot();
+        Directory.CreateDirectory(this.root);
+        http = new HttpClient(handler ?? new SocketsHttpHandler { AllowAutoRedirect = false, ConnectTimeout = TimeSpan.FromSeconds(30) });
     }
 
+    /// <summary>Returns a verified, pinned package. Dispose it after use; hosts retain their own process-lifetime pin.</summary>
     public async Task<TaskHostPackage> GetAsync(string version, Uri packageUri, string sha256,
         CancellationToken cancellationToken = default)
     {
@@ -45,8 +60,15 @@ public sealed class PackageCache : IDisposable
         await writes.WaitAsync(cancellationToken);
         try
         {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            ValidateRoot();
+            var entries = Inventory(cancellationToken);
             if (Directory.Exists(target))
-                return await VerifyAsync(target, version, sha256, cancellationToken);
+            {
+                var package = await VerifyAsync(target, version, sha256, cancellationToken);
+                await MakeRoomAsync(entries, sha256, 0, cancellationToken);
+                return Lease(package, sha256, entries);
+            }
             var staging = Path.Combine(root, $".{sha256}.{Guid.NewGuid():N}");
             Directory.CreateDirectory(staging);
             try
@@ -78,9 +100,12 @@ public sealed class PackageCache : IDisposable
                     }
                 }
                 var package = await ReadManifestAsync(files, version, cancellationToken);
+                var size = Measure(staging, cancellationToken);
+                await MakeRoomAsync(entries, sha256, size, cancellationToken);
                 await PublishAsync(staging, target, cancellationToken);
                 logger.LogInformation("Cached verified compiled package {Sha256}; no compilation was performed.", sha256);
-                return new TaskHostPackage(package.Version, "dotnet", [Path.Combine(target, "files", package.EntryAssembly)], Path.Combine(target, "files"));
+                return Lease(new TaskHostPackage(package.Version, "dotnet", [Path.Combine(target, "files", package.EntryAssembly)],
+                    Path.Combine(target, "files")), sha256, entries);
             }
             finally
             {
@@ -88,6 +113,105 @@ public sealed class PackageCache : IDisposable
             }
         }
         finally { writes.Release(); }
+    }
+
+    private void ValidateRoot()
+    {
+        for (var directory = new DirectoryInfo(root); directory is not null; directory = directory.Parent)
+            if (directory.Exists) RejectLink(directory.FullName);
+    }
+
+    private sealed record CacheEntry(string Hash, string Directory, long Bytes, DateTime LastUse);
+
+    private List<CacheEntry> Inventory(CancellationToken token)
+    {
+        var entries = new List<CacheEntry>();
+        foreach (var directory in Directory.EnumerateDirectories(root))
+        {
+            token.ThrowIfCancellationRequested();
+            var name = Path.GetFileName(directory);
+            if (OperatingSystem.IsWindows()) name = name.ToLowerInvariant();
+            if (name.Length != 64 || name.Any(character => character is not (>= '0' and <= '9' or >= 'a' and <= 'f')))
+                continue;
+            entries.Add(new CacheEntry(name, directory, Measure(directory, token), Directory.GetLastWriteTimeUtc(directory)));
+        }
+        return entries;
+    }
+
+    private static long Measure(string directory, CancellationToken token)
+    {
+        RejectLink(directory);
+        var archive = Path.Combine(directory, "package.zip");
+        var files = Path.Combine(directory, "files");
+        if (!File.Exists(archive) || !Directory.Exists(files) ||
+            Directory.EnumerateFileSystemEntries(directory).Any(path => path != archive && path != files))
+            throw new InvalidDataException("Compiled-package cache entry has an invalid layout.");
+        long bytes = 0;
+        var pending = new Stack<string>();
+        pending.Push(directory);
+        while (pending.TryPop(out var current))
+        {
+            token.ThrowIfCancellationRequested();
+            RejectLink(current);
+            foreach (var path in Directory.EnumerateFileSystemEntries(current))
+            {
+                token.ThrowIfCancellationRequested();
+                RejectLink(path);
+                if (Directory.Exists(path)) pending.Push(path);
+                else bytes = checked(bytes + new FileInfo(path).Length);
+            }
+        }
+        return bytes;
+    }
+
+    private async Task MakeRoomAsync(List<CacheEntry> entries, string requestedHash, long incomingBytes, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        var requested = entries.Find(entry => entry.Hash == requestedHash);
+        if ((requested?.Bytes ?? incomingBytes) > maxCacheBytes)
+            throw new IOException("Compiled package exceeds the configured package-cache byte budget.");
+        var bytes = entries.Aggregate(incomingBytes, (sum, entry) => checked(sum + entry.Bytes));
+        var count = entries.Count + (requested is null ? 1 : 0);
+        var victims = new List<CacheEntry>();
+        foreach (var entry in entries.OrderBy(entry => entry.LastUse).ThenBy(entry => entry.Hash, StringComparer.Ordinal))
+        {
+            if (bytes <= maxCacheBytes && count <= maxPackages) break;
+            if (entry.Hash == requestedHash || (pins.TryGetValue(entry.Hash, out var pin) && pin.InUse)) continue;
+            victims.Add(entry);
+            bytes -= entry.Bytes;
+            count--;
+        }
+        if (bytes > maxCacheBytes || count > maxPackages)
+            throw new IOException("Package-cache capacity is exhausted by pinned packages; retry after their leases are released.");
+        foreach (var entry in victims)
+        {
+            ValidateRoot();
+            _ = Measure(entry.Directory, token);
+            await VerifyHashAsync(Path.Combine(entry.Directory, "package.zip"), entry.Hash, token);
+        }
+        foreach (var entry in victims)
+        {
+            token.ThrowIfCancellationRequested();
+            ValidateRoot();
+            _ = Measure(entry.Directory, token);
+            Directory.Delete(entry.Directory, recursive: true);
+            pins.Remove(entry.Hash);
+            logger.LogInformation("Evicted unused compiled package {Sha256} ({Bytes} bytes).", entry.Hash, entry.Bytes);
+        }
+    }
+
+    private TaskHostPackage Lease(TaskHostPackage package, string hash, List<CacheEntry> entries)
+    {
+        var lastUse = entries.Count == 0 ? DateTime.MinValue : entries.Max(entry => entry.LastUse);
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        // Persist ordering on the verified directory, not in a client-editable access-time journal.
+        if (lastUse >= now) now = lastUse.AddMilliseconds(1);
+        Directory.SetLastWriteTimeUtc(Path.Combine(root, hash), now);
+        if (!pins.TryGetValue(hash, out var pin)) pins.Add(hash, pin = new PackageLease.Pin());
+        return new TaskHostPackage(package.Version, package.Executable, package.Arguments, package.WorkingDirectory)
+        {
+            CacheLease = new PackageLease(pin)
+        };
     }
 
     private static async Task<TaskHostPackage> VerifyAsync(string directory, string version, string sha256, CancellationToken token)
@@ -216,8 +340,14 @@ public sealed class PackageCache : IDisposable
 
     public void Dispose()
     {
-        http.Dispose();
-        writes.Dispose();
+        writes.Wait();
+        try
+        {
+            if (disposed) return;
+            disposed = true;
+            http.Dispose();
+        }
+        finally { writes.Release(); }
     }
 }
 

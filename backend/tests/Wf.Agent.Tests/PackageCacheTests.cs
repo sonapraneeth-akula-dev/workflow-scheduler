@@ -202,7 +202,7 @@ public sealed class PackageCacheTests
     internal sealed class CacheFixture : IAsyncDisposable
     {
         internal static readonly Uri Url = new("http://localhost/package.zip");
-        internal string Root { get; } = Path.Combine(Path.GetTempPath(), $"wf-p-{Guid.NewGuid():N}");
+        internal string Root { get; } = Path.GetFullPath(Path.Combine(".agent-artifacts", "package-tests", Guid.NewGuid().ToString("N")));
         internal string Sha { get; }
         internal CountingHandler Handler { get; }
         internal PackageCache Cache { get; }

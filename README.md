@@ -360,6 +360,19 @@ precede atomic publication; warm hits verify archive and extracted-file integrit
 without HTTP or compilation. Cache failures are explicit attempt platform errors.
 Windows publication retries only bounded file-lock/access conflicts.
 
+Published cache storage is bounded to 4 GiB and 32 packages by default, counting
+archives plus expanded files. `PackageCache` constructor budgets can override
+these positive limits. Successful cold/warm reads durably touch LRU ordering;
+oldest unused packages are evicted first, including after restart. Use
+`using var package = await cache.GetAsync(...)`: each returned `TaskHostPackage`
+owns a caller lease, and every warm/active host independently pins its package
+until process exit. Production dispatch already disposes its caller lease.
+Pinned capacity or an oversized package fails explicitly without partial
+capacity-plan eviction; corruption and filesystem failures are not cache misses.
+Use one cache owner per root. Limits exclude foreign content, abandoned staging,
+filesystem allocation overhead and one serialized in-progress download/extraction.
+Persisted host pins across agent restart belong to live-host re-adoption.
+
 `Dispatcher` accepts only database-committed Ready tasks in running runs.
 Dispatched event, attempt capacity reservation and dispatch outbox commit in one
 PostgreSQL transaction before the gateway sends anything. Committed pending

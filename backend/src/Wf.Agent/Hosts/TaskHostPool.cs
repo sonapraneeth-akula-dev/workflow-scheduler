@@ -8,13 +8,15 @@ using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
+using Wf.Agent.Packages;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Host.V1;
 
 namespace Wf.Agent.Hosts;
 
-public sealed class TaskHostPackage
+public sealed class TaskHostPackage : IDisposable
 {
+    internal PackageLease? CacheLease { get; init; }
     public string Version { get; }
     public string Executable { get; }
     public IReadOnlyList<string> Arguments { get; }
@@ -36,6 +38,8 @@ public sealed class TaskHostPackage
 
     internal bool Matches(TaskHostPackage other) => Version == other.Version && Executable == other.Executable &&
         WorkingDirectory == other.WorkingDirectory && Arguments.SequenceEqual(other.Arguments);
+
+    public void Dispose() => CacheLease?.Dispose();
 }
 
 public sealed class TaskHostPool(ILogger<TaskHostPool> logger) : IAsyncDisposable
@@ -148,6 +152,7 @@ public sealed class TaskHostPool(ILogger<TaskHostPool> logger) : IAsyncDisposabl
 
     private async Task<Host> StartAsync(TaskHostPackage package, CancellationToken cancellationToken)
     {
+        using var startingLease = package.CacheLease?.Retain();
         var directory = Path.Combine(Path.GetTempPath(), $"wf-h-{Guid.NewGuid():N}");
         CreatePrivateDirectory(directory);
         var socketPath = Path.Combine(directory, "s");
@@ -189,7 +194,7 @@ public sealed class TaskHostPool(ILogger<TaskHostPool> logger) : IAsyncDisposabl
                 HttpHandler = handler, DisposeHttpClient = true,
                 MaxReceiveMessageSize = 1024 * 1024, MaxSendMessageSize = 1024 * 1024
             });
-            host = new Host(package, directory, socketPath, process, channel, logger);
+            host = new Host(package, directory, socketPath, process, channel, logger, startingLease?.Retain());
             live.TryAdd(process.Id, host);
             using var readiness = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             readiness.CancelAfter(TimeSpan.FromSeconds(15));
@@ -239,6 +244,7 @@ public sealed class TaskHostPool(ILogger<TaskHostPool> logger) : IAsyncDisposabl
         {
             if (!host.Process.HasExited) host.Process.Kill(entireProcessTree: true);
             await host.Process.WaitForExitAsync();
+            host.PackageLease?.Dispose();
             await Task.WhenAll(host.Output, host.Error);
         }
         finally
@@ -289,11 +295,13 @@ public sealed class TaskHostPool(ILogger<TaskHostPool> logger) : IAsyncDisposabl
         public TaskHost.TaskHostClient Client { get; }
         public Task Output { get; }
         public Task Error { get; }
+        public PackageLease? PackageLease { get; }
         public string Diagnostics => string.Join(Environment.NewLine, diagnostics);
 
         public Host(TaskHostPackage package, string directory, string socketPath, Process process, GrpcChannel channel,
-            ILogger<TaskHostPool> logger)
+            ILogger<TaskHostPool> logger, PackageLease? packageLease)
         {
+            PackageLease = packageLease;
             Package = package; Directory = directory; SocketPath = socketPath; Process = process; Channel = channel;
             Client = new(channel);
             Output = DrainAsync(process.StandardOutput);
