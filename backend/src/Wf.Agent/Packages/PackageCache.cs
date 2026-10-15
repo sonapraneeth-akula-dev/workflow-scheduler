@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -71,8 +72,10 @@ public sealed class PackageCache : IDisposable
             }
             var staging = Path.Combine(root, $".{sha256}.{Guid.NewGuid():N}");
             Directory.CreateDirectory(staging);
+            byte[]? copyBuffer = null;
             try
             {
+                copyBuffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
                 var archivePath = Path.Combine(staging, "package.zip");
                 using var response = await http.GetAsync(packageUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                 response.EnsureSuccessStatusCode();
@@ -80,8 +83,8 @@ public sealed class PackageCache : IDisposable
                     throw new InvalidDataException("Compiled package exceeds the 512 MiB download limit.");
                 await using (var source = await response.Content.ReadAsStreamAsync(cancellationToken))
                 await using (var destination = new FileStream(archivePath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
-                    64 * 1024, FileOptions.Asynchronous))
-                    await CopyBoundedAsync(source, destination, MaxArchiveBytes, cancellationToken);
+                    1, FileOptions.Asynchronous))
+                    await CopyBoundedAsync(source, destination, MaxArchiveBytes, copyBuffer.AsMemory(0, 64 * 1024), cancellationToken);
                 await VerifyHashAsync(archivePath, sha256, cancellationToken);
                 var files = Path.Combine(staging, "files");
                 Directory.CreateDirectory(files);
@@ -94,8 +97,8 @@ public sealed class PackageCache : IDisposable
                         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                         await using var input = entry.Open();
                         await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None,
-                            64 * 1024, FileOptions.Asynchronous);
-                        await CopyBoundedAsync(input, output, entry.Length, cancellationToken);
+                            1, FileOptions.Asynchronous);
+                        await CopyBoundedAsync(input, output, entry.Length, copyBuffer.AsMemory(0, 64 * 1024), cancellationToken);
                         if (output.Length != entry.Length) throw new InvalidDataException("Compiled-package entry length is invalid.");
                     }
                 }
@@ -109,6 +112,7 @@ public sealed class PackageCache : IDisposable
             }
             finally
             {
+                if (copyBuffer is not null) ArrayPool<byte>.Shared.Return(copyBuffer);
                 if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
             }
         }
@@ -319,16 +323,15 @@ public sealed class PackageCache : IDisposable
         }
     }
 
-    private static async Task CopyBoundedAsync(Stream input, Stream output, long limit, CancellationToken token)
+    private static async Task CopyBoundedAsync(Stream input, Stream output, long limit, Memory<byte> buffer, CancellationToken token)
     {
-        var buffer = new byte[64 * 1024];
         long written = 0;
         int count;
         while ((count = await input.ReadAsync(buffer, token)) != 0)
         {
             written = checked(written + count);
             if (written > limit) throw new InvalidDataException("Compiled package exceeds its permitted size.");
-            await output.WriteAsync(buffer.AsMemory(0, count), token);
+            await output.WriteAsync(buffer[..count], token);
         }
     }
 

@@ -263,12 +263,16 @@ public sealed class TaskHostPoolTests
     }
 
     [Fact]
-    public async Task Warm_pool_rejects_a_fifth_process()
+    public async Task Warm_pool_evicts_oldest_before_starting_a_fifth_process()
     {
         await using var pool = Pool();
         for (var index = 0; index < 4; index++) await pool.PrewarmAsync(Package, TestContext.Current.CancellationToken);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => pool.PrewarmAsync(Package, TestContext.Current.CancellationToken));
-        Assert.Equal(4, pool.ProcessStartCount);
+        var oldest = pool.WarmProcessIds[0];
+        await pool.PrewarmAsync(Package, TestContext.Current.CancellationToken);
+        Assert.Equal(5, pool.ProcessStartCount);
+        Assert.DoesNotContain(oldest, pool.WarmProcessIds);
+        Assert.True(pool.WarmProcessIds.Count <= 4);
+        AssertStopped(oldest);
     }
 
     [Theory]

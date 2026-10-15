@@ -502,6 +502,26 @@ Native AOT, and require the ASP.NET Core runtime. Resource-limit enforcement and
 live-host re-adoption remain separate backlog items. The sample accepts
 `--task-host --socket <path>`; normal local execution is unchanged.
 
+The global warm pool defaults to four unused processes and 200,000,000 bytes
+aggregate RSS, evicting least recently used hosts and emptying after five
+monotonic idle minutes. Active hosts are not warm-eviction candidates.
+Eviction waits for process exit before admission; package pins survive disposal
+until exit. RSS is checked on admission and sampled while warm hosts exist, not
+enforced as an instantaneous OS hard limit. SDK private IPC startup uses only
+Kestrel/routing/gRPC services; agents retain Native AOT size optimization.
+
+Footprint acceptance remains **blocked**, not complete: final Windows native
+cold-dispatch peaks include simultaneous agent growth above its idle baseline
+plus the full real SDK task-host RSS. MaxTasks=1 measured 53,555,200 bytes/task
+(51.0742 MiB); MaxTasks=2 measured 51,558,400 bytes/task (49.1699 MiB).
+Both exceed the contractual 50,000,000 bytes/task. Native idle measured 0.0244%
+normalized CPU over 20 s and about 26 MB RSS, below 1%/100 MB.
+Set `WF_AGENT_EXECUTABLE` to a published native agent and
+`WF_AGENT_FOOTPRINT_BENCHMARK=true` to enable the strict `FootprintBenchmark`
+integration lane; it intentionally fails until the combined cold budget is met.
+No managed-runtime subtraction, forced GC or working-set purge is used.
+Linux measurements remain outstanding.
+
 `PackageCache` downloads immutable ZIP packages into SHA-256-addressed directories.
 Set `Agent__PackageCache` to an absolute path to override the user's local
 `wf-agent\packages` directory. Packages contain published IL/dependencies plus

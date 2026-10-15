@@ -31,10 +31,12 @@ public static class TaskHostServer
             throw new ArgumentException("The task-host socket must be an absolute path shorter than 108 UTF-8 bytes.", nameof(socketPath));
         if (File.Exists(socketPath))
             throw new IOException("The task-host socket path already exists.");
-        var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { Args = [], ContentRootPath = AppContext.BaseDirectory });
+        // Private IPC needs no application configuration watchers or public-web middleware defaults.
+        var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions { Args = [], ContentRootPath = AppContext.BaseDirectory });
         builder.Logging.ClearProviders();
-        builder.WebHost.ConfigureKestrel(options =>
+        builder.WebHost.UseKestrelCore().ConfigureKestrel(options =>
             options.ListenUnixSocket(socketPath, listen => listen.Protocols = HttpProtocols.Http2));
+        builder.Services.AddRoutingCore();
         builder.Services.AddGrpc(options => { options.MaxReceiveMessageSize = 1024 * 1024; options.MaxSendMessageSize = 1024 * 1024; });
         builder.Services.AddSingleton(new TaskHostService(workflow));
         await using var app = builder.Build();
