@@ -6,6 +6,7 @@
     <Project Path="src/Wf.Validation/Wf.Validation.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Wf.Benchmarks.Tests/Wf.Benchmarks.Tests.csproj" />
     <Project Path="tests/Wf.Benchmarks/Wf.Benchmarks.csproj" />
     <Project Path="tests/Wf.Engine.Core.Tests/Wf.Engine.Core.Tests.csproj" />
     <Project Path="tests/Wf.Integration.Tests/Wf.Integration.Tests.csproj" />

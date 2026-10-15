@@ -46,6 +46,7 @@ are not implied by local task completion.
 | 1.2.2.1.2 | Complete | Local channel actor executes the shared core with committed in-memory events, live console states, all variable types, series/parallel/caps, retries/deadlines and abort cleanup. Scenario A runs with `--var env=dev`; real HTTP/command integration and failing exit-code cases pass. SDK line coverage 94.0%, definition/runtime 98.4%. Uncooperative in-process functions fail explicitly after grace; force-kill isolation follows in task-host work. |
 | 1.2.2.1.3 | Complete | Scenario A local execution matches all 62 ordered shared-core fixture events and checked-in golden JSON across five repetitions. Parallel branches remain active together; explicit completion barriers remove scheduling noise without sorting, dropping or coalescing events. |
 | 1.2.2.2.2 | Complete | Release BenchmarkDotNet measures precompiled 200-node manifest serialization: mean 0.483 ms, p95 0.524 ms on local Windows. Full JSON exported; missing results or p95 >= 1 s fail the command. Unit test verifies all 200 nodes, tasks and dependencies survive without delegate execution. |
+| 2.1.1.2.2 | Complete | Actual 200-node no-op chain: mean 58.79 ms, run p95 69.982 ms; 1,000 individual Ready-to-terminal node samples p95 1.236 ms. Bounds <= 3 s / <= 10 ms enforced. Windows/Linux CI runs pinned baseline and head on the same runner and fails either > 10% regression; gate tests, command exit-code checks and workflow lint pass. Remote CI remains unrun until push. |
 
 ## Summary Rollup
 

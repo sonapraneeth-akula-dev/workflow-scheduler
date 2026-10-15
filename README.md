@@ -58,3 +58,22 @@ p95 reaches 1 second or measurements are missing. Workflow construction and
 compilation are outside the measured operation. A local Windows measurement on
 October 15, 2026: mean 0.483 ms, p95 0.524 ms. Generated reports stay under
 `BenchmarkDotNet.Artifacts` and are ignored by git; results depend on the machine.
+
+```powershell
+dotnet run -c Release --project backend\tests\Wf.Benchmarks -- --filter '*EngineCore*' --metrics BenchmarkDotNet.Artifacts\engine-metrics.json
+dotnet run -c Release --project backend\tests\Wf.Benchmarks -- --compare BenchmarkDotNet.Artifacts\baseline-metrics.json BenchmarkDotNet.Artifacts\engine-metrics.json
+```
+
+Execution measures a 200-node no-op chain through the actual local/core engine.
+The run p95 must stay <= 3 s; per-node Ready-to-terminal p95 <= 10 ms, measured
+from 1,000 individual nodes after warmup, not inferred by dividing run time.
+Local Windows measurements: run mean 58.79 ms, p95 69.982 ms; node p95 1.236 ms.
+
+`benchmarks.yml` executes the pinned code revision in
+`backend/tests/Wf.Benchmarks/baseline.json` and current code on the same
+Windows/Linux runner with identical measurement code. Either p95 regressing by
+more than 10% fails, as do missing/invalid results or incompatible environments.
+Each run uploads baseline/current metrics and full BenchmarkDotNet reports.
+Baseline revision changes are explicit, reviewable code changes; there is no
+first-run skip or automatic acceptance of slower results. Virtualized runners
+can still be noisy; investigate a failed comparison rather than relaxing limits.

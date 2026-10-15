@@ -1,0 +1,66 @@
+name: Engine benchmarks
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/benchmarks.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  regression:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Read approved baseline revision
+        id: baseline
+        run: |
+          $config = Get-Content (Join-Path 'backend' 'tests' 'Wf.Benchmarks' 'baseline.json') -Raw | ConvertFrom-Json
+          if ($config.codeRevision -cnotmatch '^[0-9a-f]{40}$') { throw 'A full immutable baseline revision is required.' }
+          "revision=$($config.codeRevision)" >> $env:GITHUB_OUTPUT
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.baseline.outputs.revision }}
+          path: .benchmark-baseline
+          persist-credentials: false
+      - name: Use identical measurement harness for both code revisions
+        run: |
+          $source = Join-Path 'backend' 'tests' 'Wf.Benchmarks'
+          $destination = Join-Path '.benchmark-baseline' 'backend' 'tests' 'Wf.Benchmarks'
+          Get-ChildItem -LiteralPath $source -Filter '*.cs' -File | Copy-Item -Destination $destination
+      - name: Measure approved baseline on this runner
+        working-directory: .benchmark-baseline/backend/tests/Wf.Benchmarks
+        run: |
+          $results = Join-Path $env:GITHUB_WORKSPACE 'benchmark-results'
+          dotnet run -c Release -- --filter '*EngineCore*' --artifacts (Join-Path $results 'baseline') --metrics (Join-Path $results 'baseline.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Measure current code on the same runner
+        working-directory: backend/tests/Wf.Benchmarks
+        run: |
+          $results = Join-Path $env:GITHUB_WORKSPACE 'benchmark-results'
+          dotnet run -c Release -- --filter '*EngineCore*' --artifacts (Join-Path $results 'current') --metrics (Join-Path $results 'current.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Reject absolute threshold failures and regressions above 10 percent
+        working-directory: backend/tests/Wf.Benchmarks
+        run: |
+          $results = Join-Path $env:GITHUB_WORKSPACE 'benchmark-results'
+          dotnet run -c Release --no-build -- --compare (Join-Path $results 'baseline.json') (Join-Path $results 'current.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine-benchmarks-${{ matrix.os }}
+          path: benchmark-results
+          if-no-files-found: error
