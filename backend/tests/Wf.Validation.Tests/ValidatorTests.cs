@@ -129,7 +129,8 @@ public sealed class ValidatorTests
     [Fact]
     public void CatalogueHasStableUniqueCompleteDescriptors()
     {
-        Assert.Equal(["WFV001", "WFV002", "WFV003", "WFV004", "WFV005", "WFV006", "WFV007", "WFV008", "WFV009", "WFV010"],
+        Assert.Equal(["WFV001", "WFV002", "WFV003", "WFV004", "WFV005", "WFV006", "WFV007", "WFV008", "WFV009", "WFV010",
+            "WFV011", "WFV012", "WFV013", "WFV014"],
             RuleCatalog.All.Select(rule => rule.Id));
         Assert.Equal(RuleCatalog.All.Length, RuleCatalog.All.Select(rule => rule.Id).Distinct().Count());
         Assert.All(RuleCatalog.All, rule =>

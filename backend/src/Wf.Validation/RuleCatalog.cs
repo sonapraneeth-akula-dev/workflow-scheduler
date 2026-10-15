@@ -53,7 +53,24 @@ public static class RuleCatalog
         "The workflow version does not satisfy the required API compatibility bump.",
         "Increase the version by the required MAJOR, MINOR or PATCH level.");
 
+    public static readonly ValidationRule ScheduleShape = new("WFV011",
+        "The schedule file does not match its JSON contract.",
+        "Use schedules.schema.json; provide instances, nonempty IDs and timezones, and only supported properties.");
+
+    public static readonly ValidationRule ScheduleExpression = new("WFV012",
+        "A schedule expression or timezone is invalid.",
+        "Provide exactly one valid five-field cron or positive constant-format interval and a recognized IANA timezone.");
+
+    public static readonly ValidationRule ScheduleVariable = new("WFV013",
+        "A schedule variable is unknown, invalid, duplicated across categories, or required but missing.",
+        "Use declared variable keys and valid values; declare each default once and supply required instance values.");
+
+    public static readonly ValidationRule ScheduleIdentity = new("WFV014",
+        "A schedule instance ID is empty or duplicated.",
+        "Give every instance a nonempty, stable, unique ID.");
+
     public static ImmutableArray<ValidationRule> All { get; } =
         [DirectoryNotFound, WorkflowNotFound, BuildFailed, DescribeFailed, DependencyCycle, UnknownDependency,
-            DuplicateKey, VariableType, VariableRequired, VersionBump];
+            DuplicateKey, VariableType, VariableRequired, VersionBump, ScheduleShape, ScheduleExpression,
+            ScheduleVariable, ScheduleIdentity];
 }

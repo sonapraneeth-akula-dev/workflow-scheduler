@@ -87,8 +87,15 @@ generates it from the same strict, source-generated contracts used by the server
 `id`, exactly one `cron` or constant-format `interval`, and an IANA `timezone`.
 Instance `variables` override defaults; optional `versionPin`, `overlap`
 (`Skip`, `Queue`, `Concurrent`) and `catchUp` (`None`, `Latest`) control execution.
-Default policies are `Skip` and `Latest`. Semantic expression/variable validation
-and registration follow in their dependent tasks.
+Default policies are `Skip` and `Latest`.
+`ScheduleFileValidator.Validate(utf8, variableSchemas)` resolves workflow defaults,
+then categorised file defaults, then each instance's overrides. It returns
+immutable effective JSON values and shared `ScheduleExpression` objects, or
+file/path/message/hint errors without partial instances. Unknown or invalid
+values, required-but-missing variables and duplicate defaults across categories
+fail even when another override would hide them. `Validator` and the testing
+facade automatically check optional `schedules.json`; registration remains its
+own backlog task.
 
 Placement is authored at workflow, node or task level with `RunsOn` and
 `Affinity`. The innermost selector replaces the whole outer selector; affinity

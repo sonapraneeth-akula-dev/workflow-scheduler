@@ -1,11 +1,13 @@
 using Wf.Validation.Build;
 using Wf.Validation.Rules;
+using Wf.Validation.Schedules;
 
 namespace Wf.Validation;
 
 /// <summary>
 /// Publishes a trusted workflow.cs and reads its --describe manifest without executing tasks.
-/// Validates manifest semantics. This is not a sandbox. Schedule, registry and SemVer rules are separate steps.
+/// Validates manifest and optional schedule-file semantics. This is not a sandbox.
+/// Registry and SemVer comparisons are separate steps.
 /// </summary>
 public static class Validator
 {
@@ -42,7 +44,17 @@ public static class Validator
             var build = await buildCache.BuildAsync(new(script, root, additionalInputs), cancellationToken)
                 .ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            return new(ManifestRules.Validate(build.Manifest, cancellationToken: cancellationToken), build);
+            var errors = ManifestRules.Validate(build.Manifest, cancellationToken: cancellationToken);
+            var schedules = Path.Combine(root, ScheduleFileValidator.FileName);
+            if (HasAttributes(schedules, FileAttributes.Directory, expected: true))
+                errors = errors.Add(RuleCatalog.ScheduleShape.CreateError(ScheduleFileValidator.FileName, "$"));
+            else if (HasAttributes(schedules, FileAttributes.Directory, expected: false))
+            {
+                var contents = await File.ReadAllBytesAsync(schedules, cancellationToken).ConfigureAwait(false);
+                errors = errors.AddRange(ScheduleFileValidator.Validate(contents, build.Manifest.Variables,
+                    cancellationToken: cancellationToken).Errors);
+            }
+            return new(errors, build);
         }
         catch (ManifestValidationException error)
         {
