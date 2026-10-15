@@ -8,8 +8,23 @@ public sealed class WorkflowBuilder
     private readonly string name;
     private readonly string version;
     private readonly List<NodeBuilder> nodes = [];
+    private readonly List<VariableSchema> variables = [];
 
     internal WorkflowBuilder(string name, string version) => (this.name, this.version) = (name, version);
+
+    public WorkflowBuilder Variables(Action<VariablesBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        var builder = new VariablesBuilder();
+        configure(builder);
+        foreach (var variable in builder.Build())
+        {
+            if (variables.Any(v => v.Key == variable.Key))
+                throw new ArgumentException($"Duplicate variable key '{variable.Key}'.");
+            variables.Add(variable);
+        }
+        return this;
+    }
 
     public WorkflowBuilder Node(string key, Action<NodeBuilder> configure)
     {
@@ -65,7 +80,7 @@ public sealed class WorkflowBuilder
         foreach (var node in nodes)
             foreach (var task in node.Handlers)
                 tasks.Add($"{node.Key}/{task.Key}", task.Value);
-        return new(name, version, definitions, tasks.ToImmutable());
+        return new(name, version, definitions, tasks.ToImmutable(), variables.ToImmutableArray());
     }
 
     internal static void ValidateKey(string key)

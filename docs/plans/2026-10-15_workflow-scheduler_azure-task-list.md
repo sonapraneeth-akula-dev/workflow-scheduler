@@ -22,6 +22,7 @@ are not implied by local task completion.
 | 1.1.1.1.2 | Complete | 9 DAG cases pass, including 10,000-node depth, cycles naming all members, unknown dependencies and duplicate keys; integration test confirms invalid definitions cannot execute. |
 | 1.1.1.1.3 | Complete | 9 execution-mode cases pass; constructor and builder reject invalid parallelism, preserve task order and reset to series; JSON integration preserves and validates execution contracts. |
 | 1.1.1.2.1 | Complete | 8 stage authoring cases pass; reserved nodes, multiple named stage tasks, sync/async handlers and cancellation-context integration covered. Runtime ordering remains task 1.1.1.2.2, after its engine prerequisite. |
+| 1.1.2.1.1 | Complete | All nine variable types, defaults, required flags, allowed values, immutability and name-only secret references covered by unit tests; schema JSON round-trip integration passes. |
 
 ## Summary Rollup
 

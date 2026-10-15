@@ -9,13 +9,15 @@ public sealed class WorkflowDefinition
     public string Version { get; }
     public ImmutableArray<NodeDefinition> Nodes { get; }
     public ImmutableDictionary<string, Func<TaskContext, Task>> Tasks { get; }
+    public ImmutableArray<VariableSchema> Variables { get; }
 
     internal WorkflowDefinition(string name, string version, ImmutableArray<NodeDefinition> nodes,
-        ImmutableDictionary<string, Func<TaskContext, Task>> tasks)
+        ImmutableDictionary<string, Func<TaskContext, Task>> tasks, ImmutableArray<VariableSchema> variables)
     {
         Name = name;
         Version = version;
         Nodes = nodes;
         Tasks = tasks;
+        Variables = variables;
     }
 }
