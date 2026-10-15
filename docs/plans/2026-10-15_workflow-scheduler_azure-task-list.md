@@ -35,6 +35,7 @@ are not implied by local task completion.
 | 2.1.1.1.2 | Complete | Live/rebuilt/snapshot-tail states match; proposals do not mutate before commit; sequence gaps/duplicates/late events rejected. Monthly-partitioned PG migration and persisted snapshot/event replay pass against Testcontainers and external-server modes. |
 | 2.1.2.1.1 | Complete | Innermost-wins timeout/retry/platform-retry resolution tested across workflow/node/task/stages; defaults 0 retries, 1 h attempt, 24 h run, 15 min post stages. Source-generated manifest preserves resolved policies. |
 | 1.2.2.2.1 | Complete | Golden JSON snapshot, all contract fields, no eager task execution, stable metadata ordering and manifest-to-core-run integration pass. CLI `--describe` mode dispatch is wired with 1.2.2.1.1. |
+| 1.2.1.1.1 | Complete | Kestrel tests cover headers/body, expected/unexpected status, plain 202, cancellation, bounded response buffering, source validation and SDK stable-key integration; HTTP response output uses source-generated JSON. |
 
 ## Summary Rollup
 

@@ -76,5 +76,6 @@ public sealed class NodeOutputs
 [JsonSerializable(typeof(string[]))]
 [JsonSerializable(typeof(ImmutableArray<string>))]
 [JsonSerializable(typeof(JsonElement))]
+[JsonSerializable(typeof(HttpResponseOutput))]
 [JsonSerializable(typeof(ImmutableDictionary<string, JsonElement>))]
 internal partial class OutputJsonContext : JsonSerializerContext;
