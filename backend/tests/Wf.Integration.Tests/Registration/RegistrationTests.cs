@@ -642,5 +642,6 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
 
 public sealed class RegistrationDatabase : AgentDatabase
 {
+    public string ConnectionString => DatabaseConnectionString;
     protected override IReadOnlyList<string> Migrations => Migrator.LoadScripts().Select(script => script.Name).ToArray();
 }

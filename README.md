@@ -578,8 +578,22 @@ Every file/config/series mutation shares the registry/version/audit/NOTIFY
 transaction. Version pins and execution policies are retained for the dependent
 trigger/scheduler implementation; apply-under-load firing verification is separate.
 
-Publish CLI/merge automation, active-version caches, catalogue/version reads,
-proactive live revocation, general audit middleware/partition maintenance and
+`ActiveVersionCache` is a hosted service shared by future trigger handlers.
+It listens to `registry` before loading the initial atomic immutable snapshot,
+refreshes after committed notifications without restarting the engine, and
+resynchronizes completely after reconnect. Idle listener heartbeats detect
+broken connections; transient database failures log an error and make new
+lookups unavailable until resynchronized. Corrupt stored identity/manifest data
+fails explicitly instead of returning a stale or partial snapshot. Workflows
+without an active version, or soft-deleted workflows, are excluded.
+Callers capture one `ActiveWorkflowVersion` and use its immutable version ID,
+manifest and package for a new run/command; later activation does not retarget
+that captured value or existing persisted run IDs. Leader readiness requires
+the cache to be synchronized. Trigger HTTP wiring and the 20-in-flight-run hot
+activation scenario remain their own tasks.
+
+Publish CLI/merge automation, catalogue/version reads, proactive live revocation,
+general audit middleware/partition maintenance and
 cloud profiles remain their dependent tasks.
 
 ## Agent

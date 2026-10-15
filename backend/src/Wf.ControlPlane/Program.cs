@@ -8,6 +8,7 @@ using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Events;
 using Wf.ControlPlane.Engine.Leadership;
 using Wf.ControlPlane.Engine.Recovery;
+using Wf.ControlPlane.Engine.Registry;
 using Wf.ControlPlane.Engine.Sweeper;
 using Wf.ControlPlane.Hosting;
 using Wf.ControlPlane.Live;
@@ -50,6 +51,8 @@ builder.Services.AddTeamAuthorization();
 builder.Services.AddSignalR();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddWorkflowRegistrations(builder.Configuration);
+builder.Services.AddSingleton<ActiveVersionCache>();
+builder.Services.AddHostedService<ActiveVersionCache>(services => services.GetRequiredService<ActiveVersionCache>());
 builder.Services.AddSingleton(new LeaseOptions(Guid.NewGuid().ToString("N"),
     new Uri(builder.Configuration["Engine:PublicEndpoint"] ?? $"http://localhost:{port}", UriKind.Absolute)));
 builder.Services.AddSingleton<LeaseManager>();
@@ -77,6 +80,7 @@ app.MapRegistryEndpoints();
 app.MapRegistrationEndpoints();
 app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
 app.MapGet("/healthz", () => Results.Ok()).AllowAnonymous();
-app.MapGet("/healthz/leader", (LeaseManager leadership, RunRecovery recovery) =>
-    leadership.IsLeader && recovery.IsReady ? Results.Ok() : Results.StatusCode(StatusCodes.Status503ServiceUnavailable)).AllowAnonymous();
+app.MapGet("/healthz/leader", (LeaseManager leadership, RunRecovery recovery, ActiveVersionCache versions) =>
+    leadership.IsLeader && recovery.IsReady && versions.IsReady
+        ? Results.Ok() : Results.StatusCode(StatusCodes.Status503ServiceUnavailable)).AllowAnonymous();
 await app.RunAsync();
