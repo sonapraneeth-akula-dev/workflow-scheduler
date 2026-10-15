@@ -256,24 +256,36 @@ Optional `roleBindings` on the team and each type map
 `Viewer`/`Operator`/`Author`/`Admin` to non-empty Entra `groupId` UUIDs. Omitted
 maps are empty; duplicate role/group pairs within one scope fail, while one
 group may hold different roles or appear at both scopes. Sample UUIDs are
-placeholders, not deployed groups. Registration/RBAC synchronization follows
-separately; declaring a map does not itself grant access to the running API.
+placeholders, not deployed groups. Registration persists the group bindings in
+the same transaction; scope-aware authorization enforcement remains a separate
+task, so declaring a map alone does not yet grant access to the running API.
 
 Migration `0015_team_type_registry.sql` adds `teams` and `workflow_types`.
 `RegistryWriter.UpsertAsync(connection, transaction, registry)` uses the same
 shared rules and trusted constructor quota (default 10), serializes updates per
 team, and replaces the complete team/type snapshot in the caller's registration
 transaction. It never commits: commit with all other registration work, or
-roll back on any error. JSON-equivalent snapshots return false without updating
-row versions or notifying; changed snapshots issue transaction-scoped
+roll back on any error. JSON-equivalent snapshots with unchanged bindings return
+false without updating row versions or notifying; changed snapshots or repaired
+bindings issue transaction-scoped
 `NOTIFY registry`. Removed types are deleted, not silently retained; future
 workflow foreign keys must prevent removal of in-use types.
 IDs preserve exact declared names as `team/type`; shared validation and editor
 schema now bound both segments to 128 Unicode code points and reject path
 separators/control characters, avoiding ambiguous IDs and oversized index keys.
 The host exposes `GET /api/v1/teams` for global Admins only as a bootstrap read;
-scope-filtered catalogue expansion, role-binding synchronization and the full
+scope-filtered catalogue expansion, role enforcement and the full
 workflow-registration endpoint remain separate tasks.
+
+Migration `0016_role_bindings.sql` adds global/team/type scopes (0/1/2), shared
+Viewer/Operator/Author/Admin values (0/1/2/3) and group/user principals (0/1).
+`RoleBindingSync` reconciles validated team/type group maps inside
+`RegistryWriter`'s transaction, deleting removed groups and removed-type maps.
+Global grants, explicit user grants and unrelated teams are preserved.
+Even an unchanged JSON snapshot reconciles missing bindings after an upgrade;
+unchanged binding rows retain their UUIDs and row versions. Registry and role
+changes become visible together only at commit, with no permission cache to
+leave stale entries behind.
 
 Optional team `presentation` config supplies ordered `typeOrder`, `groupingKeys`
 and metadata `listColumns`, plus metadata-keyed `defaultFilters` and display

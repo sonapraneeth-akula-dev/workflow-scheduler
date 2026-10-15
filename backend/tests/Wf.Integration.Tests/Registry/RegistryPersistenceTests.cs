@@ -320,7 +320,7 @@ public sealed class RegistryUpgradeTests(RegistryPreviousDatabase database) : IC
 
 public sealed class RegistryDatabase : AgentDatabase
 {
-    protected override IReadOnlyList<string> Migrations => ["0015_team_type_registry.sql"];
+    protected override IReadOnlyList<string> Migrations => ["0015_team_type_registry.sql", "0016_role_bindings.sql"];
 }
 
 public sealed class RegistryPreviousDatabase : AgentDatabase

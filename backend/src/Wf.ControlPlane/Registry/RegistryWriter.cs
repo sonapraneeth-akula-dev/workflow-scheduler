@@ -3,6 +3,7 @@ using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
 using Wf.Contracts.Registry;
+using Wf.ControlPlane.Auth;
 using Wf.Validation;
 using Wf.Validation.Rules;
 
@@ -47,6 +48,7 @@ public sealed class RegistryWriter
             gate.Parameters.AddWithValue(registry.Team);
             await gate.ExecuteNonQueryAsync(cancellationToken);
         }
+        bool changed;
         await using (var team = new NpgsqlCommand("""
             INSERT INTO teams(id,name,presentation,registry) VALUES($1,$1,$2,$3)
             ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,presentation=EXCLUDED.presentation,registry=EXCLUDED.registry
@@ -57,33 +59,38 @@ public sealed class RegistryWriter
             team.Parameters.AddWithValue(registry.Team);
             team.Parameters.AddWithValue(NpgsqlDbType.Jsonb, presentation);
             team.Parameters.AddWithValue(NpgsqlDbType.Jsonb, json);
-            if (await team.ExecuteScalarAsync(cancellationToken) is null) return false;
+            changed = await team.ExecuteScalarAsync(cancellationToken) is not null;
         }
-        await using (var remove = new NpgsqlCommand(
-            "DELETE FROM workflow_types WHERE team_id=$1 AND NOT(name=ANY($2))", connection, transaction))
+        if (changed)
         {
-            remove.Parameters.AddWithValue(registry.Team);
-            remove.Parameters.AddWithValue(registry.Types.Select(type => type.Name).ToArray());
-            await remove.ExecuteNonQueryAsync(cancellationToken);
+            await using (var remove = new NpgsqlCommand(
+                "DELETE FROM workflow_types WHERE team_id=$1 AND NOT(name=ANY($2))", connection, transaction))
+            {
+                remove.Parameters.AddWithValue(registry.Team);
+                remove.Parameters.AddWithValue(registry.Types.Select(type => type.Name).ToArray());
+                await remove.ExecuteNonQueryAsync(cancellationToken);
+            }
+            for (var index = 0; index < registry.Types.Length; index++)
+            {
+                var type = registry.Types[index];
+                await using var upsert = new NpgsqlCommand("""
+                    INSERT INTO workflow_types(id,team_id,name,normalized_name,description,metadata_schema)
+                    VALUES($1,$2,$3,$4,$5,$6)
+                    ON CONFLICT(id) DO UPDATE SET normalized_name=EXCLUDED.normalized_name,
+                        description=EXCLUDED.description,metadata_schema=EXCLUDED.metadata_schema
+                    """, connection, transaction);
+                upsert.Parameters.AddWithValue(registry.Team + "/" + type.Name);
+                upsert.Parameters.AddWithValue(registry.Team);
+                upsert.Parameters.AddWithValue(type.Name);
+                upsert.Parameters.AddWithValue(TypeNameSimilarity.Normalize(type.Name));
+                upsert.Parameters.AddWithValue(type.Description);
+                upsert.Parameters.AddWithValue(NpgsqlDbType.Jsonb,
+                    document.RootElement.GetProperty("types")[index].GetProperty("metadataSchema").GetRawText());
+                await upsert.ExecuteNonQueryAsync(cancellationToken);
+            }
         }
-        for (var index = 0; index < registry.Types.Length; index++)
-        {
-            var type = registry.Types[index];
-            await using var upsert = new NpgsqlCommand("""
-                INSERT INTO workflow_types(id,team_id,name,normalized_name,description,metadata_schema)
-                VALUES($1,$2,$3,$4,$5,$6)
-                ON CONFLICT(id) DO UPDATE SET normalized_name=EXCLUDED.normalized_name,
-                    description=EXCLUDED.description,metadata_schema=EXCLUDED.metadata_schema
-                """, connection, transaction);
-            upsert.Parameters.AddWithValue(registry.Team + "/" + type.Name);
-            upsert.Parameters.AddWithValue(registry.Team);
-            upsert.Parameters.AddWithValue(type.Name);
-            upsert.Parameters.AddWithValue(TypeNameSimilarity.Normalize(type.Name));
-            upsert.Parameters.AddWithValue(type.Description);
-            upsert.Parameters.AddWithValue(NpgsqlDbType.Jsonb,
-                document.RootElement.GetProperty("types")[index].GetProperty("metadataSchema").GetRawText());
-            await upsert.ExecuteNonQueryAsync(cancellationToken);
-        }
+        var rolesChanged = await RoleBindingSync.SyncAsync(connection, transaction, registry, cancellationToken);
+        if (!changed && !rolesChanged) return false;
         await using var notify = new NpgsqlCommand("SELECT pg_notify('registry',$1)", connection, transaction);
         notify.Parameters.AddWithValue(registry.Team);
         await notify.ExecuteNonQueryAsync(cancellationToken);
