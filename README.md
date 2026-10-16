@@ -917,8 +917,21 @@ active pointer in its transaction, independently of notification ordering.
 Invalid pins/values log a rejection and retain the due cursor, without starving
 other schedules. Transient storage failures disable scheduler readiness until
 resynchronization; fatal corrupt state fails explicitly. Queued-run FIFO release
-and the one-hour/1,000-schedule chaos
-gate remain their dependent tasks, not implied by basic exactly-once firing.
+remains a dependent task, not implied by basic exactly-once firing.
+
+The nightly/manual `schedule-chaos.yml` lane runs the actual one-hour
+`ScheduleExactlyOnce` gate against PostgreSQL 17 with durability enabled:
+1,000 minutely schedules, uniformly phased 60 ms apart across each minute,
+and two hard leader-process kills during firing. The measured local gate
+retained all 60,000 intended fire slots and runs, zero duplicate or invalid
+runs, zero extra slots and zero silent misses. Intended-fire-to-durable-commit
+p99 was 0.274046 s against the unchanged 2 s limit; maximum failover delay
+was 15.887371 s, with 428 late slots recovered and lease epochs 1 -> 2 -> 3.
+Commit timing uses PostgreSQL `track_commit_timestamp`; `fsync`,
+`full_page_writes` and `synchronous_commit` stay on. Nightly artifacts retain
+metrics, process logs and TRX for 14 days. This workload does not claim a
+synchronized 1,000-at-once burst meets 2 s; development bursts measured p99
+5-6 s. Hosted GitHub Actions execution remains unclaimed until a push.
 
 Every overdue cursor is replanned against one UTC clock snapshot, including on
 takeover and reconnect. `Scheduler:FireGrace` is a nonnegative `TimeSpan`
