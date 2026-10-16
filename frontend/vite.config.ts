@@ -20,6 +20,10 @@ export default defineConfig(({ mode }) => {
       proxy: {
         "/api": environment.KARDIA_API_URL || "http://127.0.0.1:5001",
         "/openapi": environment.KARDIA_API_URL || "http://127.0.0.1:5001",
+        "/hubs": {
+          target: environment.KARDIA_API_URL || "http://127.0.0.1:5001",
+          ws: true,
+        },
       },
     },
   }

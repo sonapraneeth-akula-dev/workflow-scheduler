@@ -31,6 +31,7 @@ jobs:
       - run: dotnet test ../backend/tests/Wf.Integration.Tests --configuration Release --filter 'FullyQualifiedName~AuthorizationMatrixTests'
         env:
           WF_PERMISSION_BROWSER: "true"
+          WF_LIVE_BROWSER: "true"
           WF_FRONTEND_ROOT: ${{ github.workspace }}/frontend
       - run: bun run test:e2e
       - uses: actions/upload-artifact@v4

@@ -70,10 +70,12 @@ export async function signIn(): Promise<void> {
   const response = await application.loginPopup({
     scopes: [import.meta.env.VITE_ENTRA_API_SCOPE],
   })
+  await (await import("@/lib/live/subscriptions")).liveSubscriptions.reset()
   application.setActiveAccount(response.account)
 }
 
 export async function signOut(): Promise<void> {
+  await (await import("@/lib/live/subscriptions")).liveSubscriptions.reset()
   await (await client()).logoutPopup()
 }
 

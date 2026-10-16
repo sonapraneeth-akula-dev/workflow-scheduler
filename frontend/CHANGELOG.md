@@ -5,6 +5,8 @@ All notable frontend changes are documented here, using Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Shared MessagePack live connection, reference-counted scope subscriptions and
+  animation-frame-batched external stores using the official SignalR clients.
 - React/TypeScript SPA foundation with typed file routes, server-state queries,
   system-aware light/dark themes and an accessible schedule-management form.
 - Separate generated public/internal API clients with live contract drift checks,
