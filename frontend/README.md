@@ -118,6 +118,9 @@ JSON children mount only when expanded, in batches of 100. Image headers must
 identify a supported raster format; SVG/HTML cannot enter the image path.
 Refresh failures hide previously displayed content. Renderer and decoding
 failures stay within the report pane.
+Adding a renderer requires one lazy entry in `src\renderers\registry.ts`;
+`src\renderers\README.md` documents the component contract, extension test and
+untrusted-content rules. No backend kind enum or migration is required.
 
 `e2e/report-renderers.spec.ts` reads real HTTP content from immutable filesystem
 objects and PostgreSQL report/attempt rows in the isolated UI fixture. Fixture

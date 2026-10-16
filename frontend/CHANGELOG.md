@@ -5,6 +5,7 @@ All notable frontend changes are documented here, using Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Renderer-only extension guide and a single-entry lazy registration check.
 - Lazy report renderers for safe Markdown, text, expandable JSON and raster
   images; Markdown uses pinned `react-markdown` 10.1.0 without raw HTML plugins.
 - Shared MessagePack live connection, reference-counted scope subscriptions and
