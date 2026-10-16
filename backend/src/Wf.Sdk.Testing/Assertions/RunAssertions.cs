@@ -192,7 +192,7 @@ public static class RunAssertions
             var snapshot = log.Snapshot;
             var replay = RunState.Restore(snapshot with
             {
-                Status = RunStatus.Queued, LastSequence = 0, Abort = null, EndedAt = null, AbortTargets = [],
+                Status = RunStatus.Queued, LastSequence = 0, Abort = null, EndedAt = null, AbortTargets = [], Metrics = null,
                 Nodes = snapshot.Nodes.ToImmutableDictionary(p => p.Key, _ => ExecutionStatus.Pending, StringComparer.Ordinal),
                 Tasks = snapshot.Tasks.ToImmutableDictionary(p => p.Key, _ => ExecutionStatus.Pending, StringComparer.Ordinal)
             }, log.Events, _ => { }).Snapshot;

@@ -3,6 +3,7 @@ using System.Text.Json;
 using Wf.Contracts;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
+using Wf.Engine.Core.Metrics;
 using Wf.Engine.Core.StateMachine;
 
 namespace Wf.Engine.Core;
@@ -10,7 +11,10 @@ namespace Wf.Engine.Core;
 public sealed record RunSnapshot(Guid RunId, RunStatus Status, long LastSequence,
     ImmutableDictionary<string, ExecutionStatus> Nodes, ImmutableDictionary<string, ExecutionStatus> Tasks,
     WorkflowMetadata Metadata, ImmutableDictionary<string, JsonElement> Variables,
-    AbortRecord? Abort = null, DateTimeOffset? EndedAt = null, ImmutableArray<string> AbortTargets = default);
+    AbortRecord? Abort = null, DateTimeOffset? EndedAt = null, ImmutableArray<string> AbortTargets = default)
+{
+    public RunMetrics? Metrics { get; init; }
+}
 
 public sealed class RunState
 {
@@ -21,6 +25,12 @@ public sealed class RunState
 
     public RunState(Guid runId, ImmutableArray<NodeDefinition> nodes, WorkflowMetadata metadata,
         Action<string> log, IReadOnlyDictionary<string, JsonElement>? variables = null)
+        : this(runId, nodes, metadata, log, DateTimeOffset.UtcNow, variables)
+    {
+    }
+
+    public RunState(Guid runId, ImmutableArray<NodeDefinition> nodes, WorkflowMetadata metadata,
+        Action<string> log, DateTimeOffset queuedAt, IReadOnlyDictionary<string, JsonElement>? variables = null)
         : this(new(runId, RunStatus.Queued, 0,
             nodes.ToImmutableDictionary(n => n.Key, _ => ExecutionStatus.Pending, StringComparer.Ordinal),
             nodes.SelectMany(n => n.Tasks.Select(t => $"{n.Key}/{t.Key}"))
@@ -28,6 +38,7 @@ public sealed class RunState
             metadata, variables?.ToImmutableDictionary(p => p.Key, p => p.Value.Clone(), StringComparer.Ordinal) ??
                 ImmutableDictionary<string, JsonElement>.Empty), log)
     {
+        Snapshot = Snapshot with { Metrics = RunMetricsRecorder.Initialize(Snapshot, queuedAt) };
     }
 
     private RunState(RunSnapshot snapshot, Action<string> log)
@@ -56,6 +67,7 @@ public sealed class RunState
             AbortTargets = snapshot.AbortTargets.IsDefault ? [] : snapshot.AbortTargets,
             Variables = snapshot.Variables.ToImmutableDictionary(p => p.Key, p => p.Value.Clone(), StringComparer.Ordinal)
         };
+        Snapshot = Snapshot with { Metrics = snapshot.Metrics ?? RunMetricsRecorder.Initialize(Snapshot) };
     }
 
     public static RunState Restore(RunSnapshot snapshot, IEnumerable<RunEvent> tail, Action<string> log)
@@ -69,7 +81,10 @@ public sealed class RunState
 
     public RunEvent CreateEvent(EventEntity entity, string? key, int state, DateTimeOffset at, AbortRecord? abort = null)
     {
-        var @event = new RunEvent(Snapshot.RunId, checked(Snapshot.LastSequence + 1), at.ToUniversalTime(), entity, key, state, abort);
+        var @event = new RunEvent(Snapshot.RunId, checked(Snapshot.LastSequence + 1), at.ToUniversalTime(), entity, key, state, abort)
+        {
+            RunQueuedAt = Snapshot.LastSequence == 0 ? Snapshot.Metrics!.Run.QueuedAt : null
+        };
         Validate(@event);
         return @event;
     }
@@ -85,6 +100,7 @@ public sealed class RunState
     {
         ArgumentNullException.ThrowIfNull(@event);
         Validate(@event);
+        var metrics = RunMetricsRecorder.Record(Snapshot.Metrics!, @event);
         Snapshot = @event.Entity switch
         {
             EventEntity.Run => Snapshot with
@@ -103,6 +119,7 @@ public sealed class RunState
                 { Tasks = Snapshot.Tasks.SetItem(@event.Key!, (ExecutionStatus)@event.State), LastSequence = @event.Sequence },
             _ => throw new ArgumentOutOfRangeException(nameof(@event))
         };
+        Snapshot = Snapshot with { Metrics = metrics };
         events.Add(@event);
     }
 
@@ -112,6 +129,26 @@ public sealed class RunState
             Reject($"Run '{Snapshot.RunId}' expected event sequence {Snapshot.LastSequence + 1} for the same run.");
         if (@event.At.Offset != TimeSpan.Zero)
             Reject("Event timestamps must use UTC.");
+        if (@event.RunQueuedAt is { } queuedAt && (queuedAt.Offset != TimeSpan.Zero || @event.Sequence != 1))
+            Reject("Run queue time can only be recorded in UTC on the first event.");
+        if (@event.Attempt is { } attempt && (@event.Entity != EventEntity.Task || attempt is <= 0 or > short.MaxValue))
+            Reject("An attempt identity requires a task and positive smallint attempt number.");
+        if (@event.Attempt is { } number && @event.Key is { } attemptKey &&
+            Snapshot.Metrics!.Tasks.TryGetValue(attemptKey, out var taskMetric) &&
+            taskMetric.Attempts is { Length: > 0 } previous &&
+            ((ExecutionStatus)@event.State == ExecutionStatus.Dispatched
+                ? number <= previous[^1].Attempt : number != previous[^1].Attempt))
+            Reject("An event must identify the current attempt, or a newer dispatched attempt.");
+        if ((@event.AttemptEndedAt is { } attemptEnd && (attemptEnd.Offset != TimeSpan.Zero || attemptEnd > @event.At)) ||
+            (@event.AttemptStatus is { } attemptStatus && !TransitionTable.IsTerminal(attemptStatus)) ||
+            ((@event.AttemptEndedAt is not null || @event.AttemptStatus is not null) &&
+                (@event.Entity != EventEntity.Task || ((ExecutionStatus)@event.State != ExecutionStatus.Retrying &&
+                    !TransitionTable.IsTerminal((ExecutionStatus)@event.State)))))
+            Reject("Attempt completion data requires a UTC end time and terminal outcome on a task completion or retry.");
+        if (@event.AttemptEndedAt is { } completion && @event.Key is { } taskKey &&
+            Snapshot.Metrics!.Tasks.TryGetValue(taskKey, out var metric) && metric.Attempts is { Length: > 0 } attempts &&
+            completion < (attempts[^1].StartedAt ?? attempts[^1].QueuedAt))
+            Reject("An attempt cannot end before it started or entered the queue.");
         if (@event.Abort is { } abort && (@event.Entity != EventEntity.Run || Snapshot.Abort is not null ||
                 (Snapshot.Status, (RunStatus)@event.State) is not
                     ((RunStatus.Queued, RunStatus.Aborted) or (RunStatus.Running, RunStatus.Aborting)) ||

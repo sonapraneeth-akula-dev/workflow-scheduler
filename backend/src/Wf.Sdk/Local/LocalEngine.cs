@@ -89,7 +89,7 @@ public sealed class LocalEngine
         this.variables = VariableBinder.Bind(workflow.Variables, variables ?? ImmutableDictionary<string, JsonElement>.Empty);
         this.workflow = new(workflow.Name, workflow.Version, PlacementResolver.Resolve(workflow.Nodes, this.variables),
             workflow.Tasks, workflow.Variables, workflow.Metadata, workflow.RunTimeout, workflow.Placement);
-        run = new(Guid.CreateVersion7(), this.workflow.Nodes, workflow.Metadata, renderer.Log,
+        run = new(Guid.CreateVersion7(), this.workflow.Nodes, workflow.Metadata, renderer.Log, time.GetUtcNow(),
             this.variables.ToDictionary(p => p.Key,
                 p => JsonSerializer.SerializeToElement(p.Value, OutputJsonContext.Default.Object), StringComparer.Ordinal));
         registry = new(workflow);
@@ -153,9 +153,12 @@ public sealed class LocalEngine
     }
 
     private DateTimeOffset Now => time.GetUtcNow();
-    private void Emit(EventEntity entity, string? key, int state, AbortRecord? abort = null)
+    private void Emit(EventEntity entity, string? key, int state, AbortRecord? abort = null,
+        ExecutionStatus? attemptStatus = null, DateTimeOffset? attemptEndedAt = null)
     {
-        var committed = run.Append(entity, key, state, Now, abort);
+        var committed = run.CreateEvent(entity, key, state, Now, abort) with
+            { AttemptStatus = attemptStatus, AttemptEndedAt = attemptEndedAt };
+        run.Apply(committed);
         renderer.Render(committed);
     }
 
@@ -318,7 +321,8 @@ public sealed class LocalEngine
         {
             budgets[completed.Key] = (budget.Author + (retry.Budget == RetryBudget.Author ? 1 : 0),
                 budget.Platform + (retry.Budget == RetryBudget.Platform ? 1 : 0), budget.Attempts);
-            Emit(EventEntity.Task, completed.Key, (int)ExecutionStatus.Retrying);
+            Emit(EventEntity.Task, completed.Key, (int)ExecutionStatus.Retrying,
+                attemptStatus: status, attemptEndedAt: attempts[^1].EndedAt);
             timers.Track(new(new(TimerScope.Retry, completed.Key), RetryAt: retry.RetryAt));
             return;
         }

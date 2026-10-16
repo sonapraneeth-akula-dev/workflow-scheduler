@@ -14,6 +14,7 @@ using Wf.ControlPlane.Engine.Leadership;
 using Wf.Engine.Core;
 using Wf.Engine.Core.StateMachine;
 using Wf.Engine.Core.Results;
+using Wf.Engine.Core.Metrics;
 using DispatchCommand = Wf.Contracts.Agent.V1.Dispatch;
 
 namespace Wf.ControlPlane.Engine.Dispatch;
@@ -46,6 +47,8 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
         DateTimeOffset deadline, DateTimeOffset createdAt, string createdBy, CancellationToken cancellationToken,
         Guid? seriesId = null, RunTrigger trigger = RunTrigger.Manual)
     {
+        run = RunState.Restore(run.Snapshot with
+            { Metrics = RunMetricsRecorder.Initialize(run.Snapshot, createdAt) }, [], _ => { });
         await ExecuteAsync(connection, "SELECT ensure_run_partitions(uuid_v7_run_day($1))", cancellationToken, run.Snapshot.RunId);
         await ExecuteAsync(connection, """
             INSERT INTO runs(run_day,id,workflow_id,version_id,series_id,trigger,triggered_by,variables,metadata,status,created_at,deadline_at)
@@ -80,6 +83,8 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
             ?? throw new KeyNotFoundException($"Run '{runId}' does not exist.");
         var snapshot = JsonSerializer.Deserialize(payload, RunStoreJson.Default.RunSnapshot)
             ?? throw new InvalidDataException("Persisted run snapshot is null.");
+        if (snapshot.Metrics is null)
+            snapshot = await LoadMetricsBaselineAsync(connection, runId, cancellationToken);
         await using var tail = new NpgsqlCommand("""
             SELECT payload FROM run_events WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND seq>$2 ORDER BY seq
             """, connection);
@@ -112,14 +117,18 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
                         ?? throw new InvalidDataException("Persisted run snapshot is null."));
         }
         if (snapshots.Count != ids.Length) throw new InvalidDataException("A recovering run has no persisted snapshot.");
+        var legacy = snapshots.Where(p => p.Value.Metrics is null).Select(p => p.Key).ToArray();
+        foreach (var id in legacy)
+            snapshots[id] = await LoadMetricsBaselineAsync(connection, id, cancellationToken);
         var events = new Dictionary<Guid, List<RunEvent>>();
         await using (var command = new NpgsqlCommand("""
             SELECT e.run_id,e.payload FROM run_events e JOIN runs r ON r.run_day=e.run_day AND r.id=e.run_id
             WHERE e.run_day=ANY(SELECT uuid_v7_run_day(id) FROM unnest($1::uuid[]) id)
-                AND e.run_id=ANY($1) AND e.seq>r.snapshot_seq ORDER BY e.run_id,e.seq
+                AND e.run_id=ANY($1) AND e.seq>CASE WHEN e.run_id=ANY($2) THEN 0 ELSE r.snapshot_seq END ORDER BY e.run_id,e.seq
             """, connection))
         {
             command.Parameters.AddWithValue(ids);
+            command.Parameters.AddWithValue(legacy);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
@@ -132,6 +141,23 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
         return snapshots.ToDictionary(pair => pair.Key, pair => RunState.Restore(pair.Value,
             events.TryGetValue(pair.Key, out var tail) ? tail : [],
             message => logger.LogWarning("{RunStateError}", message)));
+    }
+
+    private static async Task<RunSnapshot> LoadMetricsBaselineAsync(NpgsqlConnection connection, Guid runId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand("""
+            SELECT s.payload,r.created_at FROM runs r JOIN run_snapshots s
+                ON s.run_day=r.run_day AND s.run_id=r.id AND s.seq=0
+            WHERE r.run_day=uuid_v7_run_day($1) AND r.id=$1
+            """, connection);
+        command.Parameters.AddWithValue(runId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+            throw new InvalidDataException("A legacy run has no initial snapshot for metrics replay.");
+        var snapshot = JsonSerializer.Deserialize(reader.GetFieldValue<byte[]>(0), RunStoreJson.Default.RunSnapshot)
+            ?? throw new InvalidDataException("Persisted initial run snapshot is null.");
+        return snapshot with { Metrics = RunMetricsRecorder.Initialize(snapshot, reader.GetFieldValue<DateTimeOffset>(1)) };
     }
 
     public async Task AppendAsync(RunState run, EventEntity entity, string? key, int state, DateTimeOffset at,
@@ -154,16 +180,34 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
         CancellationToken cancellationToken)
     {
         await ExecuteAsync(connection, """
-            INSERT INTO run_events(run_day,run_id,seq,ts,kind,entity_key,payload)
-            VALUES(uuid_v7_run_day($1),$1,$2,$3,$4,$5,$6)
+            INSERT INTO run_events(run_day,run_id,seq,ts,kind,entity_key,payload,attempt)
+            VALUES(uuid_v7_run_day($1),$1,$2,$3,$4,$5,$6,$7)
             """, cancellationToken, change.RunId, change.Sequence, change.At, (short)change.Entity,
-            (object?)change.Key ?? DBNull.Value, JsonSerializer.SerializeToUtf8Bytes(change, RunStoreJson.Default.RunEvent));
+            (object?)change.Key ?? DBNull.Value, JsonSerializer.SerializeToUtf8Bytes(change, RunStoreJson.Default.RunEvent),
+            (object?)(short?)change.Attempt ?? DBNull.Value);
         run.Apply(change);
         await WriteSnapshotAsync(connection, run, cancellationToken);
         if (change.Entity == EventEntity.Node)
+        {
+            var metric = run.Snapshot.Metrics!.Nodes[change.Key!];
             await ExecuteAsync(connection, """
-                UPDATE node_runs SET status=$3 WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND node_key=$2
-                """, cancellationToken, change.RunId, change.Key!, (short)change.State);
+                UPDATE node_runs SET status=$3,started_at=$4,ended_at=$5
+                WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND node_key=$2
+                """, cancellationToken, change.RunId, change.Key!, (short)change.State,
+                (object?)metric.StartedAt ?? DBNull.Value, (object?)metric.EndedAt ?? DBNull.Value);
+        }
+        if (change.Entity == EventEntity.Task && run.Snapshot.Metrics!.Tasks[change.Key!].Attempts is { Length: > 0 } attempts)
+        {
+            var attempt = attempts[^1];
+            await ExecuteAsync(connection, """
+                UPDATE task_attempts SET queue_wait_ms=$4,started_at=$5,ended_at=$6,queued_at=$8,
+                    status=$7
+                WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 AND attempt=$3
+                """, cancellationToken, change.RunId, change.Key!, (short)attempt.Attempt, attempt.QueueWaitMs,
+                (object?)attempt.StartedAt ?? DBNull.Value, (object?)attempt.EndedAt ?? DBNull.Value,
+                (short)(attempt.TerminalStatus ?? ((ExecutionStatus)change.State == ExecutionStatus.Running
+                    ? ExecutionStatus.Running : ExecutionStatus.Dispatched)), attempt.QueuedAt);
+        }
     }
 
     private static async Task WriteSnapshotAsync(NpgsqlConnection connection, RunState run, CancellationToken cancellationToken)
@@ -174,11 +218,11 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
                 INSERT INTO run_snapshots(run_day,run_id,seq,created_at,payload)
                 VALUES(uuid_v7_run_day($1),$1,$2,$3,$4) RETURNING seq
             )
-            UPDATE runs SET last_seq=saved.seq,snapshot_seq=saved.seq,status=$5,ended_at=$6 FROM saved
+            UPDATE runs SET last_seq=saved.seq,snapshot_seq=saved.seq,status=$5,ended_at=$6,started_at=$7 FROM saved
             WHERE run_day=uuid_v7_run_day($1) AND id=$1
             """, cancellationToken, snapshot.RunId, snapshot.LastSequence, DateTimeOffset.UtcNow,
             JsonSerializer.SerializeToUtf8Bytes(snapshot, RunStoreJson.Default.RunSnapshot), (short)snapshot.Status,
-            (object?)snapshot.EndedAt ?? DBNull.Value);
+            (object?)snapshot.EndedAt ?? DBNull.Value, (object?)snapshot.Metrics!.Run.StartedAt ?? DBNull.Value);
     }
 
     public async Task<IReadOnlyList<(long Id, DispatchCommand Command)>> PendingAsync(AgentSession session,
@@ -247,7 +291,7 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
             TaskOutcome.TimedOut => ExecutionStatus.TimedOut,
             _ => throw new ArgumentException("Unsupported task outcome.", nameof(message))
         };
-        var change = run.CreateEvent(EventEntity.Task, taskKey, (int)target, at);
+        var change = run.CreateEvent(EventEntity.Task, taskKey, (int)target, at) with { Attempt = identity.Attempt };
         await AppendAsync(connection, run, change, cancellationToken);
         await ExecuteAsync(connection, """
             WITH removed AS (

@@ -96,10 +96,10 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             ExecutionPolicy? policy = null;
             Guid previousAgent;
             short platformRetries, authorRetries;
-            DateTimeOffset runDeadline, nodeDeadline;
+            DateTimeOffset runDeadline, nodeDeadline, lostAt;
             await using (var command = new NpgsqlCommand("""
                 SELECT a.dispatch_payload,a.placement_request::text,a.execution_policy::text,a.agent_id,
-                       a.platform_retries,a.author_retries,r.deadline_at,COALESCE(n.deadline_at,r.deadline_at)
+                       a.platform_retries,a.author_retries,r.deadline_at,COALESCE(n.deadline_at,r.deadline_at),a.ended_at
                 FROM task_attempts a JOIN runs r ON r.run_day=a.run_day AND r.id=a.run_id
                 JOIN node_runs n ON n.run_day=a.run_day AND n.run_id=a.run_id AND n.node_key=split_part(a.task_key,'/',1)
                 WHERE a.run_day=uuid_v7_run_day($1) AND a.run_id=$1 AND a.task_key=$2 AND a.attempt=$3
@@ -125,6 +125,7 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
                 authorRetries = reader.GetInt16(5);
                 runDeadline = reader.GetFieldValue<DateTimeOffset>(6);
                 nodeDeadline = reader.GetFieldValue<DateTimeOffset>(7);
+                lostAt = reader.GetFieldValue<DateTimeOffset>(8);
             }
             var now = timeProvider.GetUtcNow();
             if (original is not null && previous is not null &&
@@ -149,7 +150,8 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             if (failure is not null)
             {
                 await RunStore.AppendAsync(connection, run,
-                    run.CreateEvent(EventEntity.Task, taskKey, (int)ExecutionStatus.Failed, now), cancellationToken);
+                    run.CreateEvent(EventEntity.Task, taskKey, (int)ExecutionStatus.Failed, now) with
+                        { Attempt = attempt, AttemptEndedAt = lostAt, AttemptStatus = ExecutionStatus.Failed }, cancellationToken);
                 await RunStore.ExecuteAsync(connection, """
                     UPDATE task_attempts SET error=$4,replacement_processed_at=$5
                     WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 AND attempt=$3
@@ -170,7 +172,8 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             dispatch.DeadlineAt = Timestamp.FromDateTimeOffset(deadline);
             dispatch.ReservationEpoch = 1;
             await RunStore.AppendAsync(connection, run,
-                run.CreateEvent(EventEntity.Task, taskKey, (int)ExecutionStatus.Retrying, now), cancellationToken);
+                run.CreateEvent(EventEntity.Task, taskKey, (int)ExecutionStatus.Retrying, now) with
+                    { Attempt = attempt, AttemptEndedAt = lostAt, AttemptStatus = ExecutionStatus.Failed }, cancellationToken);
             await SaveDispatchAsync(connection, run, request, dispatch, decision.Agent.Id, policy,
                 checked((short)(platformRetries + 1)), authorRetries, cancellationToken);
             await RunStore.ExecuteAsync(connection, """
@@ -207,21 +210,23 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
         CancellationToken cancellationToken)
     {
         var key = $"{request.NodeKey}/{request.TaskKey}";
-        var change = run.CreateEvent(EventEntity.Task, key, (int)ExecutionStatus.Dispatched, timeProvider.GetUtcNow());
+        var change = run.CreateEvent(EventEntity.Task, key, (int)ExecutionStatus.Dispatched, timeProvider.GetUtcNow()) with
+            { Attempt = request.Attempt };
         await RunStore.AppendAsync(connection, run, change, cancellationToken);
+        var metric = run.Snapshot.Metrics!.Tasks[key].Attempts[^1];
         await RunStore.ExecuteAsync(connection, """
             WITH attempt AS (
                 INSERT INTO task_attempts(run_day,run_id,task_key,attempt,agent_id,status,queued_at,deadline_at,required_ram_mb,
-                    dispatch_payload,placement_request,execution_policy,platform_retries,author_retries)
-                VALUES(uuid_v7_run_day($1),$1,$2,$3,$4,2,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12)
+                    dispatch_payload,placement_request,execution_policy,platform_retries,author_retries,queue_wait_ms)
+                VALUES(uuid_v7_run_day($1),$1,$2,$3,$4,2,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13)
                 RETURNING run_day,run_id,task_key,attempt,agent_id
             )
             INSERT INTO dispatch_outbox(run_day,run_id,task_key,attempt,agent_id,payload)
             SELECT run_day,run_id,task_key,attempt,agent_id,$8 FROM attempt
             """, cancellationToken, request.RunId, key, (short)request.Attempt, agentId,
-            timeProvider.GetUtcNow(), dispatch.DeadlineAt.ToDateTimeOffset(), request.RequiredRamMb, dispatch.ToByteArray(),
+            metric.QueuedAt, dispatch.DeadlineAt.ToDateTimeOffset(), request.RequiredRamMb, dispatch.ToByteArray(),
             JsonSerializer.Serialize(request, DispatchJson.Default.PlacementRequest),
-            JsonSerializer.Serialize(policy, DispatchJson.Default.ExecutionPolicy), platformRetries, authorRetries);
+            JsonSerializer.Serialize(policy, DispatchJson.Default.ExecutionPolicy), platformRetries, authorRetries, metric.QueueWaitMs);
         return change;
     }
 

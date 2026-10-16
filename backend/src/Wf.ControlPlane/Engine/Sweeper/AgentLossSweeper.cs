@@ -84,7 +84,8 @@ public sealed class AgentLossSweeper(NpgsqlDataSource dataSource, AgentRegistry 
         foreach (var (runId, taskKey, attempt) in candidates)
             await RunStore.ExecuteAsync(connection, """
                 WITH lost AS (
-                    UPDATE task_attempts SET status=$5,failure_category=$6,error=$7,ended_at=$4
+                    UPDATE task_attempts SET status=$5,failure_category=$6,error=$7,ended_at=$4,
+                        queue_wait_ms=GREATEST(0,EXTRACT(EPOCH FROM (COALESCE(started_at,$4)-queued_at))*1000)
                     WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 AND attempt=$3
                     RETURNING run_day,run_id,task_key,attempt
                 )
