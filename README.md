@@ -1092,8 +1092,17 @@ without an active version, or soft-deleted workflows, are excluded.
 Callers capture one `ActiveWorkflowVersion` and use its immutable version ID,
 manifest and package for a new run/command; later activation does not retarget
 that captured value or existing persisted run IDs. Leader readiness requires
-the cache to be synchronized. Trigger HTTP wiring and the 20-in-flight-run hot
-activation scenario remain their own tasks.
+the cache to be synchronized.
+
+`HotActivationTests` holds 20 actual `1.0.0` SDK task-host processes at an HTTP
+barrier while registering `1.1.0`. Activation must take at most five seconds;
+the next run executes and finishes on the new package before releasing any
+old attempt. All 20 old runs then finish with their original UUID and
+version-specific binary outputs. Engine process, hosted cache task, PostgreSQL
+listener and native agent process/session remain unchanged; each package is
+downloaded once. This integration drives the durable run lifecycle through
+`RunStore`/`Dispatcher`, completing nodes/runs only after real committed agent
+success; it does not claim an autonomous hosted DAG execution loop.
 
 Publish CLI/merge automation, workflow/version detail reads, proactive live revocation,
 general audit middleware/partition maintenance and
