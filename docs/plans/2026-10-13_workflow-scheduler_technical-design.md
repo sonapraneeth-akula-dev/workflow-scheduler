@@ -177,14 +177,17 @@ graph LR
 - **Recovery**: on leadership acquisition, the engine loads active runs (`status in (Queued, Running, Aborting)`) from snapshot tables plus events after `snapshot_seq`, applies unprocessed commands (pending triggers and aborts), re-arms timers, and applies the same per-attempt agent-loss deadline as in normal operation (no separate blanket wait): attempts of an agent that has not reconnected stay reclaimable until 30 s after its last heartbeat (`agents.last_heartbeat_at`), then become `AgentLost`; attempts a reconnected agent does not list in `Hello.inflight` end `AgentLost` at once.
 - **Leader lease**: row in `leases` (`engine`, holder, expires_at), renewed every 3 s, TTL 10 s. Fencing: every engine write includes the lease epoch (`WHERE epoch = $current`) so a paused ex-leader cannot write. Agents find the leader as follows. On ACA, the standby's readiness probe fails until it holds the lease, so ingress routes agents only to the leader. Self-hosted agents hold an endpoint list; a standby answers `NotLeader{leaderHint}` and closes the stream.
 
-**Agent-loss timing verification pending (October 15, 2026):** the implementation
-preserves the approved 30 s absolute reclaim deadline. Task 2.3.2.1.2 also asks
-replacement and completion within those same 30 s from the last heartbeat, which
-leaves no time to dispatch or execute after classification. Functional recovery
-is verified with actual agent processes and a virtual liveness clock; that does
-not establish the conflicting wall-clock bound. Timing sign-off awaits a choice
-between retaining this reclaim window with an additional dispatch allowance or
-shortening it. No approved deadline or NFR has been silently changed.
+**Agent-loss timing decision (October 16, 2026):** the owner approved retaining
+the full 30 s absolute reclaim deadline and separating classification,
+replacement start and task completion. The previous requirement to replace and
+complete within those same 30 s was contradictory. With healthy storage, an
+active leader and eligible spare capacity, the replacement-start acceptance
+budget is an additional 30 s after reclaim expiry, including classification,
+dispatch and host startup; completion follows the workload's configured
+deadlines. This is not a second reclaim grace or a 30 s total-recovery claim.
+Functional virtual-clock evidence remains distinct from real wall-clock
+verification. See the [blocker and accepted decision](../decisions/2026-10-16_agent-loss-recovery-timing.md).
+Engine-leader and DB failover NFR-033 targets are unchanged.
 
 ### Crash and restart recovery (NFR-033, FR-061–FR-064)
 Tasks execute on agents, never inside the engine or api, so control-plane failures do not stop work.
@@ -194,7 +197,7 @@ Tasks execute on agents, never inside the engine or api, so control-plane failur
 | Engine leader crash, restart or deploy | All tasks on agents; agents journal results and perf samples to disk | Standby takes the lease ≤ 10 s (planned handover ≤ 3 s), rebuilds run actors from PG, re-arms `deadline_at` / `retry_at` / schedules; agents reconnect, report in-flight attempts and replay their journals (idempotent) | None. Load continues; live charts pause and resync |
 | api node crash or deploy | Everything (api is stateless) | Clients reconnect to another node and resync from `afterSeq` | None |
 | DB failover | Agents keep executing and journalling; engine buffers and retries commits | Commits resume when the new primary is up; runs resume ≤ DB failover time + 30 s (NFR-033; Patroni ≈ 10–20 s, PG Flexible zone-redundant HA ≈ 60–120 s, R-1). Windows-only self-hosted sites: manual DB failover (§9.3, R-11) | None |
-| Agent process crash, restart or update | **Task hosts keep running** (they are not children that die with the agent, see below) and spool results, logs and perf samples in the attempt directory | Restarted agent re-adopts live hosts within 10 s and reports them in `Hello.inflight`; the engine keeps the attempts `Running`. Agent-loss timeline from the last heartbeat: 15 s → agent `Unhealthy` (no new dispatch); attempts stay `Running` and reclaimable until 30 s → then `AgentLost` (category `AgentLost`) and re-placed per retry policy. Re-adoption (≤ 10 s) fits well inside the 30 s window, so runs resume ≤ 30 s (NFR-033) | None |
+| Agent process crash, restart or update | **Task hosts keep running** (they are not children that die with the agent, see below) and spool results, logs and perf samples in the attempt directory | Restarted agent re-adopts live hosts within 10 s and reports them in `Hello.inflight`; the engine keeps the attempts `Running`. Agent-loss timeline from the last heartbeat: 15 s → agent `Unhealthy` (no new dispatch); attempts stay `Running` and reclaimable until 30 s → then `AgentLost` and replacement per retry policy. Re-adoption (≤ 10 s) fits inside reclaim grace. If the agent does not return, replacement starts within a separate ≤ 30 s after reclaim expiry, conditional on healthy DB/leader and eligible spare capacity; task completion follows workload deadlines, not a ≤ 30 s total bound | None when hosts are re-adopted; unrecoverable loss follows task retry/checkpoint policy |
 | Task host crash, machine reboot, machine lost | Other tasks and shards | Attempt ends `AgentLost`/`TaskError` → platform or author retry; the new attempt resumes from the task's **last checkpoint** | The shard resumes from its last checkpoint (≤ 10 s of load lost); the gap is shown in the report |
 
 **Task hosts outlive the agent.** On Windows each host is in its own named job object (limits applied, no kill-on-close tied to the agent); on Linux each host has its own cgroup under the agent's delegated slice and the unit uses `KillMode=process`, so restarting the agent stops only the agent process. Each attempt directory holds `attempt.json` (pid, process start time, socket path, last acked seq). On start, the agent scans attempt directories, verifies pid + start time (guards against pid reuse), reconnects to the host's socket, and resumes forwarding from the last acked seq. Because hosts survive, agent binary updates do not need a drain; drain is only for machine maintenance or an incompatible agent ↔ task-host protocol migration.
