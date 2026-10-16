@@ -45,6 +45,21 @@ timeouts and aborts return 1. Ctrl+C requests an abort and allows cleanup.
 durations and secret-reference names use plain text, other types use JSON.
 All policies and variables validate before tasks start.
 
+`Wf.Engine.Core.FailureClassifier` reuses the existing `FailureCategory` contract:
+TaskError, Timeout, Aborted, AgentLost, ResourceLimit, ValidationError, Placement
+and PlatformError. Local execution and the SDK task host preserve explicit
+`TaskFailureException.Category`/nonretryable metadata before considering
+`TimeoutException` or actual timeout/abort facts. Bare/self cancellation without
+an engine cancellation cause is an author TaskError, not an assumed Aborted;
+ordinary author errors are not relabeled by concurrent cancellation. Unknown
+origins default to PlatformError; callers inside task execution supply TaskError.
+No exception-message or generic out-of-memory/argument-error guessing occurs.
+Attempt lifecycle status and existing author/platform retry budgets remain
+separate from category. Scripted typed signals exercise all eight categories
+through actual local and child SDK hosts; this does not implement every external
+fault producer. Gateway persistence of category and metrics views remain separate
+work; the classifier does not add a stored-category guarantee.
+
 Secret variables accept `secret://<store>/<name>` through the existing
 `SecretReference` contract and `.Secret("token", "secret://local/deploy-token")`.
 `SecretReference.Parse` requires a qualified reference; `Store` and `SecretName`
