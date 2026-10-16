@@ -181,6 +181,8 @@ public sealed class PlacementEngine
             throw new ArgumentException("Invalid placement request.", nameof(request));
         if (request.Policy?.Affinity is { Kind: AffinityKind.SameMachineAs, NodeKey: { } target } && target == request.NodeKey)
             throw new ArgumentException("SameMachineAs cannot reference the requesting node.", nameof(request));
+        if (request.Policy?.Selector is { } declared && (!declared.MachineIds.IsEmpty || declared.Count is not null))
+            throw new NotSupportedException("Machine ID and count selectors require the distributed selector runtime.");
         if (request.Policy?.Selector is { } selector &&
             (selector.Os?.Variable is not null || selector.Pool?.Variable is not null ||
              selector.Labels.Any(label => label.Value?.Variable is not null) || selector.Machines.Any(machine => machine.Variable is not null)))

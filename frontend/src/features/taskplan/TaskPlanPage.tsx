@@ -19,6 +19,9 @@ export function describePlacement(placement: PlanPlacement): string {
     )
   if (selected?.machines.length)
     parts.push(`Machines: ${selected.machines.map(selector).join(", ")}`)
+  if (selected?.machineIds?.length)
+    parts.push(`Machine IDs: ${selected.machineIds.join(", ")}`)
+  if (selected?.count != null) parts.push(`Machine count: ${selected.count}`)
   if (placement?.affinity && placement.affinity.kind !== "None")
     parts.push(
       `Affinity: ${placement.affinity.kind}${placement.affinity.nodeKey ? ` (${placement.affinity.nodeKey})` : ""}`

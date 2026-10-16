@@ -105,7 +105,8 @@ public sealed class VersionsTests
     [Fact]
     public void Task_plan_is_an_explicit_safe_projection_with_dependencies_policies_and_declared_actions()
     {
-        var placement = new PlacementPolicy(new(pool: new(variable: "pool")));
+        var machine = Guid.NewGuid();
+        var placement = new PlacementPolicy(new(pool: new(variable: "pool"), machineIds: [machine], count: 1));
         var policy = new ExecutionPolicy(TimeSpan.FromSeconds(12), new(2,
             new(BackoffKind.Exponential, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(8)),
             [FailureCategory.AgentLost]), false);
@@ -130,6 +131,10 @@ public sealed class VersionsTests
         Assert.Equal(policy.Retry.On, node.Tasks[0].Policy.Retry.On);
         Assert.False(node.Tasks[0].Policy.AutoRetry);
         Assert.Equal("pool", node.Tasks[0].Placement!.Selector!.Pool!.Variable);
+        Assert.Equal([machine], node.Tasks[0].Placement!.Selector!.MachineIds);
+        Assert.Equal(1, node.Tasks[0].Placement!.Selector!.Count);
+        Assert.Equal(machine, root.GetProperty("placement").GetProperty("selector").GetProperty("machineIds")[0].GetGuid());
+        Assert.Equal(1, root.GetProperty("placement").GetProperty("selector").GetProperty("count").GetInt32());
         Assert.Equal("SdkFunction", root.GetProperty("nodes")[0].GetProperty("tasks")[0].GetProperty("action").GetProperty("kind").GetString());
         foreach (var value in new[] { "metadata-secret", "default-secret", "private-input", "\"variables\"", "\"inputs\"" })
             Assert.DoesNotContain(value, root.GetRawText(), StringComparison.Ordinal);

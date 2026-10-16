@@ -286,4 +286,49 @@ describe("immutable task plan boundaries and states", () => {
       "OS: linux; Pool: variable(pool); Label: gpu; Label: region=west; Machines: variable(target); Affinity: SameMachineAs (prepare)"
     )
   })
+
+  it("decodes and renders immutable machine IDs and requested machine count", async () => {
+    const id = "019ed132-2f44-7000-8000-000000000003"
+    const placement = {
+      selector: {
+        os: { literal: "linux", variable: null },
+        pool: null,
+        labels: [],
+        machines: [],
+        machineIds: [id],
+        count: 1,
+      },
+      affinity: null,
+    }
+    respond({ ...plan, placement })
+    expect((await getVersionPlan(workflowId, versionId)).placement).toEqual(
+      placement
+    )
+    expect(describePlacement(placement)).toBe(
+      `OS: linux; Machine IDs: ${id}; Machine count: 1`
+    )
+  })
+
+  it.each([
+    { machineIds: ["invalid"], count: 1 },
+    { machineIds: ["00000000-0000-0000-0000-000000000000"], count: 1 },
+    { machineIds: [], count: 0 },
+    { machineIds: [], count: -1 },
+    { machineIds: [], count: 1.5 },
+  ])("rejects malformed machine IDs or counts: %j", async (fields) => {
+    respond({
+      ...plan,
+      placement: {
+        selector: {
+          os: null,
+          pool: null,
+          labels: [],
+          machines: [],
+          ...fields,
+        },
+        affinity: null,
+      },
+    })
+    await expect(getVersionPlan(workflowId, versionId)).rejects.toThrow()
+  })
 })

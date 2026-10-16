@@ -11,6 +11,17 @@ public sealed class PlacementEngineTests
     private static readonly string Sha = new('a', 64);
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void New_authoring_constraints_are_never_silently_ignored_before_runtime_support(bool machineIds)
+    {
+        var engine = new PlacementEngine();
+        var selector = machineIds ? new PlacementSelector(machineIds: [Agent(2).Id]) : new PlacementSelector(count: 2);
+        Assert.Throws<NotSupportedException>(() => engine.Propose(Request() with { Policy = new(selector) }, [Agent(1)]));
+        Assert.Equal(PlacementSnapshot.Empty, engine.Snapshot);
+    }
+
+    [Theory]
     [InlineData("unhealthy")]
     [InlineData("draining")]
     [InlineData("os")]

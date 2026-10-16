@@ -25,6 +25,14 @@ const placement = z
           z.object({ key: z.string(), value: selectorValue.nullable() })
         ),
         machines: z.array(selectorValue),
+        machineIds: z
+          .array(
+            z
+              .uuid()
+              .refine((id) => id !== "00000000-0000-0000-0000-000000000000")
+          )
+          .optional(),
+        count: z.int().positive().nullable().optional(),
       })
       .nullable(),
     affinity: z

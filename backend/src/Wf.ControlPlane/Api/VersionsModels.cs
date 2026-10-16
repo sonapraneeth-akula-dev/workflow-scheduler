@@ -88,12 +88,14 @@ public sealed record TaskPlanTask(string Key, TaskAction? Action, string? Secret
     FailurePolicy Failure, TaskPlanExecutionPolicy Policy, TaskPlanPlacement? Placement);
 public sealed record TaskPlanExecutionPolicy(TimeSpan AttemptTimeout, TaskPlanRetry Retry, bool AutoRetry);
 public sealed record TaskPlanRetry(int Retries, BackoffPolicy Backoff, FailureCategory[] On);
-public sealed record TaskPlanSelector(SelectorValue? Os, SelectorValue? Pool, LabelSelector[] Labels, SelectorValue[] Machines);
+public sealed record TaskPlanSelector(SelectorValue? Os, SelectorValue? Pool, LabelSelector[] Labels,
+    SelectorValue[] Machines, Guid[] MachineIds, int? Count);
 public sealed record TaskPlanPlacement(TaskPlanSelector? Selector, PlacementAffinity? Affinity)
 {
     public static TaskPlanPlacement? From(PlacementPolicy? placement) => placement is null ? null :
         new(placement.Selector is not { } selector ? null :
-            new(selector.Os, selector.Pool, selector.Labels.ToArray(), selector.Machines.ToArray()), placement.Affinity);
+            new(selector.Os, selector.Pool, selector.Labels.ToArray(), selector.Machines.ToArray(),
+                selector.MachineIds.ToArray(), selector.Count), placement.Affinity);
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, UseStringEnumConverter = true)]

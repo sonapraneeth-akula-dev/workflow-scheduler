@@ -905,6 +905,18 @@ w.Variables(v => v.StringList("machines", ["worker-a", "worker-b"]))
 
 `Os.Windows/Linux`, `Machines.Pool`, `Machines.Label` (presence or exact value)
 and `Machines.Named` compose with AND; names within one `Named` are alternatives.
+`Machines.Ids(uuid1, uuid2)` declares immutable agent IDs instead of names;
+`Machines.Count(2)` declares the requested number of machines. Compose them
+with OS, pool or label constraints in the same `RunsOn` call. IDs must be
+non-empty UUIDs; names and IDs cannot be mixed, counts must be positive and
+cannot exceed an explicit ID set. Repeated IDs are deduplicated. A label-based
+selector can declare a count without enumerating IDs. The whole selector,
+including IDs/count, follows the same innermost-wins rule and appears in the
+manifest and historical Task Plan API/UI. These are authoring contracts;
+availability validation, distributed count enforcement and exclusive
+reservation follow their respective selector/reservation tasks. Distributed
+placement currently rejects ID/count selectors explicitly instead of silently
+ignoring a constraint; legacy name/label/OS placement remains available.
 Selector callbacks build symbolic metadata once. Describing never reads run
 variables or invokes task delegates. Effective task selectors resolve from bound
 string/enum variables at run start; machine names also accept string lists.

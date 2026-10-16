@@ -66,7 +66,7 @@ public static class PlacementResolver
             return new(new PlacementSelector(Scalar(selector.Os), Scalar(selector.Pool),
                 selector.Labels.Select(label => new LabelSelector(label.Key, Scalar(label.Value))).ToImmutableArray(),
                 selector.Machines.SelectMany(machine => Values(machine, true)).Select(value => new SelectorValue(value))
-                    .ToImmutableArray()), policy.Affinity);
+                    .ToImmutableArray(), selector.MachineIds, selector.Count), policy.Affinity);
 
             SelectorValue? Scalar(SelectorValue? value) => value is null ? null : new(Values(value, false).Single());
 

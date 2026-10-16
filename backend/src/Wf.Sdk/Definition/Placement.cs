@@ -12,6 +12,15 @@ public static class Os
 
 public static class Machines
 {
+    public static PlacementSelector Ids(params Guid[] ids)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        if (ids.Length == 0) throw new ArgumentException("Ids needs at least one machine UUID.", nameof(ids));
+        return new(machineIds: ids.ToImmutableArray());
+    }
+
+    public static PlacementSelector Count(int count) => new(count: count);
+
     public static PlacementSelector Named(params SelectorValue[] names)
     {
         ArgumentNullException.ThrowIfNull(names);
@@ -29,6 +38,8 @@ public static class Machines
         SelectorValue? pool = null;
         var labels = ImmutableArray.CreateBuilder<LabelSelector>();
         var machines = ImmutableArray.CreateBuilder<SelectorValue>();
+        var ids = ImmutableArray.CreateBuilder<Guid>();
+        int? count = null;
         foreach (var selector in selectors)
         {
             ArgumentNullException.ThrowIfNull(selector);
@@ -38,12 +49,18 @@ public static class Machines
                 throw new ArgumentException("RunsOn cannot combine conflicting pool selectors.", nameof(selectors));
             if (!selector.Machines.IsEmpty && machines.Count != 0)
                 throw new ArgumentException("Combine machine alternatives in one Machines.Named call.", nameof(selectors));
+            if (!selector.MachineIds.IsEmpty && ids.Count != 0)
+                throw new ArgumentException("Combine machine IDs in one Machines.Ids call.", nameof(selectors));
+            if (selector.Count is not null && count is not null && selector.Count != count)
+                throw new ArgumentException("RunsOn cannot combine conflicting machine counts.", nameof(selectors));
             os ??= selector.Os;
             pool ??= selector.Pool;
             labels.AddRange(selector.Labels);
             machines.AddRange(selector.Machines);
+            ids.AddRange(selector.MachineIds);
+            count ??= selector.Count;
         }
-        return new(os, pool, labels.ToImmutable(), machines.ToImmutable());
+        return new(os, pool, labels.ToImmutable(), machines.ToImmutable(), ids.ToImmutable(), count);
     }
 }
 
