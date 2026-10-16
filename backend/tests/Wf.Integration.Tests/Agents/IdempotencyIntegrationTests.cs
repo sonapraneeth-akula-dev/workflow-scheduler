@@ -156,7 +156,7 @@ public sealed class IdempotencyIntegrationTests(DispatchDatabase database) : ICl
     [InlineData("outputs")]
     [InlineData("timestamp")]
     [InlineData("identity")]
-    public async Task Malformed_duplicate_is_rejected_before_the_terminal_attempt_short_circuit(string invalid)
+    public async Task Malformed_duplicate_metadata_is_rejected_and_invalid_outputs_cannot_change_terminal_evidence(string invalid)
     {
         using var registry = new AgentRegistry(database.DataSource, TimeProvider.System);
         var session = await registry.RegisterAsync(Hello(), Token);
@@ -175,7 +175,8 @@ public sealed class IdempotencyIntegrationTests(DispatchDatabase database) : ICl
             case "timestamp": malformed.TaskCompleted.At = null; break;
             case "identity": malformed.TaskCompleted.Task.Attempt = 0; break;
         }
-        await Assert.ThrowsAsync<ArgumentException>(() => Store.AcceptAsync(session, malformed, Token));
+        if (invalid == "outputs") await Store.AcceptAsync(session, malformed, Token);
+        else await Assert.ThrowsAsync<ArgumentException>(() => Store.AcceptAsync(session, malformed, Token));
         Assert.Equal(before, await Evidence(run));
     }
 

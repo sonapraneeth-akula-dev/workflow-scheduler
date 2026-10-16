@@ -6,6 +6,7 @@ import { LiveRunGraph } from "@/features/graph/RunGraph"
 import { AbortDialog } from "@/features/runs/AbortDialog"
 import { Timeline } from "@/features/runs/Timeline"
 import { ResourceCharts } from "@/features/runs/ResourceCharts"
+import { TaskOutputs } from "@/features/runs/TaskOutputs"
 import { ReportIndex } from "@/features/reports/ReportIndex"
 import { useRun } from "@/lib/live/useRun"
 
@@ -70,6 +71,12 @@ function RunDetail() {
                 Metrics
               </Tabs.Trigger>
               <Tabs.Trigger
+                value="outputs"
+                className="rounded border px-3 py-2 data-[state=active]:bg-muted"
+              >
+                Outputs
+              </Tabs.Trigger>
+              <Tabs.Trigger
                 value="reports"
                 className="rounded border px-3 py-2 data-[state=active]:bg-muted"
               >
@@ -91,6 +98,9 @@ function RunDetail() {
             </Tabs.Content>
             <Tabs.Content value="metrics" className="min-w-0">
               <ResourceCharts key={run.runId} runId={run.runId} />
+            </Tabs.Content>
+            <Tabs.Content value="outputs" className="min-w-0">
+              <TaskOutputs key={run.runId} runId={run.runId} />
             </Tabs.Content>
           </Tabs.Root>
         </>

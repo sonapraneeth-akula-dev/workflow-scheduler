@@ -1535,6 +1535,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{id}/outputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Structured JSON outputs of one exact committed task attempt, during or after its run. Fresh Run Viewer authorization. No ancestor/source fallback; null means no recorded outputs. Task output objects are limited to 65536 UTF-8 bytes; no errors, variables or capabilities are returned. */
+        get: {
+            parameters: {
+                query: {
+                    /** @description Exact stored node/task key; URI-encode as a query value. */
+                    taskKey: string;
+                    /** @description Exact attempt number, 1..32767. */
+                    attempt: number;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskOutputsResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs": {
         parameters: {
             query?: never;
@@ -3644,6 +3728,14 @@ export interface components {
             matches: components["schemas"]["TaskLogMatch"][];
             nextCursor: null | string;
         };
+        TaskOutputsResponse: {
+            /** Format: uuid */
+            runId: string;
+            taskKey: string;
+            /** Format: int32 */
+            attempt: number | string;
+            outputs: null | components["schemas"]["JsonElement"];
+        };
         TaskPlanExecutionPolicy: {
             attemptTimeout: string;
             retry: components["schemas"]["TaskPlanRetry"];
@@ -3675,6 +3767,9 @@ export interface components {
             pool: null | components["schemas"]["SelectorValue"];
             labels: components["schemas"]["LabelSelector"][];
             machines: components["schemas"]["SelectorValue"][];
+            machineIds: string[];
+            /** Format: int32 */
+            count: null | number | string;
         };
         TaskPlanTask: {
             key: string;

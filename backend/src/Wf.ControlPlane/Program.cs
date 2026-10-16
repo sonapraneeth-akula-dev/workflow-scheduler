@@ -56,6 +56,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, AbortRunJson.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, TaskLogsJsonContext.Default);
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.Contracts.Outputs.TaskOutputsJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, VersionsJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, VariablesJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.Contracts.Runs.RunJsonContext.Default);

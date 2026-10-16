@@ -17,6 +17,21 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
             ctx.Log("Executed actual SDK task delegate.");
         })
         .Task("fail", _ => throw new InvalidOperationException("fixture failure"))
+        .Task("outputs", ctx =>
+        {
+            ctx.Outputs["text"] = "<script>window.outputExecuted=true</script>";
+            ctx.Outputs["null"] = null;
+            ctx.Outputs["pid"] = Environment.ProcessId;
+        })
+        .Task("oversizedOutputs", ctx => ctx.Outputs["value"] = new string('x', 65536))
+        .Task("failedOutputs", ctx =>
+        {
+            ctx.Outputs["partial"] = ctx.Var<int>("amount");
+            ctx.Outputs["pid"] = Environment.ProcessId;
+            ctx.Outputs["text"] = "<script>window.outputExecuted=true</script>";
+            ctx.Outputs["null"] = null;
+            throw new InvalidOperationException("fixture failure with outputs");
+        })
         .Task("logs", async ctx =>
         {
             ctx.Outputs["pid"] = Environment.ProcessId;

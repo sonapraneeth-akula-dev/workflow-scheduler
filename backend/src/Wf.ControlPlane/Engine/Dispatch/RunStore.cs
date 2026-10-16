@@ -9,6 +9,7 @@ using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Events;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Runs;
+using Wf.Contracts.Outputs;
 using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Leadership;
 using Wf.Engine.Core;
@@ -264,6 +265,8 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
             ?? throw new ArgumentException("Task event requires a timestamp.", nameof(message));
         var taskKey = identity.TaskKey;
         var completed = message.TaskCompleted;
+        if (completed is not null && TaskOutputJson.Error(completed.OutputsJson.Memory) is { } outputError)
+            completed = TaskOutputJson.Reject(completed, outputError);
         if (completed is not null) ResultDeduplicator.Validate(completed);
         var lease = CaptureLease();
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
@@ -290,6 +293,22 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
             if (ResultDeduplicator.IsDuplicate((ExecutionStatus)status, completed is not null))
                 return;
         }
+        if (completed is { OutputsJson.Length: > 0 })
+        {
+            // PostgreSQL jsonb rejects some otherwise valid JSON (NUL, invalid surrogates, out-of-range numbers).
+            // Validate before recording success; roll back only this probe, never an accepted attempt transition.
+            await transaction.SaveAsync("task_outputs", cancellationToken);
+            try
+            {
+                await ExecuteAsync(connection, "SELECT $1::jsonb", cancellationToken, completed.OutputsJson.ToStringUtf8());
+                await transaction.ReleaseAsync("task_outputs", cancellationToken);
+            }
+            catch (PostgresException error) when (error.SqlState is "22P02" or "22P05" or "22003")
+            {
+                await transaction.RollbackAsync("task_outputs", cancellationToken);
+                completed = TaskOutputJson.Reject(completed, "Task outputs contain JSON values unsupported by output storage.");
+            }
+        }
         var target = completed?.Outcome switch
         {
             null => ExecutionStatus.Running,
@@ -313,10 +332,11 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
             )
             UPDATE task_attempts SET status=$4,
                 started_at=CASE WHEN $4=3 THEN $5 ELSE started_at END,
-                ended_at=CASE WHEN $4>=5 THEN $5 ELSE ended_at END,error=$6
+                ended_at=CASE WHEN $4>=5 THEN $5 ELSE ended_at END,error=$6,outputs=$7::json
             WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 AND attempt=$3
             """, cancellationToken, runId, taskKey, identity.Attempt, (short)target, at,
-            (object?)completed?.Error?.Message ?? DBNull.Value);
+            (object?)completed?.Error?.Message ?? DBNull.Value,
+            completed is { OutputsJson.Length: > 0 } ? completed.OutputsJson.ToStringUtf8() : DBNull.Value);
         if (completed is { Outcome: TaskOutcome.Succeeded, OutputsJson.Length: > 0 })
             await ExecuteAsync(connection, """
                 UPDATE node_runs SET outputs=COALESCE(outputs,'{}'::jsonb) || $3::jsonb

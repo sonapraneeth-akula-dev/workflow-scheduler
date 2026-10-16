@@ -13,6 +13,7 @@ using Microsoft.Extensions.Logging;
 using Wf.Agent.Packages;
 using Wf.Agent.Secrets;
 using Wf.Agent.Sampling;
+using Wf.Agent.Execution;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Host.V1;
 
@@ -194,6 +195,7 @@ public sealed class TaskHostPool : IAsyncDisposable
                 result.Outcome == TaskOutcome.Unspecified || !System.Enum.IsDefined(result.Outcome))
                 throw new InvalidDataException("Task host returned an invalid attempt result.");
             resourceTracking?.Dispose();
+            result = OutputsGuard.Apply(result, host.Masker);
             journalResult?.Invoke(result);
             using var acknowledgement = host.Client.AcknowledgeAsync(new AcknowledgeRequest { Task = dispatch.Task },
                 deadline: DateTime.UtcNow.AddSeconds(5));

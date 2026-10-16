@@ -3,12 +3,13 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Wf.Contracts.Definition;
+using Wf.Contracts.Outputs;
 
 namespace Wf.Sdk;
 
 public sealed class NodeOutputs
 {
-    public const int MaxBytes = 64 * 1024;
+    public const int MaxBytes = TaskOutputJson.MaxBytes;
     private readonly string node;
     private readonly object sync = new();
     private ImmutableDictionary<string, JsonElement> values = ImmutableDictionary<string, JsonElement>.Empty;

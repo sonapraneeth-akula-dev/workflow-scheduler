@@ -1,8 +1,8 @@
 using System.Text;
-using System.Text.Json;
 using Wf.Contracts;
 using Wf.Contracts.Agent.V1;
 using Wf.Engine.Core.StateMachine;
+using Wf.Contracts.Outputs;
 
 namespace Wf.Engine.Core.Results;
 
@@ -33,16 +33,9 @@ public static class ResultDeduplicator
         try { _ = completed.At.ToDateTimeOffset(); }
         catch (InvalidOperationException exception) { throw new ArgumentException("Invalid result timestamp.", nameof(completed), exception); }
         if (completed.Outcome == TaskOutcome.Unspecified || !Enum.IsDefined(completed.Outcome) ||
-            completed.OutputsJson.Length > 64 * 1024 ||
             Encoding.UTF8.GetByteCount(completed.Error?.Message ?? "") > 4096)
             throw new ArgumentException("Task result contains an invalid outcome or oversized payload.", nameof(completed));
-        if (completed.OutputsJson.Length == 0) return;
-        try
-        {
-            using var outputs = JsonDocument.Parse(completed.OutputsJson.Memory);
-            if (outputs.RootElement.ValueKind != JsonValueKind.Object)
-                throw new ArgumentException("Task outputs must be a JSON object.", nameof(completed));
-        }
-        catch (JsonException exception) { throw new ArgumentException("Invalid task output JSON.", nameof(completed), exception); }
+        if (TaskOutputJson.Error(completed.OutputsJson.Memory) is { } error)
+            throw new ArgumentException(error, nameof(completed));
     }
 }

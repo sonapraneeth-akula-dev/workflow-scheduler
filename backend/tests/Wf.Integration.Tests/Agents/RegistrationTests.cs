@@ -364,7 +364,11 @@ public class AgentDatabase : IAsyncLifetime
             await create.ExecuteNonQueryAsync(token);
         }
         DataSource = NpgsqlDataSource.Create(connectionString);
-        foreach (var name in Migrations)
+        var migrations = Migrations;
+        // Current RunStore writes per-attempt outputs, including in fixtures using historical schema subsets.
+        if (migrations.Contains("0006_dispatch_outbox.sql") && !migrations.Contains("0027_task_outputs.sql"))
+            migrations = [.. migrations, "0027_task_outputs.sql"];
+        foreach (var name in migrations)
         {
             var migration = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Migrations", name), token);
             await using var command = DataSource.CreateCommand(migration);
