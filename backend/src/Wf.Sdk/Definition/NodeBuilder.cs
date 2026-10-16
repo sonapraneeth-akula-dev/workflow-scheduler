@@ -12,6 +12,7 @@ public sealed class NodeBuilder
     private NodeExecutionMode mode;
     private int? maxParallel;
     private FailurePolicy failure;
+    private WhenUnavailable whenUnavailable;
     private readonly PolicyBuilder policy = new();
     internal string Key { get; }
     internal IEnumerable<KeyValuePair<string, Func<TaskContext, Task>>> Handlers => handlers;
@@ -57,6 +58,12 @@ public sealed class NodeBuilder
     public NodeBuilder RunsOn(params PlacementSelector[] selectors) { policy.RunsOn(selectors); return this; }
     public NodeBuilder RunsOn(Func<PlacementVariables, PlacementSelector> configure) { policy.RunsOn(configure); return this; }
     public NodeBuilder Affinity(PlacementAffinity value) { policy.Affinity(value); return this; }
+    public NodeBuilder WhenUnavailable(WhenUnavailable value)
+    {
+        if (!Enum.IsDefined(value)) throw new ArgumentOutOfRangeException(nameof(value));
+        whenUnavailable = value;
+        return this;
+    }
 
     public NodeBuilder Task(string key, Func<TaskContext, Task> execute, FailurePolicy failure = FailurePolicy.Hard)
         => Task(key, execute, null, failure);
@@ -127,6 +134,6 @@ public sealed class NodeBuilder
         return new(Key, dependencies.ToImmutableArray(), tasks.Select(t =>
             new TaskDefinition(t.Key, t.Failure, PolicyResolver.Resolve(defaults, overrides, t.Policy),
                 PlacementPolicy.Inherit(nodePlacement, t.Policy.Placement), t.HttpOperation, t.Action)).ToImmutableArray(),
-            mode, maxParallel, failure, inputs.ToImmutableArray(), overrides.Timeout, nodePlacement);
+            mode, maxParallel, failure, inputs.ToImmutableArray(), overrides.Timeout, nodePlacement, whenUnavailable);
     }
 }

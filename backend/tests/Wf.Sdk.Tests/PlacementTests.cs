@@ -10,6 +10,25 @@ namespace Wf.Sdk.Tests;
 public sealed class PlacementTests
 {
     [Fact]
+    public void Per_node_reservation_policy_survives_manifest_roundtrip_and_selector_resolution()
+    {
+        var workflow = Workflow.Define("reservation-policy", "1.0.0", w => w.Type("test")
+            .RunsOn(Os.Linux)
+            .Node("queued", n => n.Task("work", _ => { }))
+            .Node("rejected", n => n.WhenUnavailable(WhenUnavailable.Reject).Task("work", _ => { })));
+        var bytes = ManifestWriter.WriteUtf8(workflow);
+        var manifest = JsonSerializer.Deserialize(bytes, WorkflowManifestJsonContext.Default.WorkflowManifest)!;
+        Assert.Equal(WhenUnavailable.Queue, manifest.Nodes[0].WhenUnavailable);
+        Assert.Equal(WhenUnavailable.Reject, manifest.Nodes[1].WhenUnavailable);
+        Assert.Equal(WhenUnavailable.Reject,
+            PlacementResolver.Resolve(manifest.Nodes, ImmutableDictionary<string, object>.Empty)[1].WhenUnavailable);
+        using var json = JsonDocument.Parse(bytes);
+        Assert.False(json.RootElement.GetProperty("nodes")[0].TryGetProperty("whenUnavailable", out _));
+        Assert.Equal("Reject", json.RootElement.GetProperty("nodes")[1].GetProperty("whenUnavailable").GetString());
+        Assert.Equal(bytes, ManifestWriter.WriteUtf8(workflow));
+    }
+
+    [Fact]
     public void Innermost_selector_replaces_whole_selector_and_affinity_inherits_independently()
     {
         var workflow = Workflow.Define("placement", "1", w => w.Type("test")

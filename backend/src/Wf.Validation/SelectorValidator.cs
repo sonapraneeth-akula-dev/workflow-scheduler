@@ -92,7 +92,8 @@ public static class SelectorValidator
             return new NodeDefinition(node.Key, node.Dependencies,
                 node.Tasks.Select(task => new TaskDefinition(task.Key, task.Failure, task.Policy,
                     PlacementPolicy.Inherit(placement, task.Placement), task.HttpOperation, task.Action)).ToImmutableArray(),
-                node.Mode, node.MaxParallel, node.Failure, node.Inputs, node.Timeout);
+                node.Mode, node.MaxParallel, node.Failure, node.Inputs, node.Timeout,
+                whenUnavailable: node.WhenUnavailable);
         }).ToImmutableArray();
     }
 }

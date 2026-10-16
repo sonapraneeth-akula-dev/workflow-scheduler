@@ -1030,9 +1030,27 @@ Every maintenance pass reads durable owners under the current leader fence, so
 a replacement leader adopts and renews existing reservation IDs and machine
 epochs rather than allocating replacements. Pending physical fences also
 survive engine crashes unchanged and never become implicit releases.
-Workflow-facing reservation policies remain their following tasks.
-Reservation allocation is still an explicit engine API;
-this does not claim an autonomous hosted DAG execution loop.
+Nodes declare shortage policy with
+`.WhenUnavailable(WhenUnavailable.Queue)` (the default) or
+`.WhenUnavailable(WhenUnavailable.Reject)`. `ReservationManager.RequestAsync`
+accepts that node policy and returns `Reserved`, `Queued` with its current
+one-based position, or `Rejected`. Reject atomically cancels unfinished state
+and fails the run with durable `FailureReason = "ReservationUnavailable"`;
+database failures roll back events, snapshots and queue changes together.
+Existing reservation release/fencing still applies to any machines that run owns.
+`ReserveAsync` remains the lower-level throw-on-shortage API.
+
+Waiting intents persist their canonical selector, exact count, original lifetime
+and FIFO identity. Equivalent retries retain their place; changing a queued
+request's selector, count, lifetime or policy is rejected. A hosted one-second
+leader-fenced sweep grants the oldest live request automatically, including
+after leader replacement, and removes aborted/ended owners. FIFO is global and
+strict: an unsatisfied head blocks later requests even if a later selector fits
+currently free machines; neither request policy nor `ReserveAsync` can jump it.
+The lease lifetime starts when machines are granted, not while waiting, and
+pending physical fences continue to block grants. API/live UI queue details
+remain the following task. Initial reservation requests are still explicit
+engine calls; this does not claim an autonomous hosted DAG execution loop.
 
 ## Blob storage
 

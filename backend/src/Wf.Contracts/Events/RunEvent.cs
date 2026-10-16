@@ -18,4 +18,6 @@ public sealed record RunEvent(Guid RunId, long Sequence, DateTimeOffset At, Even
     public ExecutionStatus? AttemptStatus { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public FailureCategory? FailureCategory { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FailureReason { get; init; }
 }

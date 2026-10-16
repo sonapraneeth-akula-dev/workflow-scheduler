@@ -330,7 +330,12 @@ public sealed partial class ReservationManagerTests(ReservationDatabase database
             await Assert.ThrowsAsync<NotLeaderException>(() =>
                 new ReservationManager(database.DataSource, fencedStore, clock)
                     .ReserveAsync(run.Snapshot.RunId, "work", 1, new(pool: Pool(fleet)), Lifetime, Token));
+            var fencedManager = new ReservationManager(database.DataSource, fencedStore, clock);
+            await Assert.ThrowsAsync<NotLeaderException>(() => fencedManager.RequestAsync(run.Snapshot.RunId,
+                "work", 1, new(pool: Pool(fleet)), Lifetime, cancellationToken: Token));
+            await Assert.ThrowsAsync<NotLeaderException>(() => fencedManager.SweepQueueAsync(Token));
             Assert.Equal(0L, await Count(run.Snapshot.RunId));
+            Assert.Equal(0L, await Scalar("SELECT count(*) FROM reservation_queue WHERE run_id=$1", run.Snapshot.RunId));
         }
         finally { await Execute("DELETE FROM leases WHERE name='engine'"); }
     }

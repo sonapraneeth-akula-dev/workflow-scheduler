@@ -94,6 +94,7 @@ builder.Services.AddSingleton<GroupCommitAppender>();
 builder.Services.AddSingleton<PlacementEngine>();
 builder.Services.AddSingleton<Dispatcher>();
 builder.Services.AddSingleton<Wf.ControlPlane.Engine.Reservations.ReservationManager>();
+builder.Services.AddHostedService<Wf.ControlPlane.Engine.Reservations.ReservationQueueService>();
 builder.Services.AddSingleton<Wf.ControlPlane.Engine.Reservations.ReservationLeaseService>();
 builder.Services.AddHostedService<Wf.ControlPlane.Engine.Reservations.ReservationLeaseService>(
     services => services.GetRequiredService<Wf.ControlPlane.Engine.Reservations.ReservationLeaseService>());

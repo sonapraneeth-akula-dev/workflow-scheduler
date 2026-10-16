@@ -6,6 +6,18 @@ namespace Wf.Sdk.Tests;
 public sealed class WorkflowBuilderTests
 {
     [Fact]
+    public void Reservation_shortage_policy_is_per_node_and_defaults_to_queue()
+    {
+        var definition = Workflow.Define("sample", "1.0.0", w => w.Type("test")
+            .Node("queued", n => n.Task("work", _ => { }))
+            .Node("rejected", n => n.WhenUnavailable(WhenUnavailable.Reject).Task("work", _ => { })));
+        Assert.Equal(WhenUnavailable.Queue, definition.Nodes[0].WhenUnavailable);
+        Assert.Equal(WhenUnavailable.Reject, definition.Nodes[1].WhenUnavailable);
+        Assert.Throws<ArgumentOutOfRangeException>(() => Workflow.Define("sample", "1.0.0", w => w.Type("test")
+            .Node("bad", n => n.WhenUnavailable((WhenUnavailable)42))));
+    }
+
+    [Fact]
     public void BuildsOrderedNodesTasksAndDependenciesWithoutExecutingTasks()
     {
         var executed = false;

@@ -14,6 +14,7 @@ public sealed record RunSnapshot(Guid RunId, RunStatus Status, long LastSequence
     AbortRecord? Abort = null, DateTimeOffset? EndedAt = null, ImmutableArray<string> AbortTargets = default)
 {
     public RunMetrics? Metrics { get; init; }
+    public string? FailureReason { get; init; }
 }
 
 public sealed class RunState
@@ -49,6 +50,9 @@ public sealed class RunState
         ArgumentNullException.ThrowIfNull(snapshot.Nodes);
         ArgumentNullException.ThrowIfNull(snapshot.Tasks);
         ArgumentNullException.ThrowIfNull(snapshot.Variables);
+        if (snapshot.FailureReason is { } failureReason &&
+            (snapshot.Status != RunStatus.Failed || string.IsNullOrWhiteSpace(failureReason) || failureReason.Length > 500))
+            throw new ArgumentException("A failure reason requires a failed run and 1-500 nonblank characters.", nameof(snapshot));
         if ((snapshot.Abort is not null && snapshot.Status is not (RunStatus.Aborting or RunStatus.Aborted)) ||
             (snapshot.EndedAt is { } endedAt && (endedAt.Offset != TimeSpan.Zero ||
                 !TransitionTable.IsTerminal(snapshot.Status) || endedAt < snapshot.Abort?.At)) ||
@@ -111,7 +115,8 @@ public sealed class RunState
                     ? Snapshot.Tasks.Where(p => p.Value is ExecutionStatus.Dispatched or ExecutionStatus.Running or ExecutionStatus.Retrying)
                         .Select(p => p.Key).Order(StringComparer.Ordinal).ToImmutableArray()
                     : Snapshot.AbortTargets,
-                EndedAt = TransitionTable.IsTerminal((RunStatus)@event.State) ? @event.At : null
+                EndedAt = TransitionTable.IsTerminal((RunStatus)@event.State) ? @event.At : null,
+                FailureReason = @event.FailureReason ?? Snapshot.FailureReason
             },
             EventEntity.Node => Snapshot with
                 { Nodes = Snapshot.Nodes.SetItem(@event.Key!, (ExecutionStatus)@event.State), LastSequence = @event.Sequence },
@@ -129,6 +134,10 @@ public sealed class RunState
             Reject($"Run '{Snapshot.RunId}' expected event sequence {Snapshot.LastSequence + 1} for the same run.");
         if (@event.At.Offset != TimeSpan.Zero)
             Reject("Event timestamps must use UTC.");
+        if (@event.FailureReason is { } reason &&
+            (string.IsNullOrWhiteSpace(reason) || reason.Length > 500 ||
+             @event.Entity != EventEntity.Run || (RunStatus)@event.State != RunStatus.Failed))
+            Reject("A failure reason requires a failed run and 1-500 nonblank characters.");
         if (@event.FailureCategory is { } category && (!Enum.IsDefined(category) ||
             !(@event.Entity switch
             {

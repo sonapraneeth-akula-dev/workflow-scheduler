@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 namespace Wf.Contracts.Definition;
 
 public enum NodeExecutionMode { Series, Parallel }
+public enum WhenUnavailable { Queue, Reject }
 
 public sealed record TaskDefinition
 {
@@ -44,11 +45,13 @@ public sealed record NodeDefinition
     public TimeSpan? Timeout { get; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public PlacementPolicy? Placement { get; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public WhenUnavailable WhenUnavailable { get; }
 
     public NodeDefinition(string key, ImmutableArray<DependencyDefinition> dependencies, ImmutableArray<TaskDefinition> tasks,
         NodeExecutionMode mode = NodeExecutionMode.Series, int? maxParallel = null,
         FailurePolicy failure = FailurePolicy.Hard, ImmutableArray<InputBinding> inputs = default,
-        TimeSpan? timeout = null, PlacementPolicy? placement = null)
+        TimeSpan? timeout = null, PlacementPolicy? placement = null, WhenUnavailable whenUnavailable = WhenUnavailable.Queue)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         if (dependencies.IsDefault || tasks.IsDefault)
@@ -63,6 +66,8 @@ public sealed record NodeDefinition
             throw new ArgumentException("Series nodes cannot specify maxParallel.", nameof(maxParallel));
         if (timeout <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(timeout), "Node timeout must be positive.");
+        if (!Enum.IsDefined(whenUnavailable))
+            throw new ArgumentOutOfRangeException(nameof(whenUnavailable));
         Key = key;
         Dependencies = dependencies;
         Tasks = tasks;
@@ -72,5 +77,6 @@ public sealed record NodeDefinition
         Inputs = inputs.IsDefault ? [] : inputs;
         Timeout = timeout;
         Placement = placement;
+        WhenUnavailable = whenUnavailable;
     }
 }

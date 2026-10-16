@@ -18,6 +18,84 @@ public sealed class ReservationFailoverTests(ITestOutputHelper output)
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
+    [Fact(Timeout = 100_000)]
+    public async Task Actual_hosted_queue_survives_leader_kill_and_grants_original_FIFO_without_polling_requests()
+    {
+        await using var database = await ChaosDatabase.StartAsync(Token, requireCommitTimestamps: false);
+        var workflow = await SeedAsync(database.Source, Token, schedules: 0);
+        await using var versionQuery = database.Source.CreateCommand("SELECT id FROM workflow_versions");
+        var version = (Guid)(await versionQuery.ExecuteScalarAsync(Token))!;
+        var root = Path.Combine(Path.GetTempPath(), "wf-queue-chaos-" + Guid.NewGuid().ToString("N")[..12]);
+        Directory.CreateDirectory(root);
+        var engines = new List<EngineProcess>();
+        var completed = false;
+        try
+        {
+            engines.Add(EngineProcess.Start(database.ConnectionString, root, 0));
+            engines.Add(EngineProcess.Start(database.ConnectionString, root, 1));
+            var firstLeader = await Leader(engines);
+            var store = new RunStore(database.Source, NullLogger<RunStore>.Instance);
+            var manager = new ReservationManager(database.Source, store, TimeProvider.System);
+            var pool = Guid.NewGuid().ToString("N");
+            var requests = new List<Guid>();
+            foreach (var _ in Enumerable.Range(0, 2))
+            {
+                var run = new RunState(Guid.CreateVersion7(), [new("work", [], [new("task")])],
+                    new("release", ImmutableSortedDictionary<string, string>.Empty), Assert.Fail);
+                await store.CreateAsync(run, workflow, version, DateTimeOffset.UtcNow.AddHours(1), Token);
+                await store.AppendAsync(run, EventEntity.Run, null, (int)RunStatus.Running, DateTimeOffset.UtcNow, Token);
+                requests.Add(run.Snapshot.RunId);
+                Assert.Equal(requests.Count, (await manager.RequestAsync(run.Snapshot.RunId, "work", 1,
+                    new(pool: pool), TimeSpan.FromMinutes(2), cancellationToken: Token)).Position);
+            }
+            var before = await Queue();
+            Assert.Equal(requests, before.Select(row => row.Run));
+            output.WriteLine($"Hard-killing actual engine leader {firstLeader.Id} with two durable FIFO waiters.");
+            await firstLeader.KillAsync();
+            Assert.NotEqual(firstLeader.Id, (await Leader(engines)).Id);
+            Assert.Equal(before, await Queue());
+            using var registry = new AgentRegistry(database.Source, TimeProvider.System);
+            var id = Guid.NewGuid();
+            var session = await registry.RegisterAsync(new Hello
+            {
+                Id = id.ToString(), Name = "queue-chaos-" + id.ToString("N"), Pool = pool, Os = "linux",
+                Arch = "x64", Cores = 4, RamMb = 8192, MaxTasks = 1, Version = "1.0.0", ProtocolVersion = 1
+            }, Token);
+            await Wait(async () => (await Read(database.Source)).Count == 1, engines);
+            Assert.Equal(requests[0], Assert.Single(await Read(database.Source)).RunId);
+            Assert.Equal(requests[1], Assert.Single(await Queue()).Run);
+            using var leases = new ReservationLeaseService(database.Source, store, TimeProvider.System,
+                NullLogger<ReservationLeaseService>.Instance);
+            await leases.ReleaseAsync(requests[0], "work", "Grant next FIFO waiter", Token);
+            await leases.ConfirmAsync(session, Assert.Single(await leases.PendingAsync(session, Token)).ReservationEpoch, Token);
+            await Wait(async () => (await Read(database.Source)).Any(row => row.RunId == requests[1]), engines);
+            Assert.Empty(await Queue());
+            await leases.ReleaseAsync(requests[1], "work", "Hosted FIFO proof complete", Token);
+            await leases.ConfirmAsync(session, Assert.Single(await leases.PendingAsync(session, Token)).ReservationEpoch, Token);
+            Assert.Empty(await Read(database.Source));
+            output.WriteLine("Replacement production engine granted original FIFO through physical-ACK database boundary; zero leaked reservations or queue rows.");
+            completed = true;
+        }
+        finally
+        {
+            foreach (var engine in engines) await engine.DisposeAsync();
+            if (!completed)
+                foreach (var engine in engines)
+                    foreach (var path in new[] { engine.LogPath, engine.LogPath + ".stderr" })
+                        if (File.Exists(path)) output.WriteLine(await File.ReadAllTextAsync(path, CancellationToken.None));
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+
+        async Task<List<(long Position, Guid Run)>> Queue()
+        {
+            await using var command = database.Source.CreateCommand("SELECT position,run_id FROM reservation_queue ORDER BY position");
+            await using var reader = await command.ExecuteReaderAsync(Token);
+            var rows = new List<(long, Guid)>();
+            while (await reader.ReadAsync(Token)) rows.Add((reader.GetInt64(0), reader.GetGuid(1)));
+            return rows;
+        }
+    }
+
     [Theory(Timeout = 150_000)]
     [InlineData(false)]
     [InlineData(true)]
