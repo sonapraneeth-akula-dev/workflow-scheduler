@@ -116,6 +116,87 @@ export const versionDiffSchema = z
   })
 export type VersionDiff = z.infer<typeof versionDiffSchema>
 
+const cloneKey = key.refine(
+  (value) => value.trim().length > 0 && [...value].length <= 128
+)
+export const cloneRequestSchema = z
+  .object({
+    newName: cloneKey,
+    targetType: z
+      .string()
+      .refine(
+        (value) =>
+          z.tuple([cloneKey, cloneKey]).safeParse(value.split("/")).success
+      ),
+  })
+  .strict()
+export type CloneRequest = z.infer<typeof cloneRequestSchema>
+
+export async function cloneWorkflow(
+  identity: string,
+  version: string,
+  request: CloneRequest
+): Promise<Blob> {
+  versionId.parse(version)
+  const body = cloneRequestSchema.parse(request)
+  if (`${body.targetType}/${body.newName}` === identity) {
+    throw new Error("The clone target must differ from the source workflow.")
+  }
+  const result = await publicApi.POST(
+    "/api/v1/workflows/{team}/{type}/{workflow}/versions/{version}/clone",
+    {
+      params: { path: { ...path(identity), version } },
+      body,
+      parseAs: "stream",
+      redirect: "error",
+    }
+  )
+  if (!result.response.ok) {
+    throw new ApiError(result.response, result.error)
+  }
+  const limit = 2 * 1024 * 1024
+  const length = result.response.headers.get("Content-Length")
+  if (
+    result.response.headers.get("Content-Type")?.split(";")[0] !==
+      "application/zip" ||
+    !result.response.headers
+      .get("Content-Disposition")
+      ?.startsWith("attachment;") ||
+    !result.response.headers
+      .get("Cache-Control")
+      ?.split(",")
+      .some((value) => value.trim() === "no-store") ||
+    (length !== null && (!/^[0-9]+$/.test(length) || Number(length) > limit)) ||
+    !result.data
+  ) {
+    await result.data?.cancel()
+    throw new Error("The API did not return a bounded no-store ZIP attachment.")
+  }
+  const reader = result.data.getReader()
+  const chunks: Uint8Array<ArrayBuffer>[] = []
+  let size = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        break
+      }
+      size += value.byteLength
+      if (size > limit) {
+        throw new Error("Clone download exceeds its size limit.")
+      }
+      chunks.push(new Uint8Array(value))
+    }
+    if (size === 0 || (length !== null && size !== Number(length))) {
+      throw new Error("Clone download was empty or incomplete.")
+    }
+    return new Blob(chunks, { type: "application/zip" })
+  } finally {
+    await reader.cancel().catch(() => undefined)
+    reader.releaseLock()
+  }
+}
+
 function path(identity: string) {
   const [team, type, workflow] = z
     .tuple([key, key, key])

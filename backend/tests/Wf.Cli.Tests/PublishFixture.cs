@@ -123,7 +123,7 @@ internal sealed class PublishHttpServer : IAsyncDisposable
 {
     internal sealed record Request(string Method, string Path, Dictionary<string, string> Headers, byte[] Body);
     internal sealed record Reply(int Status, string Body = "{}", bool Drop = false, string? Location = null,
-        string ContentType = "application/json");
+        string ContentType = "application/json", byte[]? Bytes = null, string ExtraHeaders = "");
     private readonly TcpListener listener = new(IPAddress.Loopback, 0);
     private readonly CancellationTokenSource stop = new();
     private readonly Task loop;
@@ -170,12 +170,19 @@ internal sealed class PublishHttpServer : IAsyncDisposable
                 Requests.Enqueue(request);
                 var response = handler(request);
                 if (response.Drop) continue;
-                var bytes = Encoding.UTF8.GetBytes(response.Body);
+                var bytes = response.Bytes ?? Encoding.UTF8.GetBytes(response.Body);
                 var head = $"HTTP/1.1 {response.Status} Test\r\nContent-Length: {bytes.Length}\r\n" +
                     $"Content-Type: {response.ContentType}\r\nConnection: close\r\n" +
-                    (response.Location is null ? "" : $"Location: {response.Location}\r\n") + "\r\n";
-                await stream.WriteAsync(Encoding.ASCII.GetBytes(head), stop.Token);
-                await stream.WriteAsync(bytes, stop.Token);
+                    (response.Location is null ? "" : $"Location: {response.Location}\r\n") + response.ExtraHeaders + "\r\n";
+                try
+                {
+                    await stream.WriteAsync(Encoding.ASCII.GetBytes(head), stop.Token);
+                    await stream.WriteAsync(bytes, stop.Token);
+                }
+                catch (IOException)
+                {
+                    // A bounded-download client can reject headers without draining the attachment.
+                }
             }
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested) { }

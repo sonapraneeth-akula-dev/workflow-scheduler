@@ -5,6 +5,7 @@ import { ErrorNotice } from "@/components/ErrorNotice"
 import { Button } from "@/components/ui/button"
 import { getVersions } from "./api"
 import { VersionComparison } from "./VersionComparison"
+import { CloneDialog } from "./CloneDialog"
 
 export function VersionsTab({
   workflowId,
@@ -56,6 +57,9 @@ export function VersionsTab({
         </Button>
       </div>
       <p className="break-words">{workflowId}</p>
+      {pinnedVersionId ? (
+        <CloneDialog workflowId={workflowId} versionId={pinnedVersionId} />
+      ) : null}
       <p>
         Newest registration first. Times shown in UTC; active and latest may
         differ after rollback. History and comparison are read-only.
@@ -150,6 +154,7 @@ export function VersionsTab({
                         "Git author / Registered by",
                         "Commit / SDK",
                         "Change note",
+                        "Scaffold",
                       ].map((title) => (
                         <th key={title} scope="col" className="p-3">
                           {title}
@@ -197,6 +202,16 @@ export function VersionsTab({
                         </td>
                         <td className="max-w-96 p-3 break-words whitespace-pre-wrap">
                           {version.registration.changeNote ?? "No change note."}
+                        </td>
+                        <td className="p-3">
+                          {version.versionId !== pinnedVersionId ? (
+                            <CloneDialog
+                              workflowId={workflowId}
+                              versionId={version.versionId}
+                            />
+                          ) : (
+                            <span>Pinned version above</span>
+                          )}
                         </td>
                       </tr>
                     ))}

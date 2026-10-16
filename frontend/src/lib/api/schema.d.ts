@@ -244,6 +244,128 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workflows/{team}/{type}/{workflow}/versions/{version}/clone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Download a ZIP scaffold from one exact immutable version UUID, including historical and soft-deleted sources. Body: newName is a workflow leaf, targetType is an exact team/type scope. Fresh Viewer(source type) and Author(target type) permissions are required. Existing targets (including deleted) conflict. No registration, activation or database mutation. Only literal Workflow.Define/Type fluent declarations are supported; unsupported source returns 400. Authored tasks and directives are preserved, version starts at 1.0.0, Metadata("ClonedFrom") records source@UUID. Schedules start empty and tests validate identity and lineage. Source is bounded, SHA-256/length verified and parsed only, never compiled/executed by this endpoint. Target registry schema requirements must be reviewed before publishing. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team: string;
+                    type: string;
+                    workflow: string;
+                    version: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description New workflow leaf name. */
+                        newName: string;
+                        /** @description Exact team/type scope. */
+                        targetType: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/zip": string;
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unsupported Media Type */
+                415: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workflows/{team}/{type}/{workflow}/versions": {
         parameters: {
             query?: never;
