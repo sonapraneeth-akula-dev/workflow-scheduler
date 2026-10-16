@@ -214,6 +214,7 @@ public sealed class AgentLossHandlerTests(ReplacementDatabase database, ITestOut
         using var handler = new AgentLossHandler(database.DataSource, placement, leader, time, NullLogger<AgentLossHandler>.Instance);
         var bytes = await Package();
         var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        var root = Path.GetFullPath(Path.Combine(".agent-artifacts", "replacement-tests", Guid.NewGuid().ToString("N")));
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0,
             listen => listen.Protocols = HttpProtocols.Http1));
@@ -225,6 +226,8 @@ public sealed class AgentLossHandlerTests(ReplacementDatabase database, ITestOut
         builder.Services.AddSingleton(store);
         builder.Services.AddSingleton(leader);
         builder.Services.AddSingleton(sweeper);
+        builder.Services.AddSingleton(new Wf.ControlPlane.Engine.ResourceSampleSink(database.DataSource, store,
+            new Wf.ControlPlane.Storage.FileSystemBlobStore(Path.Combine(root, "resources"), RandomNumberGenerator.GetBytes(32))));
         if (wallClock)
         {
             builder.Services.AddHostedService(_ => sweeper);
@@ -237,7 +240,6 @@ public sealed class AgentLossHandlerTests(ReplacementDatabase database, ITestOut
         var addresses = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.ToArray();
         var packageUri = new Uri(new Uri(addresses[0]), "package.zip");
         var gatewayUri = new Uri(addresses[1]);
-        var root = Path.GetFullPath(Path.Combine(".agent-artifacts", "replacement-tests", Guid.NewGuid().ToString("N")));
         Directory.CreateDirectory(root);
         Process? first = null, second = null;
         try
@@ -478,5 +480,5 @@ public sealed class ReplacementDatabase : AgentDatabase
 {
     protected override IReadOnlyList<string> Migrations =>
         ["0002_runs_events.sql", "0003_attempt_timers.sql", "0005_agents.sql", "0006_dispatch_outbox.sql",
-            "0009_leases.sql", "0011_attempt_replacement.sql"];
+            "0009_leases.sql", "0011_attempt_replacement.sql", "0025_resource_samples.sql"];
 }

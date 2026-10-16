@@ -26,9 +26,11 @@ using Wf.Contracts;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
+using Wf.ControlPlane.Engine;
 using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Sweeper;
+using Wf.ControlPlane.Storage;
 using Wf.Engine.Core;
 using Wf.Engine.Core.Placement;
 using Wf.Engine.Core.Scheduling;
@@ -177,7 +179,10 @@ public sealed class DispatchTests(DispatchDatabase database) : IClassFixture<Dis
         using var losses = new AgentLossSweeper(database.DataSource, registry, TimeProvider.System,
             NullLogger<AgentLossSweeper>.Instance);
         var service = new ResultJournalGateway(new AgentGatewayService(registry,
-            NullLogger<AgentGatewayService>.Instance, store, losses: losses), held, offlineResult ? 2 : 1);
+            NullLogger<AgentGatewayService>.Instance, store, losses: losses,
+            resources: new ResourceSampleSink(database.DataSource, store,
+                new FileSystemBlobStore(Path.Combine(root, "resources"), RandomNumberGenerator.GetBytes(32)))),
+            held, offlineResult ? 2 : 1);
         var packageBytes = offlineResult ? [] : await Package();
         var packageBuilder = WebApplication.CreateBuilder();
         packageBuilder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
@@ -610,5 +615,6 @@ public sealed class DispatchTests(DispatchDatabase database) : IClassFixture<Dis
 public sealed class DispatchDatabase : AgentDatabase
 {
     protected override IReadOnlyList<string> Migrations =>
-        ["0002_runs_events.sql", "0003_attempt_timers.sql", "0005_agents.sql", "0006_dispatch_outbox.sql", "0011_attempt_replacement.sql"];
+        ["0002_runs_events.sql", "0003_attempt_timers.sql", "0005_agents.sql", "0006_dispatch_outbox.sql",
+            "0011_attempt_replacement.sql", "0025_resource_samples.sql"];
 }

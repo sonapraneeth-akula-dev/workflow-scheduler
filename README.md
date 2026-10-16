@@ -939,9 +939,16 @@ creating commands/runs; failed scheduled fires also leave claims/cursors unchang
 Known machines that are unhealthy, full or temporarily unavailable remain valid
 configuration and wait for runtime placement rather than failing validation.
 Omitted count means all explicit IDs, or one match for other selectors.
-Distributed count enforcement and exclusive reservation remain separate tasks. Distributed
-placement currently rejects ID/count selectors explicitly instead of silently
-ignoring a constraint; legacy name/label/OS placement remains available.
+Distributed placement intersects explicit IDs with the other constraints.
+ID/count selectors choose an exact-size candidate cohort from healthy,
+non-draining, matching machines not reserved for another run/node; existing
+affinity takes precedence, then stable UUID ordering. Fewer matching machines
+leave the task waiting. Busy slots or insufficient RAM wait inside that cohort
+rather than spilling onto extra machines. Warm-host/load/round-robin preference
+still applies within it. Membership can change as machine health, labels or
+reservation ownership changes; this is not an exclusive or durable reservation,
+nor task fan-out. Exclusive leases and reservation epochs remain separate tasks.
+Legacy name/label/OS selectors without IDs/count keep their existing placement.
 Selector callbacks build symbolic metadata once. Describing never reads run
 variables or invokes task delegates. Effective task selectors resolve from bound
 string/enum variables at run start; machine names also accept string lists.

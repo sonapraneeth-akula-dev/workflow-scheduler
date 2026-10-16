@@ -13,12 +13,113 @@ public sealed class PlacementEngineTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void New_authoring_constraints_are_never_silently_ignored_before_runtime_support(bool machineIds)
+    public void Too_few_matching_machine_IDs_or_requested_count_wait_without_mutating_state(bool machineIds)
     {
         var engine = new PlacementEngine();
         var selector = machineIds ? new PlacementSelector(machineIds: [Agent(2).Id]) : new PlacementSelector(count: 2);
-        Assert.Throws<NotSupportedException>(() => engine.Propose(Request() with { Policy = new(selector) }, [Agent(1)]));
+        var decision = engine.Propose(Request() with { Policy = new(selector) }, [Agent(1)]);
+        Assert.Null(decision.Agent);
+        Assert.Equal(PlacementReason.WaitingForMachine, decision.Reason);
         Assert.Equal(PlacementSnapshot.Empty, engine.Snapshot);
+    }
+
+    [Fact]
+    public void Explicit_IDs_intersect_other_constraints_and_default_to_all_requested_machines()
+    {
+        var engine = new PlacementEngine();
+        var selector = new PlacementSelector(os: "linux", machineIds: [Agent(2).Id, Agent(3).Id]);
+        var request = Request() with { Policy = new(selector) };
+        Assert.Null(engine.Propose(request, [Agent(1), Agent(2)]).Agent);
+        Assert.Null(engine.Propose(request, [Agent(2), Agent(3) with { Os = "windows" }]).Agent);
+        var agents = new[] { Agent(1) with { WarmRuns = ImmutableHashSet.Create(Run) }, Agent(3), Agent(2) };
+        var selected = new List<Guid>();
+        for (var index = 0; index < 4; index++)
+        {
+            var decision = engine.Propose(request, agents);
+            selected.Add(decision.Agent!.Id);
+            engine.Apply(decision);
+        }
+        Assert.Equal([Agent(2).Id, Agent(3).Id, Agent(2).Id, Agent(3).Id], selected);
+    }
+
+    [Fact]
+    public void Count_limits_a_stable_input_order_independent_cohort_without_busy_machine_spillover()
+    {
+        var engine = new PlacementEngine();
+        var request = Request() with { Policy = new(new PlacementSelector(os: "linux", count: 2)) };
+        var first = Agent(1) with { SlotsUsed = 1, MaxTasks = 1 };
+        var second = Agent(2);
+        var extra = Agent(3) with { WarmRuns = ImmutableHashSet.Create(Run) };
+        var decision = engine.Propose(request, [extra, second, first]);
+        Assert.Equal(second.Id, decision.Agent!.Id);
+        Assert.Equal(second.Id, engine.Propose(request, [first, second, extra]).Agent!.Id);
+        engine.Apply(decision);
+        var before = engine.Snapshot;
+        Assert.Null(engine.Propose(request, [first, second with { SlotsUsed = second.MaxTasks }, extra]).Agent);
+        Assert.Equal(before, engine.Snapshot);
+        var restored = new PlacementEngine(JsonSerializer.Deserialize<PlacementSnapshot>(JsonSerializer.Serialize(before))!);
+        Assert.Equal(second.Id, restored.Propose(request, [extra, first, second]).Agent!.Id);
+    }
+
+    [Theory]
+    [InlineData("unhealthy")]
+    [InlineData("draining")]
+    [InlineData("reserved")]
+    [InlineData("label")]
+    [InlineData("pool")]
+    [InlineData("os")]
+    public void Unusable_or_nonmatching_agents_never_satisfy_requested_machine_count(string reason)
+    {
+        var first = Agent(1) with { Labels = ImmutableDictionary<string, string>.Empty.Add("role", "perf") };
+        var second = first with { Id = Agent(2).Id, Name = "agent-2" };
+        second = reason switch
+        {
+            "unhealthy" => second with { Healthy = false },
+            "draining" => second with { Draining = true },
+            "reserved" => second with { ReservedForRun = Guid.NewGuid(), ReservationEpoch = 1 },
+            "label" => second with { Labels = ImmutableDictionary<string, string>.Empty },
+            "pool" => second with { Pool = "other" },
+            "os" => second with { Os = "windows" },
+            _ => throw new ArgumentOutOfRangeException(nameof(reason))
+        };
+        var request = Request() with
+        {
+            Policy = new(new PlacementSelector(os: "linux", pool: "ci", labels: [new("role", "perf")], count: 2))
+        };
+        var decision = new PlacementEngine().Propose(request, [second, first]);
+        Assert.Null(decision.Agent);
+        Assert.Equal(PlacementReason.WaitingForMachine, decision.Reason);
+    }
+
+    [Fact]
+    public void Count_preserves_existing_affinity_before_stable_UUID_cohort_ordering()
+    {
+        var engine = new PlacementEngine();
+        var policy = new PlacementPolicy(Affinity: new(AffinityKind.Run));
+        engine.Apply(engine.Propose(Request() with { Policy = policy }, [Agent(3)]));
+        var request = Request() with { Policy = policy with { Selector = new(count: 2) } };
+        var decision = engine.Propose(request, [Agent(1), Agent(2), Agent(3)]);
+        Assert.Equal(Agent(3).Id, decision.Agent!.Id);
+        Assert.Equal(PlacementReason.Affinity, decision.Reason);
+    }
+
+    [Fact]
+    public void Count_subset_can_replace_a_lost_agent_only_with_another_allowed_ID()
+    {
+        var request = Request() with
+        {
+            Policy = new(new PlacementSelector(machineIds: [Agent(1).Id, Agent(2).Id], count: 1)),
+            Attempt = 2, RePlacement = true, PreviousAgentId = Agent(1).Id
+        };
+        var decision = new PlacementEngine().Propose(request,
+            [Agent(1), Agent(2), Agent(3) with { WarmRuns = ImmutableHashSet.Create(Run) }]);
+        Assert.Equal(Agent(2).Id, decision.Agent!.Id);
+        Assert.Null(new PlacementEngine().Propose(request, [Agent(1), Agent(3)]).Agent);
+        Assert.Equal(Agent(2).Id, new PlacementEngine().Propose(request with
+        {
+            Policy = new(new PlacementSelector(machineIds: [Agent(1).Id, Agent(2).Id], count: 1),
+                new(AffinityKind.Run))
+        }, [Agent(2)]).Agent!.Id);
     }
 
     [Theory]

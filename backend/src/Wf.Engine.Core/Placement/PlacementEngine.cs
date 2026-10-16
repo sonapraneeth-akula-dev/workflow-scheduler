@@ -76,18 +76,25 @@ public sealed class PlacementEngine
             return Decision(null, PlacementReason.WaitingForAffinity);
         if (request.RePlacement && pinned == request.PreviousAgentId) pinned = null;
 
+        HashSet<Guid>? cohort = null;
+        if (request.Policy?.Selector is { } selector && (selector.Count is not null || !selector.MachineIds.IsEmpty))
+        {
+            var count = selector.Count ?? selector.MachineIds.Length;
+            // Capacity changes must not expand a count-limited pool onto extra machines.
+            var matching = agents.Where(Eligible).OrderBy(agent => agent.Id == pinned ? 0 : 1)
+                .ThenBy(agent => agent.Id).Take(count).ToArray();
+            if (matching.Length < count) return Decision(null, PlacementReason.WaitingForMachine);
+            cohort = matching.Select(agent => agent.Id).ToHashSet();
+        }
         PlacementAgent? best = null;
         PlacementAgent? next = null;
         var bestWarm = false;
         var tied = false;
         foreach (var agent in agents)
         {
-            if (!agent.Healthy || agent.Draining || agent.SlotsUsed >= agent.MaxTasks ||
+            if (!Eligible(agent) || agent.SlotsUsed >= agent.MaxTasks ||
                 agent.AvailableRamMb < request.RequiredRamMb || (pinned is not null && agent.Id != pinned) ||
-                (request.RePlacement && agent.Id == request.PreviousAgentId) ||
-                (agent.ReservedForRun is { } reserved &&
-                    (reserved != request.RunId || (agent.ReservedForNode is { } node && node != request.NodeKey))) ||
-                !Matches(request.Policy?.Selector, agent))
+                (cohort is not null && !cohort.Contains(agent.Id)))
                 continue;
             var warm = agent.WarmRuns?.Contains(request.RunId) == true ||
                 agent.WarmPackages?.Any(sha => string.Equals(sha, request.PackageSha256, StringComparison.OrdinalIgnoreCase)) == true;
@@ -112,6 +119,11 @@ public sealed class PlacementEngine
                 bestWarm ? PlacementReason.WarmHost : tied ? PlacementReason.RoundRobin : PlacementReason.LeastLoaded);
 
         bool AfterCursor(Guid id) => Snapshot.LastAgentId is not { } last || id.CompareTo(last) > 0;
+        bool Eligible(PlacementAgent agent) => agent.Healthy && !agent.Draining &&
+            (!request.RePlacement || agent.Id != request.PreviousAgentId) &&
+            (agent.ReservedForRun is not { } reserved ||
+                reserved == request.RunId && (agent.ReservedForNode is null || agent.ReservedForNode == request.NodeKey)) &&
+            Matches(request.Policy?.Selector, agent);
         PlacementDecision Decision(PlacementAgent? agent, PlacementReason reason) => new(request, agent, reason, owner, Snapshot.Revision);
     }
 
@@ -164,6 +176,7 @@ public sealed class PlacementEngine
         if (selector is null) return true;
         if (selector.Os?.Literal is { } os && os != agent.Os || selector.Pool?.Literal is { } pool && pool != agent.Pool)
             return false;
+        if (!selector.MachineIds.IsEmpty && !selector.MachineIds.Contains(agent.Id)) return false;
         if (!selector.Machines.IsEmpty && !selector.Machines.Any(machine => machine.Literal == agent.Name)) return false;
         foreach (var label in selector.Labels)
             if (agent.Labels is null || !agent.Labels.TryGetValue(label.Key, out var value) ||
@@ -181,8 +194,6 @@ public sealed class PlacementEngine
             throw new ArgumentException("Invalid placement request.", nameof(request));
         if (request.Policy?.Affinity is { Kind: AffinityKind.SameMachineAs, NodeKey: { } target } && target == request.NodeKey)
             throw new ArgumentException("SameMachineAs cannot reference the requesting node.", nameof(request));
-        if (request.Policy?.Selector is { } declared && (!declared.MachineIds.IsEmpty || declared.Count is not null))
-            throw new NotSupportedException("Machine ID and count selectors require the distributed selector runtime.");
         if (request.Policy?.Selector is { } selector &&
             (selector.Os?.Variable is not null || selector.Pool?.Variable is not null ||
              selector.Labels.Any(label => label.Value?.Variable is not null) || selector.Machines.Any(machine => machine.Variable is not null)))
