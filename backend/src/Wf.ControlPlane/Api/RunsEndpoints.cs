@@ -22,6 +22,7 @@ public static class RunsEndpoints
 
     public static IEndpointRouteBuilder MapRunsEndpoints(this IEndpointRouteBuilder endpoints)
     {
+        endpoints.MapRunAbortEndpoint();
         endpoints.MapPost("/api/v1/runs", Trigger).RequireAuthorization()
             .AddEndpointFilter(AuthorizeRequest)
             .AddEndpointFilter<IdempotencyFilter>();

@@ -26,7 +26,7 @@ public sealed class RunQueryServer(WebApplication app, HttpClient client, RSA rs
     private const string Audience = "562b0870-4522-43da-8587-41e9b788f309";
     private const string Issuer = $"https://login.microsoftonline.com/{Tenant}/v2.0";
 
-    public static async Task<RunQueryServer> Start(NpgsqlDataSource source, CancellationToken token)
+    public static async Task<RunQueryServer> Start(NpgsqlDataSource source, CancellationToken token, bool abort = false)
     {
         ArgumentNullException.ThrowIfNull(source);
         var rsa = RSA.Create(2048);
@@ -40,8 +40,12 @@ public sealed class RunQueryServer(WebApplication app, HttpClient client, RSA rs
         builder.Services.AddSingleton(source);
         builder.Services.AddTeamAuthorization();
         builder.Services.AddWorkflowOpenApi();
+        if (abort) builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.ConfigureHttpJsonOptions(options =>
-            options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunQueryJsonContext.Default));
+        {
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunQueryJsonContext.Default);
+            if (abort) options.SerializerOptions.TypeInfoResolverChain.Insert(0, AbortRunJson.Default);
+        });
         var metadata = new OpenIdConnectConfiguration { Issuer = Issuer };
         metadata.SigningKeys.Add(key);
         var manager = new StaticConfigurationManager<OpenIdConnectConfiguration>(metadata);
@@ -59,6 +63,7 @@ public sealed class RunQueryServer(WebApplication app, HttpClient client, RSA rs
             app.UseAuthentication();
             app.UseAuthorization();
             app.MapRunQueryEndpoints();
+            if (abort) app.MapRunAbortEndpoint();
             app.MapWorkflowOpenApi();
             await app.StartAsync(token);
             var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
@@ -91,6 +96,13 @@ public sealed class RunQueryServer(WebApplication app, HttpClient client, RSA rs
     public async Task<HttpResponseMessage> Get(string path, string? jwt)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        if (jwt is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwt);
+        return await client.SendAsync(request, cancellationToken);
+    }
+
+    public async Task<HttpResponseMessage> Post(string path, string? jwt, HttpContent content)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = content };
         if (jwt is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwt);
         return await client.SendAsync(request, cancellationToken);
     }

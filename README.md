@@ -284,6 +284,25 @@ Hosts commit the initial abort event before cancelling attempts, drain active
 work, then run eligible `always` and post stages with `ctx.Abort`. Queued aborts
 skip all work; running aborts record `EndedAt` only after cleanup actually stops.
 Abort targets and the original record survive snapshot/event replay.
+
+`POST /api/v1/runs/{id}/abort` requires fresh Operator or Admin access to the
+stored run's team/type, independently of the SPA client. Send
+`{"reason":"Stop deployment","source":"API"}`; source defaults to API and accepts
+UI/API/CLI only. The nonblank reason is required, at most 500 characters; unknown,
+duplicate and malformed JSON properties fail explicitly, and bodies are capped
+at 16 KiB including streamed requests. The authenticated principal UUID/display
+name and server UTC acceptance time cannot be supplied by the caller.
+Acceptance atomically persists one Abort command and `run.abort` audit record,
+then notifies recovery only after commit; the API never writes run state.
+Concurrent/repeated requests, including while Aborting, return 202 with the first
+immutable `{by,byName,at,reason,source}` record without another audit row.
+Terminal runs return 409 Problem Details with their current `runStatus`; unauthorized/unknown runs
+are indistinguishable 403. Pending accepted triggers can be aborted before run
+materialization. Row locks serialize acceptance against terminal commits, while
+repeat reads avoid recovery's command-row lock; failed audit writes roll back
+acceptance and notification. Responses from authorized endpoint handling are
+never cached. CLI/UI confirmation surfaces remain their own tasks.
+
 Attempt/node/run deadlines and retry backoff use a `TimeProvider`; cleanup gets
 fresh cancellation tokens and its own deadlines. A function that ignores
 cancellation beyond grace causes an explicit error, not a false terminal result:

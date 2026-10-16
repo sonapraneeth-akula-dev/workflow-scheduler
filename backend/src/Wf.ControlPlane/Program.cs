@@ -53,6 +53,7 @@ builder.Services.AddTeamAuthorization();
 builder.Services.AddUserSchedules(builder.Configuration);
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, AbortRunJson.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, TaskLogsJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunEventsJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunQueryJsonContext.Default);
