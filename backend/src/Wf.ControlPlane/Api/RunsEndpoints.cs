@@ -8,6 +8,7 @@ using Wf.Contracts.Registry;
 using Wf.Contracts.Runs;
 using Wf.ControlPlane.Auth;
 using Wf.ControlPlane.Engine.Recovery;
+using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Registry;
 using Wf.Engine.Core;
 using Wf.Validation;
@@ -108,6 +109,17 @@ public static class RunsEndpoints
         if (!variables.IsValid)
             return Results.Problem(statusCode: 400, title: "Run validation failed",
                 extensions: new Dictionary<string, object?> { ["errors"] = variables.Errors });
+        var selectorTransaction = context.Features.Get<NpgsqlTransaction>();
+        await using (var connection = selectorTransaction is null ? await source.OpenConnectionAsync(context.RequestAborted) : null)
+        {
+            var selectors = await MachineSelectorInventory.ValidateAsync(
+                selectorTransaction?.Connection ?? connection ?? throw new InvalidOperationException("A trigger transaction has no connection."),
+                selectorTransaction, manifest,
+                VariableBinder.Bind(manifest.Variables, variables.Values), context.RequestAborted);
+            if (!selectors.IsEmpty)
+                return Results.Problem(statusCode: 400, title: "Run selector validation failed",
+                    extensions: new Dictionary<string, object?> { ["errors"] = selectors });
+        }
         var now = time.GetUtcNow();
         var runId = Guid.CreateVersion7(now);
         var run = new RunState(runId, manifest.Nodes, manifest.Metadata, _ => { }, variables.Values);

@@ -78,11 +78,16 @@ public static class RuleCatalog
         "The schedule version pin is invalid.",
         "Use an exact version UUID or SemVer, comparison ranges such as >=1.0.0 <2.0.0, || alternatives, or *, major.* or major.minor.* wildcards, within 256 characters.");
 
+    public static readonly ValidationRule MachineSelector = new("WFV027",
+        "A machine selector is invalid or cannot be satisfied by registered machines.",
+        "Use known machine IDs and satisfiable OS, pool, name, label and count constraints.");
+
     public static ImmutableArray<ValidationRule> All { get; } =
         [DirectoryNotFound, WorkflowNotFound, BuildFailed, DescribeFailed, DependencyCycle, UnknownDependency,
             DuplicateKey, VariableType, VariableRequired, VersionBump, ScheduleShape, ScheduleExpression,
             ScheduleVariable, ScheduleIdentity, TeamRegistryRules.RegistryShape, TeamRegistryRules.DuplicateType,
             TeamRegistryRules.TypeQuota, TeamRegistryRules.InvalidMetadataSchema, TeamRegistryRules.UnknownType,
             TeamRegistryRules.InvalidMetadata, HttpOperationRules.InvalidContract, HttpOperationRules.UnsafeRetry,
-            HttpOperationRules.InsufficientRetention, PresentationValidator.InvalidPresentation, TriggerVariable, ScheduleVersionPin];
+            HttpOperationRules.InsufficientRetention, PresentationValidator.InvalidPresentation, TriggerVariable, ScheduleVersionPin,
+            MachineSelector];
 }

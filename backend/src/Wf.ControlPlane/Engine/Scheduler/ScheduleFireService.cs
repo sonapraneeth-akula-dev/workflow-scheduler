@@ -4,6 +4,7 @@ using NpgsqlTypes;
 using Wf.Contracts.Runs;
 using Wf.Contracts.Schedules;
 using Wf.ControlPlane.Engine.Dispatch;
+using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Leadership;
 using Wf.ControlPlane.Engine.Recovery;
 using Wf.ControlPlane.Engine.Registry;
@@ -140,6 +141,11 @@ public sealed class ScheduleFireService(NpgsqlDataSource source, LeaseManager le
         if (!bound.IsValid)
             throw new ScheduleFireRejectedException($"Schedule '{scheduleId}' variables failed validation: " +
                 string.Join("; ", bound.Errors.Select(error => $"{error.RuleId} {error.Path}: {error.Message}")));
+        var selectors = await MachineSelectorInventory.ValidateAsync(connection, null, selected.Manifest,
+            VariableBinder.Bind(selected.Manifest.Variables, bound.Values), cancellationToken);
+        if (!selectors.IsEmpty)
+            throw new ScheduleFireRejectedException($"Schedule '{scheduleId}' selectors failed validation: " +
+                string.Join("; ", selectors.Select(error => $"{error.RuleId} {error.Path}: {error.Hint}")));
         var now = time.GetUtcNow();
         var run = new RunState(Guid.CreateVersion7(now), selected.Manifest.Nodes, selected.Manifest.Metadata,
             message => logger.LogWarning("{RunStateError}", message), bound.Values);

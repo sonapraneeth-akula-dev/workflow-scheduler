@@ -10,6 +10,7 @@ using Wf.Contracts.Manifest;
 using Wf.Contracts.Registration;
 using Wf.Contracts.Registry;
 using Wf.ControlPlane.Registry;
+using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Storage;
 using Wf.Validation;
 using Wf.Validation.Rules;
@@ -137,6 +138,11 @@ public sealed class RegistrationService(NpgsqlDataSource dataSource, IBlobStore 
             gate.Parameters.AddWithValue(team);
             await gate.ExecuteNonQueryAsync(cancellationToken);
         }
+        if (manifest is not null)
+        {
+            var selectors = await MachineSelectorInventory.ValidateAsync(connection, transaction, manifest, null, cancellationToken);
+            if (!selectors.IsEmpty) throw new RegistrationValidationException(selectors);
+        }
         var previousRegistryHash = registry is null ? null : await RegistryHash(connection, transaction, team, cancellationToken);
         Guid? snapshotId = null;
         if (registry is not null && await registryWriter.UpsertAsync(connection, transaction, registry, cancellationToken))
@@ -187,22 +193,27 @@ public sealed class RegistrationService(NpgsqlDataSource dataSource, IBlobStore 
             }
             bool exists;
             await using (var duplicate = new NpgsqlCommand("""
-                SELECT manifest=$3::jsonb AND package_sha256=$4 AND package_size=$5
-                    AND source_sha256=$6 AND source_size=$7
+                SELECT manifest::text,package_sha256=$3 AND package_size=$4 AND source_sha256=$5 AND source_size=$6
                 FROM workflow_versions WHERE workflow_id=$1 AND semver_key=split_part($2,'+',1)
                 """, connection, transaction))
             {
                 duplicate.Parameters.AddWithValue(request.WorkflowId!);
                 duplicate.Parameters.AddWithValue(manifest.Version);
-                duplicate.Parameters.AddWithValue(manifestJson);
                 duplicate.Parameters.AddWithValue(Convert.FromHexString(package!.Sha256));
                 duplicate.Parameters.AddWithValue(package.SizeBytes);
                 duplicate.Parameters.AddWithValue(Convert.FromHexString(source!.Sha256));
                 duplicate.Parameters.AddWithValue(source.SizeBytes);
-                var same = await duplicate.ExecuteScalarAsync(cancellationToken);
-                exists = same is not null;
-                if (exists && same is not true)
-                    throw new RegistrationConflictException("This workflow version already has different immutable content.");
+                await using var reader = await duplicate.ExecuteReaderAsync(cancellationToken);
+                exists = await reader.ReadAsync(cancellationToken);
+                if (exists)
+                {
+                    var stored = JsonSerializer.Deserialize<WorkflowManifest>(reader.GetString(0), ManifestOptions)
+                        ?? throw new InvalidDataException("A stored workflow manifest is null.");
+                    if (!reader.GetBoolean(1) || !JsonElement.DeepEquals(
+                            JsonSerializer.SerializeToElement(stored, WorkflowManifestJsonContext.Default.WorkflowManifest),
+                            JsonSerializer.SerializeToElement(manifest, WorkflowManifestJsonContext.Default.WorkflowManifest)))
+                        throw new RegistrationConflictException("This workflow version already has different immutable content.");
+                }
             }
             if (!exists)
             {

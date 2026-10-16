@@ -929,9 +929,17 @@ non-empty UUIDs; names and IDs cannot be mixed, counts must be positive and
 cannot exceed an explicit ID set. Repeated IDs are deduplicated. A label-based
 selector can declare a count without enumerating IDs. The whole selector,
 including IDs/count, follows the same innermost-wins rule and appears in the
-manifest and historical Task Plan API/UI. These are authoring contracts;
-availability validation, distributed count enforcement and exclusive
-reservation follow their respective selector/reservation tasks. Distributed
+manifest and historical Task Plan API/UI. Registration checks effective
+selectors against the current registered machine inventory; symbolic values
+remain deferred until variables bind. Manual triggers, schedule run-now and
+scheduled fires recheck that inventory with the bound variables. WFV027
+diagnostics identify the task and missing machine ID or label key without
+echoing selector values. Unknown IDs and too few configured matches fail before
+creating commands/runs; failed scheduled fires also leave claims/cursors unchanged.
+Known machines that are unhealthy, full or temporarily unavailable remain valid
+configuration and wait for runtime placement rather than failing validation.
+Omitted count means all explicit IDs, or one match for other selectors.
+Distributed count enforcement and exclusive reservation remain separate tasks. Distributed
 placement currently rejects ID/count selectors explicitly instead of silently
 ignoring a constraint; legacy name/label/OS placement remains available.
 Selector callbacks build symbolic metadata once. Describing never reads run
