@@ -1026,8 +1026,12 @@ whole-machine reboot with that state intact, not an agent/container restart or
 deleting records. Independently constructed test pools need an isolated
 `containmentDirectory` or their own stable `AgentOptions`; hosted DI supplies
 the production agent identity automatically.
-Workflow-facing reservation policies and failover/chaos verification remain
-their following tasks. Reservation allocation is still an explicit engine API;
+Every maintenance pass reads durable owners under the current leader fence, so
+a replacement leader adopts and renews existing reservation IDs and machine
+epochs rather than allocating replacements. Pending physical fences also
+survive engine crashes unchanged and never become implicit releases.
+Workflow-facing reservation policies remain their following tasks.
+Reservation allocation is still an explicit engine API;
 this does not claim an autonomous hosted DAG execution loop.
 
 ## Blob storage

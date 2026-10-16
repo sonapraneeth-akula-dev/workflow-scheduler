@@ -181,7 +181,7 @@ public sealed class ScheduleExactlyOnceTests(ITestOutputHelper output)
         }
     }
 
-    internal static async Task<string> SeedAsync(NpgsqlDataSource source, CancellationToken token)
+    internal static async Task<string> SeedAsync(NpgsqlDataSource source, CancellationToken token, int schedules = 1000)
     {
         const string workflow = "chaos/release/workflow";
         var definition = Workflow.Define(workflow, "1.0.0", builder =>
@@ -201,9 +201,9 @@ public sealed class ScheduleExactlyOnceTests(ITestOutputHelper output)
             INSERT INTO schedules(id,workflow_id,origin,code_key,name,timezone,interval_s,overlap_policy,
                 catchup_policy,created_by,updated_by)
                 SELECT gen_random_uuid(),'chaos/release/workflow',0,'timer-'||i,'Timer '||i,'Etc/UTC',60,2,1,'chaos','chaos'
-                FROM generate_series(1,1000) i;
+                FROM generate_series(1,$3) i;
             INSERT INTO run_series(id,workflow_id,schedule_id) SELECT gen_random_uuid(),workflow_id,id FROM schedules;
-            """, token, Guid.CreateVersion7(), manifest);
+            """, token, Guid.CreateVersion7(), manifest, schedules);
         return workflow;
     }
 
@@ -249,7 +249,7 @@ public sealed class ScheduleExactlyOnceTests(ITestOutputHelper output)
         return (T)(await query.ExecuteScalarAsync(token) ?? throw new InvalidDataException("Missing scalar result."));
     }
 
-    private sealed class EngineProcess : IAsyncDisposable
+    internal sealed class EngineProcess : IAsyncDisposable
     {
         private readonly Process process;
         private readonly HttpClient client;
