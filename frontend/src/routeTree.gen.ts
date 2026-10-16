@@ -13,6 +13,8 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as SchedulesIdRouteImport } from './routes/schedules.$id'
 import { Route as SchedulesNewRouteImport } from './routes/schedules.new'
 import { Route as SeriesIdRouteImport } from './routes/series.$id'
+import { Route as TTeamIndexRouteImport } from './routes/t/$team/index'
+import { Route as TTeamTypeIndexRouteImport } from './routes/t/$team/$type/index'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -34,18 +36,32 @@ const SeriesIdRoute = SeriesIdRouteImport.update({
   path: '/series/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TTeamIndexRoute = TTeamIndexRouteImport.update({
+  id: '/t/$team/',
+  path: '/t/$team/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TTeamTypeIndexRoute = TTeamTypeIndexRouteImport.update({
+  id: '/t/$team/$type/',
+  path: '/t/$team/$type/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/schedules/$id': typeof SchedulesIdRoute
   '/schedules/new': typeof SchedulesNewRoute
   '/series/$id': typeof SeriesIdRoute
+  '/t/$team/': typeof TTeamIndexRoute
+  '/t/$team/$type/': typeof TTeamTypeIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/schedules/$id': typeof SchedulesIdRoute
   '/schedules/new': typeof SchedulesNewRoute
   '/series/$id': typeof SeriesIdRoute
+  '/t/$team': typeof TTeamIndexRoute
+  '/t/$team/$type': typeof TTeamTypeIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +69,34 @@ export interface FileRoutesById {
   '/schedules/$id': typeof SchedulesIdRoute
   '/schedules/new': typeof SchedulesNewRoute
   '/series/$id': typeof SeriesIdRoute
+  '/t/$team/': typeof TTeamIndexRoute
+  '/t/$team/$type/': typeof TTeamTypeIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/schedules/$id' | '/schedules/new' | '/series/$id'
+  fullPaths:
+    | '/'
+    | '/schedules/$id'
+    | '/schedules/new'
+    | '/series/$id'
+    | '/t/$team/'
+    | '/t/$team/$type/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/schedules/$id' | '/schedules/new' | '/series/$id'
-  id: '__root__' | '/' | '/schedules/$id' | '/schedules/new' | '/series/$id'
+  to:
+    | '/'
+    | '/schedules/$id'
+    | '/schedules/new'
+    | '/series/$id'
+    | '/t/$team'
+    | '/t/$team/$type'
+  id:
+    | '__root__'
+    | '/'
+    | '/schedules/$id'
+    | '/schedules/new'
+    | '/series/$id'
+    | '/t/$team/'
+    | '/t/$team/$type/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,6 +104,8 @@ export interface RootRouteChildren {
   SchedulesIdRoute: typeof SchedulesIdRoute
   SchedulesNewRoute: typeof SchedulesNewRoute
   SeriesIdRoute: typeof SeriesIdRoute
+  TTeamIndexRoute: typeof TTeamIndexRoute
+  TTeamTypeIndexRoute: typeof TTeamTypeIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -99,6 +138,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SeriesIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/t/$team/': {
+      id: '/t/$team/'
+      path: '/t/$team'
+      fullPath: '/t/$team/'
+      preLoaderRoute: typeof TTeamIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/t/$team/$type/': {
+      id: '/t/$team/$type/'
+      path: '/t/$team/$type'
+      fullPath: '/t/$team/$type/'
+      preLoaderRoute: typeof TTeamTypeIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -107,6 +160,8 @@ const rootRouteChildren: RootRouteChildren = {
   SchedulesIdRoute: SchedulesIdRoute,
   SchedulesNewRoute: SchedulesNewRoute,
   SeriesIdRoute: SeriesIdRoute,
+  TTeamIndexRoute: TTeamIndexRoute,
+  TTeamTypeIndexRoute: TTeamTypeIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

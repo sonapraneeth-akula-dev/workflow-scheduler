@@ -274,6 +274,32 @@ try {
       ],
     },
   })
+  for (const browser of ["chromium", "firefox", "webkit"]) {
+    const workflowId = `ui-tests/release/catalog-${browser}`
+    await request("/api/v1/registrations", {
+      gitCommit: "b".repeat(40),
+      gitAuthor: "Catalogue UI integration",
+      workflowId,
+      manifest: {
+        ...manifest,
+        name: workflowId,
+        metadata: { type: "release", values: {} },
+      },
+      package: { sha256, size: bytes.length },
+      source: "// catalogue UI integration",
+      registry: {
+        team: "ui-tests",
+        types: [
+          {
+            team: "ui-tests",
+            name: "release",
+            description: "UI integration",
+            metadataSchema: { keys: [] },
+          },
+        ],
+      },
+    })
+  }
   const codeScheduleId = z
     .uuid()
     .parse(

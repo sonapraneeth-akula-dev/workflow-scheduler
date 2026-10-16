@@ -41,8 +41,7 @@ and retains historical runs/series.
 show a Code badge, applied file path and commit; UI-created schedules show a UI
 badge. Code views have no variable-edit form or edit/delete/pause/resume controls,
 and the actual API rejects all four mutations with 409. Legacy missing provenance
-is explicit rather than fabricated. Workflow catalogue entry points
-remain their own task. The shared `usePermissions` hook and `Can` component hide
+is explicit rather than fabricated. The shared `usePermissions` hook and `Can` component hide
 unpermitted actions using authenticated `/api/v1/permissions/<scope>?id=...`
 reads, never token-decoded role guesses. Author and Operator remain independent;
 schedule mutations require Operator. Permission reads reuse server resource
@@ -50,6 +49,16 @@ ownership and role checks, fail closed during loading, errors and refresh, and
 refresh every 30 seconds and on window focus. Forms stay mounted during these
 checks, preserving unsaved drafts. Mutation endpoints remain authoritative,
 including after a role is revoked.
+
+Home lists permitted teams; `/t/<team>` shows type descriptions and latest-run
+status counts, and `/t/<team>/<type>` shows workflows with independent active
+and latest versions. Home to workflow list takes two clicks. Never-run workflows
+are explicit; pages load 50 workflows with manual continuation. Authorized
+type-scoped MessagePack updates refresh the affected workflow list and team
+counts without timer polling or requiring a broader team grant. Failed live
+connections expose retry and manual refresh; denied reads hide previously cached
+rows. Team presentation, search/grouping and run detail links remain separate
+tasks.
 
 Commit links require an explicit workflow-repository browser template, for example:
 
