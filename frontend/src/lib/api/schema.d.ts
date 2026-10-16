@@ -506,7 +506,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Safe durable run summaries, newest UUIDv7 first. All filters combine with AND. Metadata matches the run's copied metadata, not its current workflow. Deleted workflows retain history. Fresh Viewer grants filter every page; cursors are bound to filters and visible type scopes. No variables, values, snapshots or storage capabilities. */
+        /** @description Safe durable run summaries, newest UUIDv7 first. All filters combine with AND. Metadata matches the run's copied metadata, not its current workflow. Deleted workflows retain history. Fresh Viewer grants filter every page; cursors are bound to filters and visible type scopes. Includes only copied public metadata; no variable values, snapshots or storage capabilities. */
         get: {
             parameters: {
                 query?: {
@@ -739,6 +739,297 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["RunSnapshotResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Durable workflow/series history: runs plus retained skipped/missed fire facts, including deleted resources. Run filters share /runs semantics; from/to bound the row timestamp. status, abortedBy or meta.* exclude fire-only rows. sort=createdAtDesc (default) or createdAtAsc; stable timestamp/UUID/kind keyset, bound to all filters, limit and fresh Viewer scopes. outcome=Run|Skipped|Missed; abortedBy is an exact principal UUID from the first committed abort event, not inferred from status. Run versionId is the executed workflow version, NOT code-schedule config. fire.scheduleConfigVersionId is the immutable config at claim, null for user/legacy fires. currentScheduleId is the authoritative non-deleted schedule linked by run_series for an explicit seriesId; null after schedule deletion, for run-only legacy series or without a series filter. Variables project only set schema-backed names/types; all values/defaults/secret references omitted, Secret entries marked redacted. Unknown legacy schemas produce []. Copied metadata is public author-declared metadata. Duration is endedAt-startedAt in milliseconds, null unless both exist. No storage capabilities. */
+        get: {
+            parameters: {
+                query?: {
+                    workflowId?: string;
+                    seriesId?: string;
+                    team?: string;
+                    type?: string;
+                    status?: "Queued" | "Running" | "Aborting" | "Succeeded" | "Failed" | "Aborted" | "TimedOut";
+                    from?: string;
+                    to?: string;
+                    "meta.*"?: string;
+                    limit?: number;
+                    cursor?: string;
+                    sort?: "createdAtDesc" | "createdAtAsc";
+                    abortedBy?: string;
+                    outcome?: "Run" | "Skipped" | "Missed";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RunHistoryPage"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workflows/{team}/{type}/{workflow}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Durable workflow/series history: runs plus retained skipped/missed fire facts, including deleted resources. Run filters share /runs semantics; from/to bound the row timestamp. status, abortedBy or meta.* exclude fire-only rows. sort=createdAtDesc (default) or createdAtAsc; stable timestamp/UUID/kind keyset, bound to all filters, limit and fresh Viewer scopes. outcome=Run|Skipped|Missed; abortedBy is an exact principal UUID from the first committed abort event, not inferred from status. Run versionId is the executed workflow version, NOT code-schedule config. fire.scheduleConfigVersionId is the immutable config at claim, null for user/legacy fires. currentScheduleId is the authoritative non-deleted schedule linked by run_series for an explicit seriesId; null after schedule deletion, for run-only legacy series or without a series filter. Variables project only set schema-backed names/types; all values/defaults/secret references omitted, Secret entries marked redacted. Unknown legacy schemas produce []. Copied metadata is public author-declared metadata. Duration is endedAt-startedAt in milliseconds, null unless both exist. No storage capabilities. */
+        get: {
+            parameters: {
+                query?: {
+                    workflowId?: string;
+                    seriesId?: string;
+                    team?: string;
+                    type?: string;
+                    status?: "Queued" | "Running" | "Aborting" | "Succeeded" | "Failed" | "Aborted" | "TimedOut";
+                    from?: string;
+                    to?: string;
+                    "meta.*"?: string;
+                    limit?: number;
+                    cursor?: string;
+                    sort?: "createdAtDesc" | "createdAtAsc";
+                    abortedBy?: string;
+                    outcome?: "Run" | "Skipped" | "Missed";
+                };
+                header?: never;
+                path: {
+                    team: string;
+                    type: string;
+                    workflow: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RunHistoryPage"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/series/{id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Durable workflow/series history: runs plus retained skipped/missed fire facts, including deleted resources. Run filters share /runs semantics; from/to bound the row timestamp. status, abortedBy or meta.* exclude fire-only rows. sort=createdAtDesc (default) or createdAtAsc; stable timestamp/UUID/kind keyset, bound to all filters, limit and fresh Viewer scopes. outcome=Run|Skipped|Missed; abortedBy is an exact principal UUID from the first committed abort event, not inferred from status. Run versionId is the executed workflow version, NOT code-schedule config. fire.scheduleConfigVersionId is the immutable config at claim, null for user/legacy fires. currentScheduleId is the authoritative non-deleted schedule linked by run_series for an explicit seriesId; null after schedule deletion, for run-only legacy series or without a series filter. Variables project only set schema-backed names/types; all values/defaults/secret references omitted, Secret entries marked redacted. Unknown legacy schemas produce []. Copied metadata is public author-declared metadata. Duration is endedAt-startedAt in milliseconds, null unless both exist. No storage capabilities. */
+        get: {
+            parameters: {
+                query?: {
+                    workflowId?: string;
+                    seriesId?: string;
+                    team?: string;
+                    type?: string;
+                    status?: "Queued" | "Running" | "Aborting" | "Succeeded" | "Failed" | "Aborted" | "TimedOut";
+                    from?: string;
+                    to?: string;
+                    "meta.*"?: string;
+                    limit?: number;
+                    cursor?: string;
+                    sort?: "createdAtDesc" | "createdAtAsc";
+                    abortedBy?: string;
+                    outcome?: "Run" | "Skipped" | "Missed";
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RunHistoryPage"];
                     };
                 };
                 /** @description Bad Request */
@@ -1475,6 +1766,57 @@ export interface components {
             lastSeq: number | string;
             events: components["schemas"]["LiveEvent"][];
         };
+        RunHistoryFire: {
+            /** Format: uuid */
+            scheduleId: string;
+            /** Format: date-time */
+            fireAt: string;
+            outcome: string;
+            reason: null | string;
+            /** Format: uuid */
+            scheduleConfigVersionId: null | string;
+        };
+        RunHistoryPage: {
+            items: components["schemas"]["RunHistoryRow"][];
+            nextCursor: null | string;
+            /** Format: uuid */
+            currentScheduleId: null | string;
+        };
+        RunHistoryRow: {
+            kind: string;
+            /** Format: date-time */
+            at: string;
+            workflowId: string;
+            /** Format: uuid */
+            seriesId: null | string;
+            /** Format: uuid */
+            runId: null | string;
+            /** Format: uuid */
+            versionId: null | string;
+            status: null | string;
+            /** Format: date-time */
+            startedAt: null | string;
+            /** Format: date-time */
+            endedAt: null | string;
+            /** Format: double */
+            durationMs: null | number | string;
+            trigger: null | string;
+            metadata: null | components["schemas"]["RunMetadata"];
+            abort: null | components["schemas"]["LiveAbort"];
+            variables: components["schemas"]["RunHistoryVariable"][];
+            fire: null | components["schemas"]["RunHistoryFire"];
+        };
+        RunHistoryVariable: {
+            key: string;
+            type: string;
+            redacted: boolean;
+        };
+        RunMetadata: {
+            type: string;
+            values: {
+                [key: string]: string;
+            };
+        };
         RunMetricsResponse: {
             /** Format: uuid */
             runId: string;
@@ -1513,6 +1855,7 @@ export interface components {
             startedAt: null | string;
             /** Format: date-time */
             endedAt: null | string;
+            metadata: null | components["schemas"]["RunMetadata"];
         };
         RunSnapshotResponse: {
             /** Format: uuid */
