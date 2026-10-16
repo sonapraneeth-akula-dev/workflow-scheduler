@@ -12,6 +12,7 @@ using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Wf.Agent.Packages;
 using Wf.Agent.Secrets;
+using Wf.Agent.Sampling;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Host.V1;
 
@@ -66,12 +67,13 @@ public sealed class TaskHostPool : IAsyncDisposable
     });
     private readonly ITimer timer;
     private readonly Task maintenance;
+    private readonly ResourceSamplingService? sampling;
     private int processStartCount;
     private bool disposed;
 
     public TaskHostPool(ILogger<TaskHostPool> logger, TimeProvider? timeProvider = null,
         int maxWarmProcesses = DefaultMaxWarmProcesses, long maxWarmRssBytes = DefaultMaxWarmRssBytes,
-        TimeSpan? warmIdleTimeout = null)
+        TimeSpan? warmIdleTimeout = null, ResourceSamplingService? sampling = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxWarmProcesses);
@@ -83,6 +85,7 @@ public sealed class TaskHostPool : IAsyncDisposable
         this.maxWarmProcesses = maxWarmProcesses;
         this.maxWarmRssBytes = maxWarmRssBytes;
         this.warmIdleTimeout = idle;
+        this.sampling = sampling;
         timer = clock.CreateTimer(static state => ((ChannelWriter<byte>)state!).TryWrite(0), wake.Writer,
             Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         maintenance = MaintainAsync();
@@ -141,6 +144,7 @@ public sealed class TaskHostPool : IAsyncDisposable
         finally { try { ScheduleSweep(); } finally { gate.Release(); } }
         try
         {
+            using var resourceTracking = sampling?.Track(host.Process, dispatch.Task);
             host.CaptureLog = captureLog;
             host.Masker = secretMasker ?? new SecretMasker([]);
             using var call = host.Client.ExecuteAsync(new ExecuteRequest
@@ -184,6 +188,7 @@ public sealed class TaskHostPool : IAsyncDisposable
                 result.Outcome == TaskOutcome.Unspecified || !System.Enum.IsDefined(result.Outcome))
                 throw new InvalidDataException("Task host returned an invalid attempt result.");
             journalResult?.Invoke(result);
+            resourceTracking?.Dispose();
             using var acknowledgement = host.Client.AcknowledgeAsync(new AcknowledgeRequest { Task = dispatch.Task },
                 deadline: DateTime.UtcNow.AddSeconds(5));
             await acknowledgement.ResponseAsync;

@@ -6,6 +6,7 @@ using Wf.Agent.Hosts;
 using Wf.Agent.Packages;
 using Wf.Agent.Journal;
 using Wf.Agent.Logs;
+using Wf.Agent.Sampling;
 
 var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = args, ContentRootPath = AppContext.BaseDirectory });
 builder.Services.AddWindowsService(options => options.ServiceName = builder.Configuration["Agent:ServiceName"] ?? "wf-agent");
@@ -18,6 +19,9 @@ builder.Services.AddSingleton(provider =>
     return new ResultJournal(options.ResultJournalDirectory, options.Id);
 });
 builder.Services.AddSingleton<AgentOutbox>();
+builder.Services.AddSingleton(_ => ResourceSampler.Create());
+builder.Services.AddSingleton<ResourceSamplingService>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<ResourceSamplingService>());
 builder.Services.AddSingleton<TaskHostPool>();
 builder.Services.AddSingleton<AgentLogService>();
 builder.Services.AddSingleton(provider => new PackageCache(

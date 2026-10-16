@@ -47,7 +47,7 @@ public sealed partial class AgentTelemetry(TimeProvider timeProvider, TaskComman
         };
     }
 
-    private static (ulong Total, ulong Available) Memory()
+    internal static (ulong Total, ulong Available) Memory()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -63,7 +63,7 @@ public sealed partial class AgentTelemetry(TimeProvider timeProvider, TaskComman
         return (values["MemTotal:"], values["MemAvailable:"]);
     }
 
-    private static (ulong Idle, ulong Total) Cpu()
+    internal static (ulong Idle, ulong Total) Cpu()
     {
         if (OperatingSystem.IsWindows())
         {
