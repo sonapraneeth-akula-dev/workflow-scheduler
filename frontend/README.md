@@ -119,6 +119,26 @@ publishes two real versions, triggers a pinned run, follows its historical link,
 checks safe response/UI contents, selected-task reload and light/dark mobile
 accessibility on Chromium, Firefox and WebKit.
 
+Workflow lists and workflow history link to **Versions** at
+`/t/<team>/<type>/w/<workflow>/versions`. The uncached history reads 50
+registrations per page, with immutable UUID/SemVer links, Git author/commit,
+registering identity, nullable notes, SDK and UTC registration time. Active and
+latest pointers remain distinct after rollback. Version details retain the
+read-only Task Plan, show registration provenance and default comparison from
+the pinned UUID, even when that version is outside the loaded history page.
+
+**Compare versions** explicitly fetches the selected immutable pair. Added,
+removed and changed manifest declarations have expandable before/after text;
+Int64 defaults retain exact JSON tokens. The existing lazy, read-only Monaco
+renderer loads only for a requested comparison, with exact retained script
+texts, responsive layout, theme changes and plain-text alternatives. This
+explicit source view includes authored literals, unlike the safe Task Plan;
+secret references are never resolved. Failed/refused refreshes hide stale
+history or comparison data and expose retry. Real browser tests publish
+versions, traverse keyset pages across a new registration, follow historical
+run links, corrupt and restore an owned source blob, and check light/dark mobile
+accessibility on Chromium, Firefox and WebKit.
+
 The run page renders the pinned DAG as cached ordered node positions and SVG
 dependency paths. Stable memoized edges and node buttons avoid layout recomputation
 on live updates; the production RunStore supplies one immutable update per animation

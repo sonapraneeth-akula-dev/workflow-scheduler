@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { Button } from "@/components/ui/button"
 import { getVersionPlan, type PlanPlacement } from "./api"
+import { VersionRegistration } from "@/features/versions/VersionRegistration"
 
 function selector(value: { literal: string | null; variable: string | null }) {
   return value.literal ?? `variable(${value.variable})`
@@ -70,6 +71,9 @@ export function TaskPlanPage({
           <p>
             Version {plan.version}; run timeout: {plan.runTimeout}.
           </p>
+          {plan.registration ? (
+            <VersionRegistration registration={plan.registration} />
+          ) : null}
           <p>Workflow placement: {describePlacement(plan.placement)}.</p>
           {taskKey && !selected ? (
             <p role="alert">This task is not part of the pinned version.</p>
@@ -85,9 +89,8 @@ export function TaskPlanPage({
               <p>
                 {plan.stages.includes(node.key) ? "Lifecycle stage. " : ""}
                 {node.mode} task order
-                {node.maxParallel
-                  ? `; concurrency: ${node.maxParallel}`
-                  : ""}. Failure: {node.failure}; node timeout:{" "}
+                {node.maxParallel ? `; concurrency: ${node.maxParallel}` : ""}.
+                Failure: {node.failure}; node timeout:{" "}
                 {node.timeout ?? "run deadline"}.
               </p>
               <p>Planned placement: {describePlacement(node.placement)}.</p>

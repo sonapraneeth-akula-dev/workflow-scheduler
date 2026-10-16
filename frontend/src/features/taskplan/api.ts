@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { ApiError, publicApi } from "@/lib/api/client"
+import { registrationSchema } from "@/features/versions/api"
 
 const key = z
   .string()
@@ -84,6 +85,7 @@ export const versionPlanSchema = z
     runTimeout: z.string(),
     stages: z.array(key),
     placement,
+    registration: registrationSchema.optional(),
     nodes: z.array(
       z.object({
         key,

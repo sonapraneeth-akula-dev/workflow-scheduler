@@ -80,21 +80,25 @@ describe("immutable task plan boundaries and states", () => {
   beforeEach(() => vi.resetAllMocks())
 
   it("requests the exact pinned UUID and strips fields outside the task-plan projection", async () => {
+    const registration = {
+      gitCommit: "a".repeat(40),
+      gitAuthor: "Git author",
+      registeredBy: "Registering principal",
+      changeNote: null,
+      sdkVersion: "1.0.0",
+      registeredAt: "2026-10-16T12:00:00Z",
+    }
     respond({
       ...plan,
-      registration: {
-        gitCommit: "a".repeat(40),
-        gitAuthor: "Git author",
-        registeredBy: "Registering principal",
-        changeNote: null,
-        sdkVersion: "1.0.0",
-        registeredAt: "2026-10-16T12:00:00Z",
-      },
+      registration,
       variables: { password: "private-value" },
       source: "private-source",
     })
     const signal = new AbortController().signal
-    expect(await getVersionPlan(workflowId, versionId, signal)).toEqual(plan)
+    expect(await getVersionPlan(workflowId, versionId, signal)).toEqual({
+      ...plan,
+      registration,
+    })
     expect(get).toHaveBeenCalledWith(
       "/api/v1/workflows/{team}/{type}/{workflow}/versions/{version}",
       {
@@ -109,6 +113,31 @@ describe("immutable task plan boundaries and states", () => {
         signal,
       }
     )
+  })
+
+  it("renders immutable registration provenance as text without exposing non-plan fields", async () => {
+    respond({
+      ...plan,
+      registration: {
+        gitCommit: "a".repeat(40),
+        gitAuthor: "<script>Git author</script>",
+        registeredBy: "Registering identity",
+        changeNote: "Release <img src=x>",
+        sdkVersion: "1.2.3",
+        registeredAt: "2026-10-16T12:00:00Z",
+      },
+      source: "private-source",
+      variables: { token: "private-value" },
+    })
+    show()
+    expect(
+      await screen.findByText("<script>Git author</script>")
+    ).toBeInTheDocument()
+    expect(screen.getByText("Release <img src=x>")).toBeInTheDocument()
+    expect(screen.getByText("Registering identity")).toBeInTheDocument()
+    expect(document.querySelector("script, img")).toBeNull()
+    expect(document.body).not.toHaveTextContent("private-source")
+    expect(document.body).not.toHaveTextContent("private-value")
   })
 
   it.each([

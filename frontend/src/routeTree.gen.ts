@@ -20,6 +20,8 @@ import { Route as TTeamIndexRouteImport } from './routes/t/$team/index'
 import { Route as RunsIdReportsReportIdRouteImport } from './routes/runs.$id_.reports.$reportId'
 import { Route as TTeamTypeIndexRouteImport } from './routes/t/$team/$type/index'
 import { Route as TTeamTypeWWfHistoryRouteImport } from './routes/t.$team.$type.w.$wf.history'
+import { Route as TTeamTypeWWfVersionsRouteImport } from './routes/t.$team.$type.w.$wf.versions'
+import { Route as TTeamTypeWWfVersionsIndexRouteImport } from './routes/t.$team.$type.w.$wf.versions.index'
 import { Route as TTeamTypeWWfVersionsVRouteImport } from './routes/t.$team.$type.w.$wf.versions.$v'
 import { Route as TTeamTypeWWfVersionsVTasksTaskKeyRouteImport } from './routes/t.$team.$type.w.$wf.versions.$v_.tasks.$taskKey'
 
@@ -78,16 +80,27 @@ const TTeamTypeWWfHistoryRoute = TTeamTypeWWfHistoryRouteImport.update({
   path: '/t/$team/$type/w/$wf/history',
   getParentRoute: () => rootRouteImport,
 } as any)
-const TTeamTypeWWfVersionsVRoute = TTeamTypeWWfVersionsVRouteImport.update({
-  id: '/t/$team/$type/w/$wf/versions/$v',
-  path: '/t/$team/$type/w/$wf/versions/$v',
+const TTeamTypeWWfVersionsRoute = TTeamTypeWWfVersionsRouteImport.update({
+  id: '/t/$team/$type/w/$wf/versions',
+  path: '/t/$team/$type/w/$wf/versions',
   getParentRoute: () => rootRouteImport,
+} as any)
+const TTeamTypeWWfVersionsIndexRoute =
+  TTeamTypeWWfVersionsIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => TTeamTypeWWfVersionsRoute,
+  } as any)
+const TTeamTypeWWfVersionsVRoute = TTeamTypeWWfVersionsVRouteImport.update({
+  id: '/$v',
+  path: '/$v',
+  getParentRoute: () => TTeamTypeWWfVersionsRoute,
 } as any)
 const TTeamTypeWWfVersionsVTasksTaskKeyRoute =
   TTeamTypeWWfVersionsVTasksTaskKeyRouteImport.update({
-    id: '/t/$team/$type/w/$wf/versions/$v_/tasks/$taskKey',
-    path: '/t/$team/$type/w/$wf/versions/$v/tasks/$taskKey',
-    getParentRoute: () => rootRouteImport,
+    id: '/$v_/tasks/$taskKey',
+    path: '/$v/tasks/$taskKey',
+    getParentRoute: () => TTeamTypeWWfVersionsRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -102,7 +115,9 @@ export interface FileRoutesByFullPath {
   '/runs/$id/reports/$reportId': typeof RunsIdReportsReportIdRoute
   '/t/$team/$type/': typeof TTeamTypeIndexRoute
   '/t/$team/$type/w/$wf/history': typeof TTeamTypeWWfHistoryRoute
+  '/t/$team/$type/w/$wf/versions': typeof TTeamTypeWWfVersionsRouteWithChildren
   '/t/$team/$type/w/$wf/versions/$v': typeof TTeamTypeWWfVersionsVRoute
+  '/t/$team/$type/w/$wf/versions/': typeof TTeamTypeWWfVersionsIndexRoute
   '/t/$team/$type/w/$wf/versions/$v/tasks/$taskKey': typeof TTeamTypeWWfVersionsVTasksTaskKeyRoute
 }
 export interface FileRoutesByTo {
@@ -118,6 +133,7 @@ export interface FileRoutesByTo {
   '/t/$team/$type': typeof TTeamTypeIndexRoute
   '/t/$team/$type/w/$wf/history': typeof TTeamTypeWWfHistoryRoute
   '/t/$team/$type/w/$wf/versions/$v': typeof TTeamTypeWWfVersionsVRoute
+  '/t/$team/$type/w/$wf/versions': typeof TTeamTypeWWfVersionsIndexRoute
   '/t/$team/$type/w/$wf/versions/$v/tasks/$taskKey': typeof TTeamTypeWWfVersionsVTasksTaskKeyRoute
 }
 export interface FileRoutesById {
@@ -133,7 +149,9 @@ export interface FileRoutesById {
   '/runs/$id_/reports/$reportId': typeof RunsIdReportsReportIdRoute
   '/t/$team/$type/': typeof TTeamTypeIndexRoute
   '/t/$team/$type/w/$wf/history': typeof TTeamTypeWWfHistoryRoute
+  '/t/$team/$type/w/$wf/versions': typeof TTeamTypeWWfVersionsRouteWithChildren
   '/t/$team/$type/w/$wf/versions/$v': typeof TTeamTypeWWfVersionsVRoute
+  '/t/$team/$type/w/$wf/versions/': typeof TTeamTypeWWfVersionsIndexRoute
   '/t/$team/$type/w/$wf/versions/$v_/tasks/$taskKey': typeof TTeamTypeWWfVersionsVTasksTaskKeyRoute
 }
 export interface FileRouteTypes {
@@ -150,7 +168,9 @@ export interface FileRouteTypes {
     | '/runs/$id/reports/$reportId'
     | '/t/$team/$type/'
     | '/t/$team/$type/w/$wf/history'
+    | '/t/$team/$type/w/$wf/versions'
     | '/t/$team/$type/w/$wf/versions/$v'
+    | '/t/$team/$type/w/$wf/versions/'
     | '/t/$team/$type/w/$wf/versions/$v/tasks/$taskKey'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -166,6 +186,7 @@ export interface FileRouteTypes {
     | '/t/$team/$type'
     | '/t/$team/$type/w/$wf/history'
     | '/t/$team/$type/w/$wf/versions/$v'
+    | '/t/$team/$type/w/$wf/versions'
     | '/t/$team/$type/w/$wf/versions/$v/tasks/$taskKey'
   id:
     | '__root__'
@@ -180,7 +201,9 @@ export interface FileRouteTypes {
     | '/runs/$id_/reports/$reportId'
     | '/t/$team/$type/'
     | '/t/$team/$type/w/$wf/history'
+    | '/t/$team/$type/w/$wf/versions'
     | '/t/$team/$type/w/$wf/versions/$v'
+    | '/t/$team/$type/w/$wf/versions/'
     | '/t/$team/$type/w/$wf/versions/$v_/tasks/$taskKey'
   fileRoutesById: FileRoutesById
 }
@@ -196,8 +219,7 @@ export interface RootRouteChildren {
   RunsIdReportsReportIdRoute: typeof RunsIdReportsReportIdRoute
   TTeamTypeIndexRoute: typeof TTeamTypeIndexRoute
   TTeamTypeWWfHistoryRoute: typeof TTeamTypeWWfHistoryRoute
-  TTeamTypeWWfVersionsVRoute: typeof TTeamTypeWWfVersionsVRoute
-  TTeamTypeWWfVersionsVTasksTaskKeyRoute: typeof TTeamTypeWWfVersionsVTasksTaskKeyRoute
+  TTeamTypeWWfVersionsRoute: typeof TTeamTypeWWfVersionsRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -279,22 +301,52 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TTeamTypeWWfHistoryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/t/$team/$type/w/$wf/versions': {
+      id: '/t/$team/$type/w/$wf/versions'
+      path: '/t/$team/$type/w/$wf/versions'
+      fullPath: '/t/$team/$type/w/$wf/versions'
+      preLoaderRoute: typeof TTeamTypeWWfVersionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/t/$team/$type/w/$wf/versions/': {
+      id: '/t/$team/$type/w/$wf/versions/'
+      path: '/'
+      fullPath: '/t/$team/$type/w/$wf/versions/'
+      preLoaderRoute: typeof TTeamTypeWWfVersionsIndexRouteImport
+      parentRoute: typeof TTeamTypeWWfVersionsRoute
+    }
     '/t/$team/$type/w/$wf/versions/$v': {
       id: '/t/$team/$type/w/$wf/versions/$v'
-      path: '/t/$team/$type/w/$wf/versions/$v'
+      path: '/$v'
       fullPath: '/t/$team/$type/w/$wf/versions/$v'
       preLoaderRoute: typeof TTeamTypeWWfVersionsVRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof TTeamTypeWWfVersionsRoute
     }
     '/t/$team/$type/w/$wf/versions/$v_/tasks/$taskKey': {
       id: '/t/$team/$type/w/$wf/versions/$v_/tasks/$taskKey'
-      path: '/t/$team/$type/w/$wf/versions/$v/tasks/$taskKey'
+      path: '/$v/tasks/$taskKey'
       fullPath: '/t/$team/$type/w/$wf/versions/$v/tasks/$taskKey'
       preLoaderRoute: typeof TTeamTypeWWfVersionsVTasksTaskKeyRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof TTeamTypeWWfVersionsRoute
     }
   }
 }
+
+interface TTeamTypeWWfVersionsRouteChildren {
+  TTeamTypeWWfVersionsVRoute: typeof TTeamTypeWWfVersionsVRoute
+  TTeamTypeWWfVersionsIndexRoute: typeof TTeamTypeWWfVersionsIndexRoute
+  TTeamTypeWWfVersionsVTasksTaskKeyRoute: typeof TTeamTypeWWfVersionsVTasksTaskKeyRoute
+}
+
+const TTeamTypeWWfVersionsRouteChildren: TTeamTypeWWfVersionsRouteChildren = {
+  TTeamTypeWWfVersionsVRoute: TTeamTypeWWfVersionsVRoute,
+  TTeamTypeWWfVersionsIndexRoute: TTeamTypeWWfVersionsIndexRoute,
+  TTeamTypeWWfVersionsVTasksTaskKeyRoute:
+    TTeamTypeWWfVersionsVTasksTaskKeyRoute,
+}
+
+const TTeamTypeWWfVersionsRouteWithChildren =
+  TTeamTypeWWfVersionsRoute._addFileChildren(TTeamTypeWWfVersionsRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -308,9 +360,7 @@ const rootRouteChildren: RootRouteChildren = {
   RunsIdReportsReportIdRoute: RunsIdReportsReportIdRoute,
   TTeamTypeIndexRoute: TTeamTypeIndexRoute,
   TTeamTypeWWfHistoryRoute: TTeamTypeWWfHistoryRoute,
-  TTeamTypeWWfVersionsVRoute: TTeamTypeWWfVersionsVRoute,
-  TTeamTypeWWfVersionsVTasksTaskKeyRoute:
-    TTeamTypeWWfVersionsVTasksTaskKeyRoute,
+  TTeamTypeWWfVersionsRoute: TTeamTypeWWfVersionsRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

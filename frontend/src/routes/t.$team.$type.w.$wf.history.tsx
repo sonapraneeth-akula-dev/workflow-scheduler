@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, Link } from "@tanstack/react-router"
 import { HistoryFilters, HistoryTable } from "@/features/runs/HistoryTable"
 import { historySearchSchema } from "@/features/runs/history"
 import { TriggerDialog } from "@/features/runs/TriggerDialog"
@@ -17,6 +17,9 @@ function WorkflowHistory() {
     <>
       <h1 className="text-2xl font-semibold">Workflow history</h1>
       <p className="break-words">{workflowId}</p>
+      <Link to="/t/$team/$type/w/$wf/versions" params={{ team, type, wf }}>
+        Versions
+      </Link>
       <TriggerDialog workflowId={workflowId} />
       <HistoryFilters
         key={JSON.stringify(search)}
