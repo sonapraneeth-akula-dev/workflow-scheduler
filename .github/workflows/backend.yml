@@ -35,7 +35,7 @@ jobs:
         run: |
           $suffix = if ($IsWindows) { ".exe" } else { "" }
           "WF_AGENT_EXECUTABLE=${{ runner.temp }}/wf-agent/wf-agent$suffix" >> $env:GITHUB_ENV
-      - run: dotnet test backend/Wf.slnx --configuration Release --no-build --collect:"XPlat Code Coverage"
+      - run: dotnet test backend/Wf.slnx --configuration Release --no-build --filter "Category!=Nightly&Category!=ChaosSmoke" --collect:"XPlat Code Coverage"
       - name: Install and start Windows service
         if: runner.os == 'Windows'
         shell: pwsh

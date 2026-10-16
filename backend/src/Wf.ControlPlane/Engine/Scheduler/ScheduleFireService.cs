@@ -112,8 +112,9 @@ public sealed class ScheduleFireService(NpgsqlDataSource source, LeaseManager le
         string workflow, string? pin, string variables, ScheduleOverlapPolicy overlap, RunTrigger trigger,
         CancellationToken cancellationToken)
     {
-        await using (var count = new NpgsqlCommand("SELECT count(*)::int FROM runs WHERE series_id=$1 AND status IN (0,1,2)", connection))
+        if (overlap != ScheduleOverlapPolicy.Concurrent)
         {
+            await using var count = new NpgsqlCommand("SELECT count(*)::int FROM runs WHERE series_id=$1 AND status IN (0,1,2)", connection);
             count.Parameters.AddWithValue(series);
             var active = (int)(await count.ExecuteScalarAsync(cancellationToken)
                 ?? throw new InvalidDataException("The overlap query returned no count."));
@@ -177,19 +178,27 @@ public sealed class ScheduleFireService(NpgsqlDataSource source, LeaseManager le
                                 await using var heartbeat = new NpgsqlCommand("SELECT 1", listener);
                                 await heartbeat.ExecuteScalarAsync(stoppingToken);
                             }
+                            var due = new List<ScheduleTimer>();
                             var limit = timers.Count;
                             for (var index = 0; index < limit && timers.TryTakeDue(time.GetUtcNow(), out var timer); index++)
+                                due.Add(timer!);
+                            var following = new System.Collections.Concurrent.ConcurrentBag<ScheduleTimer>();
+                            await Parallel.ForEachAsync(due, new ParallelOptions
+                            {
+                                MaxDegreeOfParallelism = 16, CancellationToken = stoppingToken
+                            }, async (timer, cancellationToken) =>
                             {
                                 try
                                 {
-                                    if (await FireAsync(timer!, stoppingToken) is { } next) timers.Add(next);
+                                    if (await FireAsync(timer, cancellationToken) is { } next) following.Add(next);
                                 }
                                 catch (ScheduleFireRejectedException error)
                                 {
                                     logger.LogError(error, "Schedule {ScheduleId} cannot fire; its cursor is retained until configuration reload.",
-                                        timer!.ScheduleId);
+                                        timer.ScheduleId);
                                 }
-                            }
+                            });
+                            foreach (var next in following) timers.Add(next);
                         }
                         else
                         {

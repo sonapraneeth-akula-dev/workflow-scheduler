@@ -23,32 +23,47 @@ public sealed class RunRecovery(NpgsqlDataSource dataSource, RunStore runs, Leas
     public ImmutableDictionary<Guid, RecoveredRun> RecoveredRuns =>
         IsReady ? Volatile.Read(ref state).Runs : ImmutableDictionary<Guid, RecoveredRun>.Empty;
 
-    public async Task RecoverAsync(CancellationToken cancellationToken = default)
+    public Task RecoverAsync(CancellationToken cancellationToken = default) => RecoverAsync(false, cancellationToken);
+
+    private async Task RecoverAsync(bool incremental, CancellationToken cancellationToken)
     {
         var lease = leadership.RequireLease();
         await gate.WaitAsync(cancellationToken);
         try
         {
-            Volatile.Write(ref state, new(null, ImmutableDictionary<Guid, RecoveredRun>.Empty));
-            await ProcessCommandsAsync(lease, cancellationToken);
+            var previous = Volatile.Read(ref state);
+            var recovered = incremental && previous.Lease == lease ? previous.Runs.ToBuilder() :
+                ImmutableDictionary.CreateBuilder<Guid, RecoveredRun>();
+            if (!incremental || previous.Lease != lease)
+                Volatile.Write(ref state, new(null, ImmutableDictionary<Guid, RecoveredRun>.Empty));
+            var changed = await ProcessCommandsAsync(lease, cancellationToken);
+            foreach (var id in changed) recovered.Remove(id);
             var ids = new List<Guid>();
-            await using (var command = dataSource.CreateCommand("SELECT id FROM runs WHERE status IN (0,1,2) ORDER BY id"))
-            await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
-                while (await reader.ReadAsync(cancellationToken)) ids.Add(reader.GetGuid(0));
-            var recovered = ImmutableDictionary.CreateBuilder<Guid, RecoveredRun>();
-            foreach (var id in ids)
+            await using (var command = dataSource.CreateCommand("""
+                SELECT id FROM runs WHERE status IN (0,1,2) AND NOT(id=ANY($1)) ORDER BY id
+                """))
             {
-                await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
-                await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-                await leadership.FenceAsync(connection, transaction, lease, cancellationToken);
-                var run = await runs.LoadAsync(connection, id, true, cancellationToken);
-                if (!TransitionTable.IsTerminal(run.Snapshot.Status))
-                {
-                    var timers = await LoadTimersAsync(connection, run.Snapshot, cancellationToken);
-                    recovered.Add(id, new(run, new(new RecoveryClock(time), restored: timers)));
-                }
-                await transaction.CommitAsync(cancellationToken);
+                command.Parameters.AddWithValue(recovered.Keys.ToArray());
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken)) ids.Add(reader.GetGuid(0));
             }
+            var loaded = new System.Collections.Concurrent.ConcurrentDictionary<Guid, RecoveredRun>();
+            await Parallel.ForEachAsync(ids.Chunk(64), new ParallelOptions
+            {
+                MaxDegreeOfParallelism = 8, CancellationToken = cancellationToken
+            }, async (batch, token) =>
+            {
+                await using var connection = await dataSource.OpenConnectionAsync(token);
+                await using var transaction = await connection.BeginTransactionAsync(token);
+                await leadership.FenceAsync(connection, transaction, lease, token);
+                var states = await runs.LoadManyAsync(connection, batch, token);
+                var timers = await LoadTimersAsync(connection, states, token);
+                await transaction.CommitAsync(token);
+                foreach (var (id, run) in states)
+                    if (!TransitionTable.IsTerminal(run.Snapshot.Status))
+                        loaded.TryAdd(id, new(run, new(new RecoveryClock(time), restored: timers[id])));
+            });
+            foreach (var (id, run) in loaded) recovered[id] = run;
             await using (var connection = await dataSource.OpenConnectionAsync(cancellationToken))
             await using (var transaction = await connection.BeginTransactionAsync(cancellationToken))
             {
@@ -62,8 +77,9 @@ public sealed class RunRecovery(NpgsqlDataSource dataSource, RunStore runs, Leas
         finally { gate.Release(); }
     }
 
-    private async Task ProcessCommandsAsync(LeaseToken lease, CancellationToken cancellationToken)
+    private async Task<HashSet<Guid>> ProcessCommandsAsync(LeaseToken lease, CancellationToken cancellationToken)
     {
+        var changed = new HashSet<Guid>();
         while (true)
         {
             await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
@@ -83,7 +99,7 @@ public sealed class RunRecovery(NpgsqlDataSource dataSource, RunStore runs, Leas
                 {
                     await reader.DisposeAsync();
                     await transaction.CommitAsync(cancellationToken);
-                    return;
+                    return changed;
                 }
                 id = reader.GetGuid(0);
                 kind = reader.GetInt16(1);
@@ -130,50 +146,64 @@ public sealed class RunRecovery(NpgsqlDataSource dataSource, RunStore runs, Leas
             await RunStore.ExecuteAsync(connection, "UPDATE commands SET processed_at=GREATEST(created_at,clock_timestamp()) WHERE id=$1",
                 cancellationToken, id);
             await transaction.CommitAsync(cancellationToken);
+            changed.Add(runId);
         }
     }
 
-    private static async Task<List<TimerEntry>> LoadTimersAsync(NpgsqlConnection connection, RunSnapshot snapshot,
+    private static async Task<Dictionary<Guid, List<TimerEntry>>> LoadTimersAsync(NpgsqlConnection connection,
+        Dictionary<Guid, RunState> states,
         CancellationToken cancellationToken)
     {
-        var timers = new List<TimerEntry>();
-        await using (var command = new NpgsqlCommand("SELECT deadline_at FROM runs WHERE run_day=uuid_v7_run_day($1) AND id=$1", connection))
-        {
-            command.Parameters.AddWithValue(snapshot.RunId);
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken)) throw new InvalidDataException("Recovered run has no deadline.");
-            timers.Add(new(new(TimerScope.Run, snapshot.RunId.ToString("D")), DeadlineAt: reader.GetFieldValue<DateTimeOffset>(0)));
-        }
+        var ids = states.Keys.ToArray();
+        var timers = ids.ToDictionary(id => id, _ => new List<TimerEntry>());
         await using (var command = new NpgsqlCommand("""
-            SELECT node_key,deadline_at FROM node_runs
-            WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND deadline_at IS NOT NULL
+            SELECT id,deadline_at FROM runs
+            WHERE run_day=ANY(SELECT uuid_v7_run_day(id) FROM unnest($1::uuid[]) id) AND id=ANY($1)
             """, connection))
         {
-            command.Parameters.AddWithValue(snapshot.RunId);
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-                if (snapshot.Nodes.TryGetValue(reader.GetString(0), out var status) && !TransitionTable.IsTerminal(status))
-                    timers.Add(new(new(TimerScope.Node, reader.GetString(0)), DeadlineAt: reader.GetFieldValue<DateTimeOffset>(1)));
-        }
-        await using (var command = new NpgsqlCommand("""
-            SELECT DISTINCT ON(task_key) task_key,attempt,deadline_at,retry_at,kill_at,timer_phase
-            FROM task_attempts WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 ORDER BY task_key,attempt DESC
-            """, connection))
-        {
-            command.Parameters.AddWithValue(snapshot.RunId);
+            command.Parameters.AddWithValue(ids);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                var key = reader.GetString(0);
+                var id = reader.GetGuid(0);
+                timers[id].Add(new(new(TimerScope.Run, id.ToString("D")), DeadlineAt: reader.GetFieldValue<DateTimeOffset>(1)));
+            }
+        }
+        await using (var command = new NpgsqlCommand("""
+            SELECT run_id,node_key,deadline_at FROM node_runs
+            WHERE run_day=ANY(SELECT uuid_v7_run_day(id) FROM unnest($1::uuid[]) id)
+                AND run_id=ANY($1) AND deadline_at IS NOT NULL
+            """, connection))
+        {
+            command.Parameters.AddWithValue(ids);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                if (states[reader.GetGuid(0)].Snapshot.Nodes.TryGetValue(reader.GetString(1), out var status) && !TransitionTable.IsTerminal(status))
+                    timers[reader.GetGuid(0)].Add(new(new(TimerScope.Node, reader.GetString(1)),
+                        DeadlineAt: reader.GetFieldValue<DateTimeOffset>(2)));
+        }
+        await using (var command = new NpgsqlCommand("""
+            SELECT DISTINCT ON(run_id,task_key) run_id,task_key,attempt,deadline_at,retry_at,kill_at,timer_phase
+            FROM task_attempts WHERE run_day=ANY(SELECT uuid_v7_run_day(id) FROM unnest($1::uuid[]) id)
+                AND run_id=ANY($1) ORDER BY run_id,task_key,attempt DESC
+            """, connection))
+        {
+            command.Parameters.AddWithValue(ids);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var id = reader.GetGuid(0);
+                var snapshot = states[id].Snapshot;
+                var key = reader.GetString(1);
                 if (!snapshot.Tasks.TryGetValue(key, out var status) || TransitionTable.IsTerminal(status)) continue;
-                var phase = (TimerPhase)reader.GetInt16(5);
-                if (!reader.IsDBNull(3) && status == ExecutionStatus.Retrying &&
+                var phase = (TimerPhase)reader.GetInt16(6);
+                if (!reader.IsDBNull(4) && status == ExecutionStatus.Retrying &&
                     phase is TimerPhase.Waiting or TimerPhase.RetryDispatched)
-                    timers.Add(new(new(TimerScope.Retry, key), RetryAt: reader.GetFieldValue<DateTimeOffset>(3), Phase: phase));
+                    timers[id].Add(new(new(TimerScope.Retry, key), RetryAt: reader.GetFieldValue<DateTimeOffset>(4), Phase: phase));
                 else if (status is ExecutionStatus.Dispatched or ExecutionStatus.Running)
-                    timers.Add(new(new(TimerScope.Attempt, $"{key}/{reader.GetInt16(1)}"),
-                        DeadlineAt: reader.GetFieldValue<DateTimeOffset>(2),
-                        KillAt: reader.IsDBNull(4) ? null : reader.GetFieldValue<DateTimeOffset>(4), Phase: phase));
+                    timers[id].Add(new(new(TimerScope.Attempt, $"{key}/{reader.GetInt16(2)}"),
+                        DeadlineAt: reader.GetFieldValue<DateTimeOffset>(3),
+                        KillAt: reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5), Phase: phase));
             }
         }
         return timers;
@@ -198,7 +228,7 @@ public sealed class RunRecovery(NpgsqlDataSource dataSource, RunStore runs, Leas
                             """);
                         pending.Parameters.AddWithValue(Volatile.Read(ref state).Runs.Keys.ToArray());
                         if ((bool)(await pending.ExecuteScalarAsync(stoppingToken) ?? false))
-                            await RecoverAsync(stoppingToken);
+                            await RecoverAsync(true, stoppingToken);
                     }
                 }
                 catch (NotLeaderException) { logger.LogInformation("Run recovery paused after losing leadership."); }

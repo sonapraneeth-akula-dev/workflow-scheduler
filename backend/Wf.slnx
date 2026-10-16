@@ -16,6 +16,7 @@
     <Project Path="tests/Wf.Cli.Tests/Wf.Cli.Tests.csproj" />
     <Project Path="tests/Wf.Contracts.Tests/Wf.Contracts.Tests.csproj" />
     <Project Path="tests/Wf.ControlPlane.Tests/Wf.ControlPlane.Tests.csproj" />
+    <Project Path="tests/Wf.Chaos.Tests/Wf.Chaos.Tests.csproj" />
     <Project Path="tests/Wf.Benchmarks.Tests/Wf.Benchmarks.Tests.csproj" />
     <Project Path="tests/Wf.Benchmarks/Wf.Benchmarks.csproj" />
     <Project Path="tests/Wf.Engine.Core.Tests/Wf.Engine.Core.Tests.csproj" />

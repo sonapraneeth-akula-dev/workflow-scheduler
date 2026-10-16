@@ -93,6 +93,47 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
         return RunState.Restore(snapshot, events, message => logger.LogWarning("{RunStateError}", message));
     }
 
+    internal async Task<Dictionary<Guid, RunState>> LoadManyAsync(NpgsqlConnection connection, Guid[] ids,
+        CancellationToken cancellationToken)
+    {
+        var snapshots = new Dictionary<Guid, RunSnapshot>();
+        await using (var command = new NpgsqlCommand("""
+            SELECT r.id,s.payload FROM runs r JOIN run_snapshots s
+              ON s.run_day=r.run_day AND s.run_id=r.id AND s.seq=r.snapshot_seq
+            WHERE r.run_day=ANY(SELECT uuid_v7_run_day(id) FROM unnest($1::uuid[]) id)
+                AND r.id=ANY($1) FOR UPDATE OF r
+            """, connection))
+        {
+            command.Parameters.AddWithValue(ids);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                snapshots.Add(reader.GetGuid(0),
+                    JsonSerializer.Deserialize(reader.GetFieldValue<byte[]>(1), RunStoreJson.Default.RunSnapshot)
+                        ?? throw new InvalidDataException("Persisted run snapshot is null."));
+        }
+        if (snapshots.Count != ids.Length) throw new InvalidDataException("A recovering run has no persisted snapshot.");
+        var events = new Dictionary<Guid, List<RunEvent>>();
+        await using (var command = new NpgsqlCommand("""
+            SELECT e.run_id,e.payload FROM run_events e JOIN runs r ON r.run_day=e.run_day AND r.id=e.run_id
+            WHERE e.run_day=ANY(SELECT uuid_v7_run_day(id) FROM unnest($1::uuid[]) id)
+                AND e.run_id=ANY($1) AND e.seq>r.snapshot_seq ORDER BY e.run_id,e.seq
+            """, connection))
+        {
+            command.Parameters.AddWithValue(ids);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var id = reader.GetGuid(0);
+                if (!events.TryGetValue(id, out var tail)) events.Add(id, tail = []);
+                tail.Add(JsonSerializer.Deserialize(reader.GetFieldValue<byte[]>(1), RunStoreJson.Default.RunEvent)
+                    ?? throw new InvalidDataException("Persisted run event is null."));
+            }
+        }
+        return snapshots.ToDictionary(pair => pair.Key, pair => RunState.Restore(pair.Value,
+            events.TryGetValue(pair.Key, out var tail) ? tail : [],
+            message => logger.LogWarning("{RunStateError}", message)));
+    }
+
     public async Task AppendAsync(RunState run, EventEntity entity, string? key, int state, DateTimeOffset at,
         CancellationToken cancellationToken = default)
     {
