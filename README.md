@@ -1216,3 +1216,33 @@ Each run uploads baseline/current metrics and full BenchmarkDotNet reports.
 Baseline revision changes are explicit, reviewable code changes; there is no
 first-run skip or automatic acceptance of slower results. Virtualized runners
 can still be noisy; investigate a failed comparison rather than relaxing limits.
+
+```powershell
+dotnet run -c Release --project backend\tests\Wf.Benchmarks -- --run-query-bench
+```
+
+The run-list/filter gate seeds exactly 100,000 historical run summaries across
+four teams, 20 types, 200 workflows and 200 series, spanning approximately 28
+hours. Signed JWT requests use production authentication and fresh Viewer
+authorization; only one team's 25,000 runs are visible. Each of ten scenarios
+requires 100 measured requests after ten warmups with nearest-rank p95 strictly
+below 300 ms. Scenarios cover unscoped authorized listing, team, type, status,
+AND metadata, time range, combined filters, workflow, series and keyset paging
+after 5,000 rows. Complete HTTP bodies, typed deserialization and exact identities,
+ordering, values and page boundaries are verified against an independent seed
+oracle inside each measured request.
+
+Local Windows/.NET 10/PostgreSQL 17 results on October 16, 2026: every scenario
+passes; worst p95 126.3951 ms (unscoped listing), team 33.693 ms, combined filters
+21.2728 ms and deep paging 38.0153 ms. These are sequential warm loopback Kestrel
+measurements, not cold-cache, concurrent-load, UI-rendering or remote-network
+SLAs. No forced query plans, cache purges or production query/index changes.
+The database contains summary rows rather than complete historical event graphs.
+Reports include dataset, environment, durability settings and per-scenario
+percentiles under ignored `BenchmarkDotNet.Artifacts\run-query\<id>\report.json`.
+`WF_TEST_POSTGRES` uses a unique schema; otherwise an isolated PostgreSQL 17
+container is created. Both modes require `fsync`, `full_page_writes` and
+`synchronous_commit` ON and remove their own schema/container afterward.
+`benchmarks.yml` runs the gate and its actual performance fixture on Windows
+and Linux; ordinary backend tests exclude the `Performance` trait. Remote CI
+execution is not implied by the local result.

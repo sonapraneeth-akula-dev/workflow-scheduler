@@ -4,6 +4,16 @@ using System.Text.Json;
 using Wf.Benchmarks;
 
 #if !ENGINE_BASELINE
+if (args.Length > 0 && args[0] == "--run-query-bench")
+{
+    if (args.Length != 1)
+    {
+        Console.Error.WriteLine("Usage: --run-query-bench");
+        return 1;
+    }
+    return await RunQueryBenchmarks.RunAsync();
+}
+
 if (args.Length > 0 && args[0] == "--trigger-api-bench")
 {
     if (args.Length != 1)
