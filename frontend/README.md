@@ -208,7 +208,33 @@ disables windowing for sequential keyboard/screen-reader access to every loaded
 record; it does not fetch additional pages. Refresh and Load more runs are
 explicit, without polling. Revoked access hides cached results. These summaries
 do not expose variables, task payloads or storage capabilities; the richer
-workflow/series history is a separate surface; abort controls remain separate work.
+workflow/series history is a separate surface.
+
+Live queued/running run pages expose Abort run only to a freshly authorized
+Operator/Admin. The confirm dialog requires a nonblank reason of 1-500
+characters, sends source `UI`, preserves the exact reason and remains open on
+failure. Cancellation is never submitted by merely opening the dialog; pending
+requests cannot be duplicated and failures never retry automatically. Viewer,
+Author-only, terminal, reconnecting and already-aborting runs expose no action;
+permissions and live status are checked again on submit.
+
+The run's status badge follows authoritative committed state, not the HTTP
+receipt. An accepted abort banner explicitly waits for committed cancellation;
+recorded Aborting still permits cleanup, and only recorded Aborted says work
+has stopped. Original actor/name, UTC acceptance time, reason and source survive
+reload and appear in series/workflow history. No actor is invented for legacy
+Aborted rows without a record. Dialog cancellation restores the trigger; after
+acceptance removes it, focus returns to the named Run controls region. The
+controls are memoized on identity/status/abort/live state so node-event traffic
+does not add dialog rendering work. Abort does not pause the schedule.
+
+`run-abort.spec.ts` exercises actual confirmation, live MessagePack completion,
+banner/history attribution and mobile/desktop accessibility on all three browser
+engines. The signed-JWT permission fixture hydrates the existing MSAL test cache
+instead of relying on development HTTP headers for WebSockets; actual Viewer
+run pages show no Abort, issue no mutation and receive 403 on a direct abort.
+No API/SignalR response is mocked; fixture authentication is not a live Entra
+sign-in.
 
 Development authentication is opt-in and requires both a loopback hostname and
 the Vite development build. A production build rejects it even on localhost.

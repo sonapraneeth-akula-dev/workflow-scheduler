@@ -19,18 +19,23 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.IdentityModel.Validators;
 using Npgsql;
+using NpgsqlTypes;
 using Wf.Contracts.Registry;
 using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Auth;
 using Wf.ControlPlane.Data;
 using Wf.ControlPlane.Live;
+using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Registry;
 using Wf.Integration.Tests.Agents;
+using Wf.Engine.Core;
+using Wf.Sdk;
 
 namespace Wf.Integration.Tests.Auth;
 
@@ -135,7 +140,7 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
 
     [Fact]
     [Trait("Category", "FrontendBrowser")]
-    public async Task Caller_permissions_support_actual_browsers_with_signed_jwt_and_no_api_mocks()
+    public async Task Caller_permissions_and_RunAbort_viewer_support_actual_browsers_with_signed_jwt_and_no_api_mocks()
     {
         Assert.SkipUnless(Environment.GetEnvironmentVariable("WF_PERMISSION_BROWSER") == "true",
             "Set WF_PERMISSION_BROWSER=true and WF_FRONTEND_ROOT after installing frontend dependencies and Playwright browsers.");
@@ -145,7 +150,22 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
         var group = Guid.NewGuid();
         var viewer = await Seed(RegistryRole.Viewer, group, false);
         var @operator = await Seed(RegistryRole.Operator, group, false);
-        await using var server = await Server.Start(database.DataSource);
+        var workflowId = viewer.Type + "/abort-viewer";
+        await CatalogWorkflow(workflowId);
+        var definition = Workflow.Define(workflowId, "1.0.0", builder =>
+            builder.Type("release").Node("work", node => node.Task("task", DeclaredPlanTask)));
+        Guid versionId;
+        await using (var version = database.DataSource.CreateCommand(
+            "UPDATE workflow_versions SET manifest=$2 WHERE workflow_id=$1 RETURNING id"))
+        {
+            version.Parameters.AddWithValue(workflowId);
+            version.Parameters.AddWithValue(NpgsqlDbType.Jsonb, ManifestWriter.Write(definition));
+            versionId = Assert.IsType<Guid>(await version.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+        }
+        var run = new RunState(Guid.CreateVersion7(), definition.Nodes, definition.Metadata, _ => { });
+        await new RunStore(database.DataSource, NullLogger<RunStore>.Instance).CreateAsync(run,
+            workflowId, versionId, DateTimeOffset.UtcNow.AddHours(1), TestContext.Current.CancellationToken);
+        await using var server = await Server.Start(database.DataSource, live: true, configure: app => app.MapRunAbortEndpoint());
         var start = new ProcessStartInfo("bun")
         {
             WorkingDirectory = frontend, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
@@ -155,13 +175,14 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
         start.Environment["WF_PERMISSION_TOKEN"] = server.Token(group: group);
         start.Environment["WF_PERMISSION_VIEWER_WORKFLOW"] = viewer.Type + "/workflow";
         start.Environment["WF_PERMISSION_OPERATOR_WORKFLOW"] = @operator.Type + "/workflow";
+        start.Environment["WF_PERMISSION_VIEWER_RUN"] = run.Snapshot.RunId.ToString("D");
         using var process = Process.Start(start)!;
         var stdout = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
         var stderr = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
         try
         {
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-            deadline.CancelAfter(TimeSpan.FromSeconds(90));
+            deadline.CancelAfter(TimeSpan.FromMinutes(2));
             await process.WaitForExitAsync(deadline.Token);
             Assert.True(process.ExitCode == 0, $"Permission browsers failed.\n{await stdout}\n{await stderr}");
         }

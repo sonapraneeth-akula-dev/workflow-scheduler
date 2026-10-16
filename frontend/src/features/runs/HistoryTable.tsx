@@ -283,7 +283,9 @@ export function HistoryTable({
                             <time dateTime={row.abort.at}>{row.abort.at}</time>
                           </dd>
                           <dt className="font-medium">Reason</dt>
-                          <dd>{row.abort.reason}</dd>
+                          <dd className="whitespace-pre-wrap">
+                            {row.abort.reason}
+                          </dd>
                           <dt className="font-medium">Source</dt>
                           <dd>{row.abort.source}</dd>
                         </dl>
