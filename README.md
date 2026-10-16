@@ -165,8 +165,22 @@ kinds remain valid, and metadata is not trimmed or rewritten. Empty payloads are
 valid. Cancellation and sink failures propagate into the ordinary task failure
 policy; the publisher does not retry. Missing or unbound publishers fail
 explicitly. Existing custom `IReports` implementations remain compatible.
-This SDK port does not yet provide quotas or remote task-host blob transport;
-those follow in the report-limit and report-store tasks.
+The default SDK quota is 10 reports per run, each at most 10,000,000 bytes
+(decimal 10 MB). Successful and in-flight publications share an atomic budget
+across all contexts; oversized payloads fail before copying or calling storage.
+Sink failure/cancellation releases its local reservation without hiding the
+original exception. Reusing the publisher for another LocalEngine resets that
+run's budget. `ReportLimitExceededException` is nonretryable and follows the
+ordinary Hard/Soft task failure policy; post-stage cleanup still runs.
+Pass a validated `Wf.Contracts.ReportLimits` as the publisher's second argument
+for overrides. Its `FromTypeLimits` parser accepts the `workflow_types.limits`
+shape `{"reports":{"maxCount":10,"maxBytes":10000000}}`, with either field
+optional. Values must be positive integers; unknown or duplicate report settings
+fail explicitly. Other limit sections remain independent. Shared contracts keep
+SDK/server policy parsing identical. Remote task-host transport, database-backed
+type-policy loading and authoritative cross-process/lost-response count
+enforcement remain the report-store task; the local counter is not a durable
+storage receipt.
 
 `POST /api/v1/runs` accepts `workflowId`, optional exact `version` (SemVer or
 version UUID), and optional `variables` (an empty object by default). A delegated

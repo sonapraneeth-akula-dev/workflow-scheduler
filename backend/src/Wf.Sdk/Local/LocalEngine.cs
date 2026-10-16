@@ -73,7 +73,7 @@ public sealed class LocalEngine
         TimeSpan? cancellationGrace = null)
     {
         ArgumentNullException.ThrowIfNull(workflow);
-        this.reports = reports;
+        this.reports = reports is ReportPublisher publisher ? publisher.ForRun() : reports;
         this.artifacts = artifacts;
         renderer = new(output ?? Console.Out);
         time = timeProvider ?? TimeProvider.System;
