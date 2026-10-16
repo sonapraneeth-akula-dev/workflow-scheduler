@@ -28,10 +28,11 @@ jobs:
       - run: bun run test
       - run: dotnet build ../backend/src/Wf.ControlPlane --configuration Release
       - run: bunx playwright install --with-deps chromium firefox webkit
-      - run: dotnet test ../backend/tests/Wf.Integration.Tests --configuration Release --filter 'FullyQualifiedName~AuthorizationMatrixTests'
+      - run: dotnet test ../backend/tests/Wf.Integration.Tests --configuration Release --filter 'FullyQualifiedName~AuthorizationMatrixTests|FullyQualifiedName~LiveResyncTests'
         env:
           WF_PERMISSION_BROWSER: "true"
           WF_LIVE_BROWSER: "true"
+          WF_LIVE_RESYNC_BROWSER: "true"
           WF_FRONTEND_ROOT: ${{ github.workspace }}/frontend
       - run: bun run test:e2e
       - uses: actions/upload-artifact@v4
