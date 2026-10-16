@@ -51,6 +51,8 @@ builder.Services.AddWorkflowAuthentication(builder.Configuration, builder.Enviro
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
 builder.Services.AddTeamAuthorization();
 builder.Services.AddUserSchedules(builder.Configuration);
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, TaskLogsJsonContext.Default));
 builder.Services.AddWorkflowOpenApi();
 builder.Services.AddWorkflowLive();
 builder.Services.AddSingleton(TimeProvider.System);
@@ -88,6 +90,7 @@ app.MapRegistryEndpoints();
 app.MapCatalogEndpoints();
 app.MapRegistrationEndpoints();
 app.MapRunsEndpoints();
+app.MapTaskLogsEndpoints();
 app.MapSchedulesEndpoints();
 app.MapSeriesFiresEndpoints();
 app.MapUserSchedulesEndpoints();

@@ -342,6 +342,125 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{id}/tasks/{task}/{attempt}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Viewer task-attempt logs. task is the URI-escaped stored node/task key. offset is zero-based original record offset; length is 1–1000 (default 200). Alternatively search (regex, 2048 characters, 10 s total, 100 ms per match, 1000 matches, cursor), or download=true (NDJSON). */
+        get: {
+            parameters: {
+                query?: {
+                    offset?: string;
+                    length?: string;
+                    search?: string;
+                    download?: string;
+                    cursor?: string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                    task: string;
+                    attempt: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskLogsPage"];
+                        "application/x-ndjson": string;
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Gateway Timeout */
+                504: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/schedules/{id}/run-now": {
         parameters: {
             query?: never;
@@ -694,6 +813,13 @@ export interface components {
             detail: string;
             reason?: null | string;
         };
+        LogFrame: {
+            /** Format: date-time */
+            at: string;
+            stream: string;
+            level: string;
+            text: string;
+        };
         ProblemDetails: {
             type?: null | string;
             title?: null | string;
@@ -745,6 +871,32 @@ export interface components {
             /** Format: uuid */
             seriesId: string;
             items: components["schemas"]["SeriesFireResponse"][];
+            nextCursor: null | string;
+        };
+        TaskLogMatch: {
+            /** Format: int64 */
+            line: number | string;
+            /** Format: int32 */
+            index: number | string;
+            /** Format: int32 */
+            length: number | string;
+            frame: components["schemas"]["LogFrame"];
+        };
+        TaskLogRecord: {
+            /** Format: int64 */
+            line: number | string;
+            frame: components["schemas"]["LogFrame"];
+        };
+        TaskLogsPage: {
+            /** Format: int64 */
+            totalLines: number | string;
+            /** Format: int64 */
+            droppedLines: number | string;
+            truncated: boolean;
+            captureInterrupted: boolean;
+            truncationMarker: null | string;
+            records: components["schemas"]["TaskLogRecord"][];
+            matches: components["schemas"]["TaskLogMatch"][];
             nextCursor: null | string;
         };
         UserScheduleResponse: {
