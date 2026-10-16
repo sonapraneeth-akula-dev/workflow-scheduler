@@ -27,7 +27,9 @@ public sealed class ReportContentHeadersTests
     public void ReportContentHeaders_only_allowlisted_kinds_are_inline(string kind, string mime, string extension)
     {
         Assert.Equal((mime, extension, true), ReportContentEndpoints.ContentType(kind));
-        Assert.Equal("sandbox allow-scripts; frame-ancestors 'self'", ReportContentEndpoints.ContentPolicy);
+        Assert.Equal("sandbox allow-scripts; frame-ancestors 'self'; default-src 'none'; " +
+            "script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; " +
+            "connect-src 'none'; form-action 'none'; base-uri 'none'", ReportContentEndpoints.ContentPolicy);
         Assert.DoesNotContain("allow-same-origin", ReportContentEndpoints.ContentPolicy);
         Assert.DoesNotContain("allow-top-navigation", ReportContentEndpoints.ContentPolicy);
     }

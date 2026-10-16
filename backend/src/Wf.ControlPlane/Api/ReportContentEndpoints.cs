@@ -11,7 +11,9 @@ namespace Wf.ControlPlane.Api;
 
 public static class ReportContentEndpoints
 {
-    public const string ContentPolicy = "sandbox allow-scripts; frame-ancestors 'self'";
+    public const string ContentPolicy = "sandbox allow-scripts; frame-ancestors 'self'; default-src 'none'; " +
+        "script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; " +
+        "connect-src 'none'; form-action 'none'; base-uri 'none'";
     private sealed class ContentRoute;
     private static readonly ContentRoute Route = new();
 

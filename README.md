@@ -216,14 +216,21 @@ report's durable run scope (including historical runs whose workflow was
 deleted). It streams verified immutable bytes without buffering the whole report
 or exposing storage paths/grants. A late size/hash fault aborts the response,
 never successfully completes a partial body. All successful content responses,
-including direct navigation, carry exactly `Content-Security-Policy: sandbox
-allow-scripts; frame-ancestors 'self'`, `nosniff`, and `no-store`; only these
+including direct navigation, carry CSP `sandbox allow-scripts; frame-ancestors
+'self'; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';
+img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none';
+base-uri 'none'`, `nosniff`, and `no-store`; only these
 responses omit the default `X-Frame-Options: DENY`. Denials/errors retain DENY
 and a stricter sandbox. Known exact kinds use safe MIME types; untrusted titles
 never become filenames. Generic `image` and unknown kinds download as
 `application/octet-stream` (clients may identify raster magic on fetched bytes);
 explicit `png`, `jpeg`, `svg`, and their exact MIME kinds have truthful types.
 The content OpenAPI response is a binary string, not a reflected Stream object.
+Inline scripts/styles and embedded visuals work without allowing fetch, forms,
+base-URL overrides or external resources. Source restrictions do not prevent
+every self-frame navigation. Authenticated clients fetching a Blob must preserve
+equivalent CSP/sandbox restrictions when rendering it; response CSP is not copied
+automatically to an object URL.
 
 `POST /api/v1/runs` accepts `workflowId`, optional exact `version` (SemVer or
 version UUID), and optional `variables` (an empty object by default). A delegated
