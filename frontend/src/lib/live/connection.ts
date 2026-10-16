@@ -4,7 +4,7 @@ export interface LiveTransport {
   start(): Promise<void>
   stop(): Promise<void>
   invoke(method: string, scope: string, id: string): Promise<unknown>
-  on(method: string, callback: (message: unknown) => void): void
+  on(method: string, callback: (message: unknown) => unknown): void
   onclose(callback: (error?: Error) => void): void
   onreconnecting(callback: (error?: Error) => void): void
   onreconnected(callback: () => void): void

@@ -30,6 +30,8 @@ using Wf.ControlPlane.Auth;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Events;
 using Wf.ControlPlane.Live;
+using Wf.ControlPlane.Hosting;
+using Microsoft.Extensions.Hosting;
 using Wf.ControlPlane.Registry;
 using Wf.Engine.Core;
 using Wf.Integration.Tests.Auth;
@@ -45,10 +47,15 @@ public sealed class LiveResyncTests(AuthorizationDatabase database, ITestOutputH
     {
         Assert.SkipUnless(Environment.GetEnvironmentVariable("WF_LIVE_RESYNC_BROWSER") == "true",
             "Set WF_LIVE_RESYNC_BROWSER=true and WF_FRONTEND_ROOT; install frontend dependencies and all Playwright engines.");
+        await using var fixture = await Fixture.Start(database.DataSource);
+        await RunBrowser(fixture, output);
+    }
+
+    internal static async Task RunBrowser(Fixture fixture, ITestOutputHelper output, bool drain = false)
+    {
         var frontend = Environment.GetEnvironmentVariable("WF_FRONTEND_ROOT");
         Assert.True(frontend is not null && File.Exists(Path.Combine(frontend, "scripts", "live-resync-browser.ts")),
             "WF_FRONTEND_ROOT must identify the repository frontend directory.");
-        await using var fixture = await Fixture.Start(database.DataSource);
         var start = new ProcessStartInfo("bun")
         {
             WorkingDirectory = frontend, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
@@ -58,6 +65,7 @@ public sealed class LiveResyncTests(AuthorizationDatabase database, ITestOutputH
         start.Environment["WF_RESYNC_CONTROL"] = fixture.Control;
         start.Environment["WF_RESYNC_TOKEN"] = fixture.Jwt;
         start.Environment["WF_RESYNC_RUN"] = fixture.RunId.ToString("D");
+        start.Environment["WF_RESYNC_DRAIN"] = drain ? "true" : "false";
         using var process = Process.Start(start)!;
         var stdout = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
         var stderr = process.StandardError.ReadToEndAsync(CancellationToken.None);
@@ -78,7 +86,7 @@ public sealed class LiveResyncTests(AuthorizationDatabase database, ITestOutputH
     }
 
     // Only the test control plane and durable writer survive API disposal.
-    private sealed class Fixture(NpgsqlDataSource source) : IAsyncDisposable
+    internal sealed class Fixture(NpgsqlDataSource source, bool enableDrain) : IAsyncDisposable
     {
         private const string Tenant = "ef8a05a0-451c-4479-9c8d-391b6bc7ee1a";
         private const string Audience = "562b0870-4522-43da-8587-41e9b788f309";
@@ -96,14 +104,18 @@ public sealed class LiveResyncTests(AuthorizationDatabase database, ITestOutputH
         private TaskCompletionSource? continueWriter;
         private bool offline;
         private int generation;
+        private readonly TaskCompletionSource requestEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource releaseRequest = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task RequestEntered => requestEntered.Task;
+        public void ReleaseRequest() => releaseRequest.TrySetResult();
         public string Api { get; private set; } = "http://127.0.0.1:0";
         public string Control { get; private set; } = "";
         public string Jwt { get; private set; } = "";
         public Guid RunId => run.Snapshot.RunId;
 
-        public static async Task<Fixture> Start(NpgsqlDataSource source)
+        public static async Task<Fixture> Start(NpgsqlDataSource source, bool enableDrain = false)
         {
-            var fixture = new Fixture(source);
+            var fixture = new Fixture(source, enableDrain);
             try
             {
                 await fixture.Initialize();
@@ -148,7 +160,9 @@ public sealed class LiveResyncTests(AuthorizationDatabase database, ITestOutputH
                 Volatile.Write(ref offline, false);
                 return Results.Ok(new { generation });
             }).RequireAuthorization();
-            control.MapPost("/fixture/stop", StopApi).RequireAuthorization();
+            control.MapPost("/fixture/stop", () => StopApi()).RequireAuthorization();
+            if (enableDrain)
+                control.MapPost("/fixture/drain", () => StopApi(graceful: true)).RequireAuthorization();
             control.MapPost("/fixture/start", async () =>
             {
                 await StartApi();
@@ -194,6 +208,7 @@ public sealed class LiveResyncTests(AuthorizationDatabase database, ITestOutputH
                 options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunEventsJsonContext.Default));
             builder.Services.AddSingleton(TimeProvider.System);
             if (live) builder.Services.AddWorkflowLive();
+            if (live && enableDrain) builder.Services.AddWorkflowDrain(builder.Configuration);
             var metadata = new OpenIdConnectConfiguration { Issuer = Issuer };
             metadata.SigningKeys.Add(Key());
             var manager = new StaticConfigurationManager<OpenIdConnectConfiguration>(metadata);
@@ -211,7 +226,7 @@ public sealed class LiveResyncTests(AuthorizationDatabase database, ITestOutputH
             return app;
         }
 
-        private async Task StartApi()
+        public async Task StartApi()
         {
             Assert.Null(api);
             var app = Build(Api);
@@ -233,6 +248,16 @@ public sealed class LiveResyncTests(AuthorizationDatabase database, ITestOutputH
             });
             app.MapRunEventsEndpoints();
             app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
+            if (enableDrain)
+            {
+                app.MapWorkflowReadiness();
+                app.MapGet("/fixture/held", async (HttpContext context) =>
+                {
+                    requestEntered.TrySetResult();
+                    await releaseRequest.Task.WaitAsync(context.RequestAborted);
+                    return Results.Ok(new { finished = true });
+                }).RequireAuthorization();
+            }
             try
             {
                 await app.StartAsync(TestContext.Current.CancellationToken);
@@ -242,6 +267,7 @@ public sealed class LiveResyncTests(AuthorizationDatabase database, ITestOutputH
                 Api = Address(app);
                 api = app;
                 generation++;
+                Volatile.Write(ref offline, false);
             }
             catch
             {
@@ -257,12 +283,13 @@ public sealed class LiveResyncTests(AuthorizationDatabase database, ITestOutputH
             return active.Length;
         }
 
-        private async Task<IResult> StopApi()
+        public async Task<IResult> StopApi(bool graceful = false)
         {
             Volatile.Write(ref offline, true);
-            var aborted = AbortSockets();
+            var aborted = graceful ? sockets.Count : AbortSockets();
             var previous = api ?? throw new InvalidOperationException("API already stopped.");
             api = null;
+            if (graceful) previous.Services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             await previous.StopAsync(deadline.Token);
             await previous.DisposeAsync();
@@ -271,7 +298,7 @@ public sealed class LiveResyncTests(AuthorizationDatabase database, ITestOutputH
             return Results.Ok(new { aborted, generation, portClosed = true });
         }
 
-        private async Task Append(int count, int delay, int pauseAfter, CancellationToken token)
+        public async Task Append(int count, int delay, int pauseAfter, CancellationToken token)
         {
             await writer.WaitAsync(token);
             try
@@ -340,6 +367,7 @@ public sealed class LiveResyncTests(AuthorizationDatabase database, ITestOutputH
 
         public async ValueTask DisposeAsync()
         {
+            releaseRequest.TrySetResult();
             Volatile.Write(ref offline, true);
             AbortSockets();
             if (control is not null) await control.DisposeAsync();

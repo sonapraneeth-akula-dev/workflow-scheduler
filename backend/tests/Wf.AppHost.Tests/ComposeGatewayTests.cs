@@ -61,6 +61,13 @@ public sealed class ComposeGatewayTests(ITestOutputHelper output)
             started = true;
             await Command("dotnet", [cli, "local", "up"], token);
             await Get(client, "/healthz", token);
+            Assert.Equal("45", await Command("docker",
+                ["inspect", "--format", "{{.Config.StopTimeout}}", Container("wf-api")], token));
+            using (var ready = await client.GetAsync("/healthz/ready", token))
+            {
+                Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
+                Assert.Empty(await ready.Content.ReadAsStringAsync(token));
+            }
             await Wait(async () =>
             {
                 using var response = await client.GetAsync("/healthz/leader", token);
@@ -159,6 +166,17 @@ public sealed class ComposeGatewayTests(ITestOutputHelper output)
             output.WriteLine($"Real gateway HTTP/API/SPA and three browser MessagePack WebSockets passed; " +
                 $"Linux h2c agent retained attempt 1 across hard-kill of {leader}; standby completed run {runId} " +
                 $"and dispatched the following task in {clock.Elapsed.TotalSeconds:F1}s after kill.");
+            await Command("docker", ["kill", "--signal", "TERM", Container("wf-api")], token);
+            await Wait(async () =>
+            {
+                using var ready = await client.GetAsync("/healthz/ready", token);
+                return ready.StatusCode == HttpStatusCode.ServiceUnavailable;
+            }, token);
+            await Wait(async () => await Command("docker",
+                ["inspect", "--format", "{{.State.Status}}", Container("wf-api")], token) == "exited", token);
+            Assert.Equal("0", await Command("docker",
+                ["inspect", "--format", "{{.State.ExitCode}}", Container("wf-api")], token));
+            output.WriteLine("Real API container SIGTERM: gateway readiness withdrew with 503 and the API exited cleanly.");
         }
         finally
         {
@@ -224,6 +242,7 @@ public sealed class ComposeGatewayTests(ITestOutputHelper output)
             WorkingDirectory = workingDirectory ?? LocalStackModelTests.Repository(),
             UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
         };
+        start.Environment["WarningsNotAsErrors"] = "NU1902;NU1903";
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start " + executable);
         var stdout = process.StandardOutput.ReadToEndAsync();

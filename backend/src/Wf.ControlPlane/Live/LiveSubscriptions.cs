@@ -7,9 +7,10 @@ using Wf.ControlPlane.Auth;
 
 namespace Wf.ControlPlane.Live;
 
-public sealed class LiveSubscriptions(IHubContext<LiveHub> hub, IServiceScopeFactory scopes)
+public sealed class LiveSubscriptions(IHubContext<LiveHub> hub, IServiceScopeFactory scopes, ILogger<LiveSubscriptions> logger)
 {
     private readonly ConcurrentDictionary<string, Connection> connections = new(StringComparer.Ordinal);
+    private int draining;
 
     public bool HasAnySubscribers => !connections.IsEmpty &&
         connections.Values.Any(connection => !connection.Subscriptions.IsEmpty);
@@ -17,10 +18,54 @@ public sealed class LiveSubscriptions(IHubContext<LiveHub> hub, IServiceScopeFac
     public bool HasSubscribers(string scope, string id) =>
         connections.Values.Any(connection => connection.Subscriptions.ContainsKey(LiveHub.Group(scope, id)));
 
-    public void Connect(HubCallerContext context) =>
-        connections[context.ConnectionId] = new(context.User!, context.ConnectionAborted);
+    public async Task ConnectAsync(HubCallerContext context)
+    {
+        var connection = new Connection(context);
+        connections[context.ConnectionId] = connection;
+        if (Volatile.Read(ref draining) != 0)
+            await ReconnectAsync(context.ConnectionId, connection, context.ConnectionAborted, acknowledge: false);
+    }
 
     public void Disconnect(string connectionId) => connections.TryRemove(connectionId, out _);
+
+    public Task DrainAsync(CancellationToken token)
+    {
+        Interlocked.Exchange(ref draining, 1);
+        return Task.WhenAll(connections.Select(pair => ReconnectAsync(pair.Key, pair.Value, token)));
+    }
+
+    private async Task ReconnectAsync(string id, Connection connection, CancellationToken token, bool acknowledge = true)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, connection.Token);
+        linked.CancelAfter(TimeSpan.FromSeconds(2));
+        try
+        {
+            var client = hub.Clients.Client(id);
+            var hint = new LiveReconnect("server_draining");
+            // Client results cannot be dispatched until OnConnectedAsync returns.
+            if (!acknowledge) await client.SendAsync("Reconnect", hint, linked.Token).ConfigureAwait(false);
+            else if (!await client.InvokeAsync<bool>("Reconnect", hint, linked.Token).ConfigureAwait(false))
+                logger.LogWarning("Live client did not acknowledge the API drain hint; closing its transport.");
+        }
+        catch (OperationCanceledException) when (connection.Token.IsCancellationRequested && !token.IsCancellationRequested)
+        {
+            connections.TryRemove(id, out _);
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            logger.LogWarning("Live client did not acknowledge the API drain hint within two seconds; closing its transport.");
+        }
+        catch (Exception error) when (error is HubException or IOException)
+        {
+            logger.LogWarning("Live API drain hint failed ({ErrorType}); closing its transport.", error.GetType().Name);
+        }
+        finally
+        {
+            // A hub Abort sends allowReconnect=false. Close its transport instead.
+            if (connection.Context.GetHttpContext() is { } http) http.Abort();
+            else connection.Context.Abort();
+        }
+    }
 
     public async Task<LiveSubscriptionProblem?> SubscribeAsync(HubCallerContext context, TeamResource resource,
         string scope, string id, IAuthorizationService authorization)
@@ -118,10 +163,11 @@ public sealed class LiveSubscriptions(IHubContext<LiveHub> hub, IServiceScopeFac
         scope is "run" or "series" ? Guid.ParseExact(id, "D").ToString("D") : id;
 
     private sealed record Subscription(string Scope, string Id, TeamResource Resource);
-    private sealed class Connection(ClaimsPrincipal user, CancellationToken token)
+    private sealed class Connection(HubCallerContext context)
     {
-        public ClaimsPrincipal User { get; } = user;
-        public CancellationToken Token { get; } = token;
+        public HubCallerContext Context { get; } = context;
+        public ClaimsPrincipal User { get; } = context.User!;
+        public CancellationToken Token { get; } = context.ConnectionAborted;
         public SemaphoreSlim Gate { get; } = new(1, 1);
         public ConcurrentDictionary<string, Subscription> Subscriptions { get; } = new(StringComparer.Ordinal);
     }

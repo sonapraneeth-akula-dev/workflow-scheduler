@@ -19,14 +19,14 @@ const frames = new Map<number, FrameRequestCallback>()
 let nextFrame = 0
 
 class TestTransport implements LiveTransport {
-  readonly handlers = new Map<string, (message: unknown) => void>()
+  readonly handlers = new Map<string, (message: unknown) => unknown>()
   reconnecting: (() => void) | undefined
   reconnected: (() => void) | undefined
   closed: ((error?: Error) => void) | undefined
   start = vi.fn(async () => {})
   stop = vi.fn(async () => {})
   invoke = vi.fn<LiveTransport["invoke"]>(async () => null)
-  on(method: string, callback: (message: unknown) => void) {
+  on(method: string, callback: (message: unknown) => unknown) {
     this.handlers.set(method, callback)
   }
   onclose(callback: (error?: Error) => void) {
@@ -41,7 +41,7 @@ class TestTransport implements LiveTransport {
   emit(method: string, payload: unknown) {
     const handler = this.handlers.get(method)
     if (!handler) throw new Error("No handler for " + method)
-    handler(payload)
+    return handler(payload)
   }
 }
 
@@ -330,6 +330,76 @@ describe("shared reference-counted live scopes", () => {
     expect(factory).toHaveBeenCalledOnce()
     await manager.reset()
   })
+
+  it("drain hint preserves retained scopes but discards pending deltas until reconnect resynchronizes", async () => {
+    const { manager, transport } = setup()
+    const scope = manager.retain(target)
+    await vi.waitFor(() => expect(scope.getSnapshot().status).toBe("live"), {
+      interval: 1,
+    })
+    transport.emit("RunDelta", delta())
+    expect(transport.emit("Reconnect", { reason: "server_draining" })).toBe(
+      true
+    )
+    frame()
+    expect(scope.getSnapshot().status).toBe("reconnecting")
+    expect(scope.getSnapshot().delta).toBeNull()
+    expect(scope.getSnapshot().resyncVersion).toBe(1)
+    transport.reconnecting?.()
+    transport.reconnected?.()
+    await vi.waitFor(() => expect(scope.getSnapshot().status).toBe("live"), {
+      interval: 1,
+    })
+    expect(scope.getSnapshot().resyncVersion).toBe(2)
+    expect(transport.invoke.mock.calls).toEqual([
+      ["Subscribe", "run", run],
+      ["Subscribe", "run", run],
+    ])
+    await manager.reset()
+  })
+
+  it("recreates a gracefully closed draining connection and ignores late callbacks from its old generation", async () => {
+    const first = new TestTransport()
+    const second = new TestTransport()
+    const factory = vi
+      .fn()
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(second)
+    const manager = new LiveSubscriptions(factory)
+    const scope = manager.retain(target)
+    await vi.waitFor(() => expect(scope.getSnapshot().status).toBe("live"), {
+      interval: 1,
+    })
+    first.emit("Reconnect", { reason: "server_draining" })
+    first.closed?.()
+    await vi.waitFor(
+      () => expect(second.invoke).toHaveBeenCalledWith("Subscribe", "run", run),
+      { interval: 1 }
+    )
+    expect(scope.getSnapshot().status).toBe("live")
+    expect(scope.getSnapshot().error).toBeNull()
+    first.reconnecting?.()
+    first.closed?.(new Error("stale"))
+    expect(scope.getSnapshot().status).toBe("live")
+    await manager.reset()
+  })
+
+  it.each([null, {}, { reason: "unexpected" }, { reason: 3 }])(
+    "rejects a malformed drain hint rather than hiding a transport failure: %j",
+    async (hint) => {
+      const { manager, transport } = setup()
+      const scope = manager.retain(target)
+      await vi.waitFor(() => expect(scope.getSnapshot().status).toBe("live"), {
+        interval: 1,
+      })
+      expect(transport.emit("Reconnect", hint)).toBe(false)
+      expect(scope.getSnapshot().status).toBe("error")
+      expect(scope.getSnapshot().error?.message).toContain(
+        "invalid live message"
+      )
+      await manager.reset()
+    }
+  )
 
   it("clears previously received data on same-token revocation without reconnecting or resubscribing manually", async () => {
     const { manager, transport } = setup()

@@ -2,6 +2,7 @@ import { createConnection, type LiveTransport } from "./connection"
 import {
   parseListDelta,
   parseReportAdded,
+  parseReconnect,
   parseResync,
   parseRunDelta,
   parseSubscription,
@@ -247,6 +248,29 @@ export class LiveSubscriptions {
   }
 
   private attach(connection: LiveTransport): void {
+    let draining = false
+    connection.on("Reconnect", (value) => {
+      let acknowledged = false
+      this.receive(connection, () => {
+        parseReconnect(value)
+        draining = true
+        this.state = "reconnecting"
+        this.subscribed.clear()
+        for (const entry of this.entries.values()) {
+          if (entry.blocked) continue
+          entry.runEvents = []
+          entry.items.clear()
+          entry.pendingDelta = undefined
+          this.update(entry, {
+            status: "reconnecting",
+            delta: null,
+            resyncVersion: entry.snapshot.resyncVersion + 1,
+          })
+        }
+        acknowledged = true
+      })
+      return acknowledged
+    })
     connection.on("ReportAdded", (value) =>
       this.receive(connection, () => {
         const added = parseReportAdded(value)
@@ -324,6 +348,7 @@ export class LiveSubscriptions {
     connection.onreconnected(() => {
       if (this.connection !== connection) return
       this.state = "connected"
+      draining = false
       this.subscribed.clear()
       for (const entry of this.entries.values()) {
         if (entry.blocked) continue
@@ -338,6 +363,11 @@ export class LiveSubscriptions {
       if (this.connection !== connection) return
       this.state = "disconnected"
       this.subscribed.clear()
+      if (draining) {
+        this.connection = undefined
+        this.schedule()
+        return
+      }
       this.fail(
         new Error("The live connection closed. Retry to reconnect.", { cause })
       )

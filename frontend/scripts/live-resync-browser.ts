@@ -14,6 +14,7 @@ interface Probe {
   applied: Change[]
   statuses: string[]
   initial: RunSnapshot
+  reconnectHints: string[]
   finish(): Promise<void>
 }
 declare global {
@@ -235,7 +236,17 @@ try {
           }: typeof import("../src/lib/live/connection") = await import(
             connectionModule
           )
-          const manager = new LiveSubscriptions(createConnection)
+          const messagesModule = "/src/lib/live/messages.ts"
+          const { parseReconnect }: typeof import("../src/lib/live/messages") =
+            await import(messagesModule)
+          const reconnectHints: string[] = []
+          const manager = new LiveSubscriptions(async () => {
+            const connection = await createConnection()
+            connection.on("Reconnect", (value) => {
+              reconnectHints.push(parseReconnect(value).reason)
+            })
+            return connection
+          })
           const store = new RunStore(run, manager)
           const applied: Change[] = []
           const statuses: string[] = []
@@ -279,6 +290,7 @@ try {
           window.resyncProbe = {
             store,
             initial,
+            reconnectHints,
             applied,
             statuses,
             finish: async () => {
@@ -304,7 +316,11 @@ try {
       const live = await append(8)
       await caughtUp(live.lastSeq)
       const evidence: string[] = []
-      for (const fault of ["drop", "stop"] as const) {
+      const faults =
+        process.env.WF_RESYNC_DRAIN === "true"
+          ? (["drain"] as const)
+          : (["drop", "stop"] as const)
+      for (const fault of faults) {
         const before = await page.evaluate(
           () => window.resyncProbe.store.getSnapshot().run!.lastSeq
         )
@@ -316,7 +332,13 @@ try {
           "The real hub did not deliver MessagePack."
         )
         const lost = faultSchema.parse(await control(fault))
-        if (fault === "stop") assert.equal(lost.portClosed, true)
+        if (fault !== "drop") assert.equal(lost.portClosed, true)
+        if (fault === "drain")
+          assert.deepEqual(
+            await page.evaluate(() => window.resyncProbe.reconnectHints),
+            ["server_draining"],
+            "Graceful drain did not deliver its real MessagePack reconnect hint."
+          )
         await page.waitForFunction(
           () => window.resyncProbe.store.getSnapshot().status === "reconnecting"
         )
@@ -342,9 +364,9 @@ try {
           .parse(await control(fault === "drop" ? "resume" : "start"))
         assert.equal(
           restored.generation,
-          lost.generation + (fault === "stop" ? 1 : 0)
+          lost.generation + (fault !== "drop" ? 1 : 0)
         )
-        if (fault === "stop") assert.equal(restored.api, settings.api)
+        if (fault !== "drop") assert.equal(restored.api, settings.api)
         await caughtUp(before + 36)
         await control("continue")
         const recovered = await continuing
@@ -420,7 +442,7 @@ try {
         durable.events.filter((event) => event.seq > initial),
         "Recovered apply audit differs from the exact committed PostgreSQL event tail."
       )
-      assert.equal(result.applied.length, 136)
+      assert.equal(result.applied.length, 8 + faults.length * 64)
       assert.deepEqual(result.recovered, result.authoritative)
       assert.equal(
         reads.filter((url) => !url.includes("/events?")).length,
@@ -428,8 +450,8 @@ try {
         "Expected only initial and final authoritative graph reads."
       )
       assert(
-        sockets.filter((socket) => socket.binary).length >= 3,
-        "Real MessagePack sockets were not reestablished after both faults."
+        sockets.filter((socket) => socket.binary).length >= faults.length + 1,
+        "Real MessagePack sockets were not reestablished after every fault."
       )
       assert(result.statuses.includes("reconnecting"))
       console.log(

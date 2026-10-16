@@ -60,6 +60,9 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             Assert.True(exported.StatusCode == HttpStatusCode.OK, await exported.Content.ReadAsStringAsync(deadline.Token));
             using var document = JsonDocument.Parse(await exported.Content.ReadAsStringAsync(deadline.Token));
             var paths = document.RootElement.GetProperty("paths");
+            var readiness = paths.GetProperty("/healthz/ready").GetProperty("get").GetProperty("responses");
+            Assert.True(readiness.TryGetProperty("200", out _));
+            Assert.True(readiness.TryGetProperty("503", out _));
             Assert.True(paths.GetProperty("/api/v1/runs/history").TryGetProperty("get", out _));
             Assert.True(paths.GetProperty("/api/v1/series/{id}/history").TryGetProperty("get", out _));
             Assert.True(paths.GetProperty("/api/v1/workflows/{team}/{type}/{workflow}/history").TryGetProperty("get", out _));
@@ -71,6 +74,7 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             Assert.Equal("#/components/schemas/ScheduleRunNowResponse", runNow.GetProperty("responses").GetProperty("202")
                 .GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
             var schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
+            Assert.True(schemas.GetProperty("LiveReconnect").GetProperty("properties").TryGetProperty("reason", out _));
             var machines = paths.GetProperty("/api/v1/machines").GetProperty("get");
             Assert.Equal("#/components/schemas/MachineListResponse", machines.GetProperty("responses").GetProperty("200")
                 .GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());

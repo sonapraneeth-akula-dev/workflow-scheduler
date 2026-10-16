@@ -61,6 +61,10 @@ public sealed record LiveResync(
     [property: Key("scope")] string Scope,
     [property: Key("id")] string Id);
 
+[MessagePackObject]
+public sealed record LiveReconnect(
+    [property: Key("reason")] string Reason);
+
 /// <summary>Run-index invalidation only; never consumes a run-event sequence.
 /// A run Resync/reconnect requires refetching the report index as well as durable run state.</summary>
 [MessagePackObject]

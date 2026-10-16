@@ -4,7 +4,7 @@ x-control-plane-build: &control-plane-build
   args:
     NUGET_SOURCE: "${KARDIA_NUGET_SOURCE:-https://api.nuget.org/v3/index.json}"
 x-control-plane-health: &control-plane-health
-  test: ["CMD", "curl", "--fail", "--silent", "--max-time", "3", "http://127.0.0.1:8080/healthz"]
+  test: ["CMD", "curl", "--fail", "--silent", "--max-time", "3", "http://127.0.0.1:8080/healthz/ready"]
   interval: 2s
   timeout: 5s
   retries: 60
@@ -26,6 +26,7 @@ services:
   wf-api:
     image: "kardia-control-plane:${KARDIA_ENVIRONMENT:?Use wf local up}"
     build: *control-plane-build
+    stop_grace_period: 45s
     healthcheck: *control-plane-health
     ports:
       - "${KARDIA_BIND_IP:?Use wf local up}:5000:8080"
@@ -59,7 +60,7 @@ services:
       wf-engine-b:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz/ready"]
       interval: 2s
       timeout: 5s
       retries: 60

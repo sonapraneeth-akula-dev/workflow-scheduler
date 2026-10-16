@@ -191,6 +191,29 @@ Cleanup removes only started projects and allowlisted test volumes; private CLI
 state persists. CI retains the TRX (including diagnostic output) for fourteen
 days. A local pass does not imply a hosted GitHub Actions result.
 
+### Graceful API shutdown
+
+Use `/healthz/ready` for routing readiness and `/healthz` for liveness. On
+SIGTERM or host stop, readiness immediately returns 503 while accepted HTTP
+requests finish. The API withdraws from Caddy's one-second readiness checks,
+waits its propagation delay, then lets Kestrel finish the accepted requests.
+Compose gives the API a 45-second termination grace period.
+
+`Drain:PropagationDelay` (`Drain__PropagationDelay` in environment variables)
+accepts zero through ten seconds. API-only nodes default to two seconds;
+combined/engine nodes default to zero to preserve fast leader handover.
+Keep the deployment termination budget longer than the configured propagation
+delay, the bounded two-second live-client acknowledgment and the HTTP shutdown
+budget. This is routing drain, not user authentication or agent drain.
+
+Live clients acknowledge a fixed `server_draining` reconnect hint before their
+transport closes. A missing acknowledgment is logged and cannot block shutdown
+indefinitely. The existing official SignalR reconnect and run store recover
+through `/events?afterSeq=<last-applied-sequence>` without replacing ordered
+replay with a snapshot or polling. The native Linux SIGTERM acceptance runs in
+the backend Linux CI leg; `WF_API_DRAIN_BROWSER=true` with `WF_FRONTEND_ROOT`
+enables the separate real Chromium/Firefox/WebKit integration test.
+
 ### Trusted local HTTPS edge
 
 The shared GrihaSetu platform edge already contains the Kardia dev/PPE routes.

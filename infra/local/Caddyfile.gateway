@@ -47,9 +47,13 @@
 	handle @grpc {
 		import engine_proxy
 	}
-	@api path /api /api/* /hubs /hubs/* /healthz
+	@api path /api /api/* /hubs /hubs/* /healthz /healthz/ready
 	handle @api {
-		reverse_proxy wf-api:8080
+		reverse_proxy wf-api:8080 {
+			health_uri /healthz/ready
+			health_interval 1s
+			health_timeout 2s
+		}
 	}
 	handle {
 		root * /srv

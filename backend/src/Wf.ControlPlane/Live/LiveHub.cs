@@ -9,10 +9,10 @@ public sealed class LiveHub(IAuthorizationService authorization, LiveSubscriptio
 {
     public const string Path = "/hubs/live/v1";
 
-    public override Task OnConnectedAsync()
+    public override async Task OnConnectedAsync()
     {
-        subscriptions.Connect(Context);
-        return base.OnConnectedAsync();
+        await subscriptions.ConnectAsync(Context);
+        await base.OnConnectedAsync();
     }
 
     public override Task OnDisconnectedAsync(Exception? exception)

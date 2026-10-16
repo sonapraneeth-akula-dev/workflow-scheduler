@@ -73,6 +73,16 @@ public sealed class LiveHubTests
     }
 
     [Fact]
+    public void Drain_hint_MessagePack_contains_only_its_fixed_reason_without_resource_payloads()
+    {
+        var bytes = MessagePackSerializer.Serialize(new LiveReconnect("server_draining"),
+            cancellationToken: TestContext.Current.CancellationToken);
+        using var json = JsonDocument.Parse(MessagePackSerializer.ConvertToJson(bytes,
+            cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal("""{"reason":"server_draining"}""", json.RootElement.GetRawText());
+    }
+
+    [Fact]
     public void MessagePack_and_OpenAPI_JSON_use_identical_camel_case_maps_and_ISO_timestamps_without_secrets()
     {
         var run = Guid.CreateVersion7();

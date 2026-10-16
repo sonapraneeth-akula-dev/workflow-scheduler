@@ -85,7 +85,7 @@ public sealed class ComposeStackTests(ITestOutputHelper output)
         {
             using var diagnostics = new CancellationTokenSource(TimeSpan.FromSeconds(45));
             foreach (var environment in started)
-                foreach (var service in new[] { "wf-engine-a", "wf-engine-b", "wf-agent", "wf-host", "gateway" })
+                foreach (var service in new[] { "wf-engine-a", "wf-engine-b", "wf-agent-linux", "wf-api", "wf-gateway" })
                     try
                     {
                         output.WriteLine(await Command("docker",

@@ -24,7 +24,7 @@ public static class OpenApiSetup
             {
                 foreach (var type in new[] { typeof(RunDelta), typeof(ListDelta), typeof(LiveResync),
                     typeof(LiveEvent), typeof(LiveAbort), typeof(LiveRunSummary), typeof(LiveSubscriptionProblem),
-                    typeof(ReportAdded) })
+                    typeof(ReportAdded), typeof(LiveReconnect) })
                     document.AddComponent(type.Name, await context.GetOrCreateSchemaAsync(type, null, token));
             });
         });

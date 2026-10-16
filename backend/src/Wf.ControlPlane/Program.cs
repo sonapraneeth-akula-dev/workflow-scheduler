@@ -82,6 +82,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.AddWorkflowOpenApi();
 builder.Services.AddWorkflowLive();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddWorkflowDrain(builder.Configuration, engineEnabled);
 builder.Services.AddWorkflowRegistrations(builder.Configuration);
 builder.Services.AddSingleton<ActiveVersionCache>();
 builder.Services.AddHostedService<ActiveVersionCache>(services => services.GetRequiredService<ActiveVersionCache>());
@@ -165,6 +166,7 @@ app.MapPermissionsEndpoints();
 app.MapWorkflowOpenApi();
 app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
 app.MapGet("/healthz", () => Results.Ok()).AllowAnonymous();
+app.MapWorkflowReadiness();
 app.MapGet("/healthz/leader", (LeaseManager leadership, RunRecovery recovery, ActiveVersionCache versions, ScheduleFireService schedules) =>
     leadership.IsLeader && recovery.IsReady && versions.IsReady && schedules.IsReady
         ? Results.Ok() : Results.StatusCode(StatusCodes.Status503ServiceUnavailable)).AllowAnonymous();

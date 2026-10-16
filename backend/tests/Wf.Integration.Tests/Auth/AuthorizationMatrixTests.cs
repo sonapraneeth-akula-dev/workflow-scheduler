@@ -720,5 +720,6 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
 
 public sealed class AuthorizationDatabase : AgentDatabase
 {
+    public string ConnectionString => DatabaseConnectionString;
     protected override IReadOnlyList<string> Migrations => Migrator.LoadScripts().Select(script => script.Name).ToArray();
 }

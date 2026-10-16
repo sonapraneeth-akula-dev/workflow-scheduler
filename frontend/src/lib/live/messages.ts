@@ -113,6 +113,12 @@ export function parseResync(value: unknown) {
   ) satisfies components["schemas"]["LiveResync"]
 }
 
+export function parseReconnect(value: unknown) {
+  return z
+    .object({ reason: z.literal("server_draining") })
+    .parse(value) satisfies components["schemas"]["LiveReconnect"]
+}
+
 export function parseSubscription(value: unknown): Error | null {
   if (value === null) return null
   const result = problem.parse(

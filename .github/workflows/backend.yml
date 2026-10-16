@@ -36,6 +36,11 @@ jobs:
           $suffix = if ($IsWindows) { ".exe" } else { "" }
           "WF_AGENT_EXECUTABLE=${{ runner.temp }}/wf-agent/wf-agent$suffix" >> $env:GITHUB_ENV
       - run: dotnet test backend/Wf.slnx --configuration Release --no-build --filter "Category!=Nightly&Category!=ChaosSmoke&Category!=Performance&Category!=LocalStackScenario" --collect:"XPlat Code Coverage"
+      - name: Verify native Linux API SIGTERM drain
+        if: runner.os == 'Linux'
+        env:
+          WF_API_DRAIN_SIGNAL: "true"
+        run: dotnet test backend/tests/Wf.Integration.Tests --configuration Release --no-build --filter "FullyQualifiedName~ApiDrainTests.Linux_SIGTERM"
       - name: Install and start Windows service
         if: runner.os == 'Windows'
         shell: pwsh

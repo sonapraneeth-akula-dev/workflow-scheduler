@@ -3159,6 +3159,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/healthz/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz/leader": {
         parameters: {
             query?: never;
@@ -3579,6 +3619,9 @@ export interface components {
             /** Format: int32 */
             state: number | string;
             abort: null | components["schemas"]["LiveAbort"];
+        };
+        LiveReconnect: {
+            reason: string;
         };
         LiveResync: {
             scope: string;
