@@ -41,14 +41,7 @@ try {
   )
   const child = spawn(
     "bun",
-    [
-      "x",
-      "--no-install",
-      "playwright",
-      "test",
-      "run-graph.spec.ts",
-      "--project=chromium",
-    ],
+    ["x", "--no-install", "playwright", "test", "run-graph"],
     {
       stdio: "inherit",
       env: {

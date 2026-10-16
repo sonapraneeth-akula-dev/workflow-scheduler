@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router"
 import { Button } from "@/components/ui/button"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { accessDenied, getWorkflows } from "./api"
-import { StatusBadge } from "./StatusBadge"
+import { StatusBadge } from "@/components/StatusBadge"
 import { useCatalogLive } from "./useCatalogLive"
 import {
   groupWorkflows,

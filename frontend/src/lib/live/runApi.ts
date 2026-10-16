@@ -3,6 +3,21 @@ import { ApiError, publicApi } from "@/lib/api/client"
 import type { components } from "@/lib/api/schema"
 import { liveAbortSchema, liveEventSchema } from "./messages"
 
+export const executionStatuses = [
+  "Pending",
+  "Ready",
+  "Dispatched",
+  "Running",
+  "Retrying",
+  "Succeeded",
+  "SoftFailed",
+  "Failed",
+  "TimedOut",
+  "Cancelled",
+  "Skipped",
+  "Reused",
+] as const
+
 const runSnapshotSchema = z
   .object({
     runId: z.uuid(),

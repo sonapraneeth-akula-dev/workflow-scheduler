@@ -7,7 +7,7 @@ export default defineConfig({
   testDir: "./e2e",
   testIgnore: fixtureOrigin
     ? []
-    : ["**/catalog-isolation.spec.ts", "**/run-graph.spec.ts"],
+    : ["**/catalog-isolation.spec.ts", "**/run-graph*.spec.ts"],
   fullyParallel: false,
   workers: 1,
   timeout: 30_000,
@@ -28,7 +28,19 @@ export default defineConfig({
       },
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-    { name: "firefox", use: { ...devices["Desktop Firefox"] } },
-    { name: "webkit", use: { ...devices["Desktop Safari"] } },
+    {
+      name: "firefox",
+      use: { ...devices["Desktop Firefox"] },
+      grepInvert: process.env.WF_GRAPH_ORIGIN
+        ? /200-node pinned DAG retains cached layout/
+        : undefined,
+    },
+    {
+      name: "webkit",
+      use: { ...devices["Desktop Safari"] },
+      grepInvert: process.env.WF_GRAPH_ORIGIN
+        ? /200-node pinned DAG retains cached layout/
+        : undefined,
+    },
   ],
 })

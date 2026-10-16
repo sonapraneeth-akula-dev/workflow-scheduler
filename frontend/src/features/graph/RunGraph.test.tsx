@@ -1,8 +1,9 @@
 import type { ReactNode } from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { VersionPlan } from "@/features/taskplan/api"
-import type { RunSnapshot } from "@/lib/live/runApi"
+import { executionStatuses, type RunSnapshot } from "@/lib/live/runApi"
 import { layoutGraph } from "./layout"
 import { RunGraph } from "./RunGraph"
 
@@ -157,6 +158,121 @@ describe("live graph rendering", () => {
     expect(
       screen.getByRole("region", { name: "Selected node start" })
     ).toHaveTextContent("No declared tasks")
+  })
+
+  it("uses one tab stop, geometric arrows and Home/End without trapping Tab", async () => {
+    const user = userEvent.setup()
+    const nodes: VersionPlan["nodes"] = [
+      plan.nodes[0]!,
+      { ...plan.nodes[0]!, key: "sibling" },
+      plan.nodes[1]!,
+      {
+        ...plan.nodes[1]!,
+        key: "peer",
+        dependencies: [{ node: "sibling", when: "OnSuccess" }],
+      },
+    ]
+    const { rerender } = render(
+      <RunGraph
+        plan={{ ...plan, nodes }}
+        run={{ ...run, nodes: { start: 5, sibling: 3, finish: 3, peer: 3 } }}
+      />
+    )
+    const first = screen.getByRole("button", { name: "start: Succeeded" })
+    const last = screen.getByRole("button", { name: "peer: Running" })
+    const graph = screen.getByRole("region", { name: "Run dependency graph" })
+    expect(graph.querySelectorAll('button[tabindex="0"]')).toHaveLength(1)
+    await user.tab()
+    expect(first).toHaveFocus()
+    await user.keyboard("{ArrowLeft}{ArrowUp}")
+    expect(first).toHaveFocus()
+    await user.keyboard("{ArrowDown}")
+    expect(
+      screen.getByRole("button", { name: "sibling: Running" })
+    ).toHaveFocus()
+    await user.keyboard("{ArrowRight}")
+    expect(last).toHaveFocus()
+    await user.keyboard("{ArrowUp}")
+    expect(
+      screen.getByRole("button", { name: "finish: Running" })
+    ).toHaveFocus()
+    await user.keyboard("{ArrowLeft}")
+    expect(first).toHaveFocus()
+    await user.keyboard("{End}")
+    expect(last).toHaveFocus()
+    await user.keyboard("{End}{ArrowRight}{ArrowDown}")
+    expect(last).toHaveFocus()
+    await user.keyboard(" ")
+    expect(last).toHaveAttribute("aria-pressed", "true")
+    expect(
+      screen.getByRole("region", { name: "Selected node peer" })
+    ).toBeVisible()
+    rerender(
+      <RunGraph
+        plan={{ ...plan, nodes }}
+        run={{
+          ...run,
+          lastSeq: 2,
+          nodes: { start: 5, sibling: 3, finish: 3, peer: 4 },
+        }}
+      />
+    )
+    expect(last).toHaveFocus()
+    expect(last).toHaveAccessibleName("peer: Retrying")
+    expect(last).toHaveAttribute("tabindex", "0")
+    await user.keyboard("{Home}{Enter}")
+    expect(first).toHaveFocus()
+    expect(first).toHaveAttribute("aria-pressed", "true")
+    await user.tab()
+    expect(screen.getByText("Node list")).toHaveFocus()
+    expect(layoutGraph).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(executionStatuses)(
+    "renders a decorative icon and readable %s text",
+    (status) => {
+      render(
+        <RunGraph
+          plan={plan}
+          run={{
+            ...run,
+            nodes: { ...run.nodes, start: executionStatuses.indexOf(status) },
+          }}
+        />
+      )
+      const node = screen.getByRole("button", { name: `start: ${status}` })
+      expect(node).toHaveTextContent(status)
+      expect(node.querySelector("svg")).toHaveAttribute("aria-hidden", "true")
+      expect(node.querySelector("svg")).toHaveAttribute("focusable", "false")
+    }
+  )
+
+  it("provides a keyboard-operable ordered list of names, statuses and dependency conditions", async () => {
+    const user = userEvent.setup()
+    render(<RunGraph plan={plan} run={run} />)
+    expect(
+      screen.queryByRole("list", { name: "Run nodes" })
+    ).not.toBeInTheDocument()
+    await user.click(screen.getByText("Node list"))
+    const list = await screen.findByRole("list", { name: "Run nodes" })
+    expect(list).toHaveTextContent("Succeeded")
+    expect(list).toHaveTextContent("start (Always)")
+    await user.click(
+      screen.getByRole("button", { name: "Inspect node finish" })
+    )
+    expect(
+      screen.getByRole("region", { name: "Selected node finish" })
+    ).toBeVisible()
+    expect(
+      screen.getByRole("link", { name: "sdk: Task Plan" })
+    ).toHaveAttribute(
+      "href",
+      `/t/team/type/w/workflow/versions/${versionId}/tasks/finish%2Fsdk`
+    )
+    await user.click(screen.getByText("Node list"))
+    expect(
+      screen.queryByRole("list", { name: "Run nodes" })
+    ).not.toBeInTheDocument()
   })
 
   it.each([

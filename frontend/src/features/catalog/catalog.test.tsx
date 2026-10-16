@@ -14,7 +14,7 @@ import {
 import { TeamList } from "./TeamList"
 import { TeamArea } from "./TeamArea"
 import { TypeWorkflows } from "./TypeWorkflows"
-import { StatusBadge } from "./StatusBadge"
+import { StatusBadge } from "@/components/StatusBadge"
 
 vi.mock("./api", async (original) => ({
   ...(await original<typeof import("./api")>()),
@@ -378,9 +378,11 @@ describe("catalogue views", () => {
     "exposes readable %s status independent of color",
     (status) => {
       show(<StatusBadge status={status} />)
-      expect(
-        screen.getByText(status === "NeverRun" ? "Never run" : status)
-      ).toBeInTheDocument()
+      const badge = screen.getByText(
+        status === "NeverRun" ? "Never run" : status
+      )
+      expect(badge).toBeInTheDocument()
+      expect(badge.querySelector("svg")).toHaveAttribute("aria-hidden", "true")
     }
   )
 })

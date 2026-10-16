@@ -93,6 +93,17 @@ on live updates; the production RunStore supplies one immutable update per anima
 frame. Selecting a node links its declared tasks to the same historical Task Plan.
 Unknown nodes, invalid states and mismatched pinned identities fail explicitly.
 
+Graph nodes use a single roving tab stop: Up/Down move within a column, Left/Right
+choose the nearest row in the next column, and Home/End reach the first/last node.
+Native Enter/Space selects a node; Tab leaves the graph. Focus scrolls the selected
+viewport into view and survives live state changes. Every execution status has
+readable text plus a decorative icon, never color alone; the shared status badge
+also covers catalogue run statuses. The expandable ordered Node list exposes
+statuses and dependency conditions without spatial navigation, with the same
+selection and historical Task Plan links. Closed lists do not render a second live
+node tree. Chromium, Firefox and WebKit run the actual signed-JWT production-build
+keyboard fixture, including desktop-light/mobile-dark axe and overflow checks.
+
 `WF_GRAPH_BROWSER=true` enables the separate real signed-JWT/PostgreSQL/MessagePack
 Chrome performance fixture in `AuthorizationMatrixTests`. It builds the production
 SPA into a private directory, provisions MSAL through a separate test-only entry
