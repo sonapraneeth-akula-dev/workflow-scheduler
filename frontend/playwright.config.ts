@@ -1,13 +1,18 @@
 import { defineConfig, devices } from "@playwright/test"
 
 const catalogueOrigin = process.env.WF_CATALOG_ORIGIN
-const fixtureOrigin = catalogueOrigin ?? process.env.WF_GRAPH_ORIGIN
+const timelineOrigin = process.env.WF_TIMELINE_ORIGIN
+const fixtureOrigin =
+  catalogueOrigin ?? process.env.WF_GRAPH_ORIGIN ?? timelineOrigin
 
 export default defineConfig({
   testDir: "./e2e",
-  testIgnore: fixtureOrigin
-    ? []
-    : ["**/catalog-isolation.spec.ts", "**/run-graph*.spec.ts"],
+  testIgnore: [
+    ...(!fixtureOrigin
+      ? ["**/catalog-isolation.spec.ts", "**/run-graph*.spec.ts"]
+      : []),
+    ...(!timelineOrigin ? ["**/run-timeline.spec.ts"] : []),
+  ],
   fullyParallel: false,
   workers: 1,
   timeout: 30_000,

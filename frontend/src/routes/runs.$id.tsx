@@ -1,8 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { z } from "zod"
+import { Tabs } from "radix-ui"
 import { ReconnectingIndicator } from "@/components/ReconnectingIndicator"
 import { LiveRunGraph } from "@/features/graph/RunGraph"
 import { AbortDialog } from "@/features/runs/AbortDialog"
+import { Timeline } from "@/features/runs/Timeline"
 import { useRun } from "@/lib/live/useRun"
 
 export const Route = createFileRoute("/runs/$id")({
@@ -45,7 +47,32 @@ function RunDetail() {
             </Link>
           ) : null}
           <p>Committed sequence: {run.lastSeq}</p>
-          <LiveRunGraph run={run} />
+          <Tabs.Root defaultValue="graph" className="min-w-0 space-y-4">
+            <Tabs.List aria-label="Run views" className="flex flex-wrap gap-2">
+              <Tabs.Trigger
+                value="graph"
+                className="rounded border px-3 py-2 data-[state=active]:bg-muted"
+              >
+                Graph
+              </Tabs.Trigger>
+              <Tabs.Trigger
+                value="timeline"
+                className="rounded border px-3 py-2 data-[state=active]:bg-muted"
+              >
+                Timeline
+              </Tabs.Trigger>
+            </Tabs.List>
+            <Tabs.Content
+              value="graph"
+              forceMount
+              className="min-w-0 data-[state=inactive]:hidden"
+            >
+              <LiveRunGraph run={run} />
+            </Tabs.Content>
+            <Tabs.Content value="timeline" className="min-w-0">
+              <Timeline runId={run.runId} />
+            </Tabs.Content>
+          </Tabs.Root>
         </>
       ) : null}
     </>

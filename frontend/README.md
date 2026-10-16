@@ -236,6 +236,25 @@ run pages show no Abort, issue no mutation and receive 403 on a direct abort.
 No API/SignalR response is mocked; fixture authentication is not a live Entra
 sign-in.
 
+Run pages default to Graph and expose a keyboard-accessible Timeline tab.
+Timeline loads only when selected and refreshes explicitly; graph events do not
+poll or refetch it. Separate queue-wait and completed-execution lanes use only
+recorded timestamps. Active attempts have no invented end or ticking duration.
+Clock inversions remain visible as warnings rather than misleading bars.
+The initially open native details table exposes every actual attempt in
+manifest/task order, including its original attempt number, full task key,
+recorded UTC times, queue/execution metrics, outcome/category and historical
+agent ID. Missing legacy attribution remains unknown; no current agent is
+substituted. The table works without interpreting the spatial chart.
+
+`run-timeline.spec.ts` runs through the optional backend timeline browser fixture
+with actual dispatcher retries, agent-loss replacement, PostgreSQL/Kestrel and
+the existing signed MSAL/MessagePack session. Chromium, Firefox and WebKit verify
+the full table against the authoritative timeline API, distinct attempt agents,
+keyboard tabs/table collapse, explicit refresh without polling and zero
+critical/serious desktop-light/mobile-dark axe violations or page overflow.
+No timeline API response or transport is mocked.
+
 Development authentication is opt-in and requires both a loopback hostname and
 the Vite development build. A production build rejects it even on localhost.
 No token is fabricated by the UI; the backend's own `--dev` handler supplies the
