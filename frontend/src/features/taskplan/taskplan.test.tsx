@@ -79,9 +79,17 @@ function show(taskKey?: string) {
 describe("immutable task plan boundaries and states", () => {
   beforeEach(() => vi.resetAllMocks())
 
-  it("requests the exact pinned UUID and strips unexpected private manifest fields", async () => {
+  it("requests the exact pinned UUID and strips fields outside the task-plan projection", async () => {
     respond({
       ...plan,
+      registration: {
+        gitCommit: "a".repeat(40),
+        gitAuthor: "Git author",
+        registeredBy: "Registering principal",
+        changeNote: null,
+        sdkVersion: "1.0.0",
+        registeredAt: "2026-10-16T12:00:00Z",
+      },
       variables: { password: "private-value" },
       source: "private-source",
     })

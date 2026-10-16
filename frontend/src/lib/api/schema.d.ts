@@ -147,6 +147,103 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workflows/{team}/{type}/{workflow}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Fresh Viewer-authorized registration history, including inactive and soft-deleted workflows. Newest registration timestamp first, then descending immutable UUID for ties. Cursor is bound to exact workflow identity and page limit; recheck authorization on every page. Lists SemVer, Git author/commit, registering identity, change note, SDK version and registration time, plus active/latest version pointers from the same database snapshot. No source, variable values or storage capabilities. */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                    cursor?: string;
+                };
+                header?: never;
+                path: {
+                    team: string;
+                    type: string;
+                    workflow: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WorkflowVersionPage"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workflows/{team}/{type}/{workflow}/versions/{version}": {
         parameters: {
             query?: never;
@@ -154,7 +251,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Read-only task plan from one immutable version UUID, never the active version. Workflow identity is the three exact team/type/workflow segments. Includes declared actions, dependency order, effective placement, retries and timeouts. Excludes variable values/defaults, input bindings, command arguments/environment, HTTP headers/bodies and storage capabilities. Legacy tasks without action metadata explicitly have an unknown declaration. */
+        /** @description Read-only task plan from one immutable version UUID, never the active version. Workflow identity is the three exact team/type/workflow segments. Includes declared actions, dependency order, effective placement, retries and timeouts. Excludes variable values/defaults, input bindings, command arguments/environment, HTTP headers/bodies and storage capabilities. Legacy tasks without action metadata explicitly have an unknown declaration. Registration includes immutable Git author/commit, registering identity, change note, SDK version and timestamp. */
         get: {
             parameters: {
                 query?: never;
@@ -3412,6 +3509,14 @@ export interface components {
             version: string;
             variables: components["schemas"]["WorkflowVariable"][];
         };
+        WorkflowVersionPage: {
+            items: components["schemas"]["WorkflowVersionSummary"][];
+            nextCursor: null | string;
+            /** Format: uuid */
+            activeVersionId: null | string;
+            /** Format: uuid */
+            latestVersionId: null | string;
+        };
         WorkflowVersionPlan: {
             /** Format: uuid */
             versionId: string;
@@ -3421,6 +3526,23 @@ export interface components {
             stages: string[];
             placement: null | components["schemas"]["TaskPlanPlacement"];
             nodes: components["schemas"]["TaskPlanNode"][];
+            registration?: null | components["schemas"]["WorkflowVersionRegistration"];
+        };
+        WorkflowVersionRegistration: {
+            gitCommit: string;
+            gitAuthor: string;
+            registeredBy: string;
+            changeNote: null | string;
+            sdkVersion: string;
+            /** Format: date-time */
+            registeredAt: string;
+        };
+        WorkflowVersionSummary: {
+            /** Format: uuid */
+            versionId: string;
+            workflowId: string;
+            version: string;
+            registration: components["schemas"]["WorkflowVersionRegistration"];
         };
     };
     responses: never;

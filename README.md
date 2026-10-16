@@ -32,6 +32,25 @@ retry policies and timeouts. Historical versions remain readable after workflow
 soft deletion; missing versions return 404, denied scopes 403, invalid identities
 400, and responses are never cached.
 
+`GET /api/v1/workflows/{team}/{type}/{workflow}/versions?limit=50` returns
+Viewer-authorized registration history with 1-100 items per page, newest
+registration timestamp first and descending immutable UUID for ties. Follow
+`nextCursor` with the same exact workflow and limit; unknown, duplicate,
+noncanonical or transplanted query values return 400. Empty registered
+workflows return an empty page; authorized missing workflows return 404.
+Inactive and soft-deleted workflows retain their history, and every page
+rechecks access. `activeVersionId` and `latestVersionId` come from the same
+database snapshot as the page, so an intentional activation rollback is
+distinct from the latest registration.
+
+Both list items and immutable task-plan details expose a safe `registration`
+projection: Git commit, Git author, registering identity, nullable change note,
+SDK version and UTC registration time. Source, raw manifests, variable values,
+package hashes and storage capabilities are not returned. Migration `0026`
+adds the workflow/timestamp/UUID paging index without changing stored versions.
+The generated API client includes these contracts; the Versions tab remains a
+separate UI task.
+
 SDK manifests now record optional declared task actions: the original SDK method,
 command executable, credential/query/fragment-free one-shot HTTP method/URL, or
 declared HTTP operation. Description never executes tasks or inspects captured
