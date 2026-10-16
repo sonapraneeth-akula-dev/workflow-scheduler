@@ -55,6 +55,9 @@ internal sealed record PublishInputs(string? Source, string? RegistryText, strin
     {
         if (path.Length > 4096 || path.Any(char.IsControl))
             throw new ArgumentException("Local paths must be at most 4096 characters without control characters.");
+        if (path.StartsWith(@"\\", StringComparison.Ordinal) ||
+            Uri.TryCreate(path, UriKind.Absolute, out var uri) && (!uri.IsFile || uri.IsUnc))
+            throw new ArgumentException("Publish accepts local filesystem paths, not URLs or UNC shares.");
         var full = Path.GetFullPath(path);
         RejectLinks(full);
         return full;

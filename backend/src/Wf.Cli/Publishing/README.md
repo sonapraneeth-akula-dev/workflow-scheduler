@@ -16,8 +16,9 @@ capability URLs or written to output.
 Only trusted local `workflow.cs` is compiled. Publication uses `Validator` and
 `PackageBuilder`, exactly as `wf validate --package` does, retaining deterministic ZIP
 bytes for identical published inputs. No remote source retrieval or prebuilt-package
-submission. Declare the complete external dependency closure using repeated `--input`;
-use `--work-directory` to isolate build/cache artifacts. `--baseline` and
+submission; URLs and UNC shares are rejected as inputs/work paths. Declare the
+complete external dependency closure using repeated `--input`; use
+`--work-directory` to isolate build/cache artifacts. `--baseline` and
 `--team-type-quota` have the same meaning as validation.
 
 Git commit and author are required, explicit provenance; the CLI never invents them.

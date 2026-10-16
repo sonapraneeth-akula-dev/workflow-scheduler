@@ -36,6 +36,7 @@ public static class PublishCommand
             return 0;
         }
         var submitted = false;
+        var contacted = false;
         string? staging = null;
         try
         {
@@ -87,9 +88,10 @@ public static class PublishCommand
             })
             {
                 grantRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.Token);
+                contacted = true;
                 using var response = await client.SendAsync(grantRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                 if (response.StatusCode is not (HttpStatusCode.OK or HttpStatusCode.Created))
-                    return await Rejected("Upload grant", response, error, cancellationToken);
+                    return await Rejected("Upload grant", response, error, options.Token, cancellationToken);
                 await response.Content.LoadIntoBufferAsync(64 * 1024, cancellationToken);
                 var grant = await response.Content.ReadFromJsonAsync(RegistrationJsonContext.Default.UploadGrantResponse, cancellationToken)
                     ?? throw new InvalidDataException("The engine returned no upload grant.");
@@ -117,7 +119,7 @@ public static class PublishCommand
                     // Upload capability authorizes only these bytes; never forward the bearer token.
                     using var uploaded = await client.SendAsync(upload, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                     if (uploaded.StatusCode != HttpStatusCode.Created)
-                        return await Rejected("Package upload", uploaded, error, cancellationToken);
+                        return await Rejected("Package upload", uploaded, error, options.Token, cancellationToken);
                 }
             }
             using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(options.Engine, "/api/v1/registrations"))
@@ -130,7 +132,7 @@ public static class PublishCommand
             submitted = true;
             using var registered = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if (registered.StatusCode is not (HttpStatusCode.Created or HttpStatusCode.OK))
-                return await Rejected("Registration", registered, error, cancellationToken);
+                return await Rejected("Registration", registered, error, options.Token, cancellationToken);
             await registered.Content.LoadIntoBufferAsync(64 * 1024, cancellationToken);
             var accepted = await registered.Content.ReadFromJsonAsync(RegistrationJsonContext.Default.RegistrationResponse, cancellationToken)
                 ?? throw new InvalidDataException("The engine returned no registration receipt.");
@@ -160,7 +162,9 @@ public static class PublishCommand
         catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or
             Win32Exception or JsonException or ArgumentException or InvalidOperationException)
         {
-            await error.WriteLineAsync($"{exception.GetType().Name}: {exception.Message}");
+            await error.WriteLineAsync(exception is JsonException && contacted
+                ? "JsonException: The engine returned invalid JSON."
+                : $"{exception.GetType().Name}: {exception.Message}");
             if (exception is ArgumentException) await error.WriteLineAsync(Usage);
             if (submitted) await error.WriteLineAsync("Registration may already be durable. No retry was submitted.");
             return 2;
@@ -233,18 +237,22 @@ public static class PublishCommand
         return new(directory, work, origin, token, commit, author, note, inputs, baseline, quota, schedule);
     }
 
-    private static async Task<int> Rejected(string operation, HttpResponseMessage response, TextWriter error, CancellationToken token)
+    private static async Task<int> Rejected(string operation, HttpResponseMessage response, TextWriter error,
+        string accessToken, CancellationToken token)
     {
         await error.WriteLineAsync($"{operation} rejected: HTTP {(int)response.StatusCode}. No retry was submitted.");
         await response.Content.LoadIntoBufferAsync(64 * 1024, token);
         if (response.Content.Headers.ContentType?.MediaType is "application/problem+json" or "application/json")
         {
-            using var problem = JsonDocument.Parse(await response.Content.ReadAsByteArrayAsync(token));
+            var bytes = await response.Content.ReadAsByteArrayAsync(token);
+            if (bytes.Length == 0) return 1;
+            using var problem = JsonDocument.Parse(bytes);
             if (problem.RootElement.ValueKind == JsonValueKind.Object &&
                 problem.RootElement.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Array)
                 foreach (var diagnostic in errors.EnumerateArray())
                     await error.WriteLineAsync(JsonSerializer.Serialize(
-                        diagnostic.Deserialize(CliJsonContext.Default.ValidationError), CliJsonContext.Default.ValidationError));
+                        diagnostic.Deserialize(CliJsonContext.Default.ValidationError), CliJsonContext.Default.ValidationError)
+                        .Replace(JsonEncodedText.Encode(accessToken).ToString(), "[redacted]", StringComparison.Ordinal));
         }
         return 1;
     }

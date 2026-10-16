@@ -153,6 +153,8 @@ public sealed class PublishRegistrationTests(RegistrationDatabase database) : IC
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         start.Environment["MSBUILDDISABLENODEREUSE"] = "1";
         start.Environment["WarningsNotAsErrors"] = "NU1902;NU1903";
+        // Fix this explicit build input while independent workers commit on the shared branch.
+        start.Environment["SourceRevisionId"] = new string('a', 40);
         if (token is null) start.Environment.Remove("WF_ACCESS_TOKEN");
         else start.Environment["WF_ACCESS_TOKEN"] = token;
         using var process = System.Diagnostics.Process.Start(start)!;
