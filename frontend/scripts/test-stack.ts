@@ -6,6 +6,7 @@ import { tmpdir } from "node:os"
 import { basename, resolve } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
 import { z } from "zod"
+import { seedRendererReports } from "./seed-renderer-reports"
 import "../src/lib/json"
 
 const root = resolve(import.meta.dirname, "..", "..")
@@ -448,6 +449,66 @@ try {
      SELECT pg_notify('schedules','${catchUp.id}');
      COMMIT;`,
   ])
+  const rendererWorkflow = "report-tests/viewer/basic"
+  await request("/api/v1/registrations", {
+    gitCommit: "e".repeat(40),
+    gitAuthor: "Report renderer integration",
+    workflowId: rendererWorkflow,
+    manifest: {
+      ...manifest,
+      name: rendererWorkflow,
+      metadata: { type: "viewer", values: {} },
+    },
+    package: { sha256, size: bytes.length },
+    source: "// report renderer integration",
+    registry: {
+      team: "report-tests",
+      types: [
+        {
+          team: "report-tests",
+          name: "viewer",
+          description: "Report renderer integration",
+          metadataSchema: { keys: [] },
+        },
+      ],
+    },
+  })
+  const rendererRunId = z
+    .object({ runId: z.uuid() })
+    .parse(
+      await request("/api/v1/runs", {
+        workflowId: rendererWorkflow,
+        variables: {},
+      })
+    ).runId
+  const reportSql = (statement: string) =>
+    run("docker", [
+      "exec",
+      container,
+      "psql",
+      "-U",
+      "workflow",
+      "-d",
+      "workflow",
+      "-At",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-c",
+      statement,
+    ])
+  const reportDeadline = Date.now() + 20_000
+  while (
+    reportSql(`SELECT count(*) FROM runs WHERE id='${rendererRunId}'`) !== "1"
+  ) {
+    if (Date.now() >= reportDeadline)
+      throw new Error("Report fixture run was not committed.")
+    await delay(50)
+  }
+  const rendererReports = await seedRendererReports(
+    storage,
+    rendererRunId,
+    reportSql
+  )
   start(
     process.execPath,
     [
@@ -469,6 +530,8 @@ try {
       historySeriesId: history.seriesId,
       catchUpSeriesId: catchUp.seriesId,
       codeScheduleId,
+      rendererRunId,
+      rendererReports,
     }),
     {
       flag: "wx",

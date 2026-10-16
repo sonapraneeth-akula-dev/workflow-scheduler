@@ -5,6 +5,8 @@ All notable frontend changes are documented here, using Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Lazy report renderers for safe Markdown, text, expandable JSON and raster
+  images; Markdown uses pinned `react-markdown` 10.1.0 without raw HTML plugins.
 - Shared MessagePack live connection, reference-counted scope subscriptions and
   animation-frame-batched external stores using the official SignalR clients.
 - React/TypeScript SPA foundation with typed file routes, server-state queries,

@@ -107,6 +107,26 @@ on live updates; the production RunStore supplies one immutable update per anima
 frame. Selecting a node links its declared tasks to the same historical Task Plan.
 Unknown nodes, invalid states and mismatched pinned identities fail explicitly.
 
+`/runs/<run UUID>/reports/<report UUID>` opens a committed report directly.
+The viewer first checks the run's authorized report index, then fetches the
+selected report's raw bytes through the same authenticated API client. Kind,
+title, source, attempt and size come from stored metadata, never URL parameters;
+foreign/missing reports and changed content sizes fail explicitly.
+Markdown, text, expandable JSON and raster images load through independent lazy
+renderer modules. Markdown never renders raw HTML or fetches inline images.
+JSON children mount only when expanded, in batches of 100. Image headers must
+identify a supported raster format; SVG/HTML cannot enter the image path.
+Refresh failures hide previously displayed content. Renderer and decoding
+failures stay within the report pane.
+
+`e2e/report-renderers.spec.ts` reads real HTTP content from immutable filesystem
+objects and PostgreSQL report/attempt rows in the isolated UI fixture. Fixture
+rows model retained published reports; this browser fixture does not claim to
+exercise SDK publishing, which has separate backend integration coverage.
+Chromium, Firefox and WebKit check safe Markdown, exact text, keyboard JSON
+expansion, real image decoding, explicit malformed-payload errors and desktop
+light/mobile dark accessibility without API transport mocks.
+
 Graph nodes use a single roving tab stop: Up/Down move within a column, Left/Right
 choose the nearest row in the next column, and Home/End reach the first/last node.
 Native Enter/Space selects a node; Tab leaves the graph. Focus scrolls the selected
