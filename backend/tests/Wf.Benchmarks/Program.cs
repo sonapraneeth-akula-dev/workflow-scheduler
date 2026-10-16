@@ -4,6 +4,11 @@ using System.Text.Json;
 using Wf.Benchmarks;
 
 #if !ENGINE_BASELINE
+if (args.Length > 0 && args[0] == "--sampler-overhead-bench")
+    return await SamplerOverheadBenchmarks.RunAsync(args[1..]);
+if (args is ["--sampler-overhead-workload"])
+    return await SamplerOverheadBenchmarks.RunWorkloadAsync();
+
 if (args.Length > 0 && args[0] == "--run-query-bench")
 {
     if (args.Length != 1)

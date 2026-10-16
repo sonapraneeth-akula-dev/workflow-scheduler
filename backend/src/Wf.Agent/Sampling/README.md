@@ -4,7 +4,9 @@ Task 8.2.1.2.1 implements counters; task 8.2.1.2.2 ships and persists them.
 Latest machine and active-attempt samples remain available locally. When an
 actual task host executes through `TaskCommands`, each task observation and
 latest machine observation also enter the durable agent journal as
-`ResourceSample`. No frontend or overhead-benchmark implementation is included.
+`ResourceSample`. The separately scoped overhead experiment is documented in
+`backend\tests\Wf.Benchmarks\SamplerOverhead.md`; it is not an end-to-end pipeline
+overhead claim.
 
 `ResourceSamplingService` samples immediately and every second (constructor
 accepts a positive interval up to five seconds). `TaskHostPool` registers the
@@ -152,7 +154,8 @@ test failure; normal runs instead verify null plus its actual native reason.
 `WF_RESOURCE_AGENT_EXECUTABLE` optionally selects a freshly published NativeAOT
 agent for the same external-process pipeline. Native ETW/BPF rights and loss
 rules are never weakened to make tests green. Installed-service identity
-validation and sampler-overhead benchmarking remain separate work.
+validation remains separate work; the sampler-only overhead experiment is
+documented in `backend\tests\Wf.Benchmarks\SamplerOverhead.md`.
 Windows trace names contain the owning PID and exact process-start UTC ticks.
 After the external-agent fixture terminates its own process, it stops only trace
 sessions matching that lifetime identity; it never stops unrelated collectors.
@@ -250,6 +253,12 @@ Machine networking sums visible non-loopback interface counters, including
 down/virtual interfaces. Virtual links may count traffic more than once; these
 are not unique external-boundary bytes. Linux interface counters cover the
 current network namespace. Interface-set changes/resets produce null rates.
+Windows reads a fresh `GetIfTable2` 64-bit snapshot each tick, avoiding adapter
+IP/DNS metadata and per-interface statistics queries. Its owned-job RAM sum uses
+`K32GetProcessMemoryInfo` current working sets rather than system-wide process
+snapshots. Handles are checked for lifetime and owned-job membership before
+reading memory, refusing PID reuse outside the job. Accounting scope, precision
+and cadence are unchanged.
 
 ## Validation and deployment limits
 

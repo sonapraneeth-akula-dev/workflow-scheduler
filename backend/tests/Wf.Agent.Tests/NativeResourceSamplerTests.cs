@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Wf.Agent.Hosts;
 using Wf.Agent.Sampling;
 using Wf.Contracts.Agent.V1;
+using Wf.Contracts.Resources;
 using Wf.Agent.ResourceFixture;
 
 namespace Wf.Agent.Tests;
@@ -162,7 +163,7 @@ public sealed class NativeResourceSamplerTests
         using var reader = new DeniedScopeSampler();
         await EchoAsync(reader, sample =>
         {
-            Assert.Null(sample.Network);
+            Assert.Null(sample.NetworkSentBytes);
             Assert.Contains("scripted native access denied", sample.NetworkUnavailableReason);
             Assert.Equal("process", sample.CpuScope);
         });
@@ -190,13 +191,13 @@ public sealed class NativeResourceSamplerTests
             Assert.Equal(OperatingSystem.IsWindows() ? "job-with-descendants" : "cgroup-with-descendants", sample.CpuScope);
             if (Environment.GetEnvironmentVariable("WF_RESOURCE_EXPECT_UNAVAILABLE") == "1")
             {
-                Assert.Null(sample.Network);
+                Assert.Null(sample.NetworkSentBytes);
                 Assert.Contains("BPF_MAP_CREATE", sample.NetworkUnavailableReason);
             }
             else
             {
                 Assert.Null(sample.NetworkUnavailableReason);
-                Assert.NotNull(sample.Network);
+                Assert.NotNull(sample.NetworkSentBytes);
             }
         });
     }
@@ -225,7 +226,7 @@ public sealed class NativeResourceSamplerTests
         Assert.Throws<ArgumentException>(() => NativeSamplingOptions.FromConfiguration(configuration));
     }
 
-    private static async Task EchoAsync(ResourceSampler reader, Action<ResourceMeasurement> verify)
+    private static async Task EchoAsync(ResourceSampler reader, Action<ResourcePoint> verify)
     {
         using var service = new ResourceSamplingService(reader, TimeProvider.System, NullLogger<ResourceSamplingService>.Instance);
         await using var pool = new TaskHostPool(NullLogger<TaskHostPool>.Instance, sampling: service);
@@ -239,15 +240,17 @@ public sealed class NativeResourceSamplerTests
             InputsJson = ByteString.CopyFromUtf8("""{"source":{"value":"unused"}}""")
         };
         var called = false;
+        ResourcePoint? final = null;
         var result = await pool.ExecuteAsync(package, dispatch, cancellationToken: TestContext.Current.CancellationToken,
             journalResult: _ =>
             {
-                var sample = Assert.Single(service.ActiveTasks).Sample;
+                Assert.Empty(service.ActiveTasks);
+                var sample = Assert.IsType<ResourcePoint>(final);
                 Assert.True(sample.RamBytes > 0);
-                Assert.Null(sample.Error);
+                Assert.Null(sample.MemoryUnavailableReason);
                 verify(sample);
                 called = true;
-            });
+            }, publishResources: message => final = ResourceContract.Parse(message.ResourceSample.SampleJson.Memory).Task);
         Assert.Equal(TaskOutcome.Succeeded, result.Outcome);
         if (OperatingSystem.IsLinux() && reader is LinuxResourceSampler)
         {

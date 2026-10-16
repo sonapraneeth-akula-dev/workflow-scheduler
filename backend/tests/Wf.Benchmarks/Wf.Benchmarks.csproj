@@ -8,6 +8,7 @@
     <PackageReference Include="Testcontainers.PostgreSql" />
     <ProjectReference Include="..\..\src\Wf.Sdk\Wf.Sdk.csproj" />
     <ProjectReference Include="..\..\src\Wf.ControlPlane\Wf.ControlPlane.csproj" />
+    <ProjectReference Include="..\..\src\Wf.Agent\Wf.Agent.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Wf.Integration.Tests\Seed\RunSeeder.cs" Link="Seed\RunSeeder.cs" />
