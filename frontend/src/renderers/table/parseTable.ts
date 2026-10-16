@@ -1,23 +1,35 @@
 import Papa from "papaparse"
-import { z } from "zod"
 import type { TableData } from "./types"
 
-const scalar = z.union([z.string(), z.number().finite(), z.boolean(), z.null()])
-const jsonTable = z.union([
-  z.strictObject({
-    columns: z.array(z.string()).min(1).max(128),
-    rows: z.array(z.array(scalar)),
-  }),
-  z.array(
-    z.custom<Record<string, z.infer<typeof scalar>>>(
-      (value) =>
-        typeof value === "object" &&
-        value !== null &&
-        !Array.isArray(value) &&
-        Object.values(value).every((cell) => scalar.safeParse(cell).success)
+type Scalar = string | number | boolean | null
+const isScalar = (value: unknown): value is Scalar =>
+  value === null ||
+  typeof value === "string" ||
+  typeof value === "boolean" ||
+  (typeof value === "number" && Number.isFinite(value))
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+const isScalarRecord = (value: unknown): value is Record<string, Scalar> =>
+  isRecord(value) && Object.values(value).every(isScalar)
+function isExplicitTable(value: unknown): value is {
+  columns: string[]
+  rows: Scalar[][]
+} {
+  return (
+    isRecord(value) &&
+    Object.keys(value).length === 2 &&
+    Object.hasOwn(value, "columns") &&
+    Object.hasOwn(value, "rows") &&
+    Array.isArray(value.columns) &&
+    value.columns.length >= 1 &&
+    value.columns.length <= 128 &&
+    value.columns.every((cell) => typeof cell === "string") &&
+    Array.isArray(value.rows) &&
+    value.rows.every(
+      (row: unknown) => Array.isArray(row) && row.every(isScalar)
     )
-  ),
-])
+  )
+}
 
 export function parseTable(text: string, format: "auto" | "csv"): TableData {
   let data: TableData
@@ -28,32 +40,29 @@ export function parseTable(text: string, format: "auto" | "csv"): TableData {
     } catch {
       throw new Error("Table report is not valid JSON.")
     }
-    const result = jsonTable.safeParse(value)
-    if (!result.success)
-      throw new Error(
-        "Table JSON requires scalar rows and at most 128 columns."
-      )
-    if (Array.isArray(result.data)) {
-      const columns = [
-        ...new Set(result.data.flatMap((row) => Object.keys(row))),
-      ]
-      if (result.data.length && !columns.length)
+    if (Array.isArray(value) && value.every(isScalarRecord)) {
+      const columns = [...new Set(value.flatMap((row) => Object.keys(row)))]
+      if (value.length && !columns.length)
         throw new Error("Table JSON rows have no columns.")
       data = {
         columns,
-        rows: result.data.map((row) =>
+        rows: value.map((row) =>
           columns.map((key) =>
             Object.hasOwn(row, key) && row[key] !== null ? String(row[key]) : ""
           )
         ),
       }
-    } else
+    } else if (isExplicitTable(value))
       data = {
-        columns: result.data.columns,
-        rows: result.data.rows.map((row) =>
+        columns: value.columns,
+        rows: value.rows.map((row) =>
           row.map((cell) => (cell === null ? "" : String(cell)))
         ),
       }
+    else
+      throw new Error(
+        "Table JSON requires scalar rows and at most 128 columns."
+      )
   } else {
     const result = Papa.parse<string[]>(text, {
       delimiter: ",",
@@ -65,6 +74,10 @@ export function parseTable(text: string, format: "auto" | "csv"): TableData {
     const [columns = [], ...rows] = result.data
     data = { columns, rows }
   }
+  return validateTable(data)
+}
+
+export function validateTable(data: TableData): TableData {
   if (
     data.columns.length > 128 ||
     data.rows.some((row) => row.length !== data.columns.length)

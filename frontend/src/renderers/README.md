@@ -135,3 +135,37 @@ workers remain outside the initial application chunk. `e2e\report-heavy.spec.ts`
 checks retained reports through actual PostgreSQL, immutable filesystem bytes,
 production content HTTP and native browser workers/canvases; desktop-light and
 mobile-dark checks include accessibility and page-overflow assertions.
+
+## Large reports
+
+The existing authenticated content request still verifies the complete Blob
+against committed byte size before passing it to a renderer. Progressive viewing
+does not skip this integrity check or claim progressive network downloads.
+The boundary is decimal: reports **over 5,000,000 bytes** use these bounded views:
+
+- CSV parses off the main thread in 131,072-code-unit text chunks. The worker pauses
+  after each validated page until the user requests the next; cached prior pages
+  remain in the owned worker. Only one page crosses into React and at most 24
+  table rows mount. Quoted multiline fields remain intact across chunk boundaries.
+- JSON tables validate completely off-thread, then return 1,000-row pages.
+- Text uses `useProgressiveContent` to decode 64 KiB byte slices with a streaming,
+  fatal UTF-8 decoder, preserving multibyte characters crossing page boundaries.
+  Previous/next controls retain exact cached text while only one page mounts.
+
+Large-table sorting/filtering explicitly applies to the current page. The
+pagination status distinguishes rows parsed so far from a completed report.
+Malformed later pages replace the preview with an error; unfinished CSV is never
+described as fully validated. Worker termination and stale-read guards still
+apply to replacement and unmount. At or below the boundary, existing whole-table
+sorting/filtering and exact row count remain unchanged.
+
+`e2e\report-render-perf.spec.ts` seeds exact 5 MB/10 MB retained payloads, clicks
+the actual Reports-tab link and times uncached metadata/content HTTP through
+first visible table rows. The Chromium performance gate remains below one
+second and 60 fps rounded typical/average scrolling, with p95 frame time at most 20 ms.
+All three browser engines exercise page traversal, exact final row totals,
+cached backward navigation and bounded large-text rendering. Raw timings and
+idle/scroll animation-frame samples are persisted as JSON attachments.
+Firefox/WebKit headless cadence is measured, not mislabeled as 60 fps: the local
+run measured about 32/22 fps while scrolling, versus about 32 fps idle. These
+parity runs do not assert a Chromium-specific frame clock.

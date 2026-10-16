@@ -5,6 +5,9 @@ All notable frontend changes are documented here, using Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Bounded progressive report viewing above decimal 5 MB: backpressured CSV
+  worker pages, validated JSON-table pages and exact UTF-8 text pages, with
+  previous/next controls and persisted real-browser performance measurements.
 - Lazy worker-parsed, sortable/virtual CSV/JSON tables, uPlot line/grouped-bar
   charts, read-only Monaco diffs and paginated PDF.js reports with accessible
   text/data alternatives, owned cleanup and versioned local PDF dependencies.

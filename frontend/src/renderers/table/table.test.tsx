@@ -72,6 +72,9 @@ describe("strict table payloads", () => {
     '[{"value":1e400}]',
     "[{}]",
     '{"columns":["a"],"rows":[["one","extra"]]}',
+    '{"columns":["a"],"rows":[],"extra":true}',
+    '{"columns":[],"rows":[]}',
+    '{"columns":[1],"rows":[]}',
     JSON.stringify({
       columns: Array.from({ length: 129 }, () => "a"),
       rows: [],
@@ -229,5 +232,54 @@ describe("owned table parser worker", () => {
       <TableContent title="Blocked" content={new Blob(["a"])} format="auto" />
     )
     expect(screen.getByRole("alert")).toHaveTextContent("Workers unavailable.")
+  })
+  it("keeps a paged worker alive, requests one page at a time and clears a malformed later preview", () => {
+    render(
+      <TableContent title="Large" content={new Blob(["a"])} format="csv" />
+    )
+    const worker = workers[0]!
+    const reply = (page: number, complete: boolean) =>
+      act(() =>
+        worker.onmessage?.(
+          new MessageEvent("message", {
+            data: {
+              data: { columns: ["name"], rows: [[`page-${page}`]] },
+              pagination: {
+                page,
+                pageCount: page + 1,
+                parsedRows: page + 1,
+                complete,
+              },
+            },
+          })
+        )
+      )
+    reply(0, false)
+    expect(worker.terminate).not.toHaveBeenCalled()
+    expect(screen.getByText(/later pages are not yet validated/)).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: "Previous table page" })
+    ).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "Next table page" }))
+    expect(worker.postMessage).toHaveBeenLastCalledWith({ page: 1 })
+    expect(
+      screen.getByRole("button", { name: "Loading table page..." })
+    ).toBeDisabled()
+    reply(1, true)
+    expect(screen.queryByText("page-0")).toBeNull()
+    expect(screen.getByRole("cell")).toHaveTextContent("page-1")
+    expect(
+      screen.getByRole("button", { name: "Next table page" })
+    ).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "Previous table page" }))
+    expect(worker.postMessage).toHaveBeenLastCalledWith({ page: 0 })
+    act(() =>
+      worker.onmessage?.(
+        new MessageEvent("message", { data: { error: "Invalid later row." } })
+      )
+    )
+    expect(screen.getByRole("alert")).toHaveTextContent("Invalid later row.")
+    expect(screen.queryByRole("table")).toBeNull()
+    expect(worker.terminate).toHaveBeenCalled()
   })
 })
