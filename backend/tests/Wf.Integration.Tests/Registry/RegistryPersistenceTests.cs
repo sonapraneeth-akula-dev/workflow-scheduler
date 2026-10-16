@@ -51,7 +51,7 @@ public sealed class RegistryPersistenceTests(RegistryDatabase database) : IClass
         Assert.Equal(replacement.RoleBindings, after.RoleBindings);
         Assert.Equal(["smoke"], await Names(team));
         var endpoint = Assert.Single(((IEndpointRouteBuilder)server.App).DataSources.SelectMany(source => source.Endpoints));
-        Assert.Equal(AuthExtensions.Admin, Assert.Single(endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>()).Policy);
+        Assert.Null(Assert.Single(endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>()).Policy);
     }
 
     [Fact]
@@ -265,6 +265,7 @@ public sealed class RegistryPersistenceTests(RegistryDatabase database) : IClass
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Configuration["Authentication:Mode"] = "Development";
         builder.Services.AddWorkflowAuthentication(builder.Configuration, builder.Environment);
+        builder.Services.AddTeamAuthorization();
         builder.Services.AddSingleton(database.DataSource);
         var app = builder.Build();
         app.UseAuthentication();

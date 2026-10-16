@@ -25,6 +25,7 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.IdentityModel.Validators;
 using Npgsql;
 using Wf.Contracts.Registry;
+using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Auth;
 using Wf.ControlPlane.Data;
 using Wf.ControlPlane.Live;
@@ -33,7 +34,7 @@ using Wf.Integration.Tests.Agents;
 
 namespace Wf.Integration.Tests.Auth;
 
-public sealed class AuthorizationMatrixTests(AuthorizationDatabase database) : IClassFixture<AuthorizationDatabase>
+public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase database) : IClassFixture<AuthorizationDatabase>
 {
     public static IEnumerable<object[]> Roles =>
         from held in Enum.GetValues<RegistryRole>()
@@ -533,6 +534,7 @@ public sealed class AuthorizationMatrixTests(AuthorizationDatabase database) : I
             builder.Services.AddWorkflowAuthentication(builder.Configuration, builder.Environment);
             builder.Services.AddSingleton(source);
             builder.Services.AddTeamAuthorization();
+            builder.Services.AddWorkflowOpenApi();
             builder.Services.AddSignalR();
             var metadata = new OpenIdConnectConfiguration { Issuer = Issuer };
             metadata.SigningKeys.Add(key);
@@ -554,6 +556,9 @@ public sealed class AuthorizationMatrixTests(AuthorizationDatabase database) : I
                     .RequireTeamRole(role, kind, "id");
             app.MapGet("/missing-metadata", () => Results.Ok()).RequireAuthorization(TeamAuthorizationExtensions.Policy(RegistryRole.Viewer));
             app.MapPermissionsEndpoints();
+            app.MapRegistryEndpoints();
+            app.MapCatalogEndpoints();
+            app.MapWorkflowOpenApi();
             app.MapGet("/hubs/live/v1-evil", () => Results.Ok());
             app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
             await app.StartAsync(TestContext.Current.CancellationToken);

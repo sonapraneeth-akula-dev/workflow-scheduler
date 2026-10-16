@@ -392,8 +392,8 @@ Optional `roleBindings` on the team and each type map
 maps are empty; duplicate role/group pairs within one scope fail, while one
 group may hold different roles or appear at both scopes. Sample UUIDs are
 placeholders, not deployed groups. Registration persists the group bindings in
-the same transaction; scope-aware authorization enforcement remains a separate
-task, so declaring a map alone does not yet grant access to the running API.
+the same transaction; scope-aware reads and mutation policies enforce the current
+bindings through the shared authorization handler.
 
 Migration `0015_team_type_registry.sql` adds `teams` and `workflow_types`.
 `RegistryWriter.UpsertAsync(connection, transaction, registry)` uses the same
@@ -408,9 +408,28 @@ workflow foreign keys must prevent removal of in-use types.
 IDs preserve exact declared names as `team/type`; shared validation and editor
 schema now bound both segments to 128 Unicode code points and reject path
 separators/control characters, avoiding ambiguous IDs and oversized index keys.
-The host exposes `GET /api/v1/teams` for global Admins only as a bootstrap read;
-scope-filtered catalogue expansion and the full
-workflow-registration endpoint remain separate tasks.
+The authenticated catalogue exposes `GET /api/v1/teams`,
+`GET /api/v1/teams/{team}/types` and `GET /api/v1/workflows`.
+All three use current stored team/type grants through the same scope handler as
+mutations and live subscriptions; Author and Operator independently inherit
+Viewer. A type-only grant exposes its team container and permitted types, never
+sibling types, role/group maps or team-wide presentation containing denied type
+names. A team grant exposes its complete presentation; global Admin retains the
+full registered team snapshot for administration.
+
+Type rows include metadata schemas and counts of each workflow's latest durable
+run status (`NeverRun` for no history). Workflow rows include active/latest
+version identities, active-version metadata and a bounded latest-run summary,
+not variables, manifests or blob capabilities. Deleted workflows are excluded.
+Lists are uncached and scope-filtered again on every request, so registration
+revocation needs no token renewal. Ungranted teams return 404 or an empty list.
+
+Workflow lists accept exact `team` and `type` names (type requires team), `limit`
+from 1 to 100 (default 50), and the previous page's opaque `cursor`. Paging uses
+ordinal workflow identity, not offsets; latest runs use creation time then UUID
+for deterministic ties. Invalid, duplicate and unsupported filters fail with
+400 Problem Details instead of being silently ignored. Full run search/filter
+and catalogue UI/live views remain their dependent tasks.
 
 Migration `0016_role_bindings.sql` adds global/team/type scopes (0/1/2), shared
 Viewer/Operator/Author/Admin values (0/1/2/3) and group/user principals (0/1).
@@ -724,7 +743,7 @@ that captured value or existing persisted run IDs. Leader readiness requires
 the cache to be synchronized. Trigger HTTP wiring and the 20-in-flight-run hot
 activation scenario remain their own tasks.
 
-Publish CLI/merge automation, catalogue/version reads, proactive live revocation,
+Publish CLI/merge automation, workflow/version detail reads, proactive live revocation,
 general audit middleware/partition maintenance and
 cloud profiles remain their dependent tasks.
 

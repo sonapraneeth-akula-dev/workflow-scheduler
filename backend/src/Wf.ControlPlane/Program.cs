@@ -85,6 +85,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapGrpcService<AgentGatewayService>().RequireAuthorization(AuthExtensions.Agent);
 app.MapRegistryEndpoints();
+app.MapCatalogEndpoints();
 app.MapRegistrationEndpoints();
 app.MapRunsEndpoints();
 app.MapSchedulesEndpoints();
