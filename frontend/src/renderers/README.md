@@ -4,6 +4,8 @@
 The viewer passes authenticated content as a `Blob`, plus the committed title.
 Kinds are exact, case-sensitive strings; unknown keys never resolve through an
 object prototype. Loading and rendering failures stay within the report pane.
+Unknown kinds use `DownloadFallback`: exact original bytes, committed title and
+size, sanitized download filename and an owned octet-stream Blob URL.
 
 ## Add a kind
 

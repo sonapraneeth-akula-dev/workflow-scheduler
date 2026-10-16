@@ -16,7 +16,7 @@ export default defineConfig({
       ? ["**/catalog-isolation.spec.ts", "**/run-graph*.spec.ts"]
       : []),
     ...(!timelineOrigin ? ["**/run-timeline.spec.ts"] : []),
-    ...(fixtureOrigin && !reportOrigin ? ["**/report-renderers.spec.ts"] : []),
+    ...(fixtureOrigin && !reportOrigin ? ["**/report-*.spec.ts"] : []),
   ],
   fullyParallel: false,
   workers: 1,

@@ -23,7 +23,14 @@ describe("lazy report registry", () => {
       expect(rendererRegistry.get(kind)).toBeUndefined()
     }
   )
-  it("loads the registered component and reports an unsupported kind explicitly", async () => {
+  it("loads the registered component and falls back for an inherited unknown key", async () => {
+    vi.stubGlobal(
+      "URL",
+      class extends URL {
+        static createObjectURL = vi.fn(() => "blob:download")
+        static revokeObjectURL = vi.fn()
+      }
+    )
     const content = new Blob(["from lazy renderer"])
     const view = render(
       <ReportRenderer kind="text" content={content} title="Lazy report" />
@@ -38,9 +45,9 @@ describe("lazy report registry", () => {
         title="Unknown report"
       />
     )
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Unsupported report kind: __proto__."
-    )
+    expect(
+      screen.getByRole("link", { name: "Download Unknown report" })
+    ).toHaveAttribute("download", "Unknown report")
   })
   it("isolates renderer failures and recovers when a different report is selected", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined)

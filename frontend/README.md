@@ -118,6 +118,10 @@ JSON children mount only when expanded, in batches of 100. Image headers must
 identify a supported raster format; SVG/HTML cannot enter the image path.
 Refresh failures hide previously displayed content. Renderer and decoding
 failures stay within the report pane.
+Unknown kinds show a download link with the committed title and exact byte size.
+Downloads use owned octet-stream Blob URLs, sanitize only the filename (not the
+visible title), and revoke URLs on replacement/unmount; they do not navigate to
+or execute unknown HTML/SVG payloads.
 Adding a renderer requires one lazy entry in `src\renderers\registry.ts`;
 `src\renderers\README.md` documents the component contract, extension test and
 untrusted-content rules. No backend kind enum or migration is required.

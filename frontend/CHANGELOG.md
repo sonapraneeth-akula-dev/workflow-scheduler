@@ -5,6 +5,8 @@ All notable frontend changes are documented here, using Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Unknown report kinds download exact bytes as owned binary Blob URLs with
+  committed title/size, safe filenames and replacement/unmount cleanup.
 - Renderer-only extension guide and a single-entry lazy registration check.
 - Lazy report renderers for safe Markdown, text, expandable JSON and raster
   images; Markdown uses pinned `react-markdown` 10.1.0 without raw HTML plugins.

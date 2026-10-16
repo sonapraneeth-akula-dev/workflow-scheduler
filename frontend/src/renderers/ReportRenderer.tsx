@@ -1,5 +1,6 @@
 import { Component, createElement, Suspense, type ReactNode } from "react"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { DownloadFallback } from "./DownloadFallback"
 import { rendererRegistry } from "./registry"
 import type { ReportRendererProps } from "./types"
 
@@ -42,7 +43,7 @@ export function ReportRenderer({
 }: ReportRendererProps & { kind: string }) {
   const Renderer = rendererRegistry.get(kind)
   if (!Renderer) {
-    return <p role="status">Unsupported report kind: {kind}.</p>
+    return <DownloadFallback {...props} />
   }
   return (
     <RendererBoundary {...props} kind={kind}>
