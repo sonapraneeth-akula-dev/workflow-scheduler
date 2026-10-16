@@ -1170,6 +1170,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description One row per committed dispatched attempt, including reserved lifecycle-stage keys. Manifest task declaration order, then increasing attempt; absent manifest uses snapshot task enumeration. Timings reuse validated recorded metrics, not live clocks. Agent identity belongs to the exact durable dispatch attempt; missing legacy attribution is null. Never-started/skipped/reused work has no invented attempts. Fresh Run Viewer authorization; no query parameters, variables, errors, outputs or machine capabilities. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RunTimelineResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{id}/tasks/{task}/{attempt}/logs": {
         parameters: {
             query?: never;
@@ -1953,6 +2036,35 @@ export interface components {
             };
             abort: null | components["schemas"]["LiveAbort"];
             endedAt: null | string;
+        };
+        RunTimelineAttempt: {
+            nodeKey: string;
+            taskKey: string;
+            /** Format: int32 */
+            attempt: number | string;
+            /** Format: date-time */
+            queuedAt: string;
+            /** Format: date-time */
+            dispatchedAt: string;
+            /** Format: date-time */
+            startedAt: null | string;
+            /** Format: date-time */
+            endedAt: null | string;
+            /** Format: double */
+            queueWaitMs: number | string;
+            /** Format: double */
+            durationMs: number | string;
+            terminalStatus: null | string;
+            failureCategory: null | string;
+            agentId: null | string;
+        };
+        RunTimelineResponse: {
+            /** Format: uuid */
+            runId: string;
+            /** Format: int64 */
+            lastSeq: number | string;
+            status: string;
+            attempts: components["schemas"]["RunTimelineAttempt"][];
         };
         /** @enum {unknown} */
         ScheduleCatchUpPolicy: "None" | "Latest";
