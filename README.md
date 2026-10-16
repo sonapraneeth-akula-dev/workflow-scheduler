@@ -84,6 +84,18 @@ Source reads verify stored hashes and bounds; the API never compiles or
 executes scripts. Review target metadata rules before publishing; the scaffold
 does not include registry configuration. PR creation remains deferred.
 
+`wf clone <team/type/workflow> --version <uuid> --new-name <leaf>
+--target-type <team/type> [--repo <existing-repo>] [--engine <origin>]` writes
+that exact historical scaffold to `teams/<team>/<type>/<leaf>` in the workflows
+repository (default: current directory). Existing destinations are never
+overwritten; bounded ZIP validation, safe paths and atomic publication reject
+partial or unsafe downloads. Cloning never compiles, executes or registers
+downloaded code. `--engine` overrides `WF_ENGINE_URL`; outside loopback, HTTPS
+and `WF_ACCESS_TOKEN` are required. The Versions tab offers the same operation
+from history rows or a pinned historical UUID, with a target-name/type dialog
+and ZIP download. Server errors retain the draft; source and target permissions
+are still rechecked by the API.
+
 SDK manifests now record optional declared task actions: the original SDK method,
 command executable, credential/query/fragment-free one-shot HTTP method/URL, or
 declared HTTP operation. Description never executes tasks or inspects captured
