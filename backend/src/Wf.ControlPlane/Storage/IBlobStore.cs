@@ -27,7 +27,7 @@ public sealed class BlobContent
     public long SizeBytes { get; }
     public string Key { get; }
 
-    private static bool IsLogKey(string key)
+    internal static bool IsLogKey(string key)
     {
         var parts = key.Split('/');
         return parts.Length == 5 && parts[0] == "logs" &&
@@ -42,6 +42,11 @@ public sealed class BlobContent
 
 public interface IBlobStore
 {
+    /// <summary>Opens immutable named log content after authorization. Caller owns the stream.
+    /// Enforces the byte ceiling before returning; no SAS or filesystem path is exposed.</summary>
+    Task<Stream> OpenLogReadAsync(string key, long maximumBytes, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Named log reads are not supported by this store.");
+
     /// <summary>Publishes verified content atomically; identical concurrent writes are idempotent.</summary>
     Task UploadAsync(BlobContent content, Stream source, CancellationToken cancellationToken = default);
 
@@ -55,6 +60,12 @@ public interface IBlobStore
 
 internal static class BlobStreaming
 {
+    internal static void ValidateLogRead(string key, long maximumBytes)
+    {
+        if (key is null || !BlobContent.IsLogKey(key)) throw new ArgumentException("Use a canonical log object key.", nameof(key));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumBytes);
+    }
+
     internal const int BufferSize = 128 * 1024;
     internal const long DefaultMaximumBytes = 5_000_000_000;
     internal static readonly TimeSpan MaximumGrantLifetime = TimeSpan.FromMinutes(15);

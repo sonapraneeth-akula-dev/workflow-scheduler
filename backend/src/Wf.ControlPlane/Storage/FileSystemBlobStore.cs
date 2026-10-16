@@ -59,6 +59,18 @@ public sealed class FileSystemBlobStore
         await BlobStreaming.CopyVerifiedAsync(input, destination, content, maximumBytes, cancellationToken);
     }
 
+    public Task<Stream> OpenLogReadAsync(string key, long maximumBytes, CancellationToken cancellationToken = default)
+    {
+        BlobStreaming.ValidateLogRead(key, maximumBytes);
+        cancellationToken.ThrowIfCancellationRequested();
+        var path = GetPath(new BlobContent(BlobKind.Logs, new string('0', 64), 0, key));
+        Stream input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete,
+            BlobStreaming.BufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        if (input.Length <= Math.Min(maximumBytes, this.maximumBytes)) return Task.FromResult(input);
+        input.Dispose();
+        throw new InvalidDataException("Named log object exceeds its byte limit.");
+    }
+
     /// <summary>
     /// Grant is a bearer secret. Retry/replay is idempotent for the same immutable content until expiry;
     /// grants are not one-shot tokens and need no process-local replay cache.

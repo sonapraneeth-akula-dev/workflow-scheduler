@@ -60,6 +60,23 @@ public sealed class AzureBlobStore : IBlobStore
         await BlobStreaming.CopyVerifiedAsync(input, destination, content, maximumBytes, cancellationToken);
     }
 
+    public async Task<Stream> OpenLogReadAsync(string key, long maximumBytes, CancellationToken cancellationToken = default)
+    {
+        BlobStreaming.ValidateLogRead(key, maximumBytes);
+        var blob = container.GetBlobClient(key);
+        try
+        {
+            var properties = await blob.GetPropertiesAsync(cancellationToken: cancellationToken);
+            if (properties.Value.ContentLength > Math.Min(maximumBytes, this.maximumBytes))
+                throw new InvalidDataException("Named log object exceeds its byte limit.");
+            return await OpenPinnedAsync(blob, properties.Value.ETag, cancellationToken);
+        }
+        catch (RequestFailedException error) when (error.Status == 404)
+        {
+            throw new FileNotFoundException("Named log object is unavailable.", error);
+        }
+    }
+
     /// <summary>
     /// Issues create-only, single-PUT SAS for one random staging blob, valid at most 15 minutes (5,000 MiB limit).
     /// MaxBytes is advisory at Azure's direct-write boundary: CompleteUploadAsync enforces it before promotion.
