@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text;
+using Wf.Contracts.Definition;
 
 namespace Wf.Sdk;
 
@@ -24,7 +25,8 @@ public static partial class Tasks
         var copiedHeaders = headers?.ToImmutableDictionary(StringComparer.OrdinalIgnoreCase) ??
             ImmutableDictionary<string, string>.Empty;
         using var validationRequest = BuildRequest();
-        return async context =>
+        var publicUrl = new UriBuilder(uri) { UserName = "", Password = "", Query = "", Fragment = "" }.Uri.AbsoluteUri;
+        return Declare(async context =>
         {
             using var request = BuildRequest();
             using var response = await HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, context.CancellationToken);
@@ -36,7 +38,7 @@ public static partial class Tasks
             var responseHeaders = response.Headers.Concat(response.Content.Headers)
                 .ToImmutableDictionary(h => h.Key, h => h.Value.ToArray(), StringComparer.OrdinalIgnoreCase);
             context.Outputs["response"] = new HttpResponseOutput((int)response.StatusCode, responseBody, responseHeaders);
-        };
+        }, new(TaskActionKind.Http, method.Method + " " + publicUrl));
 
         HttpRequestMessage BuildRequest()
         {

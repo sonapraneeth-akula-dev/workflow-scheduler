@@ -1,4 +1,5 @@
 import { useInfiniteQuery } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -86,7 +87,9 @@ export function SeriesFiresTable({ seriesId }: { seriesId: string }) {
                   <td className="p-3">
                     {fire.runId ? (
                       <div className="flex flex-col items-start gap-2">
-                        <code>{fire.runId}</code>
+                        <Link to="/runs/$id" params={{ id: fire.runId }}>
+                          <code>{fire.runId}</code>
+                        </Link>
                         {fire.reason === "catch-up" ? (
                           <TriggerBadge trigger="CatchUp" />
                         ) : null}

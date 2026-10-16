@@ -14,9 +14,11 @@ public sealed record TaskDefinition
     public PlacementPolicy? Placement { get; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public HttpOperationDefinition? HttpOperation { get; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TaskAction? Action { get; }
 
     public TaskDefinition(string key, FailurePolicy failure = FailurePolicy.Hard, ExecutionPolicy? policy = null,
-        PlacementPolicy? placement = null, HttpOperationDefinition? httpOperation = null)
+        PlacementPolicy? placement = null, HttpOperationDefinition? httpOperation = null, TaskAction? action = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         if (!Enum.IsDefined(failure))
@@ -26,6 +28,7 @@ public sealed record TaskDefinition
         Policy = policy ?? ExecutionPolicy.Default;
         Placement = placement;
         HttpOperation = httpOperation;
+        Action = action;
     }
 }
 

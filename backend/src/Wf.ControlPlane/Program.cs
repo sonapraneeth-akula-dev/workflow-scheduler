@@ -55,6 +55,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, AbortRunJson.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, TaskLogsJsonContext.Default);
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, VersionsJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunEventsJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunQueryJsonContext.Default);
 });
@@ -93,6 +94,7 @@ app.UseAuthorization();
 app.MapGrpcService<AgentGatewayService>().RequireAuthorization(AuthExtensions.Agent);
 app.MapRegistryEndpoints();
 app.MapCatalogEndpoints();
+app.MapVersionsEndpoints();
 app.MapRegistrationEndpoints();
 app.MapRunsEndpoints();
 app.MapRunEventsEndpoints();

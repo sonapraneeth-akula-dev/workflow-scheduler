@@ -10,15 +10,23 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as RunsIdRouteImport } from './routes/runs.$id'
 import { Route as SchedulesIdRouteImport } from './routes/schedules.$id'
 import { Route as SchedulesNewRouteImport } from './routes/schedules.new'
 import { Route as SeriesIdRouteImport } from './routes/series.$id'
 import { Route as TTeamIndexRouteImport } from './routes/t/$team/index'
 import { Route as TTeamTypeIndexRouteImport } from './routes/t/$team/$type/index'
+import { Route as TTeamTypeWWfVersionsVRouteImport } from './routes/t.$team.$type.w.$wf.versions.$v'
+import { Route as TTeamTypeWWfVersionsVTasksTaskKeyRouteImport } from './routes/t.$team.$type.w.$wf.versions.$v_.tasks.$taskKey'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RunsIdRoute = RunsIdRouteImport.update({
+  id: '/runs/$id',
+  path: '/runs/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SchedulesIdRoute = SchedulesIdRouteImport.update({
@@ -46,66 +54,98 @@ const TTeamTypeIndexRoute = TTeamTypeIndexRouteImport.update({
   path: '/t/$team/$type/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TTeamTypeWWfVersionsVRoute = TTeamTypeWWfVersionsVRouteImport.update({
+  id: '/t/$team/$type/w/$wf/versions/$v',
+  path: '/t/$team/$type/w/$wf/versions/$v',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TTeamTypeWWfVersionsVTasksTaskKeyRoute =
+  TTeamTypeWWfVersionsVTasksTaskKeyRouteImport.update({
+    id: '/t/$team/$type/w/$wf/versions/$v_/tasks/$taskKey',
+    path: '/t/$team/$type/w/$wf/versions/$v/tasks/$taskKey',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/runs/$id': typeof RunsIdRoute
   '/schedules/$id': typeof SchedulesIdRoute
   '/schedules/new': typeof SchedulesNewRoute
   '/series/$id': typeof SeriesIdRoute
   '/t/$team/': typeof TTeamIndexRoute
   '/t/$team/$type/': typeof TTeamTypeIndexRoute
+  '/t/$team/$type/w/$wf/versions/$v': typeof TTeamTypeWWfVersionsVRoute
+  '/t/$team/$type/w/$wf/versions/$v/tasks/$taskKey': typeof TTeamTypeWWfVersionsVTasksTaskKeyRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/runs/$id': typeof RunsIdRoute
   '/schedules/$id': typeof SchedulesIdRoute
   '/schedules/new': typeof SchedulesNewRoute
   '/series/$id': typeof SeriesIdRoute
   '/t/$team': typeof TTeamIndexRoute
   '/t/$team/$type': typeof TTeamTypeIndexRoute
+  '/t/$team/$type/w/$wf/versions/$v': typeof TTeamTypeWWfVersionsVRoute
+  '/t/$team/$type/w/$wf/versions/$v/tasks/$taskKey': typeof TTeamTypeWWfVersionsVTasksTaskKeyRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/runs/$id': typeof RunsIdRoute
   '/schedules/$id': typeof SchedulesIdRoute
   '/schedules/new': typeof SchedulesNewRoute
   '/series/$id': typeof SeriesIdRoute
   '/t/$team/': typeof TTeamIndexRoute
   '/t/$team/$type/': typeof TTeamTypeIndexRoute
+  '/t/$team/$type/w/$wf/versions/$v': typeof TTeamTypeWWfVersionsVRoute
+  '/t/$team/$type/w/$wf/versions/$v_/tasks/$taskKey': typeof TTeamTypeWWfVersionsVTasksTaskKeyRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/runs/$id'
     | '/schedules/$id'
     | '/schedules/new'
     | '/series/$id'
     | '/t/$team/'
     | '/t/$team/$type/'
+    | '/t/$team/$type/w/$wf/versions/$v'
+    | '/t/$team/$type/w/$wf/versions/$v/tasks/$taskKey'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/runs/$id'
     | '/schedules/$id'
     | '/schedules/new'
     | '/series/$id'
     | '/t/$team'
     | '/t/$team/$type'
+    | '/t/$team/$type/w/$wf/versions/$v'
+    | '/t/$team/$type/w/$wf/versions/$v/tasks/$taskKey'
   id:
     | '__root__'
     | '/'
+    | '/runs/$id'
     | '/schedules/$id'
     | '/schedules/new'
     | '/series/$id'
     | '/t/$team/'
     | '/t/$team/$type/'
+    | '/t/$team/$type/w/$wf/versions/$v'
+    | '/t/$team/$type/w/$wf/versions/$v_/tasks/$taskKey'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  RunsIdRoute: typeof RunsIdRoute
   SchedulesIdRoute: typeof SchedulesIdRoute
   SchedulesNewRoute: typeof SchedulesNewRoute
   SeriesIdRoute: typeof SeriesIdRoute
   TTeamIndexRoute: typeof TTeamIndexRoute
   TTeamTypeIndexRoute: typeof TTeamTypeIndexRoute
+  TTeamTypeWWfVersionsVRoute: typeof TTeamTypeWWfVersionsVRoute
+  TTeamTypeWWfVersionsVTasksTaskKeyRoute: typeof TTeamTypeWWfVersionsVTasksTaskKeyRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -115,6 +155,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/runs/$id': {
+      id: '/runs/$id'
+      path: '/runs/$id'
+      fullPath: '/runs/$id'
+      preLoaderRoute: typeof RunsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/schedules/$id': {
@@ -152,16 +199,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TTeamTypeIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/t/$team/$type/w/$wf/versions/$v': {
+      id: '/t/$team/$type/w/$wf/versions/$v'
+      path: '/t/$team/$type/w/$wf/versions/$v'
+      fullPath: '/t/$team/$type/w/$wf/versions/$v'
+      preLoaderRoute: typeof TTeamTypeWWfVersionsVRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/t/$team/$type/w/$wf/versions/$v_/tasks/$taskKey': {
+      id: '/t/$team/$type/w/$wf/versions/$v_/tasks/$taskKey'
+      path: '/t/$team/$type/w/$wf/versions/$v/tasks/$taskKey'
+      fullPath: '/t/$team/$type/w/$wf/versions/$v/tasks/$taskKey'
+      preLoaderRoute: typeof TTeamTypeWWfVersionsVTasksTaskKeyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  RunsIdRoute: RunsIdRoute,
   SchedulesIdRoute: SchedulesIdRoute,
   SchedulesNewRoute: SchedulesNewRoute,
   SeriesIdRoute: SeriesIdRoute,
   TTeamIndexRoute: TTeamIndexRoute,
   TTeamTypeIndexRoute: TTeamTypeIndexRoute,
+  TTeamTypeWWfVersionsVRoute: TTeamTypeWWfVersionsVRoute,
+  TTeamTypeWWfVersionsVTasksTaskKeyRoute:
+    TTeamTypeWWfVersionsVTasksTaskKeyRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

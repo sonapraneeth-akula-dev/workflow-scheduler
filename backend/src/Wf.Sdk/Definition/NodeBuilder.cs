@@ -6,7 +6,7 @@ namespace Wf.Sdk;
 public sealed class NodeBuilder
 {
     private readonly List<DependencyDefinition> dependencies = [];
-    private readonly List<(string Key, FailurePolicy Failure, PolicyOverrides Policy, HttpOperationDefinition? HttpOperation)> tasks = [];
+    private readonly List<(string Key, FailurePolicy Failure, PolicyOverrides Policy, HttpOperationDefinition? HttpOperation, TaskAction Action)> tasks = [];
     private readonly List<InputBinding> inputs = [];
     private readonly List<KeyValuePair<string, Func<TaskContext, Task>>> handlers = [];
     private NodeExecutionMode mode;
@@ -70,7 +70,7 @@ public sealed class NodeBuilder
         var builder = new PolicyBuilder();
         configure?.Invoke(builder);
         handlers.Add(new(key, execute));
-        tasks.Add((task.Key, task.Failure, builder.Build(), null));
+        tasks.Add((task.Key, task.Failure, builder.Build(), null, Tasks.Describe(execute)));
         return this;
     }
 
@@ -82,7 +82,11 @@ public sealed class NodeBuilder
     {
         ArgumentNullException.ThrowIfNull(operation);
         Task(key, operation.ExecuteAsync, configure, failure);
-        tasks[^1] = tasks[^1] with { HttpOperation = operation.Definition };
+        tasks[^1] = tasks[^1] with
+        {
+            HttpOperation = operation.Definition,
+            Action = new(TaskActionKind.HttpOperation, "POST " + operation.Definition.SubmissionUrl)
+        };
         return this;
     }
 
@@ -93,7 +97,9 @@ public sealed class NodeBuilder
         FailurePolicy failure = FailurePolicy.Hard)
     {
         ArgumentNullException.ThrowIfNull(execute);
-        return Task(key, ctx => { execute(ctx); return System.Threading.Tasks.Task.CompletedTask; }, configure, failure);
+        Task(key, ctx => { execute(ctx); return System.Threading.Tasks.Task.CompletedTask; }, configure, failure);
+        tasks[^1] = tasks[^1] with { Action = Tasks.Describe(execute) };
+        return this;
     }
 
     public NodeBuilder Series()
@@ -120,7 +126,7 @@ public sealed class NodeBuilder
             overrides = overrides with { Timeout = TimeSpan.FromMinutes(15) };
         return new(Key, dependencies.ToImmutableArray(), tasks.Select(t =>
             new TaskDefinition(t.Key, t.Failure, PolicyResolver.Resolve(defaults, overrides, t.Policy),
-                PlacementPolicy.Inherit(nodePlacement, t.Policy.Placement), t.HttpOperation)).ToImmutableArray(),
+                PlacementPolicy.Inherit(nodePlacement, t.Policy.Placement), t.HttpOperation, t.Action)).ToImmutableArray(),
             mode, maxParallel, failure, inputs.ToImmutableArray(), overrides.Timeout, nodePlacement);
     }
 }

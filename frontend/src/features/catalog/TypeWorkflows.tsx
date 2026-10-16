@@ -145,7 +145,12 @@ export function TypeWorkflows({ team, type }: { team: string; type: string }) {
                       />
                       {workflow.latestRun ? (
                         <p className="mt-2 font-mono text-xs">
-                          {workflow.latestRun.id}
+                          <Link
+                            to="/runs/$id"
+                            params={{ id: workflow.latestRun.id }}
+                          >
+                            {workflow.latestRun.id}
+                          </Link>
                         </p>
                       ) : null}
                     </td>

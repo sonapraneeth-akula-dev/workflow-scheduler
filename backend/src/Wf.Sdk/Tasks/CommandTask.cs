@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
 using Wf.Contracts;
+using Wf.Contracts.Definition;
 
 namespace Wf.Sdk;
 
@@ -42,7 +43,7 @@ public static partial class Tasks
         var retryable = retryableExitCodes?.ToImmutableHashSet();
         if (retryable?.Contains(0) == true)
             throw new ArgumentException("A successful exit code cannot be retryable.", nameof(retryableExitCodes));
-        return async context =>
+        return Declare(async context =>
         {
             context.CancellationToken.ThrowIfCancellationRequested();
             var info = new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = workingDirectory ?? "" };
@@ -69,6 +70,6 @@ public static partial class Tasks
             }
             if (process.ExitCode != 0)
                 throw new CommandTaskException(process.ExitCode, retryable?.Contains(process.ExitCode) ?? true);
-        };
+        }, new(TaskActionKind.Command, exe));
     }
 }

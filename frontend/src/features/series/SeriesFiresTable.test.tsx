@@ -1,10 +1,20 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import type { ReactNode } from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { getSeriesFires } from "@/lib/api/client"
 import { SeriesFiresTable } from "./SeriesFiresTable"
 
 vi.mock("@/lib/api/client", () => ({ getSeriesFires: vi.fn() }))
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({
+    params,
+    children,
+  }: {
+    params: { id: string }
+    children: ReactNode
+  }) => <a href={`/runs/${params.id}`}>{children}</a>,
+}))
 const seriesId = "a77bb9c1-eebc-4145-a63b-296d62ee8747"
 const read = vi.mocked(getSeriesFires)
 
@@ -40,6 +50,10 @@ describe("series fire history states", () => {
     expect(screen.getByText("Catch-up")).toHaveAttribute(
       "title",
       "Recovery run for the latest missed scheduled fire"
+    )
+    expect(screen.getByRole("link")).toHaveAttribute(
+      "href",
+      "/runs/019ed132-2f44-7000-8000-000000000001"
     )
   })
   it("announces loading and then a genuinely empty history", async () => {

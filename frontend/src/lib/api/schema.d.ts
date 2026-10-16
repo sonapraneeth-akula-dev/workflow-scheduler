@@ -147,6 +147,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workflows/{team}/{type}/{workflow}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Read-only task plan from one immutable version UUID, never the active version. Workflow identity is the three exact team/type/workflow segments. Includes declared actions, dependency order, effective placement, retries and timeouts. Excludes variable values/defaults, input bindings, command arguments/environment, HTTP headers/bodies and storage capabilities. Legacy tasks without action metadata explicitly have an unknown declaration. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team: string;
+                    type: string;
+                    workflow: string;
+                    version: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WorkflowVersionPlan"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registrations": {
         parameters: {
             query?: never;
@@ -1050,6 +1145,15 @@ export interface components {
         };
         /** @enum {unknown} */
         AbortSource: "UI" | "API" | "CLI" | "KillSwitch" | "Local";
+        /** @enum {unknown} */
+        AffinityKind: "None" | "Node" | "Run" | "SameMachineAs";
+        /** @enum {unknown} */
+        BackoffKind: "Fixed" | "Exponential";
+        BackoffPolicy: {
+            kind: components["schemas"]["BackoffKind"];
+            delay: string;
+            maxDelay: string;
+        };
         CatalogLatestRun: {
             /** Format: uuid */
             id: string;
@@ -1123,6 +1227,23 @@ export interface components {
             items: components["schemas"]["CatalogWorkflow"][];
             nextCursor: null | string;
         };
+        /**
+         * @default OnSuccess
+         * @enum {unknown}
+         */
+        DependencyCondition: "OnSuccess" | "OnFailure" | "Always";
+        DependencyDefinition: {
+            node: string;
+            when?: components["schemas"]["DependencyCondition"];
+        };
+        /** @enum {unknown} */
+        FailureCategory: "TaskError" | "Timeout" | "AgentLost" | "PlatformError" | "ValidationError" | "Aborted" | "ResourceLimit" | "Placement";
+        /** @enum {unknown} */
+        FailurePolicy: "Hard" | "Soft";
+        LabelSelector: {
+            key: string;
+            value?: components["schemas"]["SelectorValue"];
+        };
         ListDelta: {
             scope: string;
             id: string;
@@ -1186,6 +1307,12 @@ export interface components {
             stream: string;
             level: string;
             text: string;
+        };
+        /** @enum {unknown} */
+        NodeExecutionMode: "Series" | "Parallel";
+        PlacementAffinity: {
+            kind: components["schemas"]["AffinityKind"];
+            nodeKey?: null | string;
         };
         ProblemDetails: {
             type?: null | string;
@@ -1276,6 +1403,10 @@ export interface components {
         ScheduleCatchUpPolicy: "None" | "Latest";
         /** @enum {unknown} */
         ScheduleOverlapPolicy: "Skip" | "Queue" | "Concurrent";
+        SelectorValue: {
+            literal?: null | string;
+            variable?: null | string;
+        };
         SeriesFireResponse: {
             /** Format: date-time */
             fireAt: string;
@@ -1290,6 +1421,12 @@ export interface components {
             items: components["schemas"]["SeriesFireResponse"][];
             nextCursor: null | string;
         };
+        TaskAction: {
+            kind: components["schemas"]["TaskActionKind"];
+            declaration: string;
+        };
+        /** @enum {unknown} */
+        TaskActionKind: "SdkFunction" | "Command" | "Http" | "HttpOperation";
         TaskLogMatch: {
             /** Format: int64 */
             line: number | string;
@@ -1315,6 +1452,47 @@ export interface components {
             records: components["schemas"]["TaskLogRecord"][];
             matches: components["schemas"]["TaskLogMatch"][];
             nextCursor: null | string;
+        };
+        TaskPlanExecutionPolicy: {
+            attemptTimeout: string;
+            retry: components["schemas"]["TaskPlanRetry"];
+            autoRetry: boolean;
+        };
+        TaskPlanNode: {
+            key: string;
+            dependencies: components["schemas"]["DependencyDefinition"][];
+            mode: components["schemas"]["NodeExecutionMode"];
+            /** Format: int32 */
+            maxParallel: null | number | string;
+            failure: components["schemas"]["FailurePolicy"];
+            timeout: null | string;
+            placement: null | components["schemas"]["TaskPlanPlacement"];
+            tasks: components["schemas"]["TaskPlanTask"][];
+        };
+        TaskPlanPlacement: {
+            selector: null | components["schemas"]["TaskPlanSelector"];
+            affinity: null | components["schemas"]["PlacementAffinity"];
+        };
+        TaskPlanRetry: {
+            /** Format: int32 */
+            retries: number | string;
+            backoff: components["schemas"]["BackoffPolicy"];
+            on: components["schemas"]["FailureCategory"][];
+        };
+        TaskPlanSelector: {
+            os: null | components["schemas"]["SelectorValue"];
+            pool: null | components["schemas"]["SelectorValue"];
+            labels: components["schemas"]["LabelSelector"][];
+            machines: components["schemas"]["SelectorValue"][];
+        };
+        TaskPlanTask: {
+            key: string;
+            action: null | components["schemas"]["TaskAction"];
+            secretReference: null | string;
+            requestTimeout: null | string;
+            failure: components["schemas"]["FailurePolicy"];
+            policy: components["schemas"]["TaskPlanExecutionPolicy"];
+            placement: null | components["schemas"]["TaskPlanPlacement"];
         };
         UserScheduleResponse: {
             /** Format: uuid */
@@ -1344,6 +1522,16 @@ export interface components {
             values: {
                 [key: string]: string;
             };
+        };
+        WorkflowVersionPlan: {
+            /** Format: uuid */
+            versionId: string;
+            workflowId: string;
+            version: string;
+            runTimeout: string;
+            stages: string[];
+            placement: null | components["schemas"]["TaskPlanPlacement"];
+            nodes: components["schemas"]["TaskPlanNode"][];
         };
     };
     responses: never;

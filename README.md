@@ -23,6 +23,24 @@ as `?cursor=...&limit=50`; limits are 1-100. Invalid pagination returns 400,
 unknown or unauthorized series 403, and responses are never cached. This
 view lists fire history, not the separate full run-history/trends feature.
 
+Catalogue and scheduled-fire run links open `/runs/<uuid>`. Its Task Plan link
+uses the run's immutable version UUID, never the currently active version.
+`GET /api/v1/workflows/{team}/{type}/{workflow}/versions/{version}` requires fresh
+Viewer access to the exact type and returns an explicit safe plan projection:
+ordered nodes/tasks, dependency conditions, lifecycle stages, effective placement,
+retry policies and timeouts. Historical versions remain readable after workflow
+soft deletion; missing versions return 404, denied scopes 403, invalid identities
+400, and responses are never cached.
+
+SDK manifests now record optional declared task actions: the original SDK method,
+command executable, credential/query/fragment-free one-shot HTTP method/URL, or
+declared HTTP operation. Description never executes tasks or inspects captured
+values. Task Plan excludes command arguments/environment, HTTP headers/bodies,
+variable values/defaults, input bindings and package/source capabilities.
+Only declared safe secret references are shown. Older manifests without action
+metadata explicitly say the declaration is unavailable; functions do not predict
+commands they may generate at runtime.
+
 ## Backend
 
 Requires the .NET 10 SDK. PostgreSQL integration tests require Docker with Linux
