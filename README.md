@@ -33,6 +33,33 @@ restarts. Restarting the stack preserves its database, blobs and agent UUID.
 `Secrets:Provider=Local` and the protected local secrets directory are configured;
 Azure credentials or an interactive login are not required.
 
+To run multiple native agents plus an optional real Linux agent:
+
+```powershell
+dotnet run --project .\backend\src\Wf.AppHost -- --agents 3 --linux-agent
+# Or, from backend\src\Wf.AppHost:
+aspire run -- --agents 3 --linux-agent
+```
+
+`--agents` is a positive native-process count (default 1); `--linux-agent` adds
+one nonroot Linux container and requires Docker even with external PostgreSQL.
+The equivalent configuration keys are `Local__Agents` and `Local__LinuxAgent`.
+Names, immutable IDs, `instance` labels, result journals, package caches and
+spools are isolated. The original agent keeps `agents\local`; additional native
+agents use `agents\local-2`, `agents\local-3`, etc. Native agents share the
+configured protected local-secret store, not work directories.
+
+The Linux UUID lives in `agents\linux\id`; its state and separate local secrets
+live in the persistent `wf-local-agent-<UUID-without-dashes>` Docker volume,
+mounted at `/var/lib/wf-agent` with owner-only permissions. Keep that volume
+and UUID together across restarts; Windows DPAPI files are not Linux secrets.
+The image builds the managed Release agent against .NET 10 using Microsoft's
+public `dotnet-public` package mirror with normal TLS verification. Aspire's
+container-to-host tunnel connects it to the loopback gateway; the explicit
+insecure-transport opt-in is limited to this isolated development container.
+This is not an AOT image or a production deployment profile.
+`GET /api/v1/machines?status=Healthy` shows the registered native/Linux agents.
+
 Override ports with `Local__ApiPort`, `Local__EnginePort` and `Local__UiPort`;
 all must differ. `Local__PostgresVolume` selects a different persistent Docker
 volume. This AppHost is a local development launcher, not a Compose/deployment
@@ -50,6 +77,11 @@ container-free variant. Both variants launch the real dashboard, host, agent
 and UI, require health within 120 seconds per startup, and verify persisted
 database/blob data and agent identity after recreation. Each test owns and
 removes only its unique temporary database directory or Docker volume.
+The mixed-agent case additionally checks four actual HTTP inventory rows,
+nonroot Linux storage permissions, isolated identities and persistent volume
+data across recreation. Run these AppHost tests with normal build output:
+Aspire's child project runner uses the projects' default Debug output, not a
+test-only `--artifacts-path` tree.
 
 `GET /api/v1/machines` returns `{ items: [...] }`, ordered by immutable machine
 ID, with OS/architecture, hardware, slot/load metrics, pool, labels, heartbeat

@@ -23,12 +23,7 @@ public static class LocalStack
             throw new InvalidOperationException("Local:DataRoot cannot be empty.");
         var root = Path.GetFullPath(configuredRoot ??
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wf"));
-        var agentRoot = Path.Combine(root, "agents", "local");
-        Directory.CreateDirectory(agentRoot);
-        var identityFile = Path.Combine(agentRoot, "id");
-        if (!File.Exists(identityFile)) File.WriteAllText(identityFile, Guid.NewGuid().ToString("D"));
-        if (!Guid.TryParseExact(File.ReadAllText(identityFile), "D", out var identity) || identity == Guid.Empty)
-            throw new InvalidDataException("The local agent identity file must contain a non-empty canonical UUID.");
+        var agents = AgentResources.ReadIdentities(builder.Configuration, root);
 
         IResourceBuilder<IResourceWithConnectionString> database;
         IResourceBuilder<PostgresServerResource>? postgres = null;
@@ -58,18 +53,7 @@ public static class LocalStack
             .WithHttpEndpoint(port: enginePort, targetPort: enginePort, name: "engine", env: "Engine__Port", isProxied: false)
             .WithHttpHealthCheck("/healthz/leader", endpointName: "api")
             .WaitForCompletion(migrations);
-        builder.AddProject<Projects.Wf_Agent>("wf-agent", launchProfileName: null)
-            .WithEnvironment("Agent__Id", identity.ToString("D"))
-            .WithEnvironment("Agent__Name", "local-" + identity.ToString("N"))
-            .WithEnvironment("Agent__Pool", "default")
-            .WithEnvironment("Agent__Labels__environment", "local")
-            .WithEnvironment("Agent__Engines__0", host.GetEndpoint("engine"))
-            .WithEnvironment("Agent__ResultJournalDirectory", Path.Combine(agentRoot, "results"))
-            .WithEnvironment("Agent__LogSpoolDirectory", Path.Combine(agentRoot, "logs"))
-            .WithEnvironment("Agent__PackageCache", Path.Combine(agentRoot, "packages"))
-            .WithEnvironment("Secrets__Provider", "Local")
-            .WithEnvironment("Secrets__Root", Path.Combine(root, "secrets"))
-            .WaitFor(host);
+        AgentResources.Add(builder, host, root, agents);
         var frontend = Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", "..", "..", "frontend"));
         var ui = builder.AddExecutable("wf-ui", "bun", frontend)
             .WithHttpEndpoint(port: uiPort, targetPort: uiPort, isProxied: false)

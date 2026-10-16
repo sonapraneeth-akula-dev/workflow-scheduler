@@ -83,6 +83,8 @@ public sealed class LocalStackModelTests : IDisposable
             Assert.Equal(current, File.ReadAllText(Path.Combine(root, "agents", "local", "id")));
             Assert.Equal("default", environment["Agent__Pool"]);
             Assert.Equal("local", environment["Agent__Labels__environment"]);
+            Assert.Equal("wf-agent", environment["Agent__Labels__instance"]);
+            Assert.Equal(Path.Combine(root, "secrets"), environment["Secrets__LocalDirectory"]);
             Assert.Contains("wf-host.bindings.engine", environment["Agent__Engines__0"]);
             foreach (var (key, leaf) in new[] { ("ResultJournalDirectory", "results"), ("LogSpoolDirectory", "logs"), ("PackageCache", "packages") })
                 Assert.Equal(Path.Combine(root, "agents", "local", leaf), environment["Agent__" + key]);
@@ -111,6 +113,12 @@ public sealed class LocalStackModelTests : IDisposable
     }
 
     [Theory]
+    [InlineData("Local:Agents", "0")]
+    [InlineData("Local:Agents", "-1")]
+    [InlineData("Local:Agents", "1.5")]
+    [InlineData("Local:Agents", "")]
+    [InlineData("Local:Agents", "2147483648")]
+    [InlineData("Local:LinuxAgent", "not-a-boolean")]
     [InlineData("Local:EnginePort", "0")]
     [InlineData("Local:EnginePort", "-1")]
     [InlineData("Local:ApiPort", "65536")]
@@ -141,6 +149,81 @@ public sealed class LocalStackModelTests : IDisposable
         var builder = Builder();
         Assert.Throws<InvalidDataException>(() => LocalStack.Configure(builder));
         Assert.Equal(value, File.ReadAllText(file));
+        Assert.Empty(builder.Resources);
+    }
+
+    [Fact]
+    public void LocalStack_normalizes_short_flags_without_consuming_other_AppHost_options()
+    {
+        Assert.Equal(["--Local:Agents=3", "--Local:LinuxAgent=true", "--Local:ApiPort=5999"],
+            AgentResources.NormalizeArguments(["--agents", "3", "--linux-agent", "--Local:ApiPort=5999"]));
+        Assert.Equal(["--Local:Agents=2", "--Local:LinuxAgent=false"],
+            AgentResources.NormalizeArguments(["--agents=2", "--linux-agent=false"]));
+        Assert.Throws<ArgumentException>(() => AgentResources.NormalizeArguments(["--agents"]));
+    }
+
+    [Fact]
+    public async Task LocalStack_three_native_and_one_Linux_agent_have_isolated_persistent_identities_labels_and_work_directories()
+    {
+        Dictionary<string, string>? identities = null;
+        for (var iteration = 0; iteration < 2; iteration++)
+        {
+            var builder = Builder(("Local:Agents", "3"), ("Local:LinuxAgent", "true"), ("ConnectionStrings:wf", "Host=127.0.0.1"));
+            LocalStack.Configure(builder);
+            await using var app = builder.Build();
+            var resources = builder.Resources.Where(resource => resource is ProjectResource or ContainerResource &&
+                resource.Name.StartsWith("wf-agent", StringComparison.Ordinal)).ToArray();
+            Assert.Equal(4, resources.Length);
+            Assert.Equal(3, resources.OfType<ProjectResource>().Count());
+            var linux = Assert.Single(resources.OfType<ContainerResource>());
+            var mounts = Assert.Single(linux.Annotations.OfType<ContainerMountAnnotation>());
+            Assert.Equal(ContainerMountType.Volume, mounts.Type);
+            Assert.Equal("/var/lib/wf-agent", mounts.Target);
+            Assert.False(mounts.IsReadOnly);
+            var current = new Dictionary<string, string>();
+            var names = new HashSet<string>();
+            var nativeWork = new HashSet<string>();
+            foreach (var resource in resources)
+            {
+                var environment = (await Configuration(resource)).EnvironmentVariables.ToDictionary();
+                Assert.Equal(resource.Name, environment["Agent__Labels__instance"]);
+                Assert.True(names.Add(environment["Agent__Name"]));
+                Assert.True(current.TryAdd(resource.Name, environment["Agent__Id"]));
+                Assert.Equal("wf-host", Assert.Single(resource.Annotations.OfType<WaitAnnotation>()).Resource.Name);
+                Assert.Contains("wf-host.bindings.engine", environment["Agent__Engines__0"]);
+                if (resource == linux)
+                {
+                    Assert.Equal("container", environment["Agent__Labels__runtime"]);
+                    Assert.Equal("true", environment["Agent__AllowInsecureTransport"]);
+                    Assert.Equal("/var/lib/wf-agent/results", environment["Agent__ResultJournalDirectory"]);
+                    Assert.Equal("/var/lib/wf-agent/secrets", environment["Secrets__LocalDirectory"]);
+                    Assert.Equal("wf-local-agent-" + Guid.Parse(environment["Agent__Id"]).ToString("N"), mounts.Source);
+                }
+                else
+                {
+                    Assert.Equal("native", environment["Agent__Labels__runtime"]);
+                    Assert.True(nativeWork.Add(environment["Agent__ResultJournalDirectory"]));
+                    Assert.Equal(Path.Combine(root, "secrets"), environment["Secrets__LocalDirectory"]);
+                }
+            }
+            Assert.Equal(4, current.Values.Distinct().Count());
+            if (identities is not null) Assert.Equal(identities.OrderBy(pair => pair.Key), current.OrderBy(pair => pair.Key));
+            identities = current;
+        }
+    }
+
+    [Fact]
+    public void LocalStack_duplicate_identity_is_rejected_before_resources_are_added()
+    {
+        var id = Guid.NewGuid().ToString("D");
+        foreach (var directory in new[] { "local", "local-2" })
+        {
+            var path = Path.Combine(root, "agents", directory);
+            Directory.CreateDirectory(path);
+            File.WriteAllText(Path.Combine(path, "id"), id);
+        }
+        var builder = Builder(("Local:Agents", "2"));
+        Assert.Throws<InvalidDataException>(() => LocalStack.Configure(builder));
         Assert.Empty(builder.Resources);
     }
 
