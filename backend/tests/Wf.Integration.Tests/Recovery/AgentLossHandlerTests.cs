@@ -274,9 +274,9 @@ public sealed class AgentLossHandlerTests(ReplacementDatabase database, ITestOut
                 var startDeadline = expiry.AddSeconds(30);
                 output.WriteLine($"Killed process tree PID={killedPid}; kill={killedAt:O}; lastHeartbeat={lastHeartbeat:O}; reclaimExpiry={expiry:O}; replacementStartDeadline={startDeadline:O}");
                 await Wait(async () => await Scalar("SELECT started_at FROM task_attempts WHERE attempt=2") is DateTime,
-                    second!, startDeadline - time.GetUtcNow(), "Replacement did not durably START within 30 seconds after full reclaim expiry.");
+                    second!, startDeadline - time.GetUtcNow(), "Replacement did not durably enter agent execution within 30 seconds after full reclaim expiry.");
                 await Wait(async () => (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot.Tasks["work/agentloss"] == ExecutionStatus.Succeeded,
-                    second!, TimeSpan.FromSeconds(30), "Replacement did not succeed within its separate fixture completion budget.");
+                    second!, startDeadline - time.GetUtcNow(), "Short fixture success did not prove TaskHost/SDK startup within 30 seconds after reclaim expiry.");
                 await VerifyWallClockReplacement(firstId, secondId, lastHeartbeat, expiry);
                 Assert.True(leader.IsLeader, "Healthy leader is a precondition for the replacement-start gate.");
             }
@@ -346,13 +346,16 @@ public sealed class AgentLossHandlerTests(ReplacementDatabase database, ITestOut
         var classifiedAt = reader.GetFieldValue<DateTimeOffset>(1);
         var startedAt = reader.GetFieldValue<DateTimeOffset>(3);
         var succeededAt = reader.GetFieldValue<DateTimeOffset>(4);
-        output.WriteLine($"Classification={classifiedAt:O}; replacementTaskStarted={startedAt:O}; replacementSucceeded={succeededAt:O}; spareLastHeartbeat={reader.GetFieldValue<DateTimeOffset>(10):O}");
-        output.WriteLine($"LastHeartbeat->classification={(classifiedAt - lastHeartbeat).TotalSeconds:F6}s; reclaimExpiry->replacementTaskStarted={(startedAt - expiry).TotalSeconds:F6}s; replacementTaskStarted->success={(succeededAt - startedAt).TotalSeconds:F6}s");
+        output.WriteLine($"Classification={classifiedAt:O}; replacementAgentExecutionEntry(pre-host)={startedAt:O}; replacementSucceeded={succeededAt:O}; spareLastHeartbeat={reader.GetFieldValue<DateTimeOffset>(10):O}");
+        output.WriteLine($"LastHeartbeat->classification={(classifiedAt - lastHeartbeat).TotalSeconds:F6}s; reclaimExpiry->agentExecutionEntry(pre-host)={(startedAt - expiry).TotalSeconds:F6}s; agentExecutionEntry->success={(succeededAt - startedAt).TotalSeconds:F6}s; reclaimExpiry->TaskHost/SDKStartUpperBound(success)={(succeededAt - expiry).TotalSeconds:F6}s");
         Assert.Equal(lastHeartbeat, reader.GetFieldValue<DateTimeOffset>(0));
         Assert.Equal((short)FailureCategory.AgentLost, reader.GetInt16(2));
         Assert.True(classifiedAt >= expiry, "Loss must not be classified before the full 30-second last-heartbeat reclaim grace.");
         Assert.True(startedAt >= classifiedAt);
-        Assert.True(startedAt <= expiry.AddSeconds(30), "Replacement START exceeded 30 seconds after reclaim expiry.");
+        Assert.True(startedAt <= expiry.AddSeconds(30), "Pre-host agent execution entry exceeded 30 seconds after reclaim expiry.");
+        // Short fixture success conservatively bounds TaskHost/SDK entry, which the pre-host TaskStarted event cannot prove.
+        Assert.True(succeededAt <= expiry.AddSeconds(30),
+            "Short fixture success must prove TaskHost/SDK startup within the post-reclaim start budget; it is not an exact SDK-entry timestamp.");
         Assert.True(succeededAt >= startedAt && succeededAt <= startedAt.AddSeconds(30),
             "Completion has a separate 30-second fixture budget, not a 30-second total recovery promise.");
         foreach (var column in new[] { 5, 6, 7 }) Assert.True(succeededAt <= reader.GetFieldValue<DateTimeOffset>(column));
