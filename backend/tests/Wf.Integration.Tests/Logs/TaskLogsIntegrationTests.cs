@@ -32,6 +32,62 @@ public sealed class TaskLogsIntegrationTests(TaskLogsDatabase database) : IClass
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task TaskLogs_actual_openapi_export_declares_json_page_and_ndjson_stream_matching_HTTP_bodies()
+    {
+        await using var host = await TaskLogsHost.Start(database.DataSource);
+        using var exported = await host.Client.GetAsync("/openapi/v1.json", Token);
+        Assert.Equal(HttpStatusCode.OK, exported.StatusCode);
+        using var document = JsonDocument.Parse(await exported.Content.ReadAsStringAsync(Token));
+        var root = document.RootElement;
+        var response = root.GetProperty("paths").GetProperty("/api/v1/runs/{id}/tasks/{task}/{attempt}/logs")
+            .GetProperty("get").GetProperty("responses").GetProperty("200");
+        var content = response.GetProperty("content");
+        Assert.Equal(["application/json", "application/x-ndjson"],
+            content.EnumerateObject().Select(item => item.Name).Order(StringComparer.Ordinal));
+        Assert.Equal("#/components/schemas/TaskLogsPage",
+            content.GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
+        AssertType(content.GetProperty("application/x-ndjson").GetProperty("schema"), "string");
+        var schemas = root.GetProperty("components").GetProperty("schemas");
+        var page = schemas.GetProperty("TaskLogsPage").GetProperty("properties");
+        AssertType(page.GetProperty("records"), "array");
+        Assert.Equal("#/components/schemas/TaskLogRecord",
+            page.GetProperty("records").GetProperty("items").GetProperty("$ref").GetString());
+        AssertType(page.GetProperty("matches"), "array");
+        Assert.Equal("#/components/schemas/TaskLogMatch",
+            page.GetProperty("matches").GetProperty("items").GetProperty("$ref").GetString());
+        var record = schemas.GetProperty("TaskLogRecord").GetProperty("properties");
+        var match = schemas.GetProperty("TaskLogMatch").GetProperty("properties");
+        AssertType(record.GetProperty("line"), "integer");
+        AssertType(match.GetProperty("index"), "integer");
+        AssertType(match.GetProperty("length"), "integer");
+        Assert.Equal("#/components/schemas/LogFrame", record.GetProperty("frame").GetProperty("$ref").GetString());
+        Assert.Equal("#/components/schemas/LogFrame", match.GetProperty("frame").GetProperty("$ref").GetString());
+        AssertType(schemas.GetProperty("LogFrame").GetProperty("properties").GetProperty("text"), "string");
+
+        var attempt = await Seed(host.Group);
+        await host.Capture(attempt, ["contract 😀 ***"]);
+        using var range = await host.Get(attempt);
+        var ranged = (await range.Content.ReadFromJsonAsync<TaskLogsPage>(Token))!;
+        Assert.Equal("contract 😀 ***", Assert.Single(ranged.Records).Frame.Text);
+        using var search = await host.Get(attempt, "?search=contract");
+        var searched = (await search.Content.ReadFromJsonAsync<TaskLogsPage>(Token))!;
+        Assert.Equal(8, Assert.Single(searched.Matches).Length);
+        using var download = await host.Get(attempt, "?download=true", completion: HttpCompletionOption.ResponseHeadersRead);
+        Assert.Equal("application/x-ndjson", download.Content.Headers.ContentType!.MediaType);
+        var frame = JsonSerializer.Deserialize((await download.Content.ReadAsStringAsync(Token)).TrimEnd('\n'),
+            LogJsonContext.Default.LogFrame)!;
+        Assert.Equal("contract 😀 ***", frame.Text);
+
+        static void AssertType(JsonElement schema, string expected)
+        {
+            var type = schema.GetProperty("type");
+            if (type.ValueKind == JsonValueKind.Array)
+                Assert.Contains(type.EnumerateArray(), item => item.GetString() == expected);
+            else Assert.Equal(expected, type.GetString());
+        }
+    }
+
+    [Fact]
     public async Task TaskLogs_actual_spool_signed_upload_range_search_download_and_no_postgres_payload()
     {
         await using var host = await TaskLogsHost.Start(database.DataSource);
@@ -416,6 +472,11 @@ internal sealed class TaskLogsHost : IAsyncDisposable
         builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton(capabilities);
         builder.Services.AddSingleton(new BlobUploadGrants(RandomNumberGenerator.GetBytes(32)));
+        builder.Services.ConfigureHttpJsonOptions(options =>
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, TaskLogsJsonContext.Default));
+        // Runtime registration needs no XML-comment interceptors in the test assembly.
+        var documentName = "v1";
+        builder.Services.AddOpenApi(documentName);
         var key = new SymmetricSecurityKey(RandomNumberGenerator.GetBytes(64));
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
         {
@@ -432,6 +493,7 @@ internal sealed class TaskLogsHost : IAsyncDisposable
         app.UseAuthorization();
         app.MapTaskLogsEndpoints();
         app.MapLogUploadEndpoints();
+        app.MapOpenApi();
         await app.StartAsync(TestContext.Current.CancellationToken);
         return new(app, root, store, capabilities, key);
     }

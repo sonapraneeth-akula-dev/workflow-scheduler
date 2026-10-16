@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Azure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.OpenApi;
 using Npgsql;
 using Wf.Contracts.Registry;
 using Wf.ControlPlane.Auth;
@@ -17,8 +18,13 @@ public static class TaskLogsEndpoints
     {
         endpoints.MapGet("/api/v1/runs/{id}/tasks/{task}/{attempt}/logs", Get)
             .RequireAuthorization()
-            .Produces<TaskLogsPage>()
-            .Produces(200, contentType: "application/x-ndjson")
+            .Produces<TaskLogsPage>(200, "application/json", "application/x-ndjson")
+            .AddOpenApiOperationTransformer((operation, _, _) =>
+            {
+                operation.Responses!["200"].Content!["application/x-ndjson"].Schema =
+                    new OpenApiSchema { Type = JsonSchemaType.String };
+                return Task.CompletedTask;
+            })
             .ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404)
             .ProducesProblem(409).ProducesProblem(422).ProducesProblem(502).ProducesProblem(504)
             .WithDescription("Viewer task-attempt logs. task is the URI-escaped stored node/task key. " +
