@@ -316,7 +316,93 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** @description Safe durable run summaries, newest UUIDv7 first. All filters combine with AND. Metadata matches the run's copied metadata, not its current workflow. Deleted workflows retain history. Fresh Viewer grants filter every page; cursors are bound to filters and visible type scopes. No variables, values, snapshots or storage capabilities. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Exact registered team; omitted lists only currently visible scopes. */
+                    team?: string;
+                    /** @description Exact registered type name; requires team. */
+                    type?: string;
+                    /** @description Exact team/type/workflow identity; unknown or ungranted resource is forbidden. */
+                    workflowId?: string;
+                    /** @description Canonical nonempty lowercase UUID; unknown, ambiguous or ungranted series is forbidden. */
+                    seriesId?: string;
+                    /** @description One exact case-sensitive RunStatus name. */
+                    status?: "Queued" | "Running" | "Aborting" | "Succeeded" | "Failed" | "Aborted" | "TimedOut";
+                    /** @description Inclusive created_at lower bound; explicit RFC3339 offset, microsecond precision. */
+                    from?: string;
+                    /** @description Exclusive created_at upper bound; explicit RFC3339 offset, microsecond precision. */
+                    to?: string;
+                    /** @description Canonical integer 1–100, default 50. Keep all filters and limit unchanged on subsequent pages. */
+                    limit?: number;
+                    /** @description Opaque canonical nextCursor from this filter/scope combination; no offset paging. */
+                    cursor?: string;
+                    /** @description Dynamic query-name prefix, not a literal key: meta.environment=prod. Up to 32 exact string equality filters, ANDed; each suffix 1–128 characters, value ≤1024. Copied run metadata.values only. */
+                    "meta.*"?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RunQueryPage"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         put?: never;
         post: {
             parameters: {
@@ -1033,6 +1119,28 @@ export interface components {
             /** Format: int64 */
             lastSeq: number | string;
             events: components["schemas"]["LiveEvent"][];
+        };
+        RunQueryPage: {
+            items: components["schemas"]["RunQueryRow"][];
+            nextCursor: null | string;
+        };
+        RunQueryRow: {
+            /** Format: uuid */
+            id: string;
+            workflowId: string;
+            /** Format: uuid */
+            versionId: string;
+            /** Format: uuid */
+            seriesId: null | string;
+            team: string;
+            type: string;
+            status: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            startedAt: null | string;
+            /** Format: date-time */
+            endedAt: null | string;
         };
         RunSnapshotResponse: {
             /** Format: uuid */
