@@ -57,8 +57,15 @@ are explicit; pages load 50 workflows with manual continuation. Authorized
 type-scoped MessagePack updates refresh the affected workflow list and team
 counts without timer polling or requiring a broader team grant. Failed live
 connections expose retry and manual refresh; denied reads hide previously cached
-rows. Team presentation, search/grouping and run detail links remain separate
-tasks.
+rows. Each team's optional presentation controls type ordering, metadata row
+groups, extra metadata columns, default filters and labels. Unlisted types keep
+server order; missing group/column values show `Not set`. Presentation caches
+are team-scoped; type-only grants receive no hidden team-wide presentation.
+Defaults apply on the server before workflow paging and type status counts
+through `defaults=true`, without copying stored keys/values into URLs or
+applying manual-filter size limits to valid stored configuration. Explicit
+`meta.<key>` filters override corresponding defaults. Interactive search,
+URL filters/grouping and run detail links remain separate tasks.
 
 Commit links require an explicit workflow-repository browser template, for example:
 
@@ -129,9 +136,13 @@ requires a new snapshot rather than silently losing updates. Reconnects resume
 without timer polling; failures clear stale state and expose retry through
 `ReconnectingIndicator`. Unsubscription and authentication reset cancel old
 responses. Unsafe JavaScript integer sequences are rejected before a rounded
-cursor can be sent. The actual JWT browser fixture verifies dropped-frame
-recovery and a 6,001-event gap on all three engines; physical socket drop and
-API-restart acceptance remain their separate integration task.
+cursor can be sent. Actual JWT browser fixtures verify dropped-frame recovery,
+a 6,001-event gap, physical socket loss and complete API-host restart on all
+three engines. The physical-fault fixture keeps committing durable events
+while the API is absent, recreates its application/DI/listener at the same URL,
+and verifies exact ordered recovery through the production client without
+mocked API responses or REST polling. This is an API-host lifecycle test, not
+an OS-process-kill or deployment-failover claim.
 
 ```powershell
 $env:KARDIA_API_URL = "http://127.0.0.1:5001"

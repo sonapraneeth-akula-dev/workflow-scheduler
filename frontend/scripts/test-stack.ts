@@ -300,6 +300,54 @@ try {
       },
     })
   }
+  for (const team of ["presentation-a", "presentation-b"]) {
+    const presentation =
+      team === "presentation-a"
+        ? {
+            typeOrder: ["perf", "release"],
+            groupingKeys: ["environment"],
+            listColumns: ["component"],
+            defaultFilters: { environment: "dev" },
+            labels: {
+              environment: "Target environment",
+              component: "Component name",
+            },
+          }
+        : undefined
+    const types = ["release", "perf"].map((name) => ({
+      team,
+      name,
+      description: `${name} presentation fixture`,
+      metadataSchema: {
+        keys: [
+          { key: "environment", allowedValues: ["dev", "prod"] },
+          { key: "component" },
+        ],
+      },
+    }))
+    for (const environment of ["dev", "prod"]) {
+      const workflowId = `${team}/release/${environment}-workflow`
+      await request("/api/v1/registrations", {
+        gitCommit: "c".repeat(40),
+        gitAuthor: "Presentation UI integration",
+        workflowId,
+        manifest: {
+          ...manifest,
+          name: workflowId,
+          metadata: {
+            type: "release",
+            values: {
+              environment,
+              component: environment === "dev" ? "api" : "web",
+            },
+          },
+        },
+        package: { sha256, size: bytes.length },
+        source: "// presentation UI integration",
+        registry: { team, types, ...(presentation ? { presentation } : {}) },
+      })
+    }
+  }
   const codeScheduleId = z
     .uuid()
     .parse(

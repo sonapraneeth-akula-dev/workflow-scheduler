@@ -29,12 +29,86 @@ describe("catalogue API trust boundaries", () => {
 
   it("uses the authorized team list without exposing registry presentation", async () => {
     respond([{ team: "team", types: [{ team: "team", name: "release" }] }])
-    expect(await getTeams()).toEqual([{ team: "team", typeCount: 1 }])
+    expect(await getTeams()).toEqual([
+      { team: "team", typeCount: 1, presentation: null },
+    ])
   })
 
   it("rejects types leaked through another team's registry", async () => {
     respond([{ team: "team", types: [{ team: "foreign", name: "release" }] }])
     await expect(getTeams()).rejects.toThrow("outside its team")
+  })
+
+  it("preserves only the owning team's complete presentation contract", async () => {
+    const presentation = {
+      typeOrder: ["release"],
+      groupingKeys: ["environment"],
+      listColumns: ["environment"],
+      defaultFilters: { environment: "dev" },
+      labels: { environment: "Environment" },
+    }
+    respond([
+      {
+        team: "team",
+        types: [{ team: "team", name: "release" }],
+        presentation,
+      },
+    ])
+    expect((await getTeams())[0]?.presentation).toEqual(presentation)
+    respond([
+      {
+        team: "team",
+        types: [],
+        presentation: { labels: { environment: "Environment" } },
+      },
+    ])
+    await expect(getTeams()).rejects.toThrow()
+  })
+
+  it("emits actual dotted metadata keys for both workflow pages and type counts", async () => {
+    respond({ items: [], nextCursor: null })
+    await getWorkflows("team", "release", null, undefined, {
+      environment: "dev",
+      optional: "",
+    })
+    expect(get).toHaveBeenCalledWith("/api/v1/workflows", {
+      params: {
+        query: {
+          team: "team",
+          type: "release",
+          limit: 50,
+          "meta.environment": "dev",
+          "meta.optional": "",
+        },
+      },
+      signal: undefined,
+    })
+    respond([])
+    await getTypes("team", undefined, { environment: "dev" })
+    expect(get).toHaveBeenLastCalledWith("/api/v1/teams/{team}/types", {
+      params: { path: { team: "team" }, query: { "meta.environment": "dev" } },
+      signal: undefined,
+    })
+  })
+
+  it("opts into server-side presentation defaults without transporting stored values", async () => {
+    respond({ items: [], nextCursor: null })
+    await getWorkflows("team", "release", null, undefined, {}, true)
+    expect(get).toHaveBeenLastCalledWith("/api/v1/workflows", {
+      params: {
+        query: { team: "team", type: "release", limit: 50, defaults: true },
+      },
+      signal: undefined,
+    })
+    respond([])
+    await getTypes("team", undefined, { environment: "prod" }, true)
+    expect(get).toHaveBeenLastCalledWith("/api/v1/teams/{team}/types", {
+      params: {
+        path: { team: "team" },
+        query: { defaults: true, "meta.environment": "prod" },
+      },
+      signal: undefined,
+    })
   })
 
   it("parses partial string counts without inventing absent statuses", async () => {

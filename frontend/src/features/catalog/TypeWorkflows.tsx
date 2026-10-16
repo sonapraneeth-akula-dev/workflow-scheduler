@@ -5,11 +5,22 @@ import { ErrorNotice } from "@/components/ErrorNotice"
 import { accessDenied, getWorkflows } from "./api"
 import { StatusBadge } from "./StatusBadge"
 import { useCatalogLive } from "./useCatalogLive"
+import {
+  groupWorkflows,
+  metadataValue,
+  presentationLabel,
+  usePresentation,
+} from "./usePresentation"
+import { PresentationFilters } from "./PresentationFilters"
 
 export function TypeWorkflows({ team, type }: { team: string; type: string }) {
   const live = useCatalogLive(team, type)
+  const presentation = usePresentation(team)
+  const config = presentation.data ?? null
+  const filters = config?.defaultFilters ?? {}
+  const columns = config?.listColumns ?? []
   const query = useInfiniteQuery({
-    queryKey: ["catalog", "team", team, "workflows", type],
+    queryKey: ["catalog", "team", team, "workflows", type, filters],
     initialPageParam: null,
     queryFn: ({
       pageParam,
@@ -17,12 +28,14 @@ export function TypeWorkflows({ team, type }: { team: string; type: string }) {
     }: {
       pageParam: string | null
       signal: AbortSignal
-    }) => getWorkflows(team, type, pageParam, signal),
+    }) => getWorkflows(team, type, pageParam, signal, {}, true),
     getNextPageParam: (page) => page.nextCursor ?? undefined,
+    enabled: presentation.data !== undefined,
   })
-  const workflows = accessDenied(query.error)
-    ? undefined
-    : query.data?.pages.flatMap((page) => page.items)
+  const workflows =
+    accessDenied(query.error) || presentation.data === undefined
+      ? undefined
+      : query.data?.pages.flatMap((page) => page.items)
   return (
     <>
       <nav aria-label="Breadcrumb" className="flex flex-wrap gap-2">
@@ -38,8 +51,10 @@ export function TypeWorkflows({ team, type }: { team: string; type: string }) {
         </h1>
         <Button
           variant="outline"
-          disabled={query.isFetching}
-          onClick={() => void query.refetch()}
+          disabled={query.isFetching || presentation.isFetching}
+          onClick={() =>
+            void Promise.all([query.refetch(), presentation.refetch()])
+          }
         >
           Refresh workflows
         </Button>
@@ -51,6 +66,7 @@ export function TypeWorkflows({ team, type }: { team: string; type: string }) {
             ? "Live updates unavailable. Refresh workflows or retry."
             : "Connecting live updates..."}
       </p>
+      <PresentationFilters config={config} />
       {live.snapshot?.error ? (
         <Button variant="outline" onClick={live.retry}>
           Retry live updates
@@ -58,6 +74,7 @@ export function TypeWorkflows({ team, type }: { team: string; type: string }) {
       ) : null}
       {query.isPending ? <p role="status">Loading workflows...</p> : null}
       {query.error ? <ErrorNotice error={query.error} /> : null}
+      {presentation.error ? <ErrorNotice error={presentation.error} /> : null}
       {workflows?.length === 0 ? (
         <p role="status">No workflows in this type.</p>
       ) : null}
@@ -86,34 +103,57 @@ export function TypeWorkflows({ team, type }: { team: string; type: string }) {
                 <th scope="col" className="p-3">
                   Latest status
                 </th>
+                {columns.map((key) => (
+                  <th key={key} scope="col" className="p-3">
+                    {presentationLabel(config, key)}
+                  </th>
+                ))}
               </tr>
             </thead>
-            <tbody>
-              {workflows.map((workflow) => (
-                <tr key={workflow.id} className="border-b last:border-0">
-                  <th scope="row" className="p-3 font-normal">
-                    <span className="font-medium">{workflow.name}</span>
-                    <p className="break-words text-muted-foreground">
-                      {workflow.id}
-                    </p>
-                  </th>
-                  <td className="p-3">
-                    {workflow.activeVersion?.semVer ?? "No active version"}
-                  </td>
-                  <td className="p-3">{workflow.latestVersion.semVer}</td>
-                  <td className="p-3">
-                    <StatusBadge
-                      status={workflow.latestRun?.status ?? "NeverRun"}
-                    />
-                    {workflow.latestRun ? (
-                      <p className="mt-2 font-mono text-xs">
-                        {workflow.latestRun.id}
+            {groupWorkflows(workflows, config).map((group) => (
+              <tbody key={group.id}>
+                {group.label ? (
+                  <tr>
+                    <th
+                      scope="rowgroup"
+                      colSpan={4 + columns.length}
+                      className="bg-muted p-3 font-semibold"
+                    >
+                      {group.label}
+                    </th>
+                  </tr>
+                ) : null}
+                {group.items.map((workflow) => (
+                  <tr key={workflow.id} className="border-b last:border-0">
+                    <th scope="row" className="p-3 font-normal">
+                      <span className="font-medium">{workflow.name}</span>
+                      <p className="break-words text-muted-foreground">
+                        {workflow.id}
                       </p>
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
+                    </th>
+                    <td className="p-3">
+                      {workflow.activeVersion?.semVer ?? "No active version"}
+                    </td>
+                    <td className="p-3">{workflow.latestVersion.semVer}</td>
+                    <td className="p-3">
+                      <StatusBadge
+                        status={workflow.latestRun?.status ?? "NeverRun"}
+                      />
+                      {workflow.latestRun ? (
+                        <p className="mt-2 font-mono text-xs">
+                          {workflow.latestRun.id}
+                        </p>
+                      ) : null}
+                    </td>
+                    {columns.map((key) => (
+                      <td key={key} className="p-3">
+                        {metadataValue(workflow, key) ?? "Not set"}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            ))}
           </table>
         </div>
       ) : null}

@@ -5,13 +5,21 @@ import { ErrorNotice } from "@/components/ErrorNotice"
 import { accessDenied, getTypes, statusSchema, type CatalogType } from "./api"
 import { StatusBadge } from "./StatusBadge"
 import { useCatalogLive } from "./useCatalogLive"
+import { orderTypes, usePresentation } from "./usePresentation"
+import { PresentationFilters } from "./PresentationFilters"
 
 export function TeamArea({ team }: { team: string }) {
+  const presentation = usePresentation(team)
+  const filters = presentation.data?.defaultFilters ?? {}
   const query = useQuery({
-    queryKey: ["catalog", "team", team, "types"],
-    queryFn: ({ signal }) => getTypes(team, signal),
+    queryKey: ["catalog", "team", team, "types", filters],
+    queryFn: ({ signal }) => getTypes(team, signal, {}, true),
+    enabled: presentation.data !== undefined,
   })
-  const types = accessDenied(query.error) ? undefined : query.data
+  const types =
+    accessDenied(query.error) || presentation.data === undefined
+      ? undefined
+      : query.data
   return (
     <>
       <nav aria-label="Breadcrumb">
@@ -21,21 +29,25 @@ export function TeamArea({ team }: { team: string }) {
         <h1 className="text-2xl font-semibold break-words">{team}</h1>
         <Button
           variant="outline"
-          disabled={query.isFetching}
-          onClick={() => void query.refetch()}
+          disabled={query.isFetching || presentation.isFetching}
+          onClick={() =>
+            void Promise.all([query.refetch(), presentation.refetch()])
+          }
         >
           Refresh types
         </Button>
       </div>
       <p>Types and latest workflow status in this team.</p>
+      <PresentationFilters config={presentation.data ?? null} />
       {query.isPending ? <p role="status">Loading types...</p> : null}
       {query.error ? <ErrorNotice error={query.error} /> : null}
+      {presentation.error ? <ErrorNotice error={presentation.error} /> : null}
       {types?.length === 0 ? (
         <p role="status">No permitted types in this team.</p>
       ) : null}
       {types && types.length > 0 ? (
         <ul className="grid gap-4 sm:grid-cols-2">
-          {types.map((type) => (
+          {orderTypes(types, presentation.data ?? null).map((type) => (
             <TypeCard key={type.name} type={type} />
           ))}
         </ul>

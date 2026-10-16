@@ -83,3 +83,84 @@ test("home reaches workflows in two clicks and committed run changes update type
   await expect.poll(() => typeReads).toBeGreaterThan(before)
   expect(sockets).toBeGreaterThan(0)
 })
+
+test("team presentation orders types and applies metadata grouping, columns, filters and labels without affecting another team", async ({
+  page,
+}) => {
+  const filteredReads: {
+    team: string | null
+    defaults: string | null
+    environment: string | null
+  }[] = []
+  page.on("request", (request) => {
+    const url = new URL(request.url())
+    if (url.pathname === "/api/v1/workflows")
+      filteredReads.push({
+        team: url.searchParams.get("team"),
+        defaults: url.searchParams.get("defaults"),
+        environment: url.searchParams.get("meta.environment"),
+      })
+  })
+  await page.goto("/")
+  await page.getByRole("link", { name: "presentation-a", exact: true }).click()
+  await expect(page.getByRole("link", { name: /^(perf|release)$/ })).toHaveText(
+    ["perf", "release"]
+  )
+  await expect(
+    page.getByRole("region", { name: "Default metadata filters" })
+  ).toContainText("Target environment:")
+  await page.getByRole("link", { name: "release", exact: true }).click()
+  const table = page.getByRole("table")
+  await expect(table).toContainText("dev-workflow")
+  await expect(table).not.toContainText("prod-workflow")
+  await expect(
+    page.getByRole("columnheader", { name: "Component name" })
+  ).toBeVisible()
+  await expect(
+    page.getByRole("cell", { name: "api", exact: true })
+  ).toBeVisible()
+  await expect(table).toContainText("Target environment: dev")
+  await accessible(page)
+  await page.getByRole("button", { name: "Dark theme" }).click()
+  await page.setViewportSize({ width: 375, height: 812 })
+  await accessible(page)
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth
+    )
+  ).toBe(true)
+  await page.getByRole("link", { name: "Teams", exact: true }).click()
+  await page.getByRole("link", { name: "presentation-b", exact: true }).click()
+  await expect(page.getByRole("link", { name: /^(perf|release)$/ })).toHaveText(
+    ["release", "perf"]
+  )
+  await expect(
+    page.getByRole("region", { name: "Default metadata filters" })
+  ).toHaveCount(0)
+  await page.getByRole("link", { name: "release", exact: true }).click()
+  await expect(table).toContainText("dev-workflow")
+  await expect(table).toContainText("prod-workflow")
+  await expect(
+    page.getByRole("columnheader", { name: "Component name" })
+  ).toHaveCount(0)
+  await expect(table).not.toContainText("Target environment:")
+  expect(
+    filteredReads.some(
+      (read) =>
+        read.team === "presentation-a" &&
+        read.defaults === "true" &&
+        read.environment === null
+    )
+  ).toBe(true)
+  expect(
+    filteredReads
+      .filter((read) => read.team === "presentation-b")
+      .every((read) => read.defaults === "true" && read.environment === null)
+  ).toBe(true)
+  await accessible(page)
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth
+    )
+  ).toBe(true)
+})

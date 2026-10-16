@@ -83,11 +83,16 @@ function show(
 describe("catalogue views", () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    vi.mocked(getTeams).mockResolvedValue([
+      { team: "team", typeCount: 1, presentation: null },
+    ])
     vi.mocked(useLive).mockReturnValue({ snapshot: live, retry })
   })
 
   it("announces loading then renders permitted team navigation", async () => {
-    vi.mocked(getTeams).mockResolvedValue([{ team: "team", typeCount: 1 }])
+    vi.mocked(getTeams).mockResolvedValue([
+      { team: "team", typeCount: 1, presentation: null },
+    ])
     show(<TeamList />)
     expect(screen.getByText("Loading teams...")).toBeInTheDocument()
     expect(await screen.findByRole("link", { name: "team" })).toHaveAttribute(
@@ -106,7 +111,9 @@ describe("catalogue views", () => {
   })
 
   it("preserves cached rows for transient errors but hides them after access denial", async () => {
-    vi.mocked(getTeams).mockResolvedValue([{ team: "team", typeCount: 1 }])
+    vi.mocked(getTeams).mockResolvedValue([
+      { team: "team", typeCount: 1, presentation: null },
+    ])
     show(<TeamList />)
     await screen.findByRole("link", { name: "team" })
     vi.mocked(getTeams).mockRejectedValueOnce(new Error("Offline"))
@@ -152,6 +159,87 @@ describe("catalogue views", () => {
     ).toBeInTheDocument()
   })
 
+  it("applies type order and server-side default filters to team counts", async () => {
+    vi.mocked(getTeams).mockResolvedValue([
+      {
+        team: "team",
+        typeCount: 2,
+        presentation: {
+          typeOrder: ["perf", "release"],
+          groupingKeys: [],
+          listColumns: [],
+          defaultFilters: { environment: "dev" },
+          labels: { environment: "Environment" },
+        },
+      },
+    ])
+    vi.mocked(getTypes).mockResolvedValue([
+      {
+        team: "team",
+        name: "release",
+        description: "",
+        latestStatusCounts: {},
+      },
+      { team: "team", name: "perf", description: "", latestStatusCounts: {} },
+    ])
+    show(<TeamArea team="team" />)
+    await screen.findByRole("link", { name: "perf" })
+    const links = screen.getAllByRole("link").map((link) => link.textContent)
+    expect(links).toEqual(["Teams", "perf", "release"])
+    expect(getTypes).toHaveBeenCalledWith(
+      "team",
+      expect.any(AbortSignal),
+      {},
+      true
+    )
+    expect(
+      screen.getByRole("region", { name: "Default metadata filters" })
+    ).toHaveTextContent("Environment:dev")
+  })
+
+  it("applies metadata columns, labels and tuple grouping to filtered workflow pages", async () => {
+    vi.mocked(getTeams).mockResolvedValue([
+      {
+        team: "team",
+        typeCount: 1,
+        presentation: {
+          typeOrder: [],
+          groupingKeys: ["environment"],
+          listColumns: ["component"],
+          defaultFilters: { environment: "dev" },
+          labels: { environment: "Environment", component: "Component" },
+        },
+      },
+    ])
+    vi.mocked(getWorkflows).mockResolvedValue({
+      items: [
+        {
+          ...workflow,
+          metadata: {
+            type: "release",
+            values: { environment: "dev", component: "api" },
+          },
+        },
+      ],
+      nextCursor: null,
+    })
+    show(<TypeWorkflows team="team" type="release" />)
+    const table = await screen.findByRole("table")
+    expect(table).toHaveTextContent("Environment: dev")
+    expect(
+      screen.getByRole("columnheader", { name: "Component" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("cell", { name: "api" })).toBeInTheDocument()
+    expect(getWorkflows).toHaveBeenCalledWith(
+      "team",
+      "release",
+      null,
+      expect.any(AbortSignal),
+      {},
+      true
+    )
+  })
+
   it("paginates workflows, preserves active/latest versions, and labels never-run workflows", async () => {
     vi.mocked(getWorkflows)
       .mockResolvedValueOnce({ items: [workflow], nextCursor: "next" })
@@ -176,7 +264,9 @@ describe("catalogue views", () => {
       "team",
       "release",
       "next",
-      expect.any(AbortSignal)
+      expect.any(AbortSignal),
+      {},
+      true
     )
     expect(screen.getAllByRole("row")).toHaveLength(3)
     expect(

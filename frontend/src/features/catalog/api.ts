@@ -24,10 +24,22 @@ const count = z.union([
     .transform(Number)
     .pipe(z.int().nonnegative()),
 ])
+const presentationSchema = z.object({
+  typeOrder: z.array(name).refine((keys) => new Set(keys).size === keys.length),
+  groupingKeys: z
+    .array(z.string().min(1))
+    .refine((keys) => new Set(keys).size === keys.length),
+  listColumns: z
+    .array(z.string().min(1))
+    .refine((keys) => new Set(keys).size === keys.length),
+  defaultFilters: z.record(z.string().min(1), z.string()),
+  labels: z.record(z.string().min(1), z.string().min(1)),
+})
 const teams = z.array(
   z.object({
     team: name,
     types: z.array(z.object({ team: name, name })),
+    presentation: presentationSchema.nullable().optional(),
   })
 )
 const types = z.array(
@@ -68,6 +80,7 @@ const workflowPage = z.object({
 export type CatalogType = z.infer<typeof types>[number]
 export type CatalogWorkflow = z.infer<typeof workflow>
 export type RunStatus = z.infer<typeof statusSchema>
+export type Presentation = z.infer<typeof presentationSchema>
 
 export async function getTeams(signal?: AbortSignal) {
   const result = await publicApi.GET("/api/v1/teams", { signal })
@@ -81,12 +94,26 @@ export async function getTeams(signal?: AbortSignal) {
   return parsed.map((team) => ({
     team: team.team,
     typeCount: team.types.length,
+    presentation: team.presentation ?? null,
   }))
 }
 
-export async function getTypes(team: string, signal?: AbortSignal) {
+export async function getTypes(
+  team: string,
+  signal?: AbortSignal,
+  metadata: Readonly<Record<string, string>> = {},
+  defaults = false
+) {
   const result = await publicApi.GET("/api/v1/teams/{team}/types", {
-    params: { path: { team } },
+    params: {
+      path: { team },
+      query: {
+        ...(defaults ? { defaults: true } : {}),
+        ...Object.fromEntries(
+          Object.entries(metadata).map(([key, value]) => [`meta.${key}`, value])
+        ),
+      },
+    },
     signal,
   })
   if (!result.response.ok) throw new ApiError(result.response, result.error)
@@ -100,10 +127,23 @@ export async function getWorkflows(
   team: string,
   type: string,
   cursor: string | null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  metadata: Readonly<Record<string, string>> = {},
+  defaults = false
 ) {
   const result = await publicApi.GET("/api/v1/workflows", {
-    params: { query: { team, type, limit: 50, ...(cursor ? { cursor } : {}) } },
+    params: {
+      query: {
+        team,
+        type,
+        limit: 50,
+        ...(cursor ? { cursor } : {}),
+        ...(defaults ? { defaults: true } : {}),
+        ...Object.fromEntries(
+          Object.entries(metadata).map(([key, value]) => [`meta.${key}`, value])
+        ),
+      },
+    },
     signal,
   })
   if (!result.response.ok) throw new ApiError(result.response, result.error)

@@ -15,17 +15,37 @@ public static class CatalogEndpoints
     public static IEndpointRouteBuilder MapCatalogEndpoints(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapGet("/api/v1/teams/{team}/types", ReadTypes).RequireAuthorization()
-            .Produces<CatalogType[]>().ProducesProblem(400).ProducesProblem(404);
+            .Produces<CatalogType[]>().ProducesProblem(400).ProducesProblem(404)
+            .AddOpenApiOperationTransformer((operation, _, _) =>
+            {
+                operation.Parameters ??= [];
+                operation.Parameters.Add(new OpenApiParameter
+                {
+                    Name = "meta.*", In = ParameterLocation.Query,
+                    Description = "Use actual meta.<key> names for exact AND metadata filters on workflow status counts.",
+                    Schema = new OpenApiSchema { Type = JsonSchemaType.String }
+                });
+                operation.Parameters.Add(new OpenApiParameter
+                {
+                    Name = "defaults", In = ParameterLocation.Query,
+                    Description = "Apply the visible team's stored default metadata filters; explicit meta.<key> values override them.",
+                    Schema = new OpenApiSchema { Type = JsonSchemaType.Boolean }
+                });
+                return Task.CompletedTask;
+            });
         endpoints.MapGet("/api/v1/workflows", ReadWorkflows).RequireAuthorization()
             .Produces<CatalogWorkflowPage>().ProducesProblem(400)
             .AddOpenApiOperationTransformer((operation, _, _) =>
             {
                 operation.Parameters ??= [];
-                foreach (var name in new[] { "team", "type", "cursor", "limit" })
+                foreach (var name in new[] { "team", "type", "cursor", "limit", "meta.*", "defaults" })
                     operation.Parameters.Add(new OpenApiParameter
                     {
                         Name = name, In = ParameterLocation.Query,
-                        Schema = new OpenApiSchema { Type = name == "limit" ? JsonSchemaType.Integer : JsonSchemaType.String }
+                        Description = name == "meta.*" ? "Repeat with actual meta.<key> names for exact AND metadata equality filters (at most 32)." :
+                            name == "defaults" ? "Apply the visible team's stored metadata defaults. Requires team; explicit meta.<key> values override defaults." : null,
+                        Schema = new OpenApiSchema { Type = name == "limit" ? JsonSchemaType.Integer :
+                            name == "defaults" ? JsonSchemaType.Boolean : JsonSchemaType.String }
                     });
                 return Task.CompletedTask;
             });
@@ -41,6 +61,14 @@ public static class CatalogEndpoints
     {
         if (!CatalogQuery.ValidSegment(team))
             return Results.Problem(statusCode: 400, title: "Invalid team", detail: "Use the exact registered team name.");
+        CatalogQuery filter;
+        try
+        {
+            if (context.Request.Query.Keys.Any(key => key != "defaults" && !key.StartsWith("meta.", StringComparison.Ordinal)))
+                throw new ArgumentException("Only defaults and exact meta.<key> filters are supported for type status counts.");
+            filter = CatalogQuery.Parse(context.Request.Query);
+        }
+        catch (ArgumentException error) { return Results.Problem(statusCode: 400, title: "Invalid catalogue filter", detail: error.Message); }
         var visible = (await VisibleTeams(context, source, authorization, team)).SingleOrDefault();
         if (visible is null) return Results.Problem(statusCode: 404, title: "Team not found");
         var result = new List<CatalogType>();
@@ -49,13 +77,18 @@ public static class CatalogEndpoints
             var counts = new Dictionary<string, long>(StringComparer.Ordinal);
             await using var query = source.CreateCommand("""
                 SELECT latest.status,count(*) FROM workflows w
+                JOIN workflow_versions lv ON lv.workflow_id=w.id AND lv.id=w.latest_version_id
+                LEFT JOIN workflow_versions av ON av.workflow_id=w.id AND av.id=w.active_version_id
                 LEFT JOIN LATERAL (
                     SELECT r.status FROM runs r WHERE r.workflow_id=w.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1
                 ) latest ON true
                 WHERE w.type_id=$1 AND w.deleted_at IS NULL
+                    AND ($2::jsonb='{}'::jsonb OR
+                        COALESCE(av.manifest->'metadata'->'values',lv.manifest->'metadata'->'values','{}'::jsonb) @> $2::jsonb)
                 GROUP BY latest.status
                 """);
             query.Parameters.AddWithValue(team + "/" + type.Name);
+            query.Parameters.AddWithValue(JsonSerializer.Serialize(MetadataFilters(filter, visible), CatalogQueryJsonContext.Default.MetadataFilters));
             await using var reader = await query.ExecuteReaderAsync(context.RequestAborted);
             while (await reader.ReadAsync(context.RequestAborted))
                 counts.Add(reader.IsDBNull(0) ? "NeverRun" : Status(reader.GetInt16(0)), reader.GetInt64(1));
@@ -71,6 +104,8 @@ public static class CatalogEndpoints
         CatalogQuery filter;
         try { filter = CatalogQuery.Parse(context.Request.Query); }
         catch (ArgumentException error) { return Results.Problem(statusCode: 400, title: "Invalid catalogue filter", detail: error.Message); }
+        if (filter.UsePresentationDefaults && filter.Team is null)
+            return Results.Problem(statusCode: 400, title: "Invalid catalogue filter", detail: "Presentation defaults require an exact team filter.");
         var teams = await VisibleTeams(context, source, authorization, filter.Team);
         var types = teams.SelectMany(team => team.Types
             .Where(type => filter.Type is null || type.Name == filter.Type)
@@ -88,11 +123,15 @@ public static class CatalogEndpoints
                 ORDER BY r.created_at DESC,r.id DESC LIMIT 1
             ) latest ON true
             WHERE w.type_id=ANY($1) AND w.deleted_at IS NULL AND w.id COLLATE "C" > $2 COLLATE "C"
+                AND ($4::jsonb='{}'::jsonb OR
+                    COALESCE(av.manifest->'metadata'->'values',lv.manifest->'metadata'->'values','{}'::jsonb) @> $4::jsonb)
             ORDER BY w.id COLLATE "C" LIMIT $3
             """);
         query.Parameters.AddWithValue(types);
         query.Parameters.AddWithValue(filter.AfterId ?? "");
         query.Parameters.AddWithValue(filter.Limit + 1);
+        query.Parameters.AddWithValue(JsonSerializer.Serialize(MetadataFilters(filter, filter.UsePresentationDefaults ? teams.SingleOrDefault() : null),
+            CatalogQueryJsonContext.Default.MetadataFilters));
         await using var reader = await query.ExecuteReaderAsync(context.RequestAborted);
         while (await reader.ReadAsync(context.RequestAborted))
         {
@@ -151,4 +190,12 @@ public static class CatalogEndpoints
 
     private static string Status(short value) => Enum.IsDefined((RunStatus)value)
         ? ((RunStatus)value).ToString() : throw new InvalidDataException("A catalogue run has an unknown status.");
+
+    private static IReadOnlyDictionary<string, string> MetadataFilters(CatalogQuery filter, TeamRegistry? team)
+    {
+        if (!filter.UsePresentationDefaults || team?.Presentation is not { } presentation) return filter.Metadata;
+        var values = presentation.DefaultFilters.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        foreach (var pair in filter.Metadata) values[pair.Key] = pair.Value;
+        return values;
+    }
 }

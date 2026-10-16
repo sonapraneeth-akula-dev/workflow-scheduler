@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -201,6 +202,9 @@ public sealed partial class AuthorizationMatrixTests
     [InlineData("?team=..")]
     [InlineData("?cursor=invalid")]
     [InlineData("?unsupported=ignored")]
+    [InlineData("?defaults=true")]
+    [InlineData("?defaults=True")]
+    [InlineData("?defaults=true&defaults=false")]
     public async Task Catalog_http_invalid_filters_have_explicit_problem_details(string query)
     {
         await using var server = await Server.Start(database.DataSource);
@@ -219,11 +223,148 @@ public sealed partial class AuthorizationMatrixTests
         var operation = document.RootElement.GetProperty("paths").GetProperty("/api/v1/workflows").GetProperty("get");
         var parameters = operation.GetProperty("parameters").EnumerateArray()
             .ToDictionary(parameter => parameter.GetProperty("name").GetString()!, parameter => parameter);
-        Assert.Equal(new[] { "cursor", "limit", "team", "type" }, parameters.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(new[] { "cursor", "defaults", "limit", "meta.*", "team", "type" }, parameters.Keys.Order(StringComparer.Ordinal));
         Assert.Equal("integer", parameters["limit"].GetProperty("schema").GetProperty("type").GetString());
+        Assert.Equal("boolean", parameters["defaults"].GetProperty("schema").GetProperty("type").GetString());
         Assert.Equal("query", parameters["cursor"].GetProperty("in").GetString());
         Assert.Equal("#/components/schemas/CatalogWorkflowPage", operation.GetProperty("responses").GetProperty("200")
             .GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
+    }
+
+    [Fact]
+    public async Task Catalog_presentation_metadata_filters_apply_before_paging_and_status_counts()
+    {
+        var group = Guid.NewGuid();
+        var seed = await Seed(RegistryRole.Viewer, group, false);
+        for (var index = 0; index < 51; index++)
+        {
+            var id = seed.Type + "/a-" + index.ToString("D2", System.Globalization.CultureInfo.InvariantCulture);
+            await CatalogWorkflow(id);
+            await CatalogMetadata(id, new Dictionary<string, string> { ["environment"] = "ppe" });
+        }
+        foreach (var name in new[] { "z-a", "z-b", "z-c" })
+        {
+            await CatalogWorkflow(seed.Type + "/" + name);
+            await CatalogMetadata(seed.Type + "/" + name, new Dictionary<string, string>
+            {
+                ["environment"] = "dev", ["component"] = "api", ["optional"] = ""
+            });
+        }
+        await CatalogRun(seed.Type + "/z-a", RunStatus.Succeeded, DateTimeOffset.UtcNow);
+        await CatalogRun(seed.Type + "/z-b", RunStatus.Queued, DateTimeOffset.UtcNow);
+        await CatalogWorkflow(seed.OtherType + "/z-foreign");
+        await CatalogMetadata(seed.OtherType + "/z-foreign", new Dictionary<string, string>
+            { ["environment"] = "dev", ["component"] = "api" });
+        await using var server = await Server.Start(database.DataSource);
+        var token = server.Token(group: group);
+        var query = "?team=" + seed.Team + "&type=release&limit=2&meta.environment=dev&meta.component=api";
+        using var firstResponse = await server.GetPath("/api/v1/workflows" + query, token);
+        Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
+        var first = (await firstResponse.Content.ReadFromJsonAsync<CatalogWorkflowPage>(TestContext.Current.CancellationToken))!;
+        Assert.Equal(["z-a", "z-b"], first.Items.Select(item => item.Name));
+        Assert.NotNull(first.NextCursor);
+        using var secondResponse = await server.GetPath("/api/v1/workflows" + query + "&cursor=" + first.NextCursor, token);
+        var second = (await secondResponse.Content.ReadFromJsonAsync<CatalogWorkflowPage>(TestContext.Current.CancellationToken))!;
+        Assert.Equal("z-c", Assert.Single(second.Items).Name);
+        Assert.Null(second.NextCursor);
+        using var countsResponse = await server.GetPath("/api/v1/teams/" + seed.Team +
+            "/types?meta.environment=dev&meta.component=api", token);
+        var counts = Assert.Single((await countsResponse.Content.ReadFromJsonAsync<CatalogType[]>(TestContext.Current.CancellationToken))!);
+        Assert.Equal(3, counts.LatestStatusCounts.Values.Sum());
+        Assert.Equal(1, counts.LatestStatusCounts["Succeeded"]);
+        Assert.Equal(1, counts.LatestStatusCounts["Queued"]);
+        Assert.Equal(1, counts.LatestStatusCounts["NeverRun"]);
+        using var empty = await server.GetPath("/api/v1/workflows" + query + "&meta.optional=", token);
+        Assert.Equal(2, (await empty.Content.ReadFromJsonAsync<CatalogWorkflowPage>(TestContext.Current.CancellationToken))!.Items.Count);
+        using var absent = await server.GetPath("/api/v1/workflows" + query + "&meta.absent=", token);
+        Assert.Empty((await absent.Content.ReadFromJsonAsync<CatalogWorkflowPage>(TestContext.Current.CancellationToken))!.Items);
+    }
+
+    [Fact]
+    public async Task Catalog_stored_defaults_support_valid_large_metadata_without_query_limits_or_scope_leaks()
+    {
+        var group = Guid.NewGuid();
+        var teamGroup = Guid.NewGuid();
+        var seed = await Seed(RegistryRole.Viewer, group, false);
+        var filters = Enumerable.Range(0, 33).ToImmutableDictionary(index => "key" + index, _ => "value")
+            .Add(new string('k', 129) + "\n", new string('v', 1025) + "\n")
+            .Add("environment", "dev");
+        await Save(new(seed.Team,
+            [new(seed.Team, "release", "description", new([.. filters.Keys.Select(key => new MetadataFieldSchema(key))]),
+                [new(RegistryRole.Viewer, group)])],
+            RoleBindings: [new(RegistryRole.Viewer, teamGroup)],
+            Presentation: new(DefaultFilters: filters)));
+        foreach (var name in new[] { "a-missing", "b-production", "z-a", "z-b" })
+        {
+            var id = seed.Type + "/" + name;
+            await CatalogWorkflow(id);
+            await CatalogMetadata(id, name == "a-missing"
+                ? new Dictionary<string, string> { ["environment"] = "dev" }
+                : filters.SetItem("environment", name == "b-production" ? "prod" : "dev"));
+        }
+        await using var server = await Server.Start(database.DataSource);
+        var teamToken = server.Token(group: teamGroup);
+        var query = "/api/v1/workflows?team=" + seed.Team + "&type=release&defaults=true&limit=1";
+        using var firstResponse = await server.GetPath(query, teamToken);
+        Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
+        var first = (await firstResponse.Content.ReadFromJsonAsync<CatalogWorkflowPage>(TestContext.Current.CancellationToken))!;
+        Assert.Equal("z-a", Assert.Single(first.Items).Name);
+        Assert.NotNull(first.NextCursor);
+        using var secondResponse = await server.GetPath(query + "&cursor=" + first.NextCursor, teamToken);
+        var second = (await secondResponse.Content.ReadFromJsonAsync<CatalogWorkflowPage>(TestContext.Current.CancellationToken))!;
+        Assert.Equal("z-b", Assert.Single(second.Items).Name);
+        Assert.Null(second.NextCursor);
+        foreach (var (suffix, expected) in new[] { ("", 2), ("&meta.environment=prod", 1) })
+        {
+            using var response = await server.GetPath("/api/v1/teams/" + seed.Team + "/types?defaults=true" + suffix, teamToken);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var type = Assert.Single((await response.Content.ReadFromJsonAsync<CatalogType[]>(TestContext.Current.CancellationToken))!);
+            Assert.Equal(expected, type.LatestStatusCounts["NeverRun"]);
+        }
+        using var overridden = await server.GetPath(query + "&meta.environment=prod", teamToken);
+        Assert.Equal("b-production", Assert.Single((await overridden.Content
+            .ReadFromJsonAsync<CatalogWorkflowPage>(TestContext.Current.CancellationToken))!.Items).Name);
+        foreach (var suffix in new[] { "", "&defaults=false" })
+        {
+            using var unfiltered = await server.GetPath("/api/v1/workflows?team=" + seed.Team + suffix, teamToken);
+            Assert.Equal(4, (await unfiltered.Content.ReadFromJsonAsync<CatalogWorkflowPage>(TestContext.Current.CancellationToken))!.Items.Count);
+        }
+        var typeToken = server.Token(group: group);
+        using var redacted = await server.GetPath("/api/v1/teams", typeToken);
+        Assert.Null(Assert.Single((await redacted.Content.ReadFromJsonAsync<TeamRegistry[]>(TestContext.Current.CancellationToken))!).Presentation);
+        using var typeOnly = await server.GetPath("/api/v1/workflows?team=" + seed.Team + "&defaults=true", typeToken);
+        Assert.Equal(4, (await typeOnly.Content.ReadFromJsonAsync<CatalogWorkflowPage>(TestContext.Current.CancellationToken))!.Items.Count);
+        using var typeCounts = await server.GetPath("/api/v1/teams/" + seed.Team + "/types?defaults=true", typeToken);
+        Assert.Equal(4, Assert.Single((await typeCounts.Content.ReadFromJsonAsync<CatalogType[]>(TestContext.Current.CancellationToken))!)
+            .LatestStatusCounts["NeverRun"]);
+        using var foreign = await server.GetPath("/api/v1/workflows?team=" + seed.Other + "&defaults=true", teamToken);
+        Assert.Empty((await foreign.Content.ReadFromJsonAsync<CatalogWorkflowPage>(TestContext.Current.CancellationToken))!.Items);
+        using var unscoped = await server.GetPath("/api/v1/workflows?defaults=false", server.Token(role: "Admin"));
+        Assert.Equal(HttpStatusCode.OK, unscoped.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("?meta.=dev")]
+    [InlineData("?meta.environment=dev&meta.environment=ppe")]
+    [InlineData("?status=Running")]
+    [InlineData("?defaults=True")]
+    [InlineData("?defaults=true&defaults=false")]
+    public async Task Catalog_type_status_counts_reject_invalid_presentation_filters(string query)
+    {
+        await using var server = await Server.Start(database.DataSource);
+        using var response = await server.GetPath("/api/v1/teams/missing/types" + query, server.Token(role: "Admin"));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    private async Task CatalogMetadata(string workflow, IReadOnlyDictionary<string, string> values)
+    {
+        await using var update = database.DataSource.CreateCommand("""
+            UPDATE workflow_versions SET manifest=jsonb_set(manifest,'{metadata,values}',$2::jsonb)
+            WHERE workflow_id=$1
+            """);
+        update.Parameters.AddWithValue(workflow);
+        update.Parameters.AddWithValue(JsonSerializer.Serialize(values, CatalogQueryJsonContext.Default.MetadataFilters));
+        await update.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
     }
 
     private async Task CatalogWorkflow(string id)

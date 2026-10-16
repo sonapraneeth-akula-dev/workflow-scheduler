@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.WebUtilities;
@@ -39,11 +40,31 @@ public sealed record CatalogWorkflowPage(IReadOnlyList<CatalogWorkflow> Items, s
 
 public sealed record CatalogQuery(string? Team, string? Type, string? AfterId, int Limit)
 {
+    public IReadOnlyDictionary<string, string> Metadata { get; init; } = ImmutableDictionary<string, string>.Empty;
+    public bool UsePresentationDefaults { get; init; }
+
     public static CatalogQuery Parse(IQueryCollection query)
     {
+        var metadata = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var entry in query)
-            if (entry.Key is not ("team" or "type" or "cursor" or "limit") || entry.Value.Count != 1)
-                throw new ArgumentException("Use only one value for each supported catalogue filter: team, type, cursor, limit.");
+        {
+            if (entry.Value.Count != 1)
+                throw new ArgumentException("Use only one value for each catalogue filter.");
+            if (entry.Key.StartsWith("meta.", StringComparison.Ordinal))
+            {
+                var key = entry.Key[5..];
+                var value = entry.Value.ToString();
+                if (string.IsNullOrWhiteSpace(key) || key.EnumerateRunes().Count() > 128 ||
+                    key.Any(char.IsControl) || value.EnumerateRunes().Count() > 1024 ||
+                    value.Any(char.IsControl) || metadata.Count >= 32)
+                    throw new ArgumentException("Use at most 32 metadata filters with 1-128 character keys and values of at most 1024 characters, without control characters.");
+                metadata.Add(key, value);
+            }
+            else if (entry.Key is not ("team" or "type" or "cursor" or "limit" or "defaults"))
+                throw new ArgumentException("Use only team, type, cursor, limit, defaults and exact meta.<key> catalogue filters.");
+        }
+        if (query.ContainsKey("defaults") && query["defaults"].ToString() is not ("true" or "false"))
+            throw new ArgumentException("The defaults flag must be true or false.");
         var team = query["team"].Count == 0 ? null : query["team"].ToString();
         var type = query["type"].Count == 0 ? null : query["type"].ToString();
         if (team is not null && !ValidSegment(team) ||
@@ -66,9 +87,13 @@ public sealed record CatalogQuery(string? Team, string? Type, string? AfterId, i
             if (!WorkflowIdentity.TryGetTypeScope(after, out _) || Cursor(after) != cursor)
                 throw new ArgumentException("The catalogue cursor is invalid.");
         }
-        return new(team, type, after, limit);
+        var result = new CatalogQuery(team, type, after, limit) { UsePresentationDefaults = query["defaults"] == "true" };
+        return metadata.Count == 0 ? result : result with { Metadata = metadata.ToImmutableDictionary(StringComparer.Ordinal) };
     }
 
     public static string Cursor(string workflowId) => WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(workflowId));
     public static bool ValidSegment(string value) => WorkflowIdentity.TryGetTypeScope(value + "/type/workflow", out _);
 }
+
+[JsonSerializable(typeof(IReadOnlyDictionary<string, string>), TypeInfoPropertyName = "MetadataFilters")]
+public partial class CatalogQueryJsonContext : JsonSerializerContext;

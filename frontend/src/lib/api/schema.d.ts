@@ -43,7 +43,12 @@ export interface paths {
         };
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Use actual meta.<key> names for exact AND metadata filters on workflow status counts. */
+                    "meta.*"?: string;
+                    /** @description Apply the visible team's stored default metadata filters; explicit meta.<key> values override them. */
+                    defaults?: boolean;
+                };
                 header?: never;
                 path: {
                     team: string;
@@ -103,6 +108,10 @@ export interface paths {
                     type?: string;
                     cursor?: string;
                     limit?: number;
+                    /** @description Repeat with actual meta.<key> names for exact AND metadata equality filters (at most 32). */
+                    "meta.*"?: string;
+                    /** @description Apply the visible team's stored metadata defaults. Requires team; explicit meta.<key> values override defaults. */
+                    defaults?: boolean;
                 };
                 header?: never;
                 path?: never;
