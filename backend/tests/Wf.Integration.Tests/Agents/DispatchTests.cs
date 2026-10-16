@@ -178,10 +178,10 @@ public sealed class DispatchTests(DispatchDatabase database) : IClassFixture<Dis
         var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var losses = new AgentLossSweeper(database.DataSource, registry, TimeProvider.System,
             NullLogger<AgentLossSweeper>.Instance);
+        using var resourceBlobs = new FileSystemBlobStore(Path.Combine(root, "resources"), RandomNumberGenerator.GetBytes(32));
         var service = new ResultJournalGateway(new AgentGatewayService(registry,
             NullLogger<AgentGatewayService>.Instance, store, losses: losses,
-            resources: new ResourceSampleSink(database.DataSource, store,
-                new FileSystemBlobStore(Path.Combine(root, "resources"), RandomNumberGenerator.GetBytes(32)))),
+            resources: new ResourceSampleSink(database.DataSource, store, resourceBlobs)),
             held, offlineResult ? 2 : 1);
         var packageBytes = offlineResult ? [] : await Package();
         var packageBuilder = WebApplication.CreateBuilder();

@@ -215,6 +215,7 @@ public sealed class AgentLossHandlerTests(ReplacementDatabase database, ITestOut
         var bytes = await Package();
         var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
         var root = Path.GetFullPath(Path.Combine(".agent-artifacts", "replacement-tests", Guid.NewGuid().ToString("N")));
+        using var resourceBlobs = new Wf.ControlPlane.Storage.FileSystemBlobStore(Path.Combine(root, "resources"), RandomNumberGenerator.GetBytes(32));
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0,
             listen => listen.Protocols = HttpProtocols.Http1));
@@ -226,8 +227,7 @@ public sealed class AgentLossHandlerTests(ReplacementDatabase database, ITestOut
         builder.Services.AddSingleton(store);
         builder.Services.AddSingleton(leader);
         builder.Services.AddSingleton(sweeper);
-        builder.Services.AddSingleton(new Wf.ControlPlane.Engine.ResourceSampleSink(database.DataSource, store,
-            new Wf.ControlPlane.Storage.FileSystemBlobStore(Path.Combine(root, "resources"), RandomNumberGenerator.GetBytes(32))));
+        builder.Services.AddSingleton(new Wf.ControlPlane.Engine.ResourceSampleSink(database.DataSource, store, resourceBlobs));
         if (wallClock)
         {
             builder.Services.AddHostedService(_ => sweeper);
