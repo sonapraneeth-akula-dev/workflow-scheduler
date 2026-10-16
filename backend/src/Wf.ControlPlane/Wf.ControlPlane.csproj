@@ -6,6 +6,7 @@
     <PackageReference Include="dbup-postgresql" />
     <PackageReference Include="Microsoft.Identity.Web" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" />
     <ProjectReference Include="..\Wf.Contracts\Wf.Contracts.csproj" />
     <ProjectReference Include="..\Wf.Engine.Core\Wf.Engine.Core.csproj" />
     <ProjectReference Include="..\Wf.Validation\Wf.Validation.csproj" />

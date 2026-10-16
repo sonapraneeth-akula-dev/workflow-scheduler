@@ -5,6 +5,8 @@
     <PackageReference Include="Npgsql" />
     <PackageReference Include="Grpc.AspNetCore" />
     <PackageReference Include="Grpc.Net.Client" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" />
     <ProjectReference Include="..\..\src\Wf.Sdk\Wf.Sdk.csproj" />
     <ProjectReference Include="..\..\src\Wf.Validation\Wf.Validation.csproj" />
     <ProjectReference Include="..\..\src\Wf.Engine.Core\Wf.Engine.Core.csproj" />

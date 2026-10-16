@@ -522,7 +522,7 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
         public WebApplication App => app;
         public string Api => client.BaseAddress!.AbsoluteUri;
 
-        public static async Task<Server> Start(NpgsqlDataSource source)
+        public static async Task<Server> Start(NpgsqlDataSource source, bool live = false)
         {
             var rsa = RSA.Create(2048);
             var key = new RsaSecurityKey(rsa) { KeyId = "matrix-test" };
@@ -535,7 +535,16 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
             builder.Services.AddSingleton(source);
             builder.Services.AddTeamAuthorization();
             builder.Services.AddWorkflowOpenApi();
-            builder.Services.AddSignalR();
+            if (live)
+            {
+                builder.Services.AddSingleton(TimeProvider.System);
+                builder.Services.AddWorkflowLive();
+            }
+            else
+            {
+                builder.Services.AddSignalR();
+                builder.Services.AddSingleton<LiveSubscriptions>();
+            }
             var metadata = new OpenIdConnectConfiguration { Issuer = Issuer };
             metadata.SigningKeys.Add(key);
             var manager = new StaticConfigurationManager<OpenIdConnectConfiguration>(metadata);
@@ -562,6 +571,12 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
             app.MapGet("/hubs/live/v1-evil", () => Results.Ok());
             app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
             await app.StartAsync(TestContext.Current.CancellationToken);
+            if (live)
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+                timeout.CancelAfter(TimeSpan.FromSeconds(10));
+                while (!app.Services.GetRequiredService<LiveFanout>().IsReady) await Task.Delay(10, timeout.Token);
+            }
             var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
             return new(app, new HttpClient { BaseAddress = new(address), Timeout = TimeSpan.FromSeconds(10) }, rsa, key);
         }

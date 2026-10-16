@@ -631,6 +631,69 @@ export interface components {
             items: components["schemas"]["CatalogWorkflow"][];
             nextCursor: null | string;
         };
+        ListDelta: {
+            scope: string;
+            id: string;
+            items: {
+                runId: string;
+                workflowId: string;
+                versionId: string;
+                seriesId: null | string;
+                /** Format: int32 */
+                status: number | string;
+                /** Format: int64 */
+                lastSeq: number | string;
+                createdAt: string;
+                endedAt: null | string;
+            }[];
+        };
+        LiveAbort: {
+            by: string;
+            byName: string;
+            at: string;
+            reason: string;
+            source: string;
+        };
+        LiveEvent: {
+            /** Format: int64 */
+            seq: number | string;
+            at: string;
+            /** Format: int32 */
+            entity: number | string;
+            key: null | string;
+            /** Format: int32 */
+            state: number | string;
+            abort: null | {
+                by: string;
+                byName: string;
+                at: string;
+                reason: string;
+                source: string;
+            };
+        };
+        LiveResync: {
+            scope: string;
+            id: string;
+        };
+        LiveRunSummary: {
+            runId: string;
+            workflowId: string;
+            versionId: string;
+            seriesId: null | string;
+            /** Format: int32 */
+            status: number | string;
+            /** Format: int64 */
+            lastSeq: number | string;
+            createdAt: string;
+            endedAt: null | string;
+        };
+        LiveSubscriptionProblem: {
+            /** Format: int32 */
+            status: number | string;
+            title: string;
+            detail: string;
+            reason?: null | string;
+        };
         ProblemDetails: {
             type?: null | string;
             title?: null | string;
@@ -645,6 +708,26 @@ export interface components {
             role: components["schemas"]["RegistryRole"];
             /** Format: uuid */
             groupId: string;
+        };
+        RunDelta: {
+            runId: string;
+            events: {
+                /** Format: int64 */
+                seq: number | string;
+                at: string;
+                /** Format: int32 */
+                entity: number | string;
+                key: null | string;
+                /** Format: int32 */
+                state: number | string;
+                abort: null | {
+                    by: string;
+                    byName: string;
+                    at: string;
+                    reason: string;
+                    source: string;
+                };
+            }[];
         };
         /** @enum {unknown} */
         ScheduleCatchUpPolicy: "None" | "Latest";

@@ -52,7 +52,7 @@ builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
 builder.Services.AddTeamAuthorization();
 builder.Services.AddUserSchedules(builder.Configuration);
 builder.Services.AddWorkflowOpenApi();
-builder.Services.AddSignalR();
+builder.Services.AddWorkflowLive();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddWorkflowRegistrations(builder.Configuration);
 builder.Services.AddSingleton<ActiveVersionCache>();
