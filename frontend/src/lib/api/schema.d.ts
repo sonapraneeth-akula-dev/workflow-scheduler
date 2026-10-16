@@ -1466,6 +1466,155 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/{id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Viewer-scoped immutable report bytes, streamed and integrity checked. HTML/SVG and direct navigation use an opaque-origin CSP sandbox. Unknown kinds download. An interrupted or corrupt stream is aborted, never a successfully completed partial response. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/octet-stream": string;
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{id}/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Fresh Run Viewer metadata only. Optional kind/tag filters are single, exact, case-sensitive, nonblank values of at most 128 UTF-8 bytes. Both filters combine with AND. Stable createdAt/id order; sourceKey is the exact historical stage/node/task key, attempt is real, createdAt is committed UTC. No payload, variables, hash, blob path or download capability. On run Resync or SignalR reconnect, refetch this index; ReportAdded is an invalidation, not a run event. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Single exact nonblank value; at most 128 UTF-8 bytes. */
+                    kind?: string;
+                    /** @description Single exact nonblank value; at most 128 UTF-8 bytes. */
+                    tag?: string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ReportIndexResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/schedules/{id}/run-now": {
         parameters: {
             query?: never;
@@ -1991,6 +2140,31 @@ export interface components {
             role: components["schemas"]["RegistryRole"];
             /** Format: uuid */
             groupId: string;
+        };
+        ReportAdded: {
+            runId: string;
+            reportId: string;
+        };
+        ReportIndexItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            runId: string;
+            sourceKey: string;
+            /** Format: int32 */
+            attempt: number | string;
+            kind: string;
+            title: string;
+            tags: string[];
+            /** Format: int64 */
+            sizeBytes: number | string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        ReportIndexResponse: {
+            /** Format: uuid */
+            runId: string;
+            items: components["schemas"]["ReportIndexItem"][];
         };
         ReportReceipt: {
             /** Format: uuid */
