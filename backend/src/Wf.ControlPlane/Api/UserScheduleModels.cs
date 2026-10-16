@@ -17,7 +17,11 @@ public sealed record UserScheduleRequest(string WorkflowId, string Name, string 
 public sealed record UserScheduleResponse(Guid Id, Guid SeriesId, string WorkflowId, string Name, string Origin,
     string Timezone, string? Cron, TimeSpan? Interval, string? VersionPin, ScheduleOverlapPolicy Overlap,
     ScheduleCatchUpPolicy CatchUp, ImmutableDictionary<string, JsonElement> Variables, bool Paused,
-    int RowVersion, DateTimeOffset? NextFireAt);
+    int RowVersion, DateTimeOffset? NextFireAt)
+{
+    public string? SourcePath { get; init; }
+    public string? GitCommit { get; init; }
+}
 
 public sealed record UserSchedulePreview(ImmutableArray<DateTimeOffset> Fires);
 

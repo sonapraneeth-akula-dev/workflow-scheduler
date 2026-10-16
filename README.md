@@ -160,6 +160,15 @@ strict JSON capped at 1 MiB; names allow at most 128 Unicode code points.
 `GET /api/v1/schedules/{id}` remains a public authenticated Viewer read and
 returns the current strong ETag. Reads and `run-now` have no SPA-client restriction.
 
+Schedule reads include `origin`, nullable `sourcePath` and nullable `gitCommit`.
+Code provenance comes from that instance's exact applied schedule configuration,
+not the active workflow version or the latest registration attempt. A
+schedule-only file edit can update its path/commit without changing the workflow
+version or series; an identical-content retry preserves the original provenance.
+User-origin and legacy code rows without retained provenance return explicit nulls.
+No file content or resolved secrets are included. All code edit/delete/pause/resume
+routes reject authorized callers with 409 before requiring a UI edit ETag.
+
 Every edit/pause/resume/delete requires exactly one strong numeric `If-Match`
 ETag: missing is 428, malformed/weak/wildcard/multiple is 400, stale is 412.
 Create returns 201 with `Location` and ETag; edit returns 200, pause/resume 202,
@@ -174,7 +183,8 @@ Authenticated OpenAPI 3.1 documents use `Microsoft.AspNetCore.OpenApi`:
 `/openapi/v1.json` includes public reads and `run-now`, never UI-only mutations;
 `/openapi/ui.json` contains only the SPA schedule-management routes. Request
 types for those routes live in the control-plane assembly, not the SDK or CLI.
-The full public/generated TypeScript client and drift-check task remains separate.
+Public and internal TypeScript clients are generated from those live documents;
+the frontend's strict drift check rejects stale generated contracts.
 
 `dotnet run --project backend\tests\Wf.Benchmarks -c Release -- --trigger-api-bench`
 starts an isolated real API/PostgreSQL benchmark: 50 warmups, then 500 fresh-key

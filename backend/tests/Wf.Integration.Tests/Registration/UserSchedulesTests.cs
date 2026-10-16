@@ -18,7 +18,7 @@ using static Wf.Integration.Tests.Registration.RegistrationTests;
 
 namespace Wf.Integration.Tests.Registration;
 
-public sealed class UserSchedulesTests(RegistrationDatabase database) : IClassFixture<RegistrationDatabase>
+public sealed partial class UserSchedulesTests(RegistrationDatabase database) : IClassFixture<RegistrationDatabase>
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
     private const string BasePath = "/api/v1/schedules";
@@ -148,7 +148,7 @@ public sealed class UserSchedulesTests(RegistrationDatabase database) : IClassFi
     [InlineData("pause")]
     [InlineData("resume")]
     [InlineData("delete")]
-    public async Task UserSchedules_code_origin_is_read_only_for_every_mutation_and_keeps_its_series(string mutation)
+    public async Task CodeScheduleReadOnly_every_mutation_conflicts_without_changing_configuration_or_series(string mutation)
     {
         await using var server = await Server.Start(database.DataSource, userSchedules: true);
         var prepared = await Prepare(server);
@@ -162,7 +162,10 @@ public sealed class UserSchedulesTests(RegistrationDatabase database) : IClassFi
         var series = await Scalar("SELECT id FROM run_series WHERE schedule_id=$1", id);
         var xmin = await Scalar("SELECT xmin::text FROM schedules WHERE id=$1", id);
         using var read = await Send(server, HttpMethod.Get, "/" + id, Operator(server, prepared.Group));
-        Assert.Equal("Code", (await Read(read)).Origin);
+        var code = await Read(read);
+        Assert.Equal("Code", code.Origin);
+        Assert.Equal("workflow.schedules.json", code.SourcePath);
+        Assert.Equal(prepared.Request.GitCommit, code.GitCommit);
         var method = mutation == "put" ? HttpMethod.Put : mutation == "delete" ? HttpMethod.Delete : HttpMethod.Post;
         var suffix = "/" + id + (mutation is "pause" or "resume" ? "/" + mutation : "");
         using var denied = await Send(server, method, suffix, Operator(server, prepared.Group),

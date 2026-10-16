@@ -303,8 +303,10 @@ public static class UserSchedulesEndpoints
     {
         await using var query = Query(connection, """
             SELECT s.id,r.id,s.workflow_id,s.name,s.origin,s.timezone,s.cron,s.interval_s,s.version_pin,
-                s.overlap_policy,s.catchup_policy,s.variables::text,s.paused,s.row_version,s.next_fire_at
+                s.overlap_policy,s.catchup_policy,s.variables::text,s.paused,s.row_version,s.next_fire_at,
+                c.source_path,c.git_commit
             FROM schedules s JOIN workflows w ON w.id=s.workflow_id LEFT JOIN run_series r ON r.schedule_id=s.id
+            LEFT JOIN schedule_config_versions c ON c.id=s.config_version_id AND c.workflow_id=s.workflow_id
             WHERE s.id=$1 AND s.deleted_at IS NULL AND w.deleted_at IS NULL
             """ + (forUpdate ? " FOR UPDATE OF s" : ""), id);
         await using var row = await query.ExecuteReaderAsync(token);
@@ -316,7 +318,11 @@ public static class UserSchedulesEndpoints
             row.IsDBNull(8) ? null : row.GetString(8), (ScheduleOverlapPolicy)row.GetInt16(9), (ScheduleCatchUpPolicy)row.GetInt16(10),
             JsonSerializer.Deserialize(row.GetString(11), UserScheduleJson.Default.ImmutableDictionaryStringJsonElement)
                 ?? throw new InvalidDataException("Schedule variables are null."),
-            row.GetBoolean(12), row.GetInt32(13), row.IsDBNull(14) ? null : row.GetFieldValue<DateTimeOffset>(14));
+            row.GetBoolean(12), row.GetInt32(13), row.IsDBNull(14) ? null : row.GetFieldValue<DateTimeOffset>(14))
+        {
+            SourcePath = row.IsDBNull(15) ? null : row.GetString(15),
+            GitCommit = row.IsDBNull(16) ? null : row.GetString(16)
+        };
     }
 
     private static async Task AuditAndNotifyAsync(NpgsqlConnection connection, UserScheduleResponse schedule, string actor,

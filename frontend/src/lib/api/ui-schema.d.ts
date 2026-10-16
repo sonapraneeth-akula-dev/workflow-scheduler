@@ -450,6 +450,8 @@ export interface components {
             rowVersion: number | string;
             /** Format: date-time */
             nextFireAt: null | string;
+            sourcePath?: null | string;
+            gitCommit?: null | string;
         };
     };
     responses: never;
