@@ -563,6 +563,23 @@ assembly scanning. Contexts expose `Var<T>`, AOT-safe `VarEnum<T>`, declared
 publishers. Publishing without a configured host publisher fails explicitly.
 Native AOT/trim analyzers run for the SDK and shared contracts.
 
+The run's **Outputs** tab reads the exact selected task attempt, including
+failed-attempt snapshots, during and after a run. The corresponding public
+operation is `GET /api/v1/runs/{id}/outputs?taskKey=node%2Ftask&attempt=1`.
+It requires fresh Viewer access to the run's owning team/type and returns
+`{runId, taskKey, attempt, outputs}` with an object or `null`. Historical
+attempts without recorded outputs remain unavailable; node-level aggregates
+and other attempts are never substituted.
+
+Outputs must be strict UTF-8 JSON objects, at most 65,536 serialized bytes.
+Malformed, oversized or database-incompatible producer values fail the task
+clearly as nonretryable `ValidationError`, without crashing the gateway or
+partially committing success. Supplied resolved-secret maskers run before
+durable result journaling; masked expansion still must fit the limit.
+Valid outputs persist for every completed outcome; replay cannot overwrite
+an attempt's history. The UI displays text-only JSON without losing large
+integer precision and hides stale values after authorization/error changes.
+
 Core abort plans preserve the first accepted who/when/reason/source record.
 Hosts commit the initial abort event before cancelling attempts, drain active
 work, then run eligible `always` and post stages with `ctx.Abort`. Queued aborts
@@ -1437,9 +1454,10 @@ UTF-8 base64 form; arbitrary transformations, URL encoding and unpadded/base64ur
 forms are not detected. Lookahead includes the encoded values.
 `RedactJson` masks decoded string values and property names while
 keeping JSON valid; matching non-string scalars become strings. Key collisions
-fail explicitly rather than discard outputs. Secret resolution, production
-log/output transport wiring and stored-data masking verification remain
-dependent tasks; existing transport paths are not yet protected by this helper.
+fail explicitly rather than discard outputs. The completed-output/error path
+uses this masker before durable journaling when supplied resolved values.
+Secret resolution and broad stored-data masking verification remain dependent
+tasks; reference names alone do not provide resolved values to mask.
 
 ## Workflow project template
 
