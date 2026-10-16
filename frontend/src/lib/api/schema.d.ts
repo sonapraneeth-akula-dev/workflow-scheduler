@@ -1615,6 +1615,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/series/{id}/reports/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Compare metadata for two distinct actual runs in one stored series, with fresh Viewer authorization on the series and both runs. Exact case-sensitive sourceKey and title; no normalization. No payload, variables, hash, blob path or capabilities. Missing either match is 404 (report_match_not_found); multiple matches in either run, including attempts, are 409 (report_match_ambiguous). Missing takes precedence. Neither failure identifies a side or returns metadata. */
+        get: {
+            parameters: {
+                query: {
+                    /** @description Canonical lowercase RFC UUIDv7 of a distinct actual run in this series. */
+                    leftRunId: string;
+                    /** @description Canonical lowercase RFC UUIDv7 of a distinct actual run in this series. */
+                    rightRunId: string;
+                    /** @description Single exact historical source, including stages; nonblank, at most 1025 UTF-8 bytes. */
+                    sourceKey: string;
+                    /** @description Single exact author title; nonblank, at most 512 UTF-8 bytes. */
+                    title: string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ReportCompareResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/schedules/{id}/run-now": {
         parameters: {
             query?: never;
@@ -2144,6 +2243,12 @@ export interface components {
         ReportAdded: {
             runId: string;
             reportId: string;
+        };
+        ReportCompareResponse: {
+            /** Format: uuid */
+            seriesId: string;
+            left: components["schemas"]["ReportIndexItem"];
+            right: components["schemas"]["ReportIndexItem"];
         };
         ReportIndexItem: {
             /** Format: uuid */
