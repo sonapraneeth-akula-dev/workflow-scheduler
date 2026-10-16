@@ -522,7 +522,8 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
         public WebApplication App => app;
         public string Api => client.BaseAddress!.AbsoluteUri;
 
-        public static async Task<Server> Start(NpgsqlDataSource source, bool live = false)
+        public static async Task<Server> Start(NpgsqlDataSource source, bool live = false,
+            Action<WebApplication>? configure = null)
         {
             var rsa = RSA.Create(2048);
             var key = new RsaSecurityKey(rsa) { KeyId = "matrix-test" };
@@ -534,6 +535,8 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
             builder.Services.AddWorkflowAuthentication(builder.Configuration, builder.Environment);
             builder.Services.AddSingleton(source);
             builder.Services.AddTeamAuthorization();
+            builder.Services.ConfigureHttpJsonOptions(options =>
+                options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunEventsJsonContext.Default));
             builder.Services.AddWorkflowOpenApi();
             if (live)
             {
@@ -567,9 +570,11 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
             app.MapPermissionsEndpoints();
             app.MapRegistryEndpoints();
             app.MapCatalogEndpoints();
+            app.MapRunEventsEndpoints();
             app.MapWorkflowOpenApi();
             app.MapGet("/hubs/live/v1-evil", () => Results.Ok());
             app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
+            configure?.Invoke(app);
             await app.StartAsync(TestContext.Current.CancellationToken);
             if (live)
             {

@@ -3,25 +3,24 @@ import type { components } from "@/lib/api/schema"
 
 const id = z.uuid()
 const timestamp = z.iso.datetime({ offset: true })
-const event = z.object({
+export const liveAbortSchema = z.object({
+  by: z.string().min(1),
+  byName: z.string().min(1),
+  at: timestamp,
+  reason: z.string().min(1).max(500),
+  source: z.enum(["UI", "API", "CLI", "KillSwitch", "Local"]),
+})
+export const liveEventSchema = z.object({
   seq: z.int().positive(),
   at: timestamp,
   entity: z.union([z.literal(0), z.literal(1), z.literal(2)]),
   key: z.string().min(1).nullable(),
   state: z.int().nonnegative(),
-  abort: z
-    .object({
-      by: z.string().min(1),
-      byName: z.string().min(1),
-      at: timestamp,
-      reason: z.string().min(1).max(500),
-      source: z.enum(["UI", "API", "CLI", "KillSwitch", "Local"]),
-    })
-    .nullable(),
+  abort: liveAbortSchema.nullable(),
 })
 
 const runDelta = z
-  .object({ runId: id, events: z.array(event).min(1).max(512) })
+  .object({ runId: id, events: z.array(liveEventSchema).min(1).max(512) })
   .superRefine((value, context) => {
     let previous: number | undefined
     for (const change of value.events) {

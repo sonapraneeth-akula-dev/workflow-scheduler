@@ -121,6 +121,18 @@ secrets in `VITE_*` settings.
 internal client; detail reads use the public client. Runtime response validation
 checks JSON shapes and ETag consistency before allowing further writes.
 
+`src\lib\live\useRun.ts` exposes authoritative run state and explicit recovery
+status for run-detail consumers. It subscribes before reading the graph, applies
+live frame batches immutably, fills sequence gaps from the last applied cursor,
+and reloads the snapshot on HTTP 409. Racing deltas stay bounded; overflow
+requires a new snapshot rather than silently losing updates. Reconnects resume
+without timer polling; failures clear stale state and expose retry through
+`ReconnectingIndicator`. Unsubscription and authentication reset cancel old
+responses. Unsafe JavaScript integer sequences are rejected before a rounded
+cursor can be sent. The actual JWT browser fixture verifies dropped-frame
+recovery and a 6,001-event gap on all three engines; physical socket drop and
+API-restart acceptance remain their separate integration task.
+
 ```powershell
 $env:KARDIA_API_URL = "http://127.0.0.1:5001"
 # Outside backend --dev, set KARDIA_API_TOKEN to an authorized bearer token.
