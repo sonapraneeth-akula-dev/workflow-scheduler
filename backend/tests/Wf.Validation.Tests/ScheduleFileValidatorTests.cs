@@ -9,6 +9,9 @@ namespace Wf.Validation.Tests;
 public sealed class ScheduleFileValidatorTests
 {
     [Fact]
+    [RuleCoverage("WFV011", true)]
+    [RuleCoverage("WFV012", true)]
+    [RuleCoverage("WFV014", true)]
     public void ScheduleFileCategorisedDefaultsThenOverridesPreserveWorkflowDefaults()
     {
         var schemas = new[] {
@@ -46,6 +49,7 @@ public sealed class ScheduleFileValidatorTests
     [InlineData(VariableType.StringList, "[\"a\",\"b\"]")]
     [InlineData(VariableType.Duration, "\"01:02:03\"")]
     [InlineData(VariableType.Secret, "{\"Name\":\"deployment-token\"}")]
+    [RuleCoverage("WFV013", true)]
     public void ScheduleFileAcceptsAllVariableTypes(VariableType type, string value)
     {
         var schema = new VariableSchema("value", type, true,
@@ -69,6 +73,7 @@ public sealed class ScheduleFileValidatorTests
     [InlineData(VariableType.String, "\"\\u0000\"")]
     [InlineData(VariableType.StringList, "[\"\\u0000\"]")]
     [InlineData(VariableType.Secret, "{\"Name\":\"\\u0000\"}")]
+    [RuleCoverage("WFV013", false)]
     public void ScheduleFileRejectsEachInvalidVariableType(VariableType type, string value)
     {
         var schema = new VariableSchema("value", type,
@@ -127,6 +132,7 @@ public sealed class ScheduleFileValidatorTests
     [InlineData("""{"id":"x","interval":"24855.03:14:08","timezone":"Etc/UTC"}""")]
     [InlineData("""{"id":"x","cron":"* * * * *","timezone":"Eastern Standard Time"}""")]
     [InlineData("""{"id":"x","cron":"* * * * *","timezone":"Unknown/Zone"}""")]
+    [RuleCoverage("WFV012", false)]
     public void ScheduleFileUsesSharedExpressionValidation(string instance)
     {
         var result = Validate($$"""{"instances":[{{instance}}]}""");
@@ -148,6 +154,7 @@ public sealed class ScheduleFileValidatorTests
     [InlineData("~1.0.0")]
     [InlineData("1.x")]
     [InlineData("00000000-0000-0000-0000-000000000000")]
+    [RuleCoverage("WFV026", false)]
     public void ScheduleFileRejectsInvalidVersionPinsWithPreciseHints(string pin)
     {
         var result = Validate($$"""{"instances":[{"id":"x","interval":"00:01:00","timezone":"Etc/UTC","versionPin":"{{pin}}"}]}""");
@@ -164,6 +171,7 @@ public sealed class ScheduleFileValidatorTests
     [InlineData("1.2.*")]
     [InlineData("1.0.0 || 2.0.0")]
     [InlineData("11111111-1111-1111-1111-111111111111")]
+    [RuleCoverage("WFV026", true)]
     public void ScheduleFileAcceptsSupportedVersionPins(string pin) =>
         Assert.True(Validate($$"""{"instances":[{"id":"x","interval":"00:01:00","timezone":"Etc/UTC","versionPin":"{{pin}}"}]}""").IsValid);
 
@@ -179,6 +187,7 @@ public sealed class ScheduleFileValidatorTests
     [InlineData("""{"instances":[],"unexpected":"DO-NOT-LEAK"}""")]
     [InlineData("""{"instances":[],"instances":[]}""")]
     [InlineData("""{"defaults":{"a":{"value":1,"value":2}},"instances":[]}""")]
+    [RuleCoverage("WFV011", false)]
     public void ScheduleFileRejectsMalformedOrAmbiguousInputWithStructuredErrors(string json)
     {
         var result = Validate(json, file: "nested/custom.json");
@@ -199,6 +208,7 @@ public sealed class ScheduleFileValidatorTests
     [InlineData(" ")]
     [InlineData("same")]
     [InlineData("\\u0000")]
+    [RuleCoverage("WFV014", false)]
     public void ScheduleFileIdsAreStableNonemptyAndUnique(string second)
     {
         var result = Validate($$"""

@@ -14,6 +14,7 @@ public sealed class TeamRegistryRulesTests
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     [Fact]
+    [RuleCoverage("WFV015", true)]
     public void ValidRegistryAndTypedContractUseTheSameRules()
     {
         var registry = Registry();
@@ -39,6 +40,7 @@ public sealed class TeamRegistryRulesTests
     [InlineData("""{"team":"demo","types":[{"team":"demo","name":"release","description":"Release"}]}""")]
     [InlineData("""{"team":"demo","types":[{"team":"demo","name":"release","description":"Release","metadataSchema":{"keys":[],"allowFreeForm":"true"}}]}""")]
     [InlineData("""{"team":"demo","types":[{"team":"demo","name":"release","description":"Release","metadataSchema":{"keys":[{"key":"env","allowedValues":[42]}]}}]}""")]
+    [RuleCoverage("WFV015", false)]
     public void MalformedContractsReturnSanitizedShapeErrors(string json) =>
         AssertError(Assert.Single(Check(json)), TeamRegistryRules.RegistryShape, "$");
 
@@ -90,6 +92,7 @@ public sealed class TeamRegistryRulesTests
     [InlineData("release", "releazeq")]
     [InlineData("release", "relea")]
     [InlineData("release", "releasesx")]
+    [RuleCoverage("WFV016", false)]
     public void DuplicateAndNearbyNamesAreRejectedWithSafeConflictLocation(string first, string second)
     {
         var error = Assert.Single(TeamRegistryRules.Validate(Write(Registry(first, second)), cancellationToken: Token));
@@ -101,6 +104,7 @@ public sealed class TeamRegistryRulesTests
     [InlineData("release", "cleanup")]
     [InlineData("release", "releaseabc")]
     [InlineData("release", "qwertyu")]
+    [RuleCoverage("WFV016", true)]
     public void NamesMoreThanTwoEditsApartAreValid(string first, string second) =>
         Assert.Empty(TeamRegistryRules.Validate(Write(Registry(first, second)), cancellationToken: Token));
 
@@ -117,6 +121,8 @@ public sealed class TeamRegistryRulesTests
     }
 
     [Fact]
+    [RuleCoverage("WFV017", true)]
+    [RuleCoverage("WFV017", false)]
     public void DefaultTypeQuotaAllowsTenAndRejectsEleven()
     {
         var registry = Registry(Enumerable.Range(0, 11).Select(index =>
@@ -132,6 +138,7 @@ public sealed class TeamRegistryRulesTests
     }
 
     [Fact]
+    [RuleCoverage("WFV018", true)]
     public void MetadataSchemaSupportsRequiredOptionalAllowedAndFreeFormKeys()
     {
         var registry = WithSchema(new([new("environment", true, ["prod", "dev"]), new("Environment"),
@@ -154,6 +161,7 @@ public sealed class TeamRegistryRulesTests
     [InlineData("""[{"key":"env","allowedValues":[null]}]""",
         "$.types[0].metadataSchema.keys[0].allowedValues[0]")]
     [InlineData("""[null]""", "$.types[0].metadataSchema.keys[0]")]
+    [RuleCoverage("WFV018", false)]
     public void InvalidMetadataSchemasHavePrecisePaths(string keys, string path) =>
         AssertError(Assert.Single(Check($$$"""
             {"team":"demo","types":[{"team":"demo","name":"release","description":"Release",
@@ -161,6 +169,8 @@ public sealed class TeamRegistryRulesTests
             """)), TeamRegistryRules.InvalidMetadataSchema, path);
 
     [Fact]
+    [RuleCoverage("WFV019", true)]
+    [RuleCoverage("WFV019", false)]
     public void WorkflowTypeMustMatchExactlyAndBelongToThisTeam()
     {
         var utf8 = Write(Registry());
@@ -171,6 +181,8 @@ public sealed class TeamRegistryRulesTests
     }
 
     [Fact]
+    [RuleCoverage("WFV020", true)]
+    [RuleCoverage("WFV020", false)]
     public void WorkflowMetadataRequiredAllowedAndFreeFormConstraintsAreApplied()
     {
         var registry = WithSchema(new([new("env", true, ["prod", "dev"]), new("note")]));

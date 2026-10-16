@@ -7,6 +7,10 @@ namespace Wf.Validation.Tests;
 public sealed class ValidatorIntegrationTests(ITestOutputHelper output)
 {
     [Fact]
+    [RuleCoverage("WFV001", true)]
+    [RuleCoverage("WFV002", true)]
+    [RuleCoverage("WFV003", true)]
+    [RuleCoverage("WFV004", true)]
     public async Task RealSdkWorkflowCanBeValidatedFromXunitViaTestingFacadeAndCached()
     {
         using var fixture = new ValidatorFixture();
@@ -63,6 +67,7 @@ public sealed class ValidatorIntegrationTests(ITestOutputHelper output)
     }
 
     [Fact]
+    [RuleCoverage("WFV003", false)]
     public async Task CompilerFailureReturnsStableErrorAndPreservesRawDiagnostics()
     {
         using var fixture = new ValidatorFixture();
@@ -81,6 +86,7 @@ public sealed class ValidatorIntegrationTests(ITestOutputHelper output)
     }
 
     [Fact]
+    [RuleCoverage("WFV004", false)]
     public async Task ActualSdkDefinitionFailureDuringDescribeReturnsCatalogueError()
     {
         using var fixture = new ValidatorFixture();

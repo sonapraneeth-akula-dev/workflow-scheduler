@@ -1439,6 +1439,14 @@ without building or executing source; registration uses this backstop. Optional
 schedule and registry errors follow manifest errors; version comparisons remain
 a separate step.
 
+`dotnet test backend/tests/Wf.Validation.Tests --filter RuleCatalogCoverage`
+requires an unskipped offline positive and negative test for every shared
+`RuleCatalog` WFV identifier. Add `RuleCoverage(id, valid)` markers to actual
+xUnit cases when introducing a rule; the guard rejects missing directions,
+unknown markers and newly catalogued rules without evidence. It also executes
+the marked real SDK publish/describe success and compiler/definition failures.
+Registration-only envelope diagnostics such as REG001 are not shared rules.
+
 `Wf.Validation.SemVer.ApiBaseline.FromManifest` generates the immutable
 `workflow.api.json` contract: SemVer version, variable schemas and node keys.
 Ordinal ordering and source-generated JSON make equivalent manifests produce

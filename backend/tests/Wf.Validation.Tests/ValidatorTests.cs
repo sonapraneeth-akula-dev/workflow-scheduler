@@ -20,6 +20,7 @@ public sealed class ValidatorTests
     }
 
     [Fact]
+    [RuleCoverage("WFV001", false)]
     public async Task MissingDirectoryReturnsStableRelativeError()
     {
         using var fixture = new ValidatorFixture();
@@ -42,6 +43,7 @@ public sealed class ValidatorTests
     }
 
     [Fact]
+    [RuleCoverage("WFV002", false)]
     public async Task MissingScriptReturnsStableErrorWithoutRunningDotnet()
     {
         using var fixture = new ValidatorFixture();

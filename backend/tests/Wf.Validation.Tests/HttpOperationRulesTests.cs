@@ -14,6 +14,8 @@ public sealed class HttpOperationRulesTests
     [InlineData(true, 2, false)]
     [InlineData(false, 1, false)]
     [InlineData(false, 0, true)]
+    [RuleCoverage("WFV022", true)]
+    [RuleCoverage("WFV022", false)]
     public void NeitherRecoveryContractRequiresBothNoAutoRetryAndZeroAuthorRetries(bool automatic, int retries, bool valid)
     {
         var root = Manifest();
@@ -35,6 +37,7 @@ public sealed class HttpOperationRulesTests
     [Theory]
     [InlineData("deduplication", """{"headerName":"Idempotency-Key","retention":"2.00:00:00"}""")]
     [InlineData("lookup", """{"urlTemplate":"https://example.test/lookup/{submissionKey}","retention":"2.00:00:00","authoritative":true}""")]
+    [RuleCoverage("WFV021", true)]
     public void EitherGuaranteedDeduplicationOrAuthoritativeLookupAllowsRetries(string name, string value)
     {
         var root = Manifest();
@@ -46,6 +49,8 @@ public sealed class HttpOperationRulesTests
     [InlineData("status")]
     [InlineData("deduplication")]
     [InlineData("lookup")]
+    [RuleCoverage("WFV023", true)]
+    [RuleCoverage("WFV023", false)]
     public void AllDeclaredRetentionWindowsMustCoverRunDeadlineWhenRetriesAreEnabled(string shortened)
     {
         var root = Manifest();
@@ -84,6 +89,7 @@ public sealed class HttpOperationRulesTests
     [InlineData("lookup", """{"urlTemplate":"https://example.test/lookup/{submissionKey}","retention":"2.00:00:00","authoritative":false}""")]
     [InlineData("lookup", """{"urlTemplate":"https://example.test/lookup/{unknown}","retention":"2.00:00:00"}""")]
     [InlineData("do-not-echo", "\"secret\"")]
+    [RuleCoverage("WFV021", false)]
     public void ForgedRawContractsReturnStableSanitizedErrorsBeforeConstruction(string property, string value)
     {
         var root = Manifest();

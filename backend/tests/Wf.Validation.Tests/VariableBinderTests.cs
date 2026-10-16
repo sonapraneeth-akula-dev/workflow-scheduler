@@ -7,6 +7,40 @@ namespace Wf.Validation.Tests;
 
 public sealed class VariableBinderTests
 {
+    [Fact]
+    [RuleCoverage("WFV025", true)]
+    public void Offline_resolution_accepts_typed_overrides_and_required_defaults()
+    {
+        var schema = new VariableSchema("input", VariableType.Int, true, Json("3"));
+        var defaults = VariableBinder.Resolve([schema], ImmutableDictionary<string, JsonElement>.Empty,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(defaults.IsValid);
+        Assert.Empty(defaults.Errors);
+        Assert.Equal(3, defaults.Values["input"].GetInt32());
+        var overridden = VariableBinder.Resolve([schema], new Dictionary<string, JsonElement> { ["input"] = Json("4") },
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(overridden.IsValid);
+        Assert.Equal(4, overridden.Values["input"].GetInt32());
+    }
+
+    [Theory]
+    [InlineData("{}", "input")]
+    [InlineData("""{"input":"do-not-echo"}""", "input")]
+    [InlineData("""{"input":null}""", "input")]
+    [InlineData("""{"input":1,"unknown":"do-not-echo"}""", "unknown")]
+    [RuleCoverage("WFV025", false)]
+    public void Offline_resolution_rejects_missing_invalid_or_unknown_values_with_the_shared_rule(string json, string key)
+    {
+        using var document = JsonDocument.Parse(json);
+        var values = document.RootElement.EnumerateObject().ToDictionary(property => property.Name, property => property.Value);
+        var result = VariableBinder.Resolve([new("input", VariableType.Int, true)], values,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.False(result.IsValid);
+        Assert.Empty(result.Values);
+        Assert.Equal(RuleCatalog.TriggerVariable.CreateError("request", $"$.variables[\"{key}\"]"), Assert.Single(result.Errors));
+        Assert.DoesNotContain("do-not-echo", result.Errors[0].ToString());
+    }
+
     [Theory]
     [InlineData(VariableType.String, "\"hello\"", typeof(string))]
     [InlineData(VariableType.Int, "42", typeof(int))]

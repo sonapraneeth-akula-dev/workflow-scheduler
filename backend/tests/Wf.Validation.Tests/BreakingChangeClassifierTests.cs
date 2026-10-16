@@ -75,6 +75,8 @@ public sealed class BreakingChangeClassifierTests
     }
 
     [Fact]
+    [RuleCoverage("WFV010", true)]
+    [RuleCoverage("WFV010", false)]
     public void AddedNodesRequireAtLeastMinorAndLargerBumpsAreAllowed()
     {
         var old = Baseline(nodes: ["a"]);

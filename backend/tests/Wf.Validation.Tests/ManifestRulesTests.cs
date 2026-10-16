@@ -10,21 +10,26 @@ namespace Wf.Validation.Tests;
 public sealed class ManifestRulesTests
 {
     [Fact]
+    [RuleCoverage("WFV005", true)]
+    [RuleCoverage("WFV006", true)]
     public void AcyclicGraphAndKnownDependenciesAreValid() =>
         Assert.Empty(Check("""{"nodes":[{"key":"first"},{"key":"second","dependencies":[{"node":"first"}]}]}"""));
 
     [Theory]
     [InlineData("""{"nodes":[{"key":"a","dependencies":[{"node":"a"}]}]}""")]
     [InlineData("""{"nodes":[{"key":"a","dependencies":[{"node":"b"}]},{"key":"b","dependencies":[{"node":"a"}]}]}""")]
+    [RuleCoverage("WFV005", false)]
     public void CyclesHaveStableStructuredErrors(string json) =>
         AssertError(Assert.Single(Check(json)), "WFV005", "$.nodes");
 
     [Fact]
+    [RuleCoverage("WFV006", false)]
     public void UnknownDependencyPointsToItsReference() =>
         AssertError(Assert.Single(Check("""{"nodes":[{"key":"a","dependencies":[{"node":"missing"}]}]}""")),
             "WFV006", "$.nodes[0].dependencies[0].node");
 
     [Fact]
+    [RuleCoverage("WFV007", true)]
     public void KeysAreOrdinalAndTasksAreScopedToTheirNode() =>
         Assert.Empty(Check("""
             {"nodes":[{"key":"a","tasks":[{"key":"work"}]},{"key":"A","tasks":[{"key":"work"}]}],
@@ -38,6 +43,7 @@ public sealed class ManifestRulesTests
     [InlineData("""{"nodes":[{"key":"a"},{"key":"b","dependencies":[{"node":"a"},{"node":"a"}]}]}""",
         "$.nodes[1].dependencies[1].node")]
     [InlineData("""{"variables":[{"key":"a","type":"String","type":"Int"}]}""", "$.variables[0].type")]
+    [RuleCoverage("WFV007", false)]
     public void DuplicateKeysHaveScopedPaths(string json, string path) =>
         AssertError(Assert.Single(Check(json)), "WFV007", path);
 
@@ -51,6 +57,7 @@ public sealed class ManifestRulesTests
     [InlineData("StringList", "[\"a\",\"b\"]")]
     [InlineData("Duration", "\"1.02:03:04\"")]
     [InlineData("Secret", "{\"Name\":\"deploy-token\"}")]
+    [RuleCoverage("WFV008", true)]
     public void AllVariableTypesReuseContractValidation(string type, string value) =>
         Assert.Empty(Check(Variable(type, value)));
 
@@ -65,6 +72,7 @@ public sealed class ManifestRulesTests
     [InlineData("StringList", "[\"a\",null]")]
     [InlineData("Duration", "\"five minutes\"")]
     [InlineData("Secret", "{\"Name\":\"token\",\"Value\":\"do-not-echo\"}")]
+    [RuleCoverage("WFV008", false)]
     public void WrongDefaultsHaveAPathAndNeverEchoValues(string type, string value) =>
         AssertError(Assert.Single(Check(Variable(type, value))), "WFV008", "$.variables[0].default");
 
@@ -86,6 +94,7 @@ public sealed class ManifestRulesTests
     [InlineData("""{"key":"a","type":"Int","required":true,"default":3}""")]
     [InlineData("""{"key":"a","type":"String","required":true,"default":null}""")]
     [InlineData("""{"key":"a","type":"String","required":false}""")]
+    [RuleCoverage("WFV009", true)]
     public void RequiredSchemasMayBeSuppliedAtRunTimeOrHaveDefaults(string variable) =>
         Assert.Empty(Check($$"""{"variables":[{{variable}}]}"""));
 
@@ -93,6 +102,7 @@ public sealed class ManifestRulesTests
     [InlineData("\"true\"")]
     [InlineData("1")]
     [InlineData("null")]
+    [RuleCoverage("WFV009", false)]
     public void RequiredMustBeBoolean(string required) =>
         AssertError(Assert.Single(Check($$"""{"variables":[{"key":"a","type":"String","required":{{required}}}]}""")),
             "WFV009", "$.variables[0].required");

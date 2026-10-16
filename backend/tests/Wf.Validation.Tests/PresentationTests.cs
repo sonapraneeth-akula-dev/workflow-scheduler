@@ -11,6 +11,7 @@ public sealed class PresentationTests
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     [Fact]
+    [RuleCoverage("WFV024", true)]
     public void Ordered_presentation_round_trips_through_the_shared_team_contract()
     {
         var registry = Registry() with
@@ -55,6 +56,7 @@ public sealed class PresentationTests
     [InlineData("listColumns", "unknown")]
     [InlineData("listColumns", "Environment")]
     [InlineData("listColumns", " ")]
+    [RuleCoverage("WFV024", false)]
     public void Unknown_empty_or_wrong_case_references_name_the_exact_index(string property, string value)
     {
         var presentation = WithList(property, [value]);
