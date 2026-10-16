@@ -60,6 +60,23 @@ through actual local and child SDK hosts; this does not implement every external
 fault producer. Gateway persistence of category and metrics views remain separate
 work; the classifier does not add a stored-category guarantee.
 
+`RunSnapshot.Metrics` projects run, lifecycle-stage/node, task and attempt timing
+only when committed events are applied. Queue wait is separate from execution;
+task duration sums actual running-attempt intervals, excluding retry backoff,
+placement wait and recovery-handler delay. Retry counts increase on another
+actual dispatch, not a scheduled retry that is later cancelled. Every persisted
+dispatcher attempt has `queue_wait_ms`. Prestart loss has zero execution;
+aborted, reused and skipped entities retain their actual lifecycles. Durable
+attempt identities and existing author/platform retry budgets are preserved.
+
+The shared projection uses creation/event timestamps rather than another clock.
+Full replay and serialized snapshot-plus-tail recovery agree; legacy snapshots
+without metrics reconstruct from their original sequence-zero snapshot and
+retained committed history. Missing history fails explicitly rather than
+inventing times. Failed transactions leave caller-visible proposals unchanged.
+These are transition metrics, not process-resource sampling or a metrics API;
+stored failure categories remain separate work.
+
 Secret variables accept `secret://<store>/<name>` through the existing
 `SecretReference` contract and `.Secret("token", "secret://local/deploy-token")`.
 `SecretReference.Parse` requires a qualified reference; `Store` and `SecretName`
