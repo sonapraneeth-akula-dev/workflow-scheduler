@@ -2,6 +2,55 @@
 
 Implementation follows `docs/plans/2026-10-15_workflow-scheduler_azure-task-list.md`.
 
+## Local prototype stack
+
+Requires .NET 10, Bun, installed frontend dependencies
+(`cd frontend; bun install --frozen-lockfile`), and Docker with Linux containers
+or an existing PostgreSQL 17+ database. From the repository root:
+
+```powershell
+dotnet run --project .\backend\src\Wf.AppHost
+```
+
+With the Aspire CLI installed, `aspire run` from `backend\src\Wf.AppHost`
+starts the same application. The dashboard URL appears in the terminal.
+The AppHost starts migrations, the control plane, one local agent process and
+Vite; API health gates agent/UI startup, and failed migrations prevent host
+startup. Open `http://127.0.0.1:5173` for the login-free prototype UI; the API
+listens on port 5000 and the agent gateway on 5001. Development authentication
+is explicitly enabled only for this loopback profile; production guards remain
+unchanged. No Entra tenant or application login/logout setup is needed.
+
+By default PostgreSQL uses the persistent Docker volume `wf-postgres-data`.
+To omit the database container entirely, set `ConnectionStrings__wf` to an
+existing database connection string before launching; the AppHost still runs
+its migrations. Supply a disposable database when evaluating migrations.
+`Local__DataRoot` overrides the default `%LOCALAPPDATA%\wf` directory
+(`LocalApplicationData/wf` on other platforms), containing filesystem blobs
+and the agent's persistent identity, results, log spool and package cache.
+The development upload-signing key persists in AppHost user secrets across
+restarts. Restarting the stack preserves its database, blobs and agent UUID.
+`Secrets:Provider=Local` and the local secrets directory are configured;
+protected-file secret resolution remains a separate implementation task.
+
+Override ports with `Local__ApiPort`, `Local__EnginePort` and `Local__UiPort`;
+all must differ. `Local__PostgresVolume` selects a different persistent Docker
+volume. This AppHost is a local development launcher, not a Compose/deployment
+publisher. It does not install frontend dependencies or erase persistent data.
+
+The actual startup/restart tests are opt-in:
+
+```powershell
+$env:WF_APPHOST_STARTUP = "true"
+dotnet test .\backend\tests\Wf.AppHost.Tests
+```
+
+Additionally set `WF_NATIVE_POSTGRES_BIN` to PostgreSQL's native `bin` directory to exercise the
+container-free variant. Both variants launch the real dashboard, host, agent
+and UI, require health within 120 seconds per startup, and verify persisted
+database/blob data and agent identity after recreation. Each test owns and
+removes only its unique temporary database directory or Docker volume.
+
 ## Frontend
 
 `frontend` contains the React/TypeScript schedule-management SPA: create, edit,
