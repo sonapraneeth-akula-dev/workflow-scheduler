@@ -10,7 +10,33 @@ using Wf.ControlPlane.Auth;
 namespace Wf.ControlPlane.Api;
 
 public sealed record RunQueryRow(Guid Id, string WorkflowId, Guid VersionId, Guid? SeriesId,
-    string Team, string Type, string Status, DateTimeOffset CreatedAt, DateTimeOffset? StartedAt, DateTimeOffset? EndedAt);
+    string Team, string Type, string Status, DateTimeOffset CreatedAt, DateTimeOffset? StartedAt, DateTimeOffset? EndedAt)
+{
+    [JsonRequired]
+    public RunMetadata? Metadata { get; init; }
+}
+public sealed record RunMetadata(string Type, IReadOnlyDictionary<string, string> Values)
+{
+    public static RunMetadata? FromStored(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        // Legacy rows without copied metadata are unknown, never today's workflow metadata.
+        if (!root.TryGetProperty("Type", out var type) || type.ValueKind == JsonValueKind.Null) return null;
+        if (type.ValueKind != JsonValueKind.String) throw new InvalidDataException();
+        var values = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        if (root.TryGetProperty("Values", out var copied) && copied.ValueKind != JsonValueKind.Null)
+        {
+            if (copied.ValueKind != JsonValueKind.Object) throw new InvalidDataException();
+            foreach (var entry in copied.EnumerateObject())
+            {
+                if (entry.Value.ValueKind != JsonValueKind.String) throw new InvalidDataException();
+                values.Add(entry.Name, entry.Value.GetString()!);
+            }
+        }
+        return new(type.GetString()!, values);
+    }
+}
 public sealed record RunQueryPage(IReadOnlyList<RunQueryRow> Items, string? NextCursor);
 
 public sealed record RunQuery(string? Team, string? Type, string? WorkflowId, Guid? SeriesId, RunStatus? Status,

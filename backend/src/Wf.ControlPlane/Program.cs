@@ -58,6 +58,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, VersionsJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunEventsJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunQueryJsonContext.Default);
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunHistoryJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, MetricsJsonContext.Default);
 });
 builder.Services.AddWorkflowOpenApi();
@@ -100,6 +101,7 @@ app.MapRegistrationEndpoints();
 app.MapRunsEndpoints();
 app.MapRunEventsEndpoints();
 app.MapRunQueryEndpoints();
+app.MapRunHistoryEndpoints();
 app.MapMetricsEndpoints();
 app.MapTaskLogsEndpoints();
 app.MapSchedulesEndpoints();

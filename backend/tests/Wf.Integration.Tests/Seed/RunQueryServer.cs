@@ -46,6 +46,7 @@ public sealed class RunQueryServer(WebApplication app, HttpClient client, RSA rs
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunQueryJsonContext.Default);
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunHistoryJsonContext.Default);
             if (abort) options.SerializerOptions.TypeInfoResolverChain.Insert(0, AbortRunJson.Default);
         });
         var metadata = new OpenIdConnectConfiguration { Issuer = Issuer };
@@ -65,6 +66,7 @@ public sealed class RunQueryServer(WebApplication app, HttpClient client, RSA rs
             app.UseAuthentication();
             app.UseAuthorization();
             app.MapRunQueryEndpoints();
+            app.MapRunHistoryEndpoints();
             if (abort) app.MapRunAbortEndpoint();
             if (live) app.MapHub<LiveHub>(LiveHub.Path);
             app.MapWorkflowOpenApi();

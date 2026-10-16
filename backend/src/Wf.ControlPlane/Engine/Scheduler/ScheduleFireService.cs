@@ -70,12 +70,15 @@ public sealed class ScheduleFireService(NpgsqlDataSource source, LeaseManager le
         foreach (var fire in plan.CatchUp.Fires)
         {
             await using var claim = new NpgsqlCommand("""
-                INSERT INTO schedule_fires(schedule_id,fire_at,outcome) VALUES($1,$2,$3)
+                INSERT INTO schedule_fires(schedule_id,fire_at,outcome,reason,config_version_id)
+                SELECT id,$2,$3,$4,config_version_id FROM schedules WHERE id=$1
                 ON CONFLICT(schedule_id,fire_at) DO NOTHING RETURNING schedule_id
                 """, connection, transaction);
             claim.Parameters.AddWithValue(timer.ScheduleId);
             claim.Parameters.AddWithValue(fire.FireAt);
             claim.Parameters.AddWithValue((short)fire.Outcome);
+            claim.Parameters.AddWithValue(NpgsqlDbType.Text,
+                fire.Outcome == ScheduleFireOutcome.Missed ? "missed-grace" : DBNull.Value);
             if (await claim.ExecuteScalarAsync(cancellationToken) is Guid) claimed.Add(fire.FireAt);
         }
         // Preserve every missed row; the catch-up run belongs to its newest missed source, not a second fire.

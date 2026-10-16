@@ -179,6 +179,8 @@ public static class TeamAuthorizationExtensions
         public async Task HandleAsync(RequestDelegate next, HttpContext context, AuthorizationPolicy policy,
             PolicyAuthorizationResult result)
         {
+            if (context.GetEndpoint()?.Metadata.GetMetadata<ResponseCacheAttribute>() is { NoStore: true })
+                context.Response.Headers.CacheControl = "no-store";
             if (result.Forbidden && policy.Requirements.OfType<TeamRoleRequirement>().Any())
             {
                 await Results.Problem(Forbidden()).ExecuteAsync(context);

@@ -49,7 +49,7 @@ public sealed class RunQueryTests(AuthorizationDatabase database) : IClassFixtur
         using var general = await server.Get("/api/v1/runs", jwt);
         Assert.Equal(teamScope ? 2 : 1, (await Page(general)).Items.Count);
         var text = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        foreach (var forbidden in new[] { seed.Other, "variables", "values", "metadata", "manifest", "snapshot",
+        foreach (var forbidden in new[] { seed.Other, "variables", "manifest", "snapshot",
             "sourceUri", "packageUri", "payload", "outputs", "roleBindings", "secret-run-value", "blob://hidden" })
             Assert.DoesNotContain(forbidden, text);
         Assert.Null(page.NextCursor);
@@ -196,7 +196,7 @@ public sealed class RunQueryTests(AuthorizationDatabase database) : IClassFixtur
     }
 
     [Fact]
-    public async Task RunQuery_uses_actual_persisted_run_metadata_and_keeps_deleted_workflow_history_without_values()
+    public async Task RunQuery_uses_actual_copied_public_metadata_and_keeps_deleted_workflow_history_without_variable_values()
     {
         var seed = await Seed();
         var workflow = seed.Type + "/workflow";
@@ -220,14 +220,34 @@ public sealed class RunQueryTests(AuthorizationDatabase database) : IClassFixtur
         using var response = await server.Get(path, server.Jwt(seed.Group));
         var row = Assert.Single((await Page(response)).Items);
         Assert.Equal(id, row.Id);
+        Assert.Equal("prod", row.Metadata!.Values["env"]);
+        Assert.Equal("x' OR true --", row.Metadata.Values["query.key"]);
         var json = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        foreach (var forbidden in new[] { "secret-run-value", "variables", "values", "metadata", "query.key", "snapshot", "payload", "blob" })
+        foreach (var forbidden in new[] { "secret-run-value", "variables", "snapshot", "payload", "blob" })
             Assert.DoesNotContain(forbidden, json);
         await using var hardDelete = database.DataSource.CreateCommand("DELETE FROM workflows WHERE id=$1");
         hardDelete.Parameters.AddWithValue(workflow);
         await hardDelete.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
         using var history = await server.Get(path, server.Jwt(seed.Group));
         Assert.Equal(id, Assert.Single((await Page(history)).Items).Id);
+    }
+
+    [Fact]
+    public async Task RunQuery_legacy_unrecorded_copied_metadata_is_required_null_not_current_workflow_values()
+    {
+        var seed = await Seed();
+        var workflow = seed.Type + "/workflow";
+        var absent = await Run(workflow, metadata: "{}");
+        var unrecorded = await Run(workflow, metadata: """{"Type":null,"Values":null}""");
+        var empty = await Run(workflow, metadata: """{"Type":"release","Values":null}""");
+        await using var server = await Server.Start(database.DataSource);
+        using var response = await server.Get("/api/v1/runs?workflowId=" + workflow, server.Jwt(seed.Group));
+        var page = await Page(response);
+        Assert.Null(page.Items.Single(row => row.Id == absent).Metadata);
+        Assert.Null(page.Items.Single(row => row.Id == unrecorded).Metadata);
+        Assert.Empty(page.Items.Single(row => row.Id == empty).Metadata!.Values);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        Assert.All(json.RootElement.GetProperty("items").EnumerateArray(), row => Assert.True(row.TryGetProperty("metadata", out _)));
     }
 
     [Fact]
@@ -320,7 +340,7 @@ public sealed class RunQueryTests(AuthorizationDatabase database) : IClassFixtur
             Assert.True(operation.GetProperty("responses").TryGetProperty(code, out _));
         var schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
         var properties = schemas.GetProperty("RunQueryRow").GetProperty("properties");
-        Assert.Equal(new[] { "createdAt", "endedAt", "id", "seriesId", "startedAt", "status", "team", "type", "versionId", "workflowId" },
+        Assert.Equal(new[] { "createdAt", "endedAt", "id", "metadata", "seriesId", "startedAt", "status", "team", "type", "versionId", "workflowId" },
             properties.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal));
         Assert.Equal("uuid", properties.GetProperty("id").GetProperty("format").GetString());
         Assert.Equal("date-time", properties.GetProperty("createdAt").GetProperty("format").GetString());
