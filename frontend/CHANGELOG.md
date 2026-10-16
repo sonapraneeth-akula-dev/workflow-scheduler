@@ -5,6 +5,11 @@ All notable frontend changes are documented here, using Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Lazy worker-parsed, sortable/virtual CSV/JSON tables, uPlot line/grouped-bar
+  charts, read-only Monaco diffs and paginated PDF.js reports with accessible
+  text/data alternatives, owned cleanup and versioned local PDF dependencies.
+- Sandboxed HTML/SVG reports with restrictive CSP and safe direct-URL downloads.
+- Side-by-side comparison of exact reports across any two paginated series runs.
 - Live run Reports tab with stage/node/task grouping, exact kind/tag filters,
   authorized metadata refresh and separate reconnect-safe ReportAdded handling.
 - Unknown report kinds download exact bytes as owned binary Blob URLs with

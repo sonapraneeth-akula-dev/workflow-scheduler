@@ -83,3 +83,55 @@ forms or navigate the top page, including real user clicks. Raw navigation
 downloads the exact original bytes rather than executing them. Browser request
 events can describe CSP-blocked attempts: the test verifies CSP failures and no
 network response, not a misleading assertion that no attempt was made.
+
+## Tables, charts, diffs and PDF
+
+`table` accepts CSV, an array of JSON records, or an explicit JSON table:
+
+```json
+{"columns":["name","duration"],"rows":[["compile",12],["test",null]]}
+```
+
+Cells must be strings, finite numbers, booleans or null. Record columns retain
+first-seen order, including own keys such as `__proto__`. Rows must match the
+header width; at most 128 columns are accepted. `csv` and `text/csv` force CSV
+parsing, including headers starting with `[` or `{`. A dedicated module worker
+owns parsing, including quoted CSV fields. Filtering and natural column sorting
+operate on the parsed rows; the scrollable table mounts at most 24 data rows.
+Cells are literal text, never HTML or spreadsheet formulas.
+
+`chart` accepts this JSON contract, with 1–16 aligned series:
+
+```json
+{"type":"line","x":[1,2,3],"series":[{"label":"CPU","values":[10,null,30]}]}
+```
+
+Line X values must be finite, strictly increasing numbers. `type: "bar"` also
+accepts string categories, renders grouped series and includes zero in its Y
+scale. Null values represent gaps. A responsive uPlot canvas has a named series
+legend and an expandable, sortable data-table alternative.
+
+`diff` accepts only two plain-text strings:
+
+```json
+{"original":"before\n","modified":"after\n"}
+```
+
+The lazy Monaco diff is read-only on both sides; no language execution, external
+links or editable models are enabled. It adapts to narrow screens, follows theme
+changes and provides expandable plain-text alternatives. Owned editors and
+models are disposed on replacement/unmount.
+
+`pdf` and `application/pdf` accept raw PDF bytes. Lazy PDF.js reads the already
+authenticated bytes, not a payload-provided URL. Its worker, CMaps, fonts, WASM
+and color profiles are bundled locally under versioned asset paths. One page is
+rendered at a time, capped at four million raster pixels and 8,192 pixels per
+dimension; previous/next controls and extractable page text remain accessible.
+No annotation, form or PDF viewer scripting layer is installed. Loading tasks,
+render tasks and page resources are released on replacement/unmount.
+
+Malformed payloads surface explicit report errors. Each heavy renderer and its
+workers remain outside the initial application chunk. `e2e\report-heavy.spec.ts`
+checks retained reports through actual PostgreSQL, immutable filesystem bytes,
+production content HTTP and native browser workers/canvases; desktop-light and
+mobile-dark checks include accessibility and page-overflow assertions.

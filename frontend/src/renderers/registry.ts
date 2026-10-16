@@ -13,4 +13,11 @@ export const rendererRegistry: ReadonlyMap<
   ["text/html", lazy(() => import("./html/HtmlReport"))],
   ["svg", lazy(() => import("./html/HtmlReport"))],
   ["image/svg+xml", lazy(() => import("./html/HtmlReport"))],
+  ["table", lazy(() => import("./table/TableReport"))],
+  ["csv", lazy(() => import("./table/CsvReport"))],
+  ["text/csv", lazy(() => import("./table/CsvReport"))],
+  ["chart", lazy(() => import("./chart/ChartReport"))],
+  ["diff", lazy(() => import("./diff/DiffReport"))],
+  ["pdf", lazy(() => import("./pdf/PdfReport"))],
+  ["application/pdf", lazy(() => import("./pdf/PdfReport"))],
 ])

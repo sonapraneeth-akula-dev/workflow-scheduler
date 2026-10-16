@@ -3,6 +3,7 @@ import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
 import { tanstackRouter } from "@tanstack/router-plugin/vite"
 import { defineConfig, loadEnv } from "vite"
+import { pdfAssets } from "./scripts/pdf-assets"
 
 export default defineConfig(({ mode }) => {
   const environment = loadEnv(mode, process.cwd(), "")
@@ -11,6 +12,7 @@ export default defineConfig(({ mode }) => {
       tanstackRouter({ target: "react", autoCodeSplitting: true }),
       react(),
       tailwindcss(),
+      pdfAssets(),
     ],
     resolve: {
       alias: { "@": resolve(import.meta.dirname, "./src") },

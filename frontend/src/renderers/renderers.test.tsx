@@ -23,6 +23,13 @@ describe("lazy report registry", () => {
     "text/html",
     "svg",
     "image/svg+xml",
+    "table",
+    "csv",
+    "text/csv",
+    "chart",
+    "diff",
+    "pdf",
+    "application/pdf",
   ])("registers %s", (kind) => {
     expect(rendererRegistry.get(kind)).toBeDefined()
   })
