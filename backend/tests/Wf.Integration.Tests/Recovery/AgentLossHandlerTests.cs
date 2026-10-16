@@ -31,7 +31,7 @@ using DispatchCommand = Wf.Contracts.Agent.V1.Dispatch;
 
 namespace Wf.Integration.Tests.Recovery;
 
-public sealed class AgentLossHandlerTests(ReplacementDatabase database) : IClassFixture<ReplacementDatabase>
+public sealed class AgentLossHandlerTests(ReplacementDatabase database, ITestOutputHelper output) : IClassFixture<ReplacementDatabase>
 {
     private CancellationToken Token => TestContext.Current.CancellationToken;
     private readonly ReplacementClock clock = new();
@@ -194,17 +194,24 @@ public sealed class AgentLossHandlerTests(ReplacementDatabase database) : IClass
     }
 
     [Fact]
-    public async Task Killed_agent_task_is_replaced_on_second_real_agent_after_virtual_thirty_second_grace()
+    public Task Killed_agent_task_is_replaced_on_second_real_agent_after_virtual_thirty_second_grace() =>
+        KilledAgentReplacement(clock, wallClock: false);
+
+    [Fact]
+    public Task Killed_agent_tree_starts_replacement_within_thirty_real_seconds_after_full_reclaim_expiry() =>
+        KilledAgentReplacement(TimeProvider.System, wallClock: true);
+
+    private async Task KilledAgentReplacement(TimeProvider time, bool wallClock)
     {
         await Reset();
         using var leader = Manager();
         Assert.True(await leader.TryAcquireOrRenewAsync(Token));
         await leader.StartAsync(Token);
-        using var registry = new AgentRegistry(database.DataSource, clock, leader);
+        using var registry = new AgentRegistry(database.DataSource, time, leader);
         var store = new RunStore(database.DataSource, NullLogger<RunStore>.Instance, leader);
-        using var placement = new Dispatcher(database.DataSource, store, registry, new PlacementEngine(), clock);
-        using var sweeper = new AgentLossSweeper(database.DataSource, registry, clock, NullLogger<AgentLossSweeper>.Instance, leader);
-        using var handler = new AgentLossHandler(database.DataSource, placement, leader, clock, NullLogger<AgentLossHandler>.Instance);
+        using var placement = new Dispatcher(database.DataSource, store, registry, new PlacementEngine(), time);
+        using var sweeper = new AgentLossSweeper(database.DataSource, registry, time, NullLogger<AgentLossSweeper>.Instance, leader);
+        using var handler = new AgentLossHandler(database.DataSource, placement, leader, time, NullLogger<AgentLossHandler>.Instance);
         var bytes = await Package();
         var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
         var builder = WebApplication.CreateBuilder();
@@ -218,6 +225,11 @@ public sealed class AgentLossHandlerTests(ReplacementDatabase database) : IClass
         builder.Services.AddSingleton(store);
         builder.Services.AddSingleton(leader);
         builder.Services.AddSingleton(sweeper);
+        if (wallClock)
+        {
+            builder.Services.AddHostedService(_ => sweeper);
+            builder.Services.AddHostedService(_ => handler);
+        }
         await using var app = builder.Build();
         app.MapGrpcService<AgentGatewayService>();
         app.MapGet("/package.zip", () => Microsoft.AspNetCore.Http.Results.Bytes(bytes, "application/zip"));
@@ -233,23 +245,52 @@ public sealed class AgentLossHandlerTests(ReplacementDatabase database) : IClass
             var firstId = Guid.NewGuid();
             first = StartAgent(firstId, true);
             await Wait(() => Task.FromResult(registry.Find(firstId) is not null), first);
-            var run = await ReadyRun(store, "work", "agentloss");
+            var run = await ReadyRun(store, "work", "agentloss", time);
             await placement.DispatchAsync(run, new(run.Snapshot.RunId, "work", "agentloss", 1, sha),
                 new() { Task = new() { RunId = run.Snapshot.RunId.ToString("D"), NodeKey = "work", TaskKey = "agentloss", Attempt = 1 },
                     Version = "1.0.0", Sha256 = sha, PackageUri = packageUri.ToString(),
-                    DeadlineAt = Timestamp.FromDateTimeOffset(clock.GetUtcNow().AddMinutes(5)) }, Token);
+                    DeadlineAt = Timestamp.FromDateTimeOffset(time.GetUtcNow().AddMinutes(5)) }, Token);
             await Wait(async () => (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot.Tasks["work/agentloss"] == ExecutionStatus.Running, first);
+            var secondId = Guid.NewGuid();
+            if (wallClock)
+            {
+                second = StartAgent(secondId, false);
+                await Wait(() => Task.FromResult(registry.Find(secondId) is not null), second);
+                var registeredAt = registry.Find(secondId)!.LastHeartbeatAt;
+                await Wait(() => Task.FromResult(registry.Find(secondId)!.LastHeartbeatAt > registeredAt), second);
+                Assert.Contains(registry.DispatchableAgents(), agent => agent.Id == secondId && agent.SlotsUsed == 0);
+                Assert.Equal((short)ExecutionStatus.Running, await Scalar("SELECT status FROM task_attempts WHERE attempt=1"));
+                output.WriteLine($"Spare registered={registeredAt:O}; heartbeat={registry.Find(secondId)!.LastHeartbeatAt:O}; id={secondId}; PID={second.Id}");
+            }
+            var killedAt = time.GetUtcNow();
+            var killedPid = first.Id;
             first.Kill(entireProcessTree: true);
             await first.WaitForExitAsync(Token);
-            clock.Advance(TimeSpan.FromSeconds(30));
-            Assert.Single(await sweeper.SweepAsync(Token));
-            var secondId = Guid.NewGuid();
-            second = StartAgent(secondId, false);
-            await Wait(() => Task.FromResult(registry.Find(secondId) is not null), second);
-            var elapsed = Stopwatch.StartNew();
-            Assert.Equal(1, await handler.ProcessAsync(Token));
-            await Wait(async () => (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot.Tasks["work/agentloss"] == ExecutionStatus.Succeeded, second);
-            Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(30), elapsed.Elapsed.ToString());
+            if (wallClock)
+            {
+                var lastHeartbeat = new DateTimeOffset(Assert.IsType<DateTime>(await Scalar(
+                    "SELECT last_heartbeat_at FROM agents WHERE id=$1", firstId)));
+                var expiry = lastHeartbeat.AddSeconds(30);
+                var startDeadline = expiry.AddSeconds(30);
+                output.WriteLine($"Killed process tree PID={killedPid}; kill={killedAt:O}; lastHeartbeat={lastHeartbeat:O}; reclaimExpiry={expiry:O}; replacementStartDeadline={startDeadline:O}");
+                await Wait(async () => await Scalar("SELECT started_at FROM task_attempts WHERE attempt=2") is DateTime,
+                    second!, startDeadline - time.GetUtcNow(), "Replacement did not durably START within 30 seconds after full reclaim expiry.");
+                await Wait(async () => (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot.Tasks["work/agentloss"] == ExecutionStatus.Succeeded,
+                    second!, TimeSpan.FromSeconds(30), "Replacement did not succeed within its separate fixture completion budget.");
+                await VerifyWallClockReplacement(firstId, secondId, lastHeartbeat, expiry);
+                Assert.True(leader.IsLeader, "Healthy leader is a precondition for the replacement-start gate.");
+            }
+            else
+            {
+                clock.Advance(TimeSpan.FromSeconds(30));
+                Assert.Single(await sweeper.SweepAsync(Token));
+                second = StartAgent(secondId, false);
+                await Wait(() => Task.FromResult(registry.Find(secondId) is not null), second);
+                var elapsed = Stopwatch.StartNew();
+                Assert.Equal(1, await handler.ProcessAsync(Token));
+                await Wait(async () => (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot.Tasks["work/agentloss"] == ExecutionStatus.Succeeded, second);
+                Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(30), elapsed.Elapsed.ToString());
+            }
             Assert.Equal(secondId, await Scalar("SELECT agent_id FROM task_attempts WHERE attempt=2"));
             Assert.Equal(1, Convert.ToInt32(await Scalar("SELECT platform_retries FROM task_attempts WHERE attempt=2")));
             Assert.Equal(0, Convert.ToInt32(await Scalar("SELECT author_retries FROM task_attempts WHERE attempt=2")));
@@ -287,6 +328,42 @@ public sealed class AgentLossHandlerTests(ReplacementDatabase database) : IClass
         }
     }
 
+    private async Task VerifyWallClockReplacement(Guid firstId, Guid secondId, DateTimeOffset lastHeartbeat, DateTimeOffset expiry)
+    {
+        await using var command = database.DataSource.CreateCommand("""
+            SELECT a.last_heartbeat_at,l.ended_at,l.failure_category,r.started_at,r.ended_at,r.deadline_at,
+                   COALESCE(n.deadline_at,run.deadline_at),run.deadline_at,r.status,r.agent_id,a2.last_heartbeat_at
+            FROM task_attempts l JOIN agents a ON a.id=l.agent_id
+            JOIN task_attempts r ON r.run_id=l.run_id AND r.task_key=l.task_key AND r.attempt=2
+            JOIN agents a2 ON a2.id=r.agent_id
+            JOIN runs run ON run.id=r.run_id
+            JOIN node_runs n ON n.run_id=r.run_id AND n.node_key='work'
+            WHERE l.attempt=1 AND a.id=$1
+            """);
+        command.Parameters.AddWithValue(firstId);
+        await using var reader = await command.ExecuteReaderAsync(Token);
+        Assert.True(await reader.ReadAsync(Token));
+        var classifiedAt = reader.GetFieldValue<DateTimeOffset>(1);
+        var startedAt = reader.GetFieldValue<DateTimeOffset>(3);
+        var succeededAt = reader.GetFieldValue<DateTimeOffset>(4);
+        output.WriteLine($"Classification={classifiedAt:O}; replacementTaskStarted={startedAt:O}; replacementSucceeded={succeededAt:O}; spareLastHeartbeat={reader.GetFieldValue<DateTimeOffset>(10):O}");
+        output.WriteLine($"LastHeartbeat->classification={(classifiedAt - lastHeartbeat).TotalSeconds:F6}s; reclaimExpiry->replacementTaskStarted={(startedAt - expiry).TotalSeconds:F6}s; replacementTaskStarted->success={(succeededAt - startedAt).TotalSeconds:F6}s");
+        Assert.Equal(lastHeartbeat, reader.GetFieldValue<DateTimeOffset>(0));
+        Assert.Equal((short)FailureCategory.AgentLost, reader.GetInt16(2));
+        Assert.True(classifiedAt >= expiry, "Loss must not be classified before the full 30-second last-heartbeat reclaim grace.");
+        Assert.True(startedAt >= classifiedAt);
+        Assert.True(startedAt <= expiry.AddSeconds(30), "Replacement START exceeded 30 seconds after reclaim expiry.");
+        Assert.True(succeededAt >= startedAt && succeededAt <= startedAt.AddSeconds(30),
+            "Completion has a separate 30-second fixture budget, not a 30-second total recovery promise.");
+        foreach (var column in new[] { 5, 6, 7 }) Assert.True(succeededAt <= reader.GetFieldValue<DateTimeOffset>(column));
+        Assert.Equal((short)ExecutionStatus.Succeeded, reader.GetInt16(8));
+        Assert.Equal(secondId, reader.GetGuid(9));
+        var spareHeartbeat = reader.GetFieldValue<DateTimeOffset>(10);
+        Assert.True(spareHeartbeat > lastHeartbeat && succeededAt - spareHeartbeat < AgentRegistry.HeartbeatTimeout,
+            "Spare must keep sending real heartbeats and remain healthy during reclaim and replacement.");
+        Assert.False(await reader.ReadAsync(Token));
+    }
+
     private async Task<Fixture> Setup(ExecutionPolicy? policy = null)
     {
         await Reset();
@@ -310,15 +387,16 @@ public sealed class AgentLossHandlerTests(ReplacementDatabase database) : IClass
             new(database.DataSource, registry, clock, NullLogger<AgentLossSweeper>.Instance, leader));
     }
 
-    private async Task<RunState> ReadyRun(RunStore store, string node = "node", string task = "task")
+    private async Task<RunState> ReadyRun(RunStore store, string node = "node", string task = "task", TimeProvider? time = null)
     {
+        var now = (time ?? clock).GetUtcNow();
         var run = new RunState(Guid.CreateVersion7(), [new(node, [], [new(task)])],
             new WorkflowMetadata("test", ImmutableSortedDictionary<string, string>.Empty), Assert.Fail);
-        await store.CreateAsync(run, "tests/replacement", Guid.CreateVersion7(), clock.GetUtcNow().AddHours(1), Token);
-        await store.AppendAsync(run, EventEntity.Run, null, (int)RunStatus.Running, clock.GetUtcNow(), Token);
+        await store.CreateAsync(run, "tests/replacement", Guid.CreateVersion7(), now.AddHours(1), Token);
+        await store.AppendAsync(run, EventEntity.Run, null, (int)RunStatus.Running, now, Token);
         foreach (var state in new[] { ExecutionStatus.Ready, ExecutionStatus.Dispatched, ExecutionStatus.Running })
-            await store.AppendAsync(run, EventEntity.Node, node, (int)state, clock.GetUtcNow(), Token);
-        await store.AppendAsync(run, EventEntity.Task, $"{node}/{task}", (int)ExecutionStatus.Ready, clock.GetUtcNow(), Token);
+            await store.AppendAsync(run, EventEntity.Node, node, (int)state, now, Token);
+        await store.AppendAsync(run, EventEntity.Task, $"{node}/{task}", (int)ExecutionStatus.Ready, now, Token);
         return run;
     }
     private static Hello Hello()
@@ -336,9 +414,10 @@ public sealed class AgentLossHandlerTests(ReplacementDatabase database) : IClass
         foreach (var parameter in parameters) command.Parameters.Add(new NpgsqlParameter { Value = parameter });
         await command.ExecuteNonQueryAsync(Token);
     }
-    private async Task<object?> Scalar(string sql)
+    private async Task<object?> Scalar(string sql, params object[] parameters)
     {
         await using var command = database.DataSource.CreateCommand(sql);
+        foreach (var parameter in parameters) command.Parameters.Add(new NpgsqlParameter { Value = parameter });
         return await command.ExecuteScalarAsync(Token);
     }
     private async Task<byte[]> Package()
@@ -357,14 +436,14 @@ public sealed class AgentLossHandlerTests(ReplacementDatabase database) : IClass
         }
         return bytes.ToArray();
     }
-    private async Task Wait(Func<Task<bool>> condition, Process process)
+    private async Task Wait(Func<Task<bool>> condition, Process process, TimeSpan? timeout = null, string? failure = null)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Token);
-        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        var elapsed = Stopwatch.StartNew();
         while (!await condition())
         {
             Assert.False(process.HasExited, "Agent process exited before the expected state.");
-            await Task.Delay(10, timeout.Token);
+            Assert.True(elapsed.Elapsed < (timeout ?? TimeSpan.FromSeconds(20)), failure ?? "Timed out waiting for agent state.");
+            await Task.Delay(10, Token);
         }
     }
     private static async Task Stop(Process process)
