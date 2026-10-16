@@ -287,16 +287,18 @@ public sealed class LocalEngine
         _ = DisposeCancellationAsync(attempt);
         var node = workflow.Nodes.Single(n => n.Key == completed.Key[..completed.Key.IndexOf('/')]);
         var task = node.Tasks.Single(t => $"{node.Key}/{t.Key}" == completed.Key);
-        var category = attempt.Cause == CancellationCause.Timeout ? FailureCategory.Timeout :
-            completed.Error is TaskFailureException failure ? failure.Category :
-            completed.Error is OperationCanceledException ? FailureCategory.Aborted : FailureCategory.TaskError;
         var cancelled = attempt.Cause is CancellationCause.Abort or CancellationCause.HardFailure;
         var failed = completed.Error is not null || attempt.Cause != CancellationCause.None;
+        var category = failed ? FailureClassifier.Classify(completed.Error, FailureCategory.TaskError,
+            timedOut: attempt.Cause == CancellationCause.Timeout, aborted: cancelled) : (FailureCategory?)null;
+        // Preserve the lifecycle timeout independently of an error reported while cancellation drains.
+        var attemptTimedOut = attempt.Cause == CancellationCause.Timeout ||
+            completed.Error is TaskFailureException { Category: FailureCategory.Timeout };
         var status = cancelled ? ExecutionStatus.Cancelled : !failed ? ExecutionStatus.Succeeded :
             task.Failure == FailurePolicy.Soft ? ExecutionStatus.SoftFailed :
-            category == FailureCategory.Timeout ? ExecutionStatus.TimedOut : ExecutionStatus.Failed;
+            attemptTimedOut ? ExecutionStatus.TimedOut : ExecutionStatus.Failed;
         attempts.Add(new(completed.Key, attempt.Number, attempt.StartedAt, Now, status,
-            failed ? cancelled ? FailureCategory.Aborted : category : null, completed.Error));
+            category, completed.Error));
         if (completed.Error is { } error)
             renderer.Log($"{completed.Key}: {error.GetType().Name}: {error.Message}");
         if (!failed || cancelled)
@@ -309,7 +311,7 @@ public sealed class LocalEngine
             node.Dependencies.Any(d => d.When == DependencyCondition.Always);
         var deadline = cleanup && (timedOut || run.Snapshot.Status == RunStatus.Aborting)
             ? DateTimeOffset.MaxValue : runDeadline;
-        var retry = RetryPolicyEvaluator.Evaluate(task.Policy, new(category, budget.Author, budget.Platform, Now, deadline,
+        var retry = RetryPolicyEvaluator.Evaluate(task.Policy, new(category!.Value, budget.Author, budget.Platform, Now, deadline,
             nodeDeadlines.GetValueOrDefault(node.Key, DateTimeOffset.MaxValue),
             Cancelled: stoppedNodes.ContainsKey(node.Key)), time is DryRunClock ? 0.5 : Random.Shared.NextDouble(), completed.Error);
         if (retry.Retry)
@@ -322,7 +324,7 @@ public sealed class LocalEngine
         }
         var propagation = FailurePropagation.Plan(node, task.Key,
             node.Tasks.ToDictionary(t => t.Key, t => run.Snapshot.Tasks[$"{node.Key}/{t.Key}"]),
-            category == FailureCategory.Timeout);
+            attemptTimedOut);
         foreach (var change in propagation.Changes)
         {
             var key = $"{node.Key}/{change.Task}";

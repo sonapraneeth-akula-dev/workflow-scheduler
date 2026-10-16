@@ -368,7 +368,8 @@ public sealed class LocalEngineTests
         var cancelled = await new LocalEngine(selfCancelled, output: TextWriter.Null).RunAsync(Token);
         Assert.Equal(1, cancelled.ExitCode);
         Assert.Equal(RunStatus.Failed, cancelled.Snapshot.Status);
-        Assert.Single(cancelled.Attempts);
+        Assert.Equal(4, cancelled.Attempts.Length);
+        Assert.All(cancelled.Attempts, attempt => Assert.Equal(FailureCategory.TaskError, attempt.Failure));
         Assert.False(afterCancellation);
     }
 

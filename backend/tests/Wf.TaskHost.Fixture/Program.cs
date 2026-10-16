@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using Wf.Contracts;
+using Wf.Contracts.Definition;
 using Wf.Sdk;
 
 var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test")
@@ -36,6 +37,18 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
         })
         .Task("nonretryable", _ => throw new NonRetryableException("do not retry"))
         .Task("selfcancel", _ => throw new OperationCanceledException("self cancellation"))
+        .Task("classified", ctx => throw new TaskFailureException("Scripted explicit signal; not external fault injection.",
+            category: Enum.Parse<FailureCategory>(ctx.Input<string>("source", "value")!)))
+        .Task("cancelerror", async ctx =>
+        {
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, ctx.CancellationToken); }
+            catch (OperationCanceledException) { throw new InvalidOperationException("ordinary error after cancellation"); }
+        })
+        .Task("cancelauthor", async ctx =>
+        {
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, ctx.CancellationToken); }
+            catch (OperationCanceledException) { throw new NonRetryableException("author error after cancellation"); }
+        })
         .Task("permissions", ctx =>
         {
             var directory = Path.GetDirectoryName(args[2])!;

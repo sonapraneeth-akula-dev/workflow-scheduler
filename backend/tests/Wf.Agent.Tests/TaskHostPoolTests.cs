@@ -101,7 +101,7 @@ public sealed class TaskHostPoolTests
     [Theory]
     [InlineData("fail", "TaskError", false)]
     [InlineData("nonretryable", "TaskError", true)]
-    [InlineData("selfcancel", "Aborted", true)]
+    [InlineData("selfcancel", "TaskError", false)]
     public async Task User_failures_keep_classification_and_retry_semantics(string task, string category, bool nonRetryable)
     {
         await using var pool = Pool();
@@ -110,6 +110,45 @@ public sealed class TaskHostPoolTests
         Assert.Equal(category, result.Error.Category);
         Assert.Equal(nonRetryable, result.Error.NonRetryable);
         Assert.NotEmpty(result.Error.Message);
+    }
+
+    [Theory]
+    [InlineData("TaskError")]
+    [InlineData("Timeout")]
+    [InlineData("Aborted")]
+    [InlineData("AgentLost")]
+    [InlineData("ResourceLimit")]
+    [InlineData("ValidationError")]
+    [InlineData("Placement")]
+    [InlineData("PlatformError")]
+    public async Task FailureClassifier_preserves_all_eight_scripted_categories_in_actual_task_hosts(string category)
+    {
+        await using var pool = Pool();
+        var dispatch = Dispatch("classified");
+        dispatch.InputsJson = ByteString.CopyFromUtf8(JsonSerializer.Serialize(new { source = new { value = category } }));
+        var result = await pool.ExecuteAsync(Package, dispatch, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(TaskOutcome.Failed, result.Outcome);
+        Assert.Equal(category, result.Error.Category);
+        Assert.Equal(category == "Aborted", result.Error.NonRetryable);
+    }
+
+    [Theory]
+    [InlineData("cancelerror", false, false)]
+    [InlineData("cancelauthor", false, true)]
+    [InlineData("cancelerror", true, false)]
+    [InlineData("cancelauthor", true, true)]
+    public async Task FailureClassifier_does_not_relabel_normal_errors_when_actual_cancellation_races(
+        string task, bool timedOut, bool nonRetryable)
+    {
+        await using var pool = Pool();
+        await pool.PrewarmAsync(Package, TestContext.Current.CancellationToken);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        if (!timedOut) cancellation.CancelAfter(TimeSpan.FromMilliseconds(200));
+        var result = await pool.ExecuteAsync(Package, Dispatch(task, timedOut ? TimeSpan.FromMilliseconds(200) : null),
+            cancellationToken: cancellation.Token);
+        Assert.Equal(timedOut ? TaskOutcome.TimedOut : TaskOutcome.Cancelled, result.Outcome);
+        Assert.Equal("TaskError", result.Error.Category);
+        Assert.Equal(nonRetryable, result.Error.NonRetryable);
     }
 
     [Theory]

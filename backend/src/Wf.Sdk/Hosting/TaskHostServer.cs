@@ -14,6 +14,7 @@ using Wf.Contracts;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Host.V1;
+using Wf.Engine.Core;
 using Wf.Validation;
 
 namespace Wf.Sdk.Hosting;
@@ -174,8 +175,8 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
             bool wasCancelled, wasTimedOut;
             lock (sync) { wasCancelled = cancelled; wasTimedOut = timedOut || deadlineCancellation.IsCancellationRequested; }
             result.Outcome = wasTimedOut ? TaskOutcome.TimedOut : wasCancelled ? TaskOutcome.Cancelled : TaskOutcome.Failed;
-            var category = wasTimedOut ? FailureCategory.Timeout : wasCancelled || exception is OperationCanceledException ?
-                FailureCategory.Aborted : exception is TaskFailureException failure ? failure.Category : FailureCategory.TaskError;
+            var category = FailureClassifier.Classify(exception, FailureCategory.TaskError,
+                timedOut: wasTimedOut, aborted: wasCancelled);
             result.Error = new TaskError
             {
                 Category = category.ToString(), Message = exception.Message,

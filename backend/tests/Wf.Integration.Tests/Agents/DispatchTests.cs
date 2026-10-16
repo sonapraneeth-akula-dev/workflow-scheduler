@@ -408,8 +408,10 @@ public sealed class DispatchTests(DispatchDatabase database) : IClassFixture<Dis
         }
     }
 
-    [Fact]
-    public async Task Dependent_task_runs_on_real_warm_agent_and_second_run_downloads_nothing()
+    [Theory]
+    [InlineData("echo", ExecutionStatus.Succeeded)]
+    [InlineData("selfcancel", ExecutionStatus.Failed)]
+    public async Task Dependent_task_runs_on_real_warm_agent_and_second_run_downloads_nothing(string task, ExecutionStatus expected)
     {
         var bytes = await Package();
         var sha = Convert.ToHexStringLower(SHA256.HashData(bytes));
@@ -458,7 +460,7 @@ public sealed class DispatchTests(DispatchDatabase database) : IClassFixture<Dis
                     await hosts.PrewarmAsync(package, Token);
                     var warm = hosts.WarmProcessIds.ToArray();
                     var starts = hosts.ProcessStartCount;
-                    var run = await CreateRun();
+                    var run = await CreateRun(task);
                     await Ready(run, "source/noop");
                     await Dispatch(dispatcher, run, "source", "noop", sha, packageUri);
                     await Wait(async () => (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot.Tasks["source/noop"] == ExecutionStatus.Succeeded, connected);
@@ -468,8 +470,9 @@ public sealed class DispatchTests(DispatchDatabase database) : IClassFixture<Dis
                     await SetNode(run, "source", ExecutionStatus.Running);
                     await SetNode(run, "source", ExecutionStatus.Succeeded);
                     Assert.Equal(ExecutionStatus.Ready, ReadinessEvaluator.Evaluate(Nodes, run.Snapshot.Nodes).Single().Status);
-                    await Ready(run, "work/echo");
-                    var echo = Command(run, "work", "echo", sha, packageUri);
+                    var taskKey = $"work/{task}";
+                    await Ready(run, taskKey);
+                    var echo = Command(run, "work", task, sha, packageUri);
                     await using (var source = database.DataSource.CreateCommand("SELECT outputs::text FROM node_runs WHERE run_id=$1 AND node_key='source'"))
                     {
                         source.Parameters.AddWithValue(run.Snapshot.RunId);
@@ -477,19 +480,30 @@ public sealed class DispatchTests(DispatchDatabase database) : IClassFixture<Dis
                     }
                     echo.VariablesJson = ByteString.CopyFromUtf8("""{"amount":5}""");
                     echo.NodeOutputsJson = ByteString.CopyFromUtf8("""{"previous":0}""");
-                    await dispatcher.DispatchAsync(run, Request(run, "work", "echo", sha), echo, Token);
-                    await Wait(async () => (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot.Tasks["work/echo"] == ExecutionStatus.Succeeded, connected);
-                    await using var output = database.DataSource.CreateCommand("SELECT outputs::text FROM node_runs WHERE run_id=$1 AND node_key='work'");
-                    output.Parameters.AddWithValue(run.Snapshot.RunId);
-                    using var document = JsonDocument.Parse((string)(await output.ExecuteScalarAsync(Token))!);
-                    Assert.Equal(12, document.RootElement.GetProperty("result").GetInt32());
-                    Assert.Contains(document.RootElement.GetProperty("pid").GetInt32(), warm);
+                    await dispatcher.DispatchAsync(run, Request(run, "work", task, sha), echo, Token);
+                    await Wait(async () => (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot.Tasks[taskKey] == expected, connected);
+                    if (expected == ExecutionStatus.Succeeded)
+                    {
+                        await using var output = database.DataSource.CreateCommand("SELECT outputs::text FROM node_runs WHERE run_id=$1 AND node_key='work'");
+                        output.Parameters.AddWithValue(run.Snapshot.RunId);
+                        using var document = JsonDocument.Parse((string)(await output.ExecuteScalarAsync(Token))!);
+                        Assert.Equal(12, document.RootElement.GetProperty("result").GetInt32());
+                        Assert.Contains(document.RootElement.GetProperty("pid").GetInt32(), warm);
+                    }
+                    else
+                    {
+                        await using var error = database.DataSource.CreateCommand("SELECT error FROM task_attempts WHERE run_id=$1 AND task_key=$2");
+                        error.Parameters.AddWithValue(run.Snapshot.RunId);
+                        error.Parameters.AddWithValue(taskKey);
+                        Assert.Equal("self cancellation", await error.ExecuteScalarAsync(Token));
+                    }
                     Assert.Equal(starts, hosts.ProcessStartCount);
                     Assert.Equal(1, Volatile.Read(ref downloads));
                     await using var events = database.DataSource.CreateCommand("""
-                        SELECT payload FROM run_events WHERE run_id=$1 AND entity_key='work/echo' ORDER BY seq
+                        SELECT payload FROM run_events WHERE run_id=$1 AND entity_key=$2 ORDER BY seq
                         """);
                     events.Parameters.AddWithValue(run.Snapshot.RunId);
+                    events.Parameters.AddWithValue(taskKey);
                     await using var reader = await events.ExecuteReaderAsync(Token);
                     var states = new List<int>();
                     while (await reader.ReadAsync(Token))
@@ -497,7 +511,7 @@ public sealed class DispatchTests(DispatchDatabase database) : IClassFixture<Dis
                         using var change = JsonDocument.Parse(reader.GetFieldValue<byte[]>(0));
                         states.Add(change.RootElement.GetProperty("State").GetInt32());
                     }
-                    Assert.Equal(new[] { 1, 2, 3, 5 }, states);
+                    Assert.Equal(new[] { 1, 2, 3, (int)expected }, states);
                 }
             }
             finally
@@ -512,9 +526,10 @@ public sealed class DispatchTests(DispatchDatabase database) : IClassFixture<Dis
     private Dispatcher CreateDispatcher(AgentRegistry registry) =>
         new(database.DataSource, store, registry, new PlacementEngine(), TimeProvider.System);
 
-    private async Task<RunState> CreateRun()
+    private async Task<RunState> CreateRun(string task = "echo")
     {
-        var run = new RunState(Guid.CreateVersion7(), Nodes,
+        var nodes = Nodes.SetItem(1, new("work", [new("source", DependencyCondition.OnSuccess)], [new(task)]));
+        var run = new RunState(Guid.CreateVersion7(), nodes,
             new WorkflowMetadata("test", ImmutableSortedDictionary<string, string>.Empty), Assert.Fail);
         await store.CreateAsync(run, "tests/dispatch", Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(5), Token);
         await store.AppendAsync(run, EventEntity.Run, null, (int)RunStatus.Running, DateTimeOffset.UtcNow, Token);
