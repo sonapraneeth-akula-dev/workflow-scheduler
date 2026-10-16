@@ -17,8 +17,9 @@ public sealed class BlobContent
         Kind = kind;
         Sha256 = sha256.ToLowerInvariant();
         SizeBytes = sizeBytes;
-        if (logKey is not null && (kind != BlobKind.Logs || !IsLogKey(logKey)))
-            throw new ArgumentException("Named log content requires a canonical attempt prefix and object name.", nameof(logKey));
+        if (logKey is not null && !(kind == BlobKind.Logs && IsLogKey(logKey) ||
+                                   kind == BlobKind.Reports && IsReportKey(logKey)))
+            throw new ArgumentException("Named content requires a canonical log-attempt or report key.", nameof(logKey));
         Key = logKey ?? $"{Kind.ToString().ToLowerInvariant()}/{Sha256}{(Kind == BlobKind.Packages ? ".zip" : "")}";
     }
 
@@ -26,6 +27,14 @@ public sealed class BlobContent
     public string Sha256 { get; }
     public long SizeBytes { get; }
     public string Key { get; }
+
+    internal static bool IsReportKey(string key)
+    {
+        var parts = key.Split('/');
+        return parts.Length == 3 && parts[0] == "reports" &&
+            Guid.TryParseExact(parts[1], "D", out var run) && run.Version == 7 && parts[1] == run.ToString("D") &&
+            Guid.TryParseExact(parts[2], "D", out var report) && report.Version == 7 && parts[2] == report.ToString("D");
+    }
 
     internal static bool IsLogKey(string key)
     {

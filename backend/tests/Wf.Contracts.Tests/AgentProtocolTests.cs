@@ -99,6 +99,24 @@ public sealed class AgentProtocolTests
     }
 
     [Fact]
+    public void Report_header_capability_round_trips_without_changing_legacy_grants()
+    {
+        var report = new UploadGrant
+        {
+            Kind = "reports", UploadUri = "https://localhost/api/v1/report-publishes",
+            BearerToken = "test-only-capability", MaxBytes = 10_000_000
+        };
+        var restored = UploadGrant.Parser.ParseFrom(report.ToByteArray());
+        Assert.Equal(report, restored);
+        Assert.DoesNotContain(restored.BearerToken, restored.UploadUri, StringComparison.Ordinal);
+        Assert.Equal(5, UploadGrant.Descriptor.FindFieldByName("bearer_token").FieldNumber);
+        var legacy = new UploadGrant { Kind = "logs", UploadUri = "/logs/grant" }.ToByteArray();
+        var old = UploadGrant.Parser.ParseFrom(legacy);
+        Assert.Empty(old.BearerToken);
+        Assert.Equal(legacy, old.ToByteArray());
+    }
+
+    [Fact]
     public void Payload_replacement_clears_previous_variant()
     {
         var message = new ControlMessage { Dispatch = new Dispatch(), Cancel = new Cancel() };

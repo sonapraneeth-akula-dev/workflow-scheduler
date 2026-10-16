@@ -10,7 +10,8 @@ using Wf.ControlPlane.Storage;
 namespace Wf.ControlPlane.Engine.Agents;
 
 public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGatewayService> logger, RunStore? runs = null,
-    LeaseManager? leadership = null, AgentLossSweeper? losses = null, LogUploadCapabilities? logUploads = null)
+    LeaseManager? leadership = null, AgentLossSweeper? losses = null, LogUploadCapabilities? logUploads = null,
+    Wf.ControlPlane.Reports.ReportUploadCapabilities? reportUploads = null)
     : AgentGateway.AgentGatewayBase
 {
     public override async Task Connect(IAsyncStreamReader<AgentMessage> requestStream,
@@ -108,6 +109,8 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                                 {
                                     if (logUploads is not null && command.Grants.All(grant => grant.Kind != "logs"))
                                         command.Grants.Add(logUploads.Create(command.Task, command.DeadlineAt.ToDateTimeOffset()));
+                                    if (reportUploads is not null && command.Grants.All(grant => grant.Kind != "reports"))
+                                        command.Grants.Add(reportUploads.Create(command.Task, command.DeadlineAt.ToDateTimeOffset()));
                                     await responseStream.WriteAsync(new ControlMessage
                                     {
                                         Sequence = checked((ulong)Interlocked.Increment(ref sequence)),

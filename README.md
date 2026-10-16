@@ -177,10 +177,40 @@ for overrides. Its `FromTypeLimits` parser accepts the `workflow_types.limits`
 shape `{"reports":{"maxCount":10,"maxBytes":10000000}}`, with either field
 optional. Values must be positive integers; unknown or duplicate report settings
 fail explicitly. Other limit sections remain independent. Shared contracts keep
-SDK/server policy parsing identical. Remote task-host transport, database-backed
-type-policy loading and authoritative cross-process/lost-response count
-enforcement remain the report-store task; the local counter is not a durable
-storage receipt.
+SDK/server policy parsing identical; the local counter is not a durable storage
+receipt.
+
+Remote task hosts now receive an attempt-scoped report capability from the real
+agent gateway. Its optional protobuf `bearer_token` field leaves old grants
+wire-compatible and keeps credentials out of request URLs. The agent accepts
+report destinations only on configured engine origins, with no credentials,
+query, fragment, alternate endpoint or duplicate grant. The SDK uses exact
+HTTP/2, no redirects and the Authorization header, then validates a bounded
+committed receipt. Publishing requires a real Dispatched/Running attempt in a
+Running/Aborting run; no user-supplied source or cross-run override is accepted.
+Capability expiry is the attempt deadline plus 24 hours for immutable retries.
+
+`POST /api/v1/report-publishes/{reportId}` streams only payload bytes to the
+existing blob store. Bounded metadata comes through `X-Wf-Report-Metadata` as
+base64url JSON: kind, title, tags, exact length and SHA-256. Kind/title/tag limits
+are 128/512/128 UTF-8 bytes, with at most 32 tags; local SDK publishing applies
+the same description rules. The server reads the actual workflow type's limits
+and serializes admission in PostgreSQL across all hosts, without holding engine
+run-state row locks during upload. It verifies length/hash and immutable
+`reports/{runId}/{reportId}` content before committing a metadata/pointer-only
+report row. A compact global ID locator prevents cross-run/month ID reuse while
+the report records remain monthly partitioned.
+
+The same report ID with exact source/attempt/metadata/content replays without
+consuming quota or emitting another event, including after task completion.
+Different content conflicts. A committed row emits transactional `ReportAdded`
+notification IDs only; rollback emits none. Blob success followed by database
+failure can leave an unreferenced immutable object; an exact retry can repair the
+pointer, and retention cleanup must collect unreferenced objects/ID locators.
+Failed or cancelled streams leave no report row or final object. Signed-token,
+permission, malformed-policy, count, byte, storage and receipt failures remain
+explicit. Report index/content APIs and SignalR index push follow in their own
+tasks; this upload endpoint is not a viewer download capability.
 
 `POST /api/v1/runs` accepts `workflowId`, optional exact `version` (SemVer or
 version UUID), and optional `variables` (an empty object by default). A delegated

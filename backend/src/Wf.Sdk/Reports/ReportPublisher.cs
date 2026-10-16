@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Wf.Contracts;
+using Wf.Contracts.Reports;
 
 namespace Wf.Sdk;
 
@@ -36,13 +37,10 @@ public sealed class ReportPublisher : IReports
         CancellationToken cancellationToken, IReadOnlyList<string>? tags = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        ArgumentException.ThrowIfNullOrWhiteSpace(kind);
-        ArgumentException.ThrowIfNullOrWhiteSpace(title);
         if (sourceKey is null)
             throw new InvalidOperationException("Reports must be published through an executing task context.");
+        ReportUploadMetadata.ValidateDescription(kind, title, tags ?? []);
         var copiedTags = tags?.ToImmutableArray() ?? [];
-        foreach (var tag in copiedTags)
-            ArgumentException.ThrowIfNullOrWhiteSpace(tag, nameof(tags));
         quota.Reserve(payload.Length);
         try
         {

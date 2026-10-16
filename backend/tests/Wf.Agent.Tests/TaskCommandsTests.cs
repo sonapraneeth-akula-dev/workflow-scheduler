@@ -112,6 +112,35 @@ public sealed class TaskCommandsTests
         Assert.Equal(0, cache.Handler.Count);
     }
 
+    [Theory]
+    [InlineData("https://unconfigured.example/api/v1/report-publishes/token")]
+    [InlineData("//unconfigured.example/api/v1/report-publishes/token")]
+    [InlineData("http://localhost@unconfigured.example/api/v1/report-publishes/token")]
+    [InlineData("http://localhost/api/v1/report-publishes/token?other=1")]
+    [InlineData("http://localhost/api/v1/report-publishes/token#fragment")]
+    [InlineData("http://localhost/api/v1/other/token")]
+    [InlineData("duplicate")]
+    public async Task ReportPublish_dispatch_capabilities_cannot_redirect_to_unconfigured_origins_or_ambiguous_targets(string uri)
+    {
+        await using var cache = new PackageCacheTests.CacheFixture([]);
+        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
+        using var outbox = new AgentOutbox();
+        await using var commands = Create(cache, hosts, outbox);
+        var message = Dispatch(cache.Sha);
+        message.Dispatch.Grants.Add(new UploadGrant
+        {
+            Kind = "reports", UploadUri = uri == "duplicate" ? "/api/v1/report-publishes/token" : uri
+        });
+        if (uri == "duplicate")
+            message.Dispatch.Grants.Add(message.Dispatch.Grants[0].Clone());
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await commands.HandleAsync(message, TestContext.Current.CancellationToken));
+        Assert.Empty(commands.Inflight);
+        Assert.Null(outbox.NextAfter(0));
+        Assert.Equal(0, cache.Handler.Count);
+        Assert.Equal(0, hosts.ProcessStartCount);
+    }
+
     private static TaskCommands Create(PackageCacheTests.CacheFixture cache, TaskHostPool hosts, AgentOutbox outbox) =>
         new(new AgentOptions([new Uri("http://localhost")], Guid.NewGuid().ToString(), "test", "ci", 1),
             cache.Cache, hosts, outbox, TimeProvider.System, NullLogger<TaskCommands>.Instance);

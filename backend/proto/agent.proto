@@ -97,6 +97,8 @@ message UploadGrant {
   string upload_uri = 2;
   uint64 max_bytes = 3;
   google.protobuf.Timestamp expires_at = 4;
+  // Optional header capability; keep credentials out of report request URLs.
+  string bearer_token = 5;
 }
 
 message Cancel {

@@ -165,7 +165,18 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
         var result = new TaskCompleted { Task = dispatch.Task.Clone() };
         try
         {
-            var taskContext = new TaskContext(linked.Token, variables, outputs, inputs, node.Inputs);
+            var reportGrant = dispatch.Grants.SingleOrDefault(grant => grant.Kind == "reports");
+            using var reportHttp = reportGrant is null ? null : new HttpClient(new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false, ConnectTimeout = TimeSpan.FromSeconds(10)
+            })
+            {
+                DefaultRequestVersion = System.Net.HttpVersion.Version20,
+                DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact,
+                Timeout = TimeSpan.FromSeconds(30)
+            };
+            var reports = reportHttp is null ? null : ReportUploadClient.Create(reportHttp, reportGrant!, dispatch.Task);
+            var taskContext = new TaskContext(linked.Token, variables, outputs, inputs, node.Inputs, reports: reports);
             await new TaskRegistry(workflow).ExecuteAsync($"{node.Key}/{dispatch.Task.TaskKey}", taskContext);
             linked.Token.ThrowIfCancellationRequested();
             result.Outcome = TaskOutcome.Succeeded;

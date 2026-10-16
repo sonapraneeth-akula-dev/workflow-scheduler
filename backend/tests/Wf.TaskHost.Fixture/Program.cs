@@ -95,7 +95,20 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
             using var child = Process.Start(info)!;
             File.WriteAllText(marker, child.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
             Thread.Sleep(Timeout.Infinite);
-        })));
+        }))
+    .PostProcess(s => s.Task("report", async ctx =>
+    {
+        ctx.Outputs["pid"] = Environment.ProcessId;
+        ctx.Outputs["sourceKey"] = ctx.TaskKey;
+        await ctx.Reports.PublishAsync("text", "Post summary",
+            System.Text.Encoding.UTF8.GetBytes("Published by " + ctx.TaskKey), ctx.CancellationToken, ["post", "review"]);
+    }).Task("reportBurst", async ctx =>
+    {
+        for (var index = 0; index < 12; index++)
+            await ctx.Reports.PublishAsync("custom", "Report " + index,
+                System.Text.Encoding.UTF8.GetBytes(index.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                ctx.CancellationToken, ["burst"]);
+    })));
 
 return await workflow.RunAsync(args);
 

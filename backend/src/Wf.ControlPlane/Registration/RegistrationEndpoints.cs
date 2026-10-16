@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Wf.Contracts.Registration;
 using Wf.ControlPlane.Auth;
 using Wf.ControlPlane.Registry;
+using Wf.ControlPlane.Reports;
 using Wf.ControlPlane.Storage;
 
 namespace Wf.ControlPlane.Registration;
@@ -29,6 +30,8 @@ public static class RegistrationEndpoints
         services.AddSingleton(provider => new BlobUploadGrants(key, RegistrationService.MaximumPackageBytes,
             provider.GetRequiredService<TimeProvider>()));
         services.AddSingleton(provider => new LogUploadCapabilities(key, provider.GetRequiredService<TimeProvider>()));
+        services.AddSingleton(provider => new ReportUploadCapabilities(key, provider.GetRequiredService<TimeProvider>()));
+        services.AddSingleton<ReportStore>();
         services.AddSingleton<RegistrationService>();
         return services;
     }
@@ -39,6 +42,7 @@ public static class RegistrationEndpoints
         endpoints.MapPost("/api/v1/upload-grants", Grant).RequireAuthorization(AuthExtensions.Registrar);
         endpoints.MapPut("/api/v1/uploads/{grant}", Upload).AllowAnonymous();
         endpoints.MapLogUploadEndpoints();
+        endpoints.MapReportPublishEndpoints();
         return endpoints;
     }
 

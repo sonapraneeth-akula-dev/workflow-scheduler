@@ -6,6 +6,7 @@ using Wf.Agent.Hosts;
 using Wf.Agent.Packages;
 using Wf.Agent.Logs;
 using Wf.Contracts.Agent.V1;
+using Wf.Contracts.Reports;
 
 namespace Wf.Agent;
 
@@ -47,6 +48,8 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
             dispatch.Sha256.Length != 64 || dispatch.Sha256.Any(character => !char.IsAsciiHexDigit(character)))
             throw new InvalidDataException("Dispatch requires a version, deadline, reservation, package URL and SHA-256.");
         _ = dispatch.DeadlineAt.ToDateTimeOffset();
+        if (dispatch.Grants.Count(grant => grant.Kind == "reports") > 1)
+            throw new InvalidDataException("Dispatch contains duplicate report capabilities.");
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
@@ -54,6 +57,18 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
             if (active.Count >= options.MaxTasks)
                 throw new InvalidDataException("Dispatch exceeds the agent's configured task capacity.");
             var execution = new Execution(dispatch.Clone(), CancellationTokenSource.CreateLinkedTokenSource(stoppingToken));
+            foreach (var grant in execution.Dispatch.Grants.Where(grant => grant.Kind == "reports"))
+            {
+                if (!Uri.TryCreate(options.Engines[0], grant.UploadUri, out var uri) ||
+                    !options.Engines.Any(engine => engine.GetLeftPart(UriPartial.Authority) == uri.GetLeftPart(UriPartial.Authority)) ||
+                    uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0 ||
+                    uri.AbsolutePath != ReportUploadMetadata.EndpointPath)
+                {
+                    execution.Cancellation.Dispose();
+                    throw new InvalidDataException("Report capability must target a configured engine's report endpoint.");
+                }
+                grant.UploadUri = uri.AbsoluteUri;
+            }
             accepted.Add(key);
             active[key] = execution;
             execution.Work = Task.Run(async () =>
