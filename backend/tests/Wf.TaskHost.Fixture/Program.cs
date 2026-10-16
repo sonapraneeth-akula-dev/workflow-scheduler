@@ -4,9 +4,13 @@ using System.Security.Principal;
 using Wf.Contracts;
 using Wf.Contracts.Definition;
 using Wf.Sdk;
+using Wf.TaskHost.Fixture;
+
+if (args.Length > 0 && args[0] == "--secret-default-fixture")
+    return await SecretFixture.Create(withDefault: true).RunAsync(args[1..]);
 
 var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test")
-    .Variables(v => v.Int("amount", 10))
+    .Variables(v => v.Int("amount", 10).Secret("credential"))
     .Node("source", n => n.Task("noop", ctx => ctx.Outputs["value"] = 7))
     .Node("work", n => n.DependsOn("source").Input("source", "value")
         .Task("echo", ctx =>
@@ -17,6 +21,16 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
             ctx.Log("Executed actual SDK task delegate.");
         })
         .Task("fail", _ => throw new InvalidOperationException("fixture failure"))
+        .Task("secret", SecretFixture.ExecuteAsync)
+        .Task("secretOperation", Tasks.HttpOperation("https://operation.example/submit",
+            new HttpOperationStatusContract("state", TimeSpan.FromDays(1)), secretReference: "secret://local/task-token"))
+        .Task("secretFailure", async ctx =>
+        {
+            await SecretFixture.ExecuteAsync(ctx);
+            var value = ctx.Secret(ctx.Var<SecretReference>("credential"));
+            throw new InvalidOperationException("task failed: " + value + " " +
+                Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(value)));
+        })
         .Task("outputs", ctx =>
         {
             ctx.Outputs["text"] = "<script>window.outputExecuted=true</script>";

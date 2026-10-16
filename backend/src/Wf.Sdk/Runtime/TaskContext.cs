@@ -12,6 +12,7 @@ public sealed class TaskContext
     private readonly ImmutableHashSet<InputBinding> declaredInputs;
     private readonly IReports? reports;
     private readonly IArtifacts? artifacts;
+    private readonly IReadOnlyDictionary<string, string> secrets;
     public CancellationToken CancellationToken { get; }
     public NodeOutputs Outputs { get; }
     public string? TaskKey { get; }
@@ -24,7 +25,7 @@ public sealed class TaskContext
         IReadOnlyDictionary<string, object>? variables = null, NodeOutputs? outputs = null,
         IReadOnlyDictionary<string, NodeOutputs>? inputs = null, IEnumerable<InputBinding>? declaredInputs = null,
         Action<string>? logger = null, IReports? reports = null, IArtifacts? artifacts = null, string? taskKey = null,
-        AbortRecord? abort = null)
+        AbortRecord? abort = null, IReadOnlyDictionary<string, string>? secrets = null)
     {
         CancellationToken = cancellationToken;
         Outputs = outputs ?? new("task");
@@ -38,11 +39,25 @@ public sealed class TaskContext
         this.artifacts = artifacts;
         TaskKey = taskKey;
         Abort = abort;
+        this.secrets = secrets?.ToImmutableDictionary(StringComparer.Ordinal) ??
+            ImmutableDictionary<string, string>.Empty;
     }
 
     internal TaskContext ForTask(string key) => new(CancellationToken, variables, Outputs, inputs,
         declaredInputs, Logger, reports is ReportPublisher publisher ? publisher.ForSource(key) : reports,
-        artifacts is ArtifactPublisher artifactPublisher ? artifactPublisher.ForSource(key) : artifacts, key, Abort);
+        artifacts is ArtifactPublisher artifactPublisher ? artifactPublisher.ForSource(key) : artifacts, key, Abort, secrets);
+
+    /// <summary>Read an agent-resolved reference for this attempt; never writes the value into variables or the manifest.</summary>
+    public string Secret(SecretReference reference)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        return secrets.TryGetValue(reference.Name, out var value) ? value :
+            throw new TaskFailureException($"Secret '{reference.Name}' is not available for this attempt.",
+                retryable: false, category: FailureCategory.ValidationError);
+    }
+
+    public string Secret(string reference) => SecretReference.IsValidName(reference) ? Secret(new SecretReference(reference)) :
+        throw new TaskFailureException("Task secret reference is invalid.", retryable: false, category: FailureCategory.ValidationError);
 
     public void Log(string message)
     {

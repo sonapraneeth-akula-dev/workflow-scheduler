@@ -46,6 +46,7 @@ public sealed class TaskHostServerTests
             deadline.CancelAfter(TimeSpan.FromSeconds(10));
             var ready = await client.ReadyAsync(new ReadyRequest(), cancellationToken: deadline.Token);
             Assert.False(ready.Bound);
+            Assert.Equal(2u, ready.ProtocolVersion);
             Assert.Equal((uint)Environment.ProcessId, ready.ProcessId);
             var attempt = new AttemptRef { RunId = Guid.NewGuid().ToString(), NodeKey = "work", TaskKey = "task", Attempt = 1 };
             var request = new ExecuteRequest
@@ -56,10 +57,14 @@ public sealed class TaskHostServerTests
                     DeadlineAt = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddSeconds(30))
                 }
             };
+            Assert.Empty((await client.RequiredSecretsAsync(request, cancellationToken: deadline.Token)).Names);
+            Assert.Equal(0, Volatile.Read(ref invoked));
+            Assert.False((await client.ReadyAsync(new ReadyRequest(), cancellationToken: deadline.Token)).Bound);
             using var execution = client.ExecuteAsync(request, cancellationToken: deadline.Token);
             while (!(await client.ReadyAsync(new ReadyRequest(), cancellationToken: deadline.Token)).Bound)
                 await Task.Delay(5, deadline.Token);
             await RejectAsync(StatusCode.FailedPrecondition, () => client.ExecuteAsync(request, cancellationToken: deadline.Token).ResponseAsync);
+            await RejectAsync(StatusCode.FailedPrecondition, () => client.RequiredSecretsAsync(request, cancellationToken: deadline.Token).ResponseAsync);
             await RejectAsync(StatusCode.FailedPrecondition, () => client.AcknowledgeAsync(
                 new AcknowledgeRequest { Task = attempt }, cancellationToken: deadline.Token).ResponseAsync);
             var wrong = attempt.Clone();

@@ -249,7 +249,7 @@ public sealed class TaskOutputsTests(TaskOutputsDatabase database, ITestOutputHe
             Assert.Equal(HttpStatusCode.Unauthorized, unauthenticated.StatusCode);
     }
 
-    private static async Task<byte[]> Package()
+    internal static async Task<byte[]> Package()
     {
         using var buffer = new MemoryStream();
         using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
@@ -283,7 +283,7 @@ public sealed class TaskOutputsTests(TaskOutputsDatabase database, ITestOutputHe
         Assert.Equal("{}", (await host.Read(run.Snapshot.RunId, "outputs")).Outputs!.Value.GetRawText());
     }
 
-    private static Process StartAgent(OutputHost host, Guid id)
+    internal static Process StartAgent(OutputHost host, Guid id, Action<ProcessStartInfo>? configure = null)
     {
         var start = new ProcessStartInfo("dotnet")
         {
@@ -302,13 +302,19 @@ public sealed class TaskOutputsTests(TaskOutputsDatabase database, ITestOutputHe
         start.Environment["Agent__ResultJournalDirectory"] = Path.Combine(host.Root, "journal");
         start.Environment["Agent__PackageCache"] = Path.Combine(host.Root, "packages");
         start.Environment["Agent__Sampling__Enabled"] = "false";
+        start.Environment["Agent__LogSpoolDirectory"] = Path.Combine(host.Root, "logs");
+        foreach (var key in start.Environment.Keys.Where(key => key.StartsWith("Secrets__", StringComparison.OrdinalIgnoreCase)).ToArray())
+            start.Environment.Remove(key);
+        start.Environment["Secrets__Provider"] = "Local";
+        start.Environment["Secrets__LocalDirectory"] = Path.Combine(host.Root, "secrets");
         start.Environment["TEMP"] = host.ProjectRoot;
         start.Environment["TMP"] = host.ProjectRoot;
         start.Environment["TMPDIR"] = host.ProjectRoot;
+        configure?.Invoke(start);
         return Process.Start(start)!;
     }
 
-    private sealed class OutputHost : IAsyncDisposable
+    internal sealed class OutputHost : IAsyncDisposable
     {
         public required WebApplication App { get; init; }
         public required HttpClient Client { get; init; }
@@ -324,12 +330,13 @@ public sealed class TaskOutputsTests(TaskOutputsDatabase database, ITestOutputHe
         private readonly string team = "outputs-" + Guid.NewGuid().ToString("N");
         private bool seeded;
 
-        public static async Task<OutputHost> Start(NpgsqlDataSource source)
+        public static async Task<OutputHost> Start(NpgsqlDataSource source, string artifacts = "task-outputs-3adec91f",
+            Action<WebApplicationBuilder>? configure = null)
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (!Directory.Exists(Path.Combine(directory.FullName, ".git")))
                 directory = directory.Parent ?? throw new InvalidOperationException("Repository root not found.");
-            var root = Path.Combine(directory.FullName, ".agent-artifacts", "task-outputs-3adec91f", "tests", Guid.NewGuid().ToString("N"));
+            var root = Path.Combine(directory.FullName, ".agent-artifacts", artifacts, "tests", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(root);
             var runs = new RunStore(source, NullLogger<RunStore>.Instance);
             var registry = new AgentRegistry(source, TimeProvider.System);
@@ -350,6 +357,7 @@ public sealed class TaskOutputsTests(TaskOutputsDatabase database, ITestOutputHe
             builder.Services.AddSingleton(new ResourceSampleSink(source, runs, blobs));
             var documentName = "v1";
             builder.Services.AddOpenApi(documentName);
+            configure?.Invoke(builder);
             var app = builder.Build();
             app.UseAuthentication();
             app.UseAuthorization();
@@ -375,7 +383,8 @@ public sealed class TaskOutputsTests(TaskOutputsDatabase database, ITestOutputHe
         public AttemptRef Reference(Guid run, string task, uint attempt = 1) =>
             new() { RunId = run.ToString("D"), NodeKey = "work", TaskKey = task, Attempt = attempt };
 
-        public async Task<RunState> Seed(AgentSession session, string task, byte[]? package = null, string type = "test")
+        public async Task<RunState> Seed(AgentSession session, string task, byte[]? package = null, string type = "test",
+            ByteString? variablesJson = null)
         {
             if (!seeded)
             {
@@ -390,19 +399,23 @@ public sealed class TaskOutputsTests(TaskOutputsDatabase database, ITestOutputHe
                     """, Guid.CreateVersion7(), team + "/test", Viewer);
                 seeded = true;
             }
+            using var variables = variablesJson is null ? null : JsonDocument.Parse(variablesJson.Memory);
             var run = new RunState(Guid.CreateVersion7(), [new("work", [], [new(task)])],
-                new(type, ImmutableSortedDictionary<string, string>.Empty), Assert.Fail);
+                new(type, ImmutableSortedDictionary<string, string>.Empty), Assert.Fail,
+                variables?.RootElement.EnumerateObject().ToDictionary(property => property.Name,
+                    property => property.Value, StringComparer.Ordinal));
             await Runs.CreateAsync(run, $"{team}/{type}/workflow", Guid.CreateVersion7(), DateTimeOffset.UtcNow.AddMinutes(5), Token);
             await Runs.AppendAsync(run, EventEntity.Run, null, (int)RunStatus.Running, DateTimeOffset.UtcNow, Token);
             await Runs.AppendAsync(run, EventEntity.Node, "work", (int)ExecutionStatus.Ready, DateTimeOffset.UtcNow, Token);
             await Runs.AppendAsync(run, EventEntity.Node, "work", (int)ExecutionStatus.Dispatched, DateTimeOffset.UtcNow, Token);
             await Runs.AppendAsync(run, EventEntity.Node, "work", (int)ExecutionStatus.Running, DateTimeOffset.UtcNow, Token);
             await Runs.AppendAsync(run, EventEntity.Task, "work/" + task, (int)ExecutionStatus.Ready, DateTimeOffset.UtcNow, Token);
-            await Dispatch(run, session, task, 1, package);
+            await Dispatch(run, session, task, 1, package, variablesJson);
             return run;
         }
 
-        public async Task Dispatch(RunState run, AgentSession session, string task, int attempt, byte[]? package)
+        public async Task Dispatch(RunState run, AgentSession session, string task, int attempt, byte[]? package,
+            ByteString? variablesJson = null)
         {
             var sha = package is null ? new string('a', 64) : Convert.ToHexStringLower(SHA256.HashData(package));
             using var dispatcher = new Dispatcher(Source, Runs, Registry, new PlacementEngine(), TimeProvider.System);
@@ -411,7 +424,7 @@ public sealed class TaskOutputsTests(TaskOutputsDatabase database, ITestOutputHe
                 {
                     Task = Reference(run.Snapshot.RunId, task, (uint)attempt), Version = "1.0.0",
                     PackageUri = new Uri(Client.BaseAddress!, "/package.zip").ToString(), Sha256 = sha,
-                    VariablesJson = ByteString.CopyFromUtf8($$"""{"amount":{{attempt}}}"""),
+                    VariablesJson = variablesJson ?? ByteString.CopyFromUtf8($$"""{"amount":{{attempt}}}"""),
                     DeadlineAt = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(2))
                 }, Token);
             Assert.Equal(session.AgentId, decision.Agent?.Id);

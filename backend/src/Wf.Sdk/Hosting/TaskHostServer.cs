@@ -62,9 +62,36 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
         lock (sync)
             return Task.FromResult(new HostReady
             {
-                ProtocolVersion = 1, ProcessId = (uint)Environment.ProcessId,
+                ProtocolVersion = 2, ProcessId = (uint)Environment.ProcessId,
                 WorkflowVersion = workflow.Version, Bound = bound is not null
             });
+    }
+
+    public override Task<SecretReferences> RequiredSecrets(ExecuteRequest request, ServerCallContext context)
+    {
+        lock (sync)
+        {
+            if (bound is not null)
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Task host is already bound to an attempt."));
+            try
+            {
+                var dispatch = request.Dispatch;
+                var node = FindNode(dispatch);
+                var supplied = ReadObject(dispatch.VariablesJson);
+                if (workflow.Variables.Where(schema => schema.Type == VariableType.Secret).Any(schema =>
+                    supplied.TryGetValue(schema.Key, out var value) ? !SecretReference.IsValidValue(value) :
+                    schema.Required && schema.Default is null))
+                    throw new RpcException(new Status(StatusCode.InvalidArgument, "Task secret references are invalid."));
+                var variables = VariableBinder.Bind(workflow.Variables, supplied);
+                var result = new SecretReferences();
+                try { result.Names.Add(References(dispatch, node, variables)); }
+                catch (ArgumentException)
+                { throw new RpcException(new Status(StatusCode.InvalidArgument, "Task secret references are invalid.")); }
+                return Task.FromResult(result);
+            }
+            catch (Exception error) when (error is ArgumentException or JsonException or InvalidOperationException)
+            { throw new RpcException(new Status(StatusCode.InvalidArgument, "Task inputs or variables are invalid.")); }
+        }
     }
 
     public override Task<TaskCompleted> Execute(ExecuteRequest request, ServerCallContext context)
@@ -91,17 +118,44 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
                 var outputs = new NodeOutputs(node.Key);
                 foreach (var pair in ReadObject(request.NodeOutputsJson))
                     outputs[pair.Key] = pair.Value;
+                var references = References(dispatch, node, variables);
+                if (request.ResolvedSecrets.Count != references.Length || references.Any(reference =>
+                    !request.ResolvedSecrets.TryGetValue(reference, out var value) || string.IsNullOrEmpty(value)))
+                    throw new ArgumentException("Required task secrets are unavailable.");
                 var deadline = dispatch.DeadlineAt.ToDateTimeOffset();
                 bound = task.Clone();
                 attemptCancellation = new CancellationTokenSource();
-                execution = ExecuteTaskAsync(dispatch, node, variables, inputs, outputs, deadline);
+                execution = ExecuteTaskAsync(dispatch, node, variables, inputs, outputs, deadline, request.ResolvedSecrets);
                 return execution;
             }
             catch (Exception exception) when (exception is ArgumentException or JsonException or InvalidOperationException)
             {
-                throw new RpcException(new Status(StatusCode.InvalidArgument, exception.Message));
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "Task execution inputs or secret bindings are invalid."));
             }
         }
+    }
+
+    private NodeDefinition FindNode(Dispatch? dispatch)
+    {
+        if (dispatch?.Task is not { } task || dispatch.Version != workflow.Version || dispatch.DeadlineAt is null ||
+            !Guid.TryParse(task.RunId, out _) || string.IsNullOrWhiteSpace(task.NodeKey) ||
+            string.IsNullOrWhiteSpace(task.TaskKey) || task.Attempt == 0)
+            throw new ArgumentException("Invalid task identity.");
+        return workflow.Nodes.FirstOrDefault(node => node.Key == task.NodeKey &&
+            node.Tasks.Any(candidate => candidate.Key == task.TaskKey)) ??
+            throw new ArgumentException("Task is not declared in this workflow.");
+    }
+
+    private static string[] References(Dispatch dispatch, NodeDefinition node, IReadOnlyDictionary<string, object> variables)
+    {
+        var references = variables.Values.OfType<SecretReference>().Select(reference => reference.Name)
+            .Concat(dispatch.SecretRefs);
+        if (node.Tasks.Single(task => task.Key == dispatch.Task.TaskKey).HttpOperation?.SecretReference is { } taskReference)
+            references = references.Append(taskReference);
+        var names = references.Distinct(StringComparer.Ordinal).ToArray();
+        if (names.Length > 128 || names.Any(name => !SecretReference.IsValidName(name)))
+            throw new ArgumentException("Task secret references are invalid.");
+        return names;
     }
 
     public override Task<HostReply> Cancel(CancelRequest request, ServerCallContext context)
@@ -151,7 +205,7 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
 
     private async Task<TaskCompleted> ExecuteTaskAsync(Dispatch dispatch, NodeDefinition node,
         IReadOnlyDictionary<string, object> variables, IReadOnlyDictionary<string, NodeOutputs> inputs,
-        NodeOutputs outputs, DateTimeOffset deadline)
+        NodeOutputs outputs, DateTimeOffset deadline, IReadOnlyDictionary<string, string> secrets)
     {
         // Ensure Execute returns before user code can synchronously block the gRPC worker.
         await Task.Yield();
@@ -187,7 +241,8 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
                 Timeout = Timeout.InfiniteTimeSpan
             };
             var artifacts = artifactHttp is null ? null : new ArtifactPublisher(artifactHttp, artifactGrant!, dispatch.Task);
-            var taskContext = new TaskContext(linked.Token, variables, outputs, inputs, node.Inputs, reports: reports, artifacts: artifacts);
+            var taskContext = new TaskContext(linked.Token, variables, outputs, inputs, node.Inputs,
+                reports: reports, artifacts: artifacts, secrets: secrets);
             await new TaskRegistry(workflow).ExecuteAsync($"{node.Key}/{dispatch.Task.TaskKey}", taskContext);
             linked.Token.ThrowIfCancellationRequested();
             result.Outcome = TaskOutcome.Succeeded;

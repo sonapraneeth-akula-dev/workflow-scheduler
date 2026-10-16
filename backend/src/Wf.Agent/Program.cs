@@ -7,8 +7,46 @@ using Wf.Agent.Packages;
 using Wf.Agent.Journal;
 using Wf.Agent.Logs;
 using Wf.Agent.Sampling;
+using Wf.Agent.Secrets;
+using Wf.Contracts.Definition;
 
-var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = args, ContentRootPath = AppContext.BaseDirectory });
+var provisioning = args.Length == 2 && args[0] == "--set-secret";
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+{ Args = provisioning ? [] : args, ContentRootPath = AppContext.BaseDirectory });
+var secretStore = SecretStoreConfiguration.Create(builder.Configuration);
+if (provisioning)
+{
+    try
+    {
+        if (secretStore is not LocalSecretStore local || !Console.IsInputRedirected)
+            throw new ArgumentException("Local secret provisioning requires redirected standard input.");
+        using var input = Console.OpenStandardInput();
+        var bytes = new byte[LocalSecretStore.MaxSecretBytes + 3];
+        try
+        {
+            var count = 0;
+            while (count < bytes.Length)
+            {
+                var read = await input.ReadAsync(bytes.AsMemory(count));
+                if (read == 0) break;
+                count += read;
+            }
+            if (count == bytes.Length) throw new ArgumentException("Secret exceeds the supported size.");
+            var value = new System.Text.UTF8Encoding(false, true).GetString(bytes, 0, count);
+            if (value.EndsWith("\r\n", StringComparison.Ordinal)) value = value[..^2];
+            else if (value.EndsWith('\n')) value = value[..^1];
+            await local.WriteAsync(new SecretReference(args[1]), value);
+        }
+        finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(bytes); }
+    }
+    catch (Exception error) when (error is ArgumentException or IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
+    {
+        Console.Error.WriteLine("Secret provisioning failed; check reference, provider and private storage permissions.");
+        Environment.ExitCode = 1;
+    }
+    return;
+}
+builder.Services.AddSingleton(secretStore);
 builder.Services.AddWindowsService(options => options.ServiceName = builder.Configuration["Agent:ServiceName"] ?? "wf-agent");
 builder.Services.AddSystemd();
 builder.Services.AddSingleton(AgentOptions.FromConfiguration(builder.Configuration));

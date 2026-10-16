@@ -7,16 +7,18 @@ namespace Wf.Agent.Secrets;
 public sealed class SecretMasker
 {
     private readonly string[] _secrets;
+    private readonly string[] _values;
     private readonly int _longest;
 
     public SecretMasker(IEnumerable<string> resolvedValues)
     {
         ArgumentNullException.ThrowIfNull(resolvedValues);
-        _secrets = resolvedValues.Select(value =>
+        _values = resolvedValues.Select(value =>
         {
             ArgumentException.ThrowIfNullOrEmpty(value, nameof(resolvedValues));
             return value;
-        }).SelectMany(value => new[] { value, Convert.ToBase64String(Encoding.UTF8.GetBytes(value)) })
+        }).Distinct(StringComparer.Ordinal).ToArray();
+        _secrets = _values.SelectMany(value => new[] { value, Convert.ToBase64String(Encoding.UTF8.GetBytes(value)) })
             .Distinct(StringComparer.Ordinal).OrderByDescending(value => value.Length)
             .ThenBy(value => value, StringComparer.Ordinal).ToArray();
         _longest = _secrets.Length == 0 ? 0 : _secrets[0].Length;
@@ -29,6 +31,7 @@ public sealed class SecretMasker
     }
 
     public TextStream CreateStream() => new(this);
+    internal SecretMasker WithValues(IEnumerable<string> values) => new(_values.Concat(values));
 
     /// <summary>Preserves valid JSON; a secret-bearing non-string scalar becomes a redacted string.</summary>
     public JsonElement RedactJson(JsonElement value)

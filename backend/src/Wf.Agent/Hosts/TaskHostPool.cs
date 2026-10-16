@@ -16,6 +16,7 @@ using Wf.Agent.Sampling;
 using Wf.Agent.Execution;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Host.V1;
+using Wf.Contracts.Definition;
 
 namespace Wf.Agent.Hosts;
 
@@ -69,12 +70,13 @@ public sealed class TaskHostPool : IAsyncDisposable
     private readonly ITimer timer;
     private readonly Task maintenance;
     private readonly ResourceSamplingService? sampling;
+    private readonly ISecretStore? secretStore;
     private int processStartCount;
     private bool disposed;
 
     public TaskHostPool(ILogger<TaskHostPool> logger, TimeProvider? timeProvider = null,
         int maxWarmProcesses = DefaultMaxWarmProcesses, long maxWarmRssBytes = DefaultMaxWarmRssBytes,
-        TimeSpan? warmIdleTimeout = null, ResourceSamplingService? sampling = null)
+        TimeSpan? warmIdleTimeout = null, ResourceSamplingService? sampling = null, ISecretStore? secretStore = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxWarmProcesses);
@@ -87,6 +89,7 @@ public sealed class TaskHostPool : IAsyncDisposable
         this.maxWarmRssBytes = maxWarmRssBytes;
         this.warmIdleTimeout = idle;
         this.sampling = sampling;
+        this.secretStore = secretStore;
         timer = clock.CreateTimer(static state => ((ChannelWriter<byte>)state!).TryWrite(0), wake.Writer,
             Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         maintenance = MaintainAsync();
@@ -148,16 +151,52 @@ public sealed class TaskHostPool : IAsyncDisposable
             using var resourceTracking = sampling?.Track(host.Process, dispatch.Task, host.ResourceScope,
                 host.ResourceUnavailableReason, publishResources, dispatch.ReservationEpoch);
             host.CaptureLog = captureLog;
-            host.Masker = secretMasker ?? new SecretMasker([]);
-            using var call = host.Client.ExecuteAsync(new ExecuteRequest
-            {
-                Dispatch = dispatch.Clone(), NodeOutputsJson = nodeOutputsJson ?? dispatch.NodeOutputsJson
-            });
+            var request = new ExecuteRequest { Dispatch = dispatch.Clone(), NodeOutputsJson = nodeOutputsJson ?? dispatch.NodeOutputsJson };
             using var deadline = new CancellationTokenSource();
             var remaining = dispatch.DeadlineAt.ToDateTimeOffset() - DateTimeOffset.UtcNow;
             if (remaining <= TimeSpan.Zero) deadline.Cancel();
             else deadline.CancelAfter(remaining);
             using var stop = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token, cancellationToken);
+            try
+            {
+                using var required = host.Client.RequiredSecretsAsync(new ExecuteRequest { Dispatch = dispatch.Clone() },
+                    cancellationToken: stop.Token);
+                var references = (await required.ResponseAsync).Names;
+                if (references.Count > 128 || references.Any(name => !SecretReference.IsValidName(name)))
+                    throw new SecretResolutionException();
+                var bytes = 0;
+                foreach (var name in references.Distinct(StringComparer.Ordinal))
+                {
+                    var reference = new SecretReference(name);
+                    if (secretStore is null) throw new SecretResolutionException(reference);
+                    var value = await secretStore.ResolveAsync(reference, stop.Token);
+                    if (string.IsNullOrEmpty(value) || value.Contains('\0') ||
+                        Encoding.UTF8.GetByteCount(value) > LocalSecretStore.MaxSecretBytes)
+                        throw new SecretResolutionException(reference);
+                    bytes = checked(bytes + Encoding.UTF8.GetByteCount(value));
+                    if (bytes > 128 * 1024) throw new SecretResolutionException();
+                    request.ResolvedSecrets.Add(name, value);
+                }
+            }
+            catch (SecretResolutionException error)
+            {
+                host.Masker = (secretMasker ?? new SecretMasker([])).WithValues(request.ResolvedSecrets.Values);
+                return SecretFailure(host.Masker.Redact(error.Message));
+            }
+            catch (RpcException error) when (error.StatusCode == StatusCode.InvalidArgument &&
+                error.Status.Detail == "Task secret references are invalid.")
+            { return SecretFailure("Task secret references are invalid."); }
+            catch (RpcException error) when (error.StatusCode == StatusCode.Cancelled && stop.IsCancellationRequested)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return SecretFailure("Task secret resolution exceeded the attempt deadline.", timedOut: true);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
+            { return SecretFailure("Task secret resolution exceeded the attempt deadline.", timedOut: true); }
+            // Keep manually supplied maskers for existing callers, while always masking real resolved values.
+            host.Masker = (secretMasker ?? new SecretMasker([])).WithValues(request.ResolvedSecrets.Values);
+            host.HasSecrets = request.ResolvedSecrets.Count != 0;
+            using var call = host.Client.ExecuteAsync(request);
             TaskCompleted result;
             try { result = await call.ResponseAsync.WaitAsync(stop.Token); }
             catch (OperationCanceledException) when (stop.IsCancellationRequested)
@@ -205,7 +244,16 @@ public sealed class TaskHostPool : IAsyncDisposable
                 throw new InvalidOperationException($"Task host exited with code {host.Process.ExitCode}: {host.Diagnostics}");
             return result;
         }
+        catch (Exception error) when (host.HasSecrets && error is RpcException or InvalidOperationException or IOException or TimeoutException)
+        { throw new InvalidOperationException(host.Masker.Redact(error.Message)); }
         finally { await ReleaseAsync(host); }
+
+        TaskCompleted SecretFailure(string message, bool timedOut = false) => new()
+        {
+            Task = dispatch.Task.Clone(), At = Timestamp.FromDateTimeOffset(clock.GetUtcNow()),
+            Outcome = timedOut ? TaskOutcome.TimedOut : TaskOutcome.Failed,
+            Error = new TaskError { Category = timedOut ? "Timeout" : "ValidationError", NonRetryable = !timedOut, Message = message }
+        };
     }
 
     private async Task<Host?> StartAsync(TaskHostPackage package, CancellationToken cancellationToken, bool prewarming = false)
@@ -312,7 +360,7 @@ public sealed class TaskHostPool : IAsyncDisposable
                         if (prewarming && !warm.Contains(host)) return null;
                     }
                     var ready = await call.ResponseAsync;
-                    if (ready.ProtocolVersion != 1 || ready.ProcessId != process.Id || ready.WorkflowVersion != package.Version || ready.Bound)
+                    if (ready.ProtocolVersion != 2 || ready.ProcessId != process.Id || ready.WorkflowVersion != package.Version || ready.Bound)
                         throw new InvalidDataException("Task-host readiness identity, version or state is invalid.");
                     await TrimWarmAsync(prewarming ? host : null);
                     if (prewarming && !warm.Contains(host)) return null;
@@ -519,6 +567,7 @@ public sealed class TaskHostPool : IAsyncDisposable
         public Task? Release { get; set; }
         public Func<string, string, Task>? CaptureLog { get; set; }
         public SecretMasker Masker { get; set; } = new([]);
+        public bool HasSecrets { get; set; }
         public string Diagnostics => string.Join(Environment.NewLine, diagnostics);
 
         public Host(TaskHostPackage package, string directory, string socketPath, Process process, GrpcChannel channel,

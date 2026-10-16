@@ -10,6 +10,8 @@ option csharp_namespace = "Wf.Contracts.Host.V1";
 // until acknowledged; reconnect/re-adoption can extend this protocol later.
 service TaskHost {
   rpc Ready(ReadyRequest) returns (HostReady);
+  // Names only, bound from the immutable workflow and this attempt's variables.
+  rpc RequiredSecrets(ExecuteRequest) returns (SecretReferences);
   rpc Execute(ExecuteRequest) returns (wf.agent.v1.TaskCompleted);
   rpc Cancel(CancelRequest) returns (HostReply);
   rpc Acknowledge(AcknowledgeRequest) returns (HostReply);
@@ -28,6 +30,12 @@ message ExecuteRequest {
   wf.agent.v1.Dispatch dispatch = 1;
   // Outputs already committed for this node (series tasks/retries).
   bytes node_outputs_json = 2;
+  // Ephemeral private UDS only. Never copy into Dispatch, logs or a durable journal.
+  map<string, string> resolved_secrets = 3;
+}
+
+message SecretReferences {
+  repeated string names = 1;
 }
 
 message CancelRequest {
