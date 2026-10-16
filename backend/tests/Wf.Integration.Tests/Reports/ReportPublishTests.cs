@@ -37,7 +37,7 @@ using DispatchCommand = Wf.Contracts.Agent.V1.Dispatch;
 
 namespace Wf.Integration.Tests.Reports;
 
-public sealed class ReportPublishTests(ReportPublishDatabase database) : IClassFixture<ReportPublishDatabase>
+public sealed partial class ReportPublishTests(ReportPublishDatabase database) : IClassFixture<ReportPublishDatabase>
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
     private static readonly byte[] Bytes = Encoding.UTF8.GetBytes("report payload never belongs in PostgreSQL");
@@ -497,7 +497,7 @@ public sealed class ReportPublishTests(ReportPublishDatabase database) : IClassF
         return buffer.ToArray();
     }
 
-    private sealed class ReportHost : IAsyncDisposable
+    internal sealed class ReportHost : IAsyncDisposable
     {
         public WebApplication App { get; private init; } = null!;
         public string Root { get; private init; } = "";
@@ -513,10 +513,14 @@ public sealed class ReportPublishTests(ReportPublishDatabase database) : IClassF
         private NpgsqlDataSource Source { get; init; } = null!;
         private bool ownsRoot;
 
-        public static async Task<ReportHost> Start(NpgsqlDataSource source, string? root = null, byte[]? key = null)
+        public static async Task<ReportHost> Start(NpgsqlDataSource source, string? root = null, byte[]? key = null,
+            Action<WebApplicationBuilder>? configureServices = null, Action<WebApplication>? configure = null)
         {
             var actualKey = key ?? RandomNumberGenerator.GetBytes(32);
-            var actualRoot = root ?? Path.Combine(Path.GetTempPath(), "wf-reports-" + Guid.NewGuid().ToString("N"));
+            var project = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (project.Parent is not null && !Directory.Exists(Path.Combine(project.FullName, ".git")))
+                project = project.Parent;
+            var actualRoot = root ?? Path.Combine(project.FullName, ".rr-" + Guid.NewGuid().ToString("N")[..12]);
             var blobs = new FileSystemBlobStore(actualRoot, actualKey);
             var capabilities = new ReportUploadCapabilities(actualKey, TimeProvider.System);
             var registry = new AgentRegistry(source, TimeProvider.System);
@@ -539,7 +543,9 @@ public sealed class ReportPublishTests(ReportPublishDatabase database) : IClassF
             builder.Services.AddSingleton<ReportStore>();
             builder.Services.AddSingleton(registry);
             builder.Services.AddSingleton(runs);
+            configureServices?.Invoke(builder);
             var app = builder.Build();
+            configure?.Invoke(app);
             app.MapReportPublishEndpoints();
             app.MapOpenApi();
             app.MapGrpcService<AgentGatewayService>();

@@ -92,6 +92,7 @@ builder.Services.AddHostedService<AgentLossSweeper>(services => services.GetRequ
 builder.Services.AddSingleton<AgentLossHandler>();
 builder.Services.AddHostedService<AgentLossHandler>(services => services.GetRequiredService<AgentLossHandler>());
 var app = builder.Build();
+app.UseReportResponseHeaders();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapGrpcService<AgentGatewayService>().RequireAuthorization(AuthExtensions.Agent);
@@ -106,6 +107,7 @@ app.MapRunHistoryEndpoints();
 app.MapMetricsEndpoints();
 app.MapRunTimelineEndpoints();
 app.MapTaskLogsEndpoints();
+app.MapReportContentEndpoints();
 app.MapSchedulesEndpoints();
 app.MapSeriesFiresEndpoints();
 app.MapUserSchedulesEndpoints();

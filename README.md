@@ -209,8 +209,21 @@ failure can leave an unreferenced immutable object; an exact retry can repair th
 pointer, and retention cleanup must collect unreferenced objects/ID locators.
 Failed or cancelled streams leave no report row or final object. Signed-token,
 permission, malformed-policy, count, byte, storage and receipt failures remain
-explicit. Report index/content APIs and SignalR index push follow in their own
-tasks; this upload endpoint is not a viewer download capability.
+explicit. This upload endpoint is not a viewer download capability.
+
+`GET /api/v1/reports/{id}/content` requires fresh Viewer permission on the
+report's durable run scope (including historical runs whose workflow was
+deleted). It streams verified immutable bytes without buffering the whole report
+or exposing storage paths/grants. A late size/hash fault aborts the response,
+never successfully completes a partial body. All successful content responses,
+including direct navigation, carry exactly `Content-Security-Policy: sandbox
+allow-scripts; frame-ancestors 'self'`, `nosniff`, and `no-store`; only these
+responses omit the default `X-Frame-Options: DENY`. Denials/errors retain DENY
+and a stricter sandbox. Known exact kinds use safe MIME types; untrusted titles
+never become filenames. Generic `image` and unknown kinds download as
+`application/octet-stream` (clients may identify raster magic on fetched bytes);
+explicit `png`, `jpeg`, `svg`, and their exact MIME kinds have truthful types.
+The content OpenAPI response is a binary string, not a reflected Stream object.
 
 `POST /api/v1/runs` accepts `workflowId`, optional exact `version` (SemVer or
 version UUID), and optional `variables` (an empty object by default). A delegated
