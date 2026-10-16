@@ -16,6 +16,21 @@ public sealed class SelectorValidatorTests
     ];
 
     [Fact]
+    public void Placement_resolution_preserves_the_immutable_task_action_and_node_reservation_policy()
+    {
+        var action = new TaskAction(TaskActionKind.Command, "dotnet --version");
+        var policy = new PlacementPolicy(new(pool: new(variable: "pool"), count: 1));
+        var node = new NodeDefinition("work", [], [new("task", placement: policy, action: action)], placement: policy);
+        var resolved = Assert.Single(PlacementResolver.Resolve([node],
+            ImmutableDictionary<string, object>.Empty.Add("pool", "local")));
+        Assert.Same(action, Assert.Single(resolved.Tasks).Action);
+        Assert.Equal("local", resolved.Placement!.Selector!.Pool!.Literal);
+        Assert.Equal(1, resolved.Placement.Selector.Count);
+        Assert.Equal("local", resolved.Tasks[0].Placement!.Selector!.Pool!.Literal);
+        Assert.Equal("pool", node.Placement!.Selector!.Pool!.Variable);
+    }
+
+    [Fact]
     [RuleCoverage("WFV027", true)]
     public void Known_IDs_labels_OS_count_and_legacy_name_alternatives_are_valid()
     {

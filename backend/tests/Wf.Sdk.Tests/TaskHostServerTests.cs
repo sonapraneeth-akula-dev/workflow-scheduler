@@ -1,9 +1,12 @@
 using System.Net.Sockets;
+using System.Text.Json;
+using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Host.V1;
+using Wf.Contracts;
 using Wf.Sdk.Hosting;
 
 namespace Wf.Sdk.Tests;
@@ -14,9 +17,13 @@ public sealed class TaskHostServerTests
     public async Task Host_binds_once_rejects_wrong_attempt_and_waits_for_result_acknowledgement()
     {
         var invoked = 0;
+        var abort = new AbortRecord("operator", "Operator", DateTimeOffset.UtcNow,
+            "Stop the run; preserve cleanup context.", AbortSource.API);
+        AbortRecord? observedAbort = null;
         var workflow = Workflow.Define("test/host/protocol", "1", w => w.Type("test")
             .Node("work", n => n.Task("task", async ctx =>
             {
+                observedAbort = ctx.Abort;
                 Interlocked.Increment(ref invoked);
                 await Task.Delay(Timeout.InfiniteTimeSpan, ctx.CancellationToken);
             })));
@@ -54,6 +61,8 @@ public sealed class TaskHostServerTests
                 Dispatch = new Dispatch
                 {
                     Task = attempt, Version = "1",
+                    AbortJson = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(abort,
+                        AbortRecordJsonContext.Default.AbortRecord)),
                     DeadlineAt = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddSeconds(30))
                 }
             };
@@ -74,6 +83,7 @@ public sealed class TaskHostServerTests
             await client.CancelAsync(new CancelRequest { Task = attempt }, cancellationToken: deadline.Token);
             Assert.Equal(TaskOutcome.Cancelled, (await execution.ResponseAsync).Outcome);
             Assert.Equal(1, Volatile.Read(ref invoked));
+            Assert.Equal(abort, observedAbort);
             Assert.False(server.IsCompleted);
             await RejectAsync(StatusCode.FailedPrecondition, () => client.ExecuteAsync(request, cancellationToken: deadline.Token).ResponseAsync);
             await RejectAsync(StatusCode.NotFound, () => client.AcknowledgeAsync(

@@ -29,6 +29,7 @@ public static class RegistrationEndpoints
             new FileSystemBlobStore(root, key, timeProvider: provider.GetRequiredService<TimeProvider>()));
         services.AddSingleton(provider => new BlobUploadGrants(key, RegistrationService.MaximumPackageBytes,
             provider.GetRequiredService<TimeProvider>()));
+        services.AddPackageDownloads(key);
         services.AddSingleton(provider => new LogUploadCapabilities(key, provider.GetRequiredService<TimeProvider>()));
         services.AddSingleton(provider => new ReportUploadCapabilities(key, provider.GetRequiredService<TimeProvider>()));
         services.AddSingleton<ReportStore>();
@@ -46,6 +47,7 @@ public static class RegistrationEndpoints
         endpoints.MapPost("/api/v1/registrations", Register).RequireAuthorization(AuthExtensions.Registrar);
         endpoints.MapPost("/api/v1/upload-grants", Grant).RequireAuthorization(AuthExtensions.Registrar);
         endpoints.MapPut("/api/v1/uploads/{grant}", Upload).AllowAnonymous();
+        endpoints.MapPackageDownloads();
         endpoints.MapLogUploadEndpoints();
         endpoints.MapReportPublishEndpoints();
         Wf.ControlPlane.Artifacts.ArtifactEndpoints.MapArtifactEndpoints(endpoints);

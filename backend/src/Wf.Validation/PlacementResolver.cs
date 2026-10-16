@@ -57,9 +57,9 @@ public static class PlacementResolver
         // Authoring scopes are already inherited into tasks; resolve only effective policies.
         return nodes.Select(node => new NodeDefinition(node.Key, node.Dependencies,
             node.Tasks.Select(task => new TaskDefinition(task.Key, task.Failure, task.Policy,
-                ResolvePolicy(task.Placement, $"{node.Key}/{task.Key}"))).ToImmutableArray(),
+                ResolvePolicy(task.Placement, $"{node.Key}/{task.Key}"), task.HttpOperation, task.Action)).ToImmutableArray(),
             node.Mode, node.MaxParallel, node.Failure, node.Inputs, node.Timeout,
-            whenUnavailable: node.WhenUnavailable)).ToImmutableArray();
+            ResolvePolicy(node.Placement, node.Key), node.WhenUnavailable)).ToImmutableArray();
 
         PlacementPolicy? ResolvePolicy(PlacementPolicy? policy, string key)
         {

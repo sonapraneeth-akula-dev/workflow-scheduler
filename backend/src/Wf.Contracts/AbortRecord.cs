@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Wf.Contracts;
 
 public enum AbortSource { UI, API, CLI, KillSwitch, Local }
@@ -28,3 +30,6 @@ public sealed record AbortRecord
         Source = source;
     }
 }
+
+[JsonSerializable(typeof(AbortRecord))]
+public sealed partial class AbortRecordJsonContext : JsonSerializerContext;

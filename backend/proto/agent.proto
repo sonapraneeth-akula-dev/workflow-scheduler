@@ -85,6 +85,8 @@ message Dispatch {
   bytes variables_json = 11;
   // Outputs already committed by this node, keyed by declared output name.
   bytes node_outputs_json = 12;
+  // The original accepted abort record for bounded post/always cleanup.
+  bytes abort_json = 13;
 }
 
 message ResourceLimits {

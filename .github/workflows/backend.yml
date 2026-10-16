@@ -35,7 +35,7 @@ jobs:
         run: |
           $suffix = if ($IsWindows) { ".exe" } else { "" }
           "WF_AGENT_EXECUTABLE=${{ runner.temp }}/wf-agent/wf-agent$suffix" >> $env:GITHUB_ENV
-      - run: dotnet test backend/Wf.slnx --configuration Release --no-build --filter "Category!=Nightly&Category!=ChaosSmoke&Category!=Performance" --collect:"XPlat Code Coverage"
+      - run: dotnet test backend/Wf.slnx --configuration Release --no-build --filter "Category!=Nightly&Category!=ChaosSmoke&Category!=Performance&Category!=LocalStackScenario" --collect:"XPlat Code Coverage"
       - name: Install and start Windows service
         if: runner.os == 'Windows'
         shell: pwsh
@@ -76,3 +76,62 @@ jobs:
           sudo bash infra/agent/install-agent.sh --executable "$AGENT_BINARY" --engine http://localhost:5000 --name ci-linux
           sudo systemctl is-active --quiet wf-agent.service
       - run: dotnet run --file backend/samples/workflows/scenario-a.cs
+  local-stack:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            postgres-image: ""
+          - os: ubuntu-latest
+            postgres-image: postgres:17-alpine
+    runs-on: ${{ matrix.os }}
+    services:
+      postgres:
+        image: ${{ matrix.postgres-image }}
+        env:
+          POSTGRES_PASSWORD: scenario-ci
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: ankane/setup-postgres@v1
+        if: runner.os == 'Windows'
+        with:
+          postgres-version: 17
+      - name: Configure native Windows PostgreSQL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '"WF_TEST_POSTGRES=Host=localhost;Username=postgres;Database=postgres" >> $env:GITHUB_ENV'
+      - name: Configure Linux service PostgreSQL
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: |
+          "WF_TEST_POSTGRES=Host=127.0.0.1;Port=${{ job.services.postgres.ports['5432'] }};Username=postgres;Password=scenario-ci;Database=postgres" >> $env:GITHUB_ENV
+      - name: Install Vite dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+      - name: Build default Debug AppHost and production workflow compiler
+        run: dotnet build backend/src/Wf.Cli "-p:WarningsNotAsErrors=NU1902%3BNU1903" && dotnet build backend/tests/Wf.AppHost.Tests "-p:WarningsNotAsErrors=NU1902%3BNU1903"
+      - name: Execute real local-stack scenario A
+        env:
+          WF_APPHOST_SCENARIO: "true"
+        run: dotnet test backend/tests/Wf.AppHost.Tests --no-build --filter "FullyQualifiedName~LocalStackScenarioTests" --logger "trx;LogFileName=local-stack-scenario.trx"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-stack-scenario-${{ matrix.os }}
+          path: backend/tests/Wf.AppHost.Tests/TestResults
+          if-no-files-found: error

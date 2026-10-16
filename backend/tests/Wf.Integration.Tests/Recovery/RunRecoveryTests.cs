@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Wf.Contracts;
@@ -53,6 +54,68 @@ public sealed class RunRecoveryTests(RecoveryDatabase database) : IClassFixture<
         Assert.Equal(run.Snapshot.Tasks, recovered.State.Snapshot.Tasks);
         Assert.Equal(run.Snapshot.Variables, recovered.State.Snapshot.Variables);
         Assert.Single(recovered.Timers.Snapshot);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Locked_load_waiting_for_a_concurrent_snapshot_commit_uses_the_new_snapshot(bool recovering)
+    {
+        await Reset();
+        using var leader = Manager();
+        Assert.True(await leader.TryAcquireOrRenewAsync(Token));
+        var store = Store(leader);
+        var initial = await Create(store);
+        var run = await store.LoadAsync(initial.Snapshot.RunId, Token);
+        var change = run.Append(EventEntity.Run, null, (int)RunStatus.Running, time.GetUtcNow());
+        await using var writer = await database.DataSource.OpenConnectionAsync(Token);
+        await using var transaction = await writer.BeginTransactionAsync(Token);
+        await using (var command = new NpgsqlCommand("""
+            SELECT 1 FROM runs WHERE run_day=uuid_v7_run_day($1) AND id=$1 FOR UPDATE
+            """, writer, transaction))
+        {
+            command.Parameters.AddWithValue(run.Snapshot.RunId);
+            await command.ExecuteScalarAsync(Token);
+        }
+        await using (var command = new NpgsqlCommand("""
+            WITH event AS (
+                INSERT INTO run_events(run_day,run_id,seq,ts,kind,entity_key,payload)
+                VALUES(uuid_v7_run_day($1),$1,1,$2,0,NULL,$3)
+            ), saved AS (
+                INSERT INTO run_snapshots(run_day,run_id,seq,created_at,payload)
+                VALUES(uuid_v7_run_day($1),$1,1,$2,$4)
+            )
+            UPDATE runs SET last_seq=1,snapshot_seq=1,status=1
+            WHERE run_day=uuid_v7_run_day($1) AND id=$1
+            """, writer, transaction))
+        {
+            command.Parameters.AddWithValue(run.Snapshot.RunId);
+            command.Parameters.AddWithValue(change.At);
+            command.Parameters.AddWithValue(JsonSerializer.SerializeToUtf8Bytes(change));
+            command.Parameters.AddWithValue(JsonSerializer.SerializeToUtf8Bytes(run.Snapshot));
+            await command.ExecuteNonQueryAsync(Token);
+        }
+        using var recovery = Recovery(store, leader);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(10));
+        var pending = recovering ? recovery.RecoverAsync(deadline.Token) :
+            store.AppendAsync(initial, EventEntity.Run, null, (int)RunStatus.Running, time.GetUtcNow(), deadline.Token);
+        try
+        {
+            while (!(bool)(await Scalar("""
+                SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+                    WHERE $1=ANY(pg_blocking_pids(pid)) AND query LIKE '%FOR UPDATE%')
+                """, writer.ProcessID))!)
+                await Task.Delay(10, deadline.Token);
+            await transaction.CommitAsync(deadline.Token);
+            if (recovering) await pending;
+            else await Assert.ThrowsAsync<InvalidOperationException>(() => pending);
+        }
+        finally { await deadline.CancelAsync(); }
+        var restored = recovering ? Assert.Single(recovery.RecoveredRuns).Value.State.Snapshot :
+            (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot;
+        Assert.Equal(1, restored.LastSequence);
+        Assert.Equal(RunStatus.Running, restored.Status);
     }
 
     [Fact]
@@ -299,9 +362,10 @@ public sealed class RunRecoveryTests(RecoveryDatabase database) : IClassFixture<
         foreach (var parameter in parameters) command.Parameters.Add(new NpgsqlParameter { Value = parameter });
         await command.ExecuteNonQueryAsync(Token);
     }
-    private async Task<object?> Scalar(string sql)
+    private async Task<object?> Scalar(string sql, params object[] parameters)
     {
         await using var command = database.DataSource.CreateCommand(sql);
+        foreach (var parameter in parameters) command.Parameters.Add(new NpgsqlParameter { Value = parameter });
         return await command.ExecuteScalarAsync(Token);
     }
     private async Task Wait(Func<bool> condition)

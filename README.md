@@ -21,6 +21,17 @@ listens on port 5000 and the agent gateway on 5001. Development authentication
 is explicitly enabled only for this loopback profile; production guards remain
 unchanged. No Entra tenant or application login/logout setup is needed.
 
+AppHost enables the durable hosted run executor: accepted runs advance through
+their pinned workflow's lifecycle stages and DAG, dispatch real agent attempts,
+commit outputs before dependent tasks run, and honor retry/cancellation policies.
+Standalone control-plane launches retain the existing executor-off default;
+set `Engine__ExecuteRuns=true` to enable it. `Engine__ApiEndpoint` may override
+the package-download origin (HTTPS or loopback HTTP only); agents must be able
+to reach it. Packages use short-lived, purpose-bound download capabilities,
+not interactive authentication. A missing declared dependency output fails
+inside the consuming SDK task unless its author handles the missing key; it
+does not stop the control plane.
+
 By default PostgreSQL uses the persistent Docker volume `wf-postgres-data`.
 To omit the database container entirely, set `ConnectionStrings__wf` to an
 existing database connection string before launching; the AppHost still runs
@@ -119,6 +130,20 @@ nonroot Linux storage permissions, isolated identities and persistent volume
 data across recreation. Run these AppHost tests with normal build output:
 Aspire's child project runner uses the projects' default Debug output, not a
 test-only `--artifacts-path` tree.
+
+Set `WF_APPHOST_SCENARIO=true`, provide `WF_TEST_POSTGRES` as a PostgreSQL admin
+connection, and select
+`FullyQualifiedName~LocalStackScenarioTests` for the separate actual scenario A
+test. Build the default Debug solution, including the CLI, beforehand. This
+test compiles and packages a workflow using the production CLI, registers it
+through public HTTP endpoints, triggers a run, and waits for `Succeeded`.
+It checks four lifecycle stages, diamond dependency inputs, three parallel
+smoke tasks, real native-agent attribution, and SDK child-process execution
+from the downloaded package. Stack readiness must remain within 120 seconds;
+the test does not write run, attempt or output state directly. The backend
+workflow's `local-stack` Windows/Ubuntu matrix runs this opt-in separately
+from ordinary tests and uploads its TRX results. The admin connection creates
+only the test's unique disposable database; no existing database is migrated.
 
 Set `WF_APPHOST_LAN=true` (optionally `WF_APPHOST_LAN_ADDRESS`) to run the
 additional real LAN test. It requires mkcert and Docker, uses an isolated CA

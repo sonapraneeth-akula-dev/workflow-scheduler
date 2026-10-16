@@ -67,6 +67,11 @@ public sealed class ReservationManager(NpgsqlDataSource dataSource, RunStore run
         return JsonSerializer.Serialize(canonical, ReservationJson.Default.PlacementSelector);
     }
 
+    internal Task<ReservationRequestResult> RequestLockedAsync(NpgsqlConnection connection, Guid runId,
+        string nodeKey, int count, PlacementSelector selector, TimeSpan lifetime, WhenUnavailable policy,
+        CancellationToken cancellationToken) => RequestCoreAsync(connection, runId, nodeKey, count, selector,
+            Canonical(runId, nodeKey, count, selector, lifetime), lifetime, policy, cancellationToken);
+
     private async Task<ReservationRequestResult> RequestCoreAsync(NpgsqlConnection connection, Guid runId,
         string nodeKey, int count, PlacementSelector selector, string json, TimeSpan lifetime, WhenUnavailable? policy,
         CancellationToken cancellationToken)

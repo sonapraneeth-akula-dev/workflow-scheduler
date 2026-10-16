@@ -23,6 +23,39 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
 {
     private readonly SemaphoreSlim gate = new(1, 1);
 
+    internal async Task<bool> AdvanceAsync(Guid runId,
+        Func<NpgsqlConnection, RunState, CancellationToken, Task<PlacementDecision?>> advance,
+        CancellationToken cancellationToken)
+    {
+        var lease = runs.CaptureLease();
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await runs.FenceAsync(connection, transaction, lease, cancellationToken);
+            await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock($1)", cancellationToken, ReservationManager.AllocationLock);
+            var run = await runs.LoadAsync(connection, runId, true, cancellationToken);
+            var sequence = run.Snapshot.LastSequence;
+            var decision = await advance(connection, run, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            if (decision?.Agent is not null) placement.Apply(decision);
+            return run.Snapshot.LastSequence != sequence;
+        }
+        finally { gate.Release(); }
+    }
+
+    internal async Task<PlacementDecision> PrepareAsync(NpgsqlConnection connection, RunState run,
+        PlacementRequest request, DispatchCommand command, ExecutionPolicy policy, short platformRetries,
+        short authorRetries, CancellationToken cancellationToken)
+    {
+        var decision = await ChooseAsync(connection, request, cancellationToken);
+        if (decision.Agent is not null)
+            await SaveDispatchAsync(connection, run, request, command, decision.Agent.Id, policy,
+                platformRetries, authorRetries, cancellationToken);
+        return decision;
+    }
+
     public Task<PlacementDecision> DispatchAsync(RunState run, PlacementRequest request, DispatchCommand command,
         CancellationToken cancellationToken = default)
     {

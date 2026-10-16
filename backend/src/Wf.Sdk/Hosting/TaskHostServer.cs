@@ -246,7 +246,9 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
             };
             var artifacts = artifactHttp is null ? null : new ArtifactPublisher(artifactHttp, artifactGrant!, dispatch.Task);
             var taskContext = new TaskContext(linked.Token, variables, outputs, inputs, node.Inputs,
-                reports: reports, artifacts: artifacts, secrets: secrets);
+                reports: reports, artifacts: artifacts, secrets: secrets,
+                abort: dispatch.AbortJson.IsEmpty ? null : JsonSerializer.Deserialize(dispatch.AbortJson.Span,
+                    AbortRecordJsonContext.Default.AbortRecord));
             await new TaskRegistry(workflow).ExecuteAsync($"{node.Key}/{dispatch.Task.TaskKey}", taskContext);
             linked.Token.ThrowIfCancellationRequested();
             result.Outcome = TaskOutcome.Succeeded;

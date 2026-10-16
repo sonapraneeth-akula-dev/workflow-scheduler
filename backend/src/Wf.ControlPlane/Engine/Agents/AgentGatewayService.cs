@@ -105,6 +105,7 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
             async Task SendAsync()
             {
                 var sent = new HashSet<long>();
+                var sentCancels = new HashSet<string>(StringComparer.Ordinal);
                 var sentFences = new HashSet<ulong>();
                 try
                 {
@@ -126,6 +127,7 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                                         LeaderEpoch = epoch, ReservationFence = fence
                                     }, token);
                         if (runs is not null)
+                        {
                             foreach (var (id, command) in await runs.PendingAsync(session, token))
                                 if (sent.Add(id))
                                 {
@@ -141,6 +143,14 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                                         LeaderEpoch = epoch, Dispatch = command
                                     }, token);
                                 }
+                            foreach (var cancel in await runs.PendingCancelsAsync(session, token))
+                                if (sentCancels.Add($"{cancel.Task.RunId}/{cancel.Task.NodeKey}/{cancel.Task.TaskKey}/{cancel.Task.Attempt}"))
+                                    await responseStream.WriteAsync(new ControlMessage
+                                    {
+                                        Sequence = checked((ulong)Interlocked.Increment(ref sequence)),
+                                        LeaderEpoch = epoch, Cancel = cancel
+                                    }, token);
+                        }
                         using var wait = CancellationTokenSource.CreateLinkedTokenSource(token);
                         wait.CancelAfter(TimeSpan.FromMilliseconds(25));
                         try { _ = await acknowledgements.Reader.WaitToReadAsync(wait.Token); }

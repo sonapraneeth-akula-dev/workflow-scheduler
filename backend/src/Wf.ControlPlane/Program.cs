@@ -101,6 +101,16 @@ builder.Services.AddSingleton<GroupCommitAppender>();
 builder.Services.AddSingleton<PlacementEngine>();
 builder.Services.AddSingleton<Dispatcher>();
 builder.Services.AddSingleton<Wf.ControlPlane.Engine.Reservations.ReservationManager>();
+if (builder.Configuration.GetValue("Engine:ExecuteRuns", false))
+{
+    var endpoint = new Uri(builder.Configuration["Engine:ApiEndpoint"] ?? lan?.Endpoint.AbsoluteUri ??
+        $"http://localhost:{apiPort}", UriKind.Absolute);
+    if (endpoint.Scheme is not ("https" or "http") || endpoint.Scheme == "http" && !endpoint.IsLoopback ||
+        endpoint.UserInfo.Length != 0 || endpoint.AbsolutePath != "/" || endpoint.Query.Length != 0 || endpoint.Fragment.Length != 0)
+        throw new InvalidOperationException("Engine:ApiEndpoint must be an HTTPS origin or loopback HTTP origin.");
+    builder.Services.AddSingleton(new RunExecutionOptions(endpoint));
+    builder.Services.AddHostedService<RunExecutionService>();
+}
 builder.Services.AddHostedService<Wf.ControlPlane.Engine.Reservations.ReservationQueueService>();
 builder.Services.AddSingleton<Wf.ControlPlane.Engine.Reservations.ReservationLeaseService>();
 builder.Services.AddHostedService<Wf.ControlPlane.Engine.Reservations.ReservationLeaseService>(

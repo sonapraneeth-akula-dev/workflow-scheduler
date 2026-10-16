@@ -9,6 +9,7 @@ using System.Text.Json;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using Grpc.Net.Client;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -48,6 +49,58 @@ public sealed class DispatchTests(DispatchDatabase database) : IClassFixture<Dis
     private readonly RunStore store = new(database.DataSource, NullLogger<RunStore>.Instance);
     private CancellationToken Token => TestContext.Current.CancellationToken;
     private const string Sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    [Fact]
+    public async Task Durable_cancel_crosses_the_production_gateway_once_without_synthesizing_a_terminal_result()
+    {
+        using var registry = new AgentRegistry(database.DataSource, TimeProvider.System);
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0,
+            listen => listen.Protocols = HttpProtocols.Http2));
+        builder.Services.AddGrpc();
+        builder.Services.AddSingleton(registry);
+        builder.Services.AddSingleton(new RunStore(database.DataSource, NullLogger<RunStore>.Instance,
+            execution: new(new Uri("http://localhost:5000"))));
+        await using var gateway = builder.Build();
+        gateway.MapGrpcService<AgentGatewayService>();
+        await gateway.StartAsync(Token);
+        using var channel = GrpcChannel.ForAddress(Address(gateway));
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(10));
+        using var call = new AgentGateway.AgentGatewayClient(channel).Connect(cancellationToken: deadline.Token);
+        await call.RequestStream.WriteAsync(new() { Sequence = 1, Hello = Hello() }, deadline.Token);
+        Assert.True(await call.ResponseStream.MoveNext(deadline.Token));
+        Assert.Equal(1UL, call.ResponseStream.Current.Ack.Sequence);
+        var run = await CreateRun();
+        await Ready(run, "source/noop");
+        using var dispatcher = CreateDispatcher(registry);
+        await Dispatch(dispatcher, run, "source", "noop");
+        Assert.True(await call.ResponseStream.MoveNext(deadline.Token));
+        var dispatched = Assert.IsType<Wf.Contracts.Agent.V1.Dispatch>(call.ResponseStream.Current.Dispatch);
+        await using (var cancel = database.DataSource.CreateCommand("""
+            UPDATE task_attempts SET cancel_requested_at=clock_timestamp(),
+                kill_at=clock_timestamp()+interval '30 seconds',timer_phase=1,failure_category=$2
+            WHERE run_id=$1
+            """))
+        {
+            cancel.Parameters.AddWithValue(run.Snapshot.RunId);
+            cancel.Parameters.AddWithValue((short)FailureCategory.Aborted);
+            await cancel.ExecuteNonQueryAsync(deadline.Token);
+        }
+        Assert.True(await call.ResponseStream.MoveNext(deadline.Token));
+        var command = Assert.IsType<Cancel>(call.ResponseStream.Current.Cancel);
+        Assert.Equal(dispatched.Task, command.Task);
+        Assert.Equal(30_000u, command.GraceMs);
+        await call.RequestStream.WriteAsync(new()
+        {
+            Sequence = 2, Heartbeat = new() { At = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow) }
+        }, deadline.Token);
+        Assert.True(await call.ResponseStream.MoveNext(deadline.Token));
+        Assert.Equal(2UL, call.ResponseStream.Current.Ack.Sequence);
+        Assert.Equal(ExecutionStatus.Dispatched,
+            (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot.Tasks["source/noop"]);
+        await call.RequestStream.CompleteAsync();
+    }
 
     [Fact]
     public async Task In_memory_Ready_cannot_dispatch_before_the_event_commits()

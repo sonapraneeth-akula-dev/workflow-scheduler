@@ -22,7 +22,7 @@ using DispatchCommand = Wf.Contracts.Agent.V1.Dispatch;
 namespace Wf.ControlPlane.Engine.Dispatch;
 
 public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logger, LeaseManager? leadership = null,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null, RunExecutionOptions? execution = null)
 {
     internal DateTimeOffset UtcNow => (timeProvider ?? TimeProvider.System).GetUtcNow();
     internal LeaseToken? CaptureLease() => leadership?.RequireLease();
@@ -77,11 +77,20 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
     internal async Task<RunState> LoadAsync(NpgsqlConnection connection, Guid runId, bool forUpdate,
         CancellationToken cancellationToken)
     {
+        if (forUpdate)
+        {
+            await using var locked = new NpgsqlCommand("""
+                SELECT 1 FROM runs WHERE run_day=uuid_v7_run_day($1) AND id=$1 FOR UPDATE
+                """, connection);
+            locked.Parameters.AddWithValue(runId);
+            if (await locked.ExecuteScalarAsync(cancellationToken) is null)
+                throw new KeyNotFoundException($"Run '{runId}' does not exist.");
+        }
         await using var command = new NpgsqlCommand("""
             SELECT s.payload FROM runs r JOIN run_snapshots s
               ON s.run_day=r.run_day AND s.run_id=r.id AND s.seq=r.snapshot_seq
             WHERE r.run_day=uuid_v7_run_day($1) AND r.id=$1
-            """ + (forUpdate ? " FOR UPDATE OF r" : ""), connection);
+            """, connection);
         command.Parameters.AddWithValue(runId);
         var payload = await command.ExecuteScalarAsync(cancellationToken) as byte[]
             ?? throw new KeyNotFoundException($"Run '{runId}' does not exist.");
@@ -105,12 +114,25 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
     internal async Task<Dictionary<Guid, RunState>> LoadManyAsync(NpgsqlConnection connection, Guid[] ids,
         CancellationToken cancellationToken)
     {
+        // Lock first, then join at a fresh READ COMMITTED snapshot; a concurrent snapshot_seq update
+        // must not make PostgreSQL's FOR UPDATE join recheck drop an otherwise valid run.
+        await using (var locked = new NpgsqlCommand("""
+            SELECT id FROM runs WHERE run_day=ANY(SELECT uuid_v7_run_day(id) FROM unnest($1::uuid[]) id)
+                AND id=ANY($1) ORDER BY id FOR UPDATE
+            """, connection))
+        {
+            locked.Parameters.AddWithValue(ids);
+            await using var reader = await locked.ExecuteReaderAsync(cancellationToken);
+            var count = 0;
+            while (await reader.ReadAsync(cancellationToken)) count++;
+            if (count != ids.Length) throw new InvalidDataException("A recovering run no longer exists.");
+        }
         var snapshots = new Dictionary<Guid, RunSnapshot>();
         await using (var command = new NpgsqlCommand("""
             SELECT r.id,s.payload FROM runs r JOIN run_snapshots s
               ON s.run_day=r.run_day AND s.run_id=r.id AND s.seq=r.snapshot_seq
             WHERE r.run_day=ANY(SELECT uuid_v7_run_day(id) FROM unnest($1::uuid[]) id)
-                AND r.id=ANY($1) FOR UPDATE OF r
+                AND r.id=ANY($1)
             """, connection))
         {
             command.Parameters.AddWithValue(ids);
@@ -259,6 +281,18 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
         return pending;
     }
 
+    public async Task<IReadOnlyList<Cancel>> PendingCancelsAsync(AgentSession session, CancellationToken cancellationToken)
+    {
+        if (execution is null) return [];
+        var lease = CaptureLease();
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await FenceAsync(connection, transaction, lease, cancellationToken);
+        var pending = await RunExecutionService.PendingCancelsAsync(connection, session.AgentId, session.SessionId, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return pending;
+    }
+
     public async Task AcceptAsync(AgentSession session, AgentMessage message, CancellationToken cancellationToken)
     {
         var reference = message.TaskStarted?.Task ?? message.TaskCompleted?.Task;
@@ -343,8 +377,15 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
         var category = completed is not null && completed.Outcome != TaskOutcome.Succeeded &&
             Enum.TryParse<FailureCategory>(completed.Error?.Category, out var parsed) &&
             Enum.IsDefined(parsed) && completed.Error!.Category == parsed.ToString() ? parsed : (FailureCategory?)null;
-        var change = run.CreateEvent(EventEntity.Task, taskKey, (int)target, at) with
-            { Attempt = identity.Attempt, FailureCategory = category };
+        var completion = completed is not null && execution is not null
+            ? await RunExecutionService.CompleteAsync(connection, run, completed, target, category, at, cancellationToken)
+            : new RunExecutionService.Completion(target, target, null, category);
+        var change = run.CreateEvent(EventEntity.Task, taskKey, (int)completion.Status, at) with
+        {
+            Attempt = identity.Attempt, FailureCategory = completion.Category,
+            AttemptStatus = completion.Status == ExecutionStatus.Retrying ? completion.AttemptStatus : null,
+            AttemptEndedAt = completion.Status == ExecutionStatus.Retrying ? at : null
+        };
         await AppendAsync(connection, run, change, cancellationToken);
         await ExecuteAsync(connection, """
             WITH removed AS (
@@ -353,12 +394,16 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
             )
             UPDATE task_attempts SET status=$4,
                 started_at=CASE WHEN $4=3 THEN $5 ELSE started_at END,
-                ended_at=CASE WHEN $4>=5 THEN $5 ELSE ended_at END,error=$6,outputs=$7::json
+                ended_at=CASE WHEN $4>=5 THEN $5 ELSE ended_at END,error=$6,outputs=$7::json,retry_at=$8,
+                failure_category=COALESCE($9,failure_category)
             WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 AND attempt=$3
-            """, cancellationToken, runId, taskKey, identity.Attempt, (short)target, at,
+            """, cancellationToken, runId, taskKey, identity.Attempt, (short)completion.AttemptStatus, at,
             (object?)completed?.Error?.Message ?? DBNull.Value,
-            completed is { OutputsJson.Length: > 0 } ? completed.OutputsJson.ToStringUtf8() : DBNull.Value);
-        if (completed is { Outcome: TaskOutcome.Succeeded, OutputsJson.Length: > 0 })
+            completed is { OutputsJson.Length: > 0 } &&
+                !(completed.Outcome == TaskOutcome.Succeeded && completion.Status != ExecutionStatus.Succeeded)
+                ? completed.OutputsJson.ToStringUtf8() : DBNull.Value,
+            (object?)completion.RetryAt ?? DBNull.Value, (object?)(short?)completion.Category ?? DBNull.Value);
+        if (completed is { OutputsJson.Length: > 0 } && completion.Status == ExecutionStatus.Succeeded)
             await ExecuteAsync(connection, """
                 UPDATE node_runs SET outputs=COALESCE(outputs,'{}'::jsonb) || $3::jsonb
                 WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND node_key=$2
