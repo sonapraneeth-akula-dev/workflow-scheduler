@@ -947,7 +947,7 @@ leave the task waiting. Busy slots or insufficient RAM wait inside that cohort
 rather than spilling onto extra machines. Warm-host/load/round-robin preference
 still applies within it. Membership can change as machine health, labels or
 reservation ownership changes; this is not an exclusive or durable reservation,
-nor task fan-out. Exclusive leases and reservation epochs remain separate tasks.
+nor task fan-out. Exclusive reservations use the separate manager below.
 Legacy name/label/OS selectors without IDs/count keep their existing placement.
 Selector callbacks build symbolic metadata once. Describing never reads run
 variables or invokes task delegates. Effective task selectors resolve from bound
@@ -969,6 +969,23 @@ affected pins without spending an author's retries, while `NoAutoRetry` blocks
 platform placement. Snapshots restore pins and rotation; `ForgetRun` releases
 terminal-run state. Placement timeout and API single-machine overrides follow
 in their own backlog task.
+
+`Wf.ControlPlane.Engine.Reservations.ReservationManager.ReserveAsync` allocates
+an exact number of matching machines exclusively to an existing run/node.
+PostgreSQL transactions and the dispatcher's allocation lock serialize competing
+reservations and dispatches. Selection reads fresh machine metadata, health and
+pending attempts; busy, stale, draining or already-reserved machines cannot be
+claimed. Shortages and insert failures leave no partial reservation. Repeating
+the same canonical selector/count returns the original IDs, epochs and expiry;
+an active allocation cannot be resized or silently renewed.
+The dispatcher confines the owner node to its durable reserved cohort, excludes
+every other node/run and persists each machine's reservation epoch in the
+dispatch and outbox. Expired but unreleased rows still block other work and new
+owner dispatches; expiry alone never makes a machine free. The database-backed
+manager lives in the control plane so `Wf.Engine.Core` remains database-free;
+both reuse its pure selector filter. Renewal, cancel-before-release, agent epoch
+fencing, failover adoption and workflow-facing reservation policies follow in
+their own tasks; automatic reservation lifecycle orchestration is not claimed.
 
 ## Blob storage
 

@@ -123,7 +123,7 @@ public sealed class PlacementEngine
             (!request.RePlacement || agent.Id != request.PreviousAgentId) &&
             (agent.ReservedForRun is not { } reserved ||
                 reserved == request.RunId && (agent.ReservedForNode is null || agent.ReservedForNode == request.NodeKey)) &&
-            Matches(request.Policy?.Selector, agent);
+            PlacementFilter.Matches(request.Policy?.Selector, agent);
         PlacementDecision Decision(PlacementAgent? agent, PlacementReason reason) => new(request, agent, reason, owner, Snapshot.Revision);
     }
 
@@ -171,19 +171,6 @@ public sealed class PlacementEngine
         };
     }
 
-    private static bool Matches(PlacementSelector? selector, PlacementAgent agent)
-    {
-        if (selector is null) return true;
-        if (selector.Os?.Literal is { } os && os != agent.Os || selector.Pool?.Literal is { } pool && pool != agent.Pool)
-            return false;
-        if (!selector.MachineIds.IsEmpty && !selector.MachineIds.Contains(agent.Id)) return false;
-        if (!selector.Machines.IsEmpty && !selector.Machines.Any(machine => machine.Literal == agent.Name)) return false;
-        foreach (var label in selector.Labels)
-            if (agent.Labels is null || !agent.Labels.TryGetValue(label.Key, out var value) ||
-                label.Value?.Literal is { } expected && expected != value) return false;
-        return true;
-    }
-
     private static void Validate(PlacementRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -194,10 +181,7 @@ public sealed class PlacementEngine
             throw new ArgumentException("Invalid placement request.", nameof(request));
         if (request.Policy?.Affinity is { Kind: AffinityKind.SameMachineAs, NodeKey: { } target } && target == request.NodeKey)
             throw new ArgumentException("SameMachineAs cannot reference the requesting node.", nameof(request));
-        if (request.Policy?.Selector is { } selector &&
-            (selector.Os?.Variable is not null || selector.Pool?.Variable is not null ||
-             selector.Labels.Any(label => label.Value?.Variable is not null) || selector.Machines.Any(machine => machine.Variable is not null)))
-            throw new ArgumentException("Placement selectors must be resolved before dispatch.", nameof(request));
+        PlacementFilter.EnsureResolved(request.Policy?.Selector);
     }
 
     private static void Validate(PlacementAgent agent)

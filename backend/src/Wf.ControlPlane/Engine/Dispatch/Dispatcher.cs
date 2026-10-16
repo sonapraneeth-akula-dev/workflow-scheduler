@@ -8,6 +8,7 @@ using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
 using Wf.ControlPlane.Engine.Agents;
+using Wf.ControlPlane.Engine.Reservations;
 using Wf.Engine.Core;
 using Wf.Engine.Core.Placement;
 using Wf.Engine.Core.Retries;
@@ -54,7 +55,7 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
             await runs.FenceAsync(connection, transaction, lease, cancellationToken);
-            await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock(746312081)", cancellationToken);
+            await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock($1)", cancellationToken, ReservationManager.AllocationLock);
             var durable = await runs.LoadAsync(connection, request.RunId, true, cancellationToken);
             if (durable.Snapshot.LastSequence != run.Snapshot.LastSequence ||
                 !durable.Snapshot.Tasks.TryGetValue(key, out var state) || state != ExecutionStatus.Ready ||
@@ -63,7 +64,7 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             var decision = await ChooseAsync(connection, request, cancellationToken);
             if (decision.Agent is null) return decision;
             var dispatch = command.Clone();
-            dispatch.ReservationEpoch = 1;
+            dispatch.ReservationEpoch = checked((ulong)(decision.Agent.ReservedForRun is null ? 1 : decision.Agent.ReservationEpoch));
             var change = await SaveDispatchAsync(connection, durable, request, dispatch, decision.Agent.Id, executionPolicy, 0, 0, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             run.Apply(change);
@@ -85,7 +86,7 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
             await runs.FenceAsync(connection, transaction, lease, cancellationToken);
-            await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock(746312081)", cancellationToken);
+            await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock($1)", cancellationToken, ReservationManager.AllocationLock);
             var run = await runs.LoadAsync(connection, runId, true, cancellationToken);
             if (run.Snapshot.Status != RunStatus.Running ||
                 !run.Snapshot.Tasks.TryGetValue(taskKey, out var taskStatus) ||
@@ -171,7 +172,7 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             deadline = deadline < runDeadline ? deadline : runDeadline;
             deadline = deadline < nodeDeadline ? deadline : nodeDeadline;
             dispatch.DeadlineAt = Timestamp.FromDateTimeOffset(deadline);
-            dispatch.ReservationEpoch = 1;
+            dispatch.ReservationEpoch = checked((ulong)(decision.Agent.ReservedForRun is null ? 1 : decision.Agent.ReservationEpoch));
             await RunStore.AppendAsync(connection, run,
                 run.CreateEvent(EventEntity.Task, taskKey, (int)ExecutionStatus.Retrying, now) with
                     { Attempt = attempt, AttemptEndedAt = lostAt, AttemptStatus = ExecutionStatus.Failed,
@@ -193,6 +194,25 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
         CancellationToken cancellationToken)
     {
         var capacity = agents.DispatchableAgents().Select(agent => agent.Capacity(timeProvider.GetUtcNow())).ToDictionary(agent => agent.Id);
+        var owned = new HashSet<Guid>();
+        await using (var reservations = new NpgsqlCommand("""
+            SELECT agent_id,run_id,node_key,epoch,expires_at FROM reservations WHERE released_at IS NULL
+            """, connection))
+        await using (var reader = await reservations.ExecuteReaderAsync(cancellationToken))
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var id = reader.GetGuid(0);
+                var runId = reader.GetGuid(1);
+                var node = reader.GetString(2);
+                if (runId == request.RunId && node == request.NodeKey) owned.Add(id);
+                if (capacity.TryGetValue(id, out var agent))
+                    capacity[id] = agent with
+                    {
+                        ReservedForRun = runId, ReservedForNode = node, ReservationEpoch = reader.GetInt64(3),
+                        Healthy = agent.Healthy && reader.GetFieldValue<DateTimeOffset>(4) > timeProvider.GetUtcNow()
+                    };
+            }
+        if (owned.Count > 0) capacity = capacity.Where(pair => owned.Contains(pair.Key)).ToDictionary();
         await using (var pending = new NpgsqlCommand("""
             SELECT agent_id,count(*),sum(required_ram_mb) FROM task_attempts WHERE status IN (2,3) GROUP BY agent_id
             """, connection))

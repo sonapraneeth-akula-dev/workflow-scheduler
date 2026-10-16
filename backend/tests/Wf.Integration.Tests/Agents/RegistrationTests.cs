@@ -368,6 +368,8 @@ public class AgentDatabase : IAsyncLifetime
         // Current RunStore writes per-attempt outputs, including in fixtures using historical schema subsets.
         if (migrations.Contains("0006_dispatch_outbox.sql") && !migrations.Contains("0027_task_outputs.sql"))
             migrations = [.. migrations, "0027_task_outputs.sql"];
+        if (migrations.Contains("0006_dispatch_outbox.sql") && !migrations.Contains("0028_reservations.sql"))
+            migrations = [.. migrations, "0028_reservations.sql"];
         foreach (var name in migrations)
         {
             var migration = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Migrations", name), token);

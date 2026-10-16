@@ -93,6 +93,7 @@ builder.Services.AddHostedService<ScheduleFireService>(services => services.GetR
 builder.Services.AddSingleton<GroupCommitAppender>();
 builder.Services.AddSingleton<PlacementEngine>();
 builder.Services.AddSingleton<Dispatcher>();
+builder.Services.AddSingleton<Wf.ControlPlane.Engine.Reservations.ReservationManager>();
 builder.Services.AddHostedService<AgentRegistryService>();
 builder.Services.AddSingleton<AgentLossSweeper>();
 builder.Services.AddHostedService<AgentLossSweeper>(services => services.GetRequiredService<AgentLossSweeper>());
