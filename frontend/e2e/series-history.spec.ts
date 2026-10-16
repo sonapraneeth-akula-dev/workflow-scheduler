@@ -6,6 +6,57 @@ import { z } from "zod"
 import { scheduleSchema, seriesFiresSchema } from "../src/lib/api/client"
 import { parseJson } from "../src/lib/json"
 
+test("actual catch-up run is badged while its retained source remains Missed", async ({
+  page,
+  request,
+}) => {
+  const fixture = z
+    .object({ catchUpSeriesId: z.uuid() })
+    .parse(
+      JSON.parse(
+        await readFile(new URL("../.test-stack.json", import.meta.url), "utf8")
+      )
+    )
+  await expect
+    .poll(async () => {
+      const response = await request.get(
+        `/api/v1/series/${fixture.catchUpSeriesId}/fires`
+      )
+      expect(response.status()).toBe(200)
+      const history = seriesFiresSchema.parse(await response.json())
+      return (
+        history.items.filter((fire) => fire.outcome === "Missed").length ===
+          10 &&
+        history.items.filter(
+          (fire) =>
+            fire.outcome === "Missed" &&
+            fire.reason === "catch-up" &&
+            fire.runId !== null
+        ).length === 1
+      )
+    })
+    .toBe(true)
+  await page.goto(`/series/${fixture.catchUpSeriesId}`)
+  await expect(page.getByText("Catch-up", { exact: true })).toHaveCount(1)
+  const badge = page.getByText("Catch-up", { exact: true })
+  await expect(badge).toHaveAttribute(
+    "title",
+    "Recovery run for the latest missed scheduled fire"
+  )
+  await expect(page.getByRole("row").filter({ has: badge })).toContainText(
+    "Missed"
+  )
+  await accessible(page)
+  await page.getByRole("button", { name: "Dark theme" }).click()
+  await page.setViewportSize({ width: 375, height: 812 })
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth
+    )
+  ).toBe(true)
+  await accessible(page)
+})
+
 async function accessible(page: Page) {
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"])

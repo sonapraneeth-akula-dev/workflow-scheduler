@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { formatFire } from "@/features/schedules/schedule-draft"
+import { TriggerBadge } from "@/features/runs/TriggerBadge"
 import { getSeriesFires } from "@/lib/api/client"
 
 export function SeriesFiresTable({ seriesId }: { seriesId: string }) {
@@ -83,7 +84,16 @@ export function SeriesFiresTable({ seriesId }: { seriesId: string }) {
                     {fire.reason ?? "None"}
                   </td>
                   <td className="p-3">
-                    {fire.runId ? <code>{fire.runId}</code> : "No run"}
+                    {fire.runId ? (
+                      <div className="flex flex-col items-start gap-2">
+                        <code>{fire.runId}</code>
+                        {fire.reason === "catch-up" ? (
+                          <TriggerBadge trigger="CatchUp" />
+                        ) : null}
+                      </div>
+                    ) : (
+                      "No run"
+                    )}
                   </td>
                 </tr>
               ))}

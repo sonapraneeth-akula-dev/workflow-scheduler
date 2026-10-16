@@ -47,7 +47,10 @@ table shows exact recorded outcomes, reasons and associated run IDs, including
 skips/misses with no run and history retained after schedule deletion. UTC
 timestamps, explicit loading/empty/error states, refresh and cursor-based
 older-page loading are accessible in light/dark and narrow layouts. A failed
-older-page request preserves already loaded records. Full run history and
+older-page request preserves already loaded records. A linked catch-up run
+has a Catch-up trigger badge; its original scheduled-fire outcome remains
+Missed. The badge uses the durable source marker and run reference, not a
+reclassification of missed fire history. Full run history and
 trends remain separate tasks.
 
 Development authentication is opt-in and requires both a loopback hostname and

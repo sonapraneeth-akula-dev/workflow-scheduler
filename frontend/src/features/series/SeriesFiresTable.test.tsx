@@ -22,6 +22,26 @@ function show() {
 
 describe("series fire history states", () => {
   beforeEach(() => vi.resetAllMocks())
+  it("badges a linked catch-up run while keeping its source outcome Missed", async () => {
+    read.mockResolvedValue({
+      seriesId,
+      items: [
+        {
+          fireAt: "2026-10-15T12:00:00Z",
+          outcome: "Missed",
+          runId: "019ed132-2f44-7000-8000-000000000001",
+          reason: "catch-up",
+        },
+      ],
+      nextCursor: null,
+    })
+    show()
+    expect(await screen.findByRole("table")).toHaveTextContent("Missed")
+    expect(screen.getByText("Catch-up")).toHaveAttribute(
+      "title",
+      "Recovery run for the latest missed scheduled fire"
+    )
+  })
   it("announces loading and then a genuinely empty history", async () => {
     read.mockResolvedValue({ seriesId, items: [], nextCursor: null })
     show()

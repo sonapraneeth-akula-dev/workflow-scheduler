@@ -292,6 +292,32 @@ try {
      SELECT '${history.id}'::uuid,'2026-01-01'::timestamptz+n*interval '1 minute',1,'overlap'
      FROM generate_series(0,59) n;`,
   ])
+  const catchUp = z.object({ id: z.uuid(), seriesId: z.uuid() }).parse(
+    await request("/api/v1/schedules", {
+      workflowId: "ui-tests/release/workflow",
+      name: "Actual catch-up fixture",
+      timezone: "Etc/UTC",
+      interval: "00:01:00",
+      catchUp: "Latest",
+    })
+  )
+  run("docker", [
+    "exec",
+    container,
+    "psql",
+    "-U",
+    "workflow",
+    "-d",
+    "workflow",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-c",
+    `BEGIN;
+     UPDATE schedules SET next_fire_at=date_trunc('second',clock_timestamp())-interval '9 minutes 30 seconds'
+     WHERE id='${catchUp.id}'::uuid;
+     SELECT pg_notify('schedules','${catchUp.id}');
+     COMMIT;`,
+  ])
   start(
     process.execPath,
     [
@@ -311,6 +337,7 @@ try {
       directory: basename(storage),
       historyScheduleId: history.id,
       historySeriesId: history.seriesId,
+      catchUpSeriesId: catchUp.seriesId,
     }),
     {
       flag: "wx",

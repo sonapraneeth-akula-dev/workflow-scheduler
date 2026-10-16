@@ -916,8 +916,8 @@ and recurring exact/range pins; a recurring unpinned fire reads the current
 active pointer in its transaction, independently of notification ordering.
 Invalid pins/values log a rejection and retain the due cursor, without starving
 other schedules. Transient storage failures disable scheduler readiness until
-resynchronization; fatal corrupt state fails explicitly. Queued-run FIFO release,
-skipped-fire UI and the one-hour/1,000-schedule chaos
+resynchronization; fatal corrupt state fails explicitly. Queued-run FIFO release
+and the one-hour/1,000-schedule chaos
 gate remain their dependent tasks, not implied by basic exactly-once firing.
 
 Every overdue cursor is replanned against one UTC clock snapshot, including on
@@ -936,8 +936,17 @@ under Skip; its missed source retains reason `overlap`. A catch-up admitted unde
 Skip can similarly suppress a newer ordinary slot, which is recorded Skipped.
 All missing history, admitted runs and the final future cursor commit together,
 so failure/retry or repeated takeover cannot consume only part of the backlog.
-The ten-minute hosted outage test advances an injected clock, not a wall-clock
-sleep; it verifies ten missed rows and exactly one catch-up across three leaders.
+Hosted outage tests advance an injected clock, not a wall-clock sleep. The
+multi-schedule case stops the actual hosted services, advances ten minutes plus
+three seconds beyond the fire grace, and restarts across three leaders: each of
+three Latest schedules records ten exact missed slots and one newest-source
+catch-up run; two None schedules record those same misses without a run.
+Paused/removed controls remain untouched, stale timers do not recreate work,
+and the next leader recovers the persisted catch-up runs. Existing migration
+`0007_schedules.sql` already supplies the canonical `catchup_policy` column;
+no duplicate `catch_up_policy` or follow-up column migration is needed.
+Series history displays a Catch-up trigger badge for its linked durable
+`catch-up` source, without relabeling that source's Missed outcome.
 
 `Wf.Agent.Secrets.SecretMasker` takes resolved secret values, never reference
 names. `Redact` masks complete text; create a separate text stream for each
