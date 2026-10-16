@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { Button } from "@/components/ui/button"
+import { Can } from "@/components/ui/Can"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -21,6 +22,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { usePermissions } from "@/lib/auth/usePermissions"
 import { ScheduleForm } from "@/features/schedules/ScheduleForm"
 import { OriginBadge } from "@/features/schedules/OriginBadge"
 import { formatFire } from "@/features/schedules/schedule-draft"
@@ -47,14 +49,33 @@ function ScheduleDetail() {
   })
   const update = (snapshot: ScheduleSnapshot) =>
     queryClient.setQueryData(key, snapshot)
+  const permissions = usePermissions(
+    query.data
+      ? { scope: "series", id: query.data.schedule.seriesId }
+      : undefined
+  )
   const pause = useMutation({
     mutationKey: ["schedule-write", id],
-    mutationFn: setSchedulePaused,
+    mutationFn: (snapshot: ScheduleSnapshot) => {
+      if (!permissions.can("Operator")) {
+        throw new Error(
+          "Operator permission is required to manage this schedule."
+        )
+      }
+      return setSchedulePaused(snapshot)
+    },
     onSuccess: update,
   })
   const remove = useMutation({
     mutationKey: ["schedule-write", id],
-    mutationFn: deleteSchedule,
+    mutationFn: (snapshot: ScheduleSnapshot) => {
+      if (!permissions.can("Operator")) {
+        throw new Error(
+          "Operator permission is required to manage this schedule."
+        )
+      }
+      return deleteSchedule(snapshot)
+    },
   })
   const isMutating = useIsMutating({ mutationKey: ["schedule-write", id] }) > 0
   if (remove.isSuccess) {
@@ -121,7 +142,7 @@ function ScheduleDetail() {
           Reload latest schedule
         </Button>
         {canMutate ? (
-          <>
+          <Can permissions={permissions} role="Operator">
             <Button
               variant="outline"
               disabled={isMutating}
@@ -147,6 +168,7 @@ function ScheduleDetail() {
                   <AlertDialogCancel>Keep schedule</AlertDialogCancel>
                   <AlertDialogAction
                     variant="destructive"
+                    disabled={!permissions.can("Operator") || isMutating}
                     onClick={() => remove.mutate(current)}
                   >
                     Confirm delete
@@ -154,7 +176,7 @@ function ScheduleDetail() {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
-          </>
+          </Can>
         ) : null}
       </div>
       <p className="text-sm text-muted-foreground">
@@ -162,6 +184,7 @@ function ScheduleDetail() {
       </p>
       {pause.error ? <ErrorNotice error={pause.error} /> : null}
       {remove.error ? <ErrorNotice error={remove.error} /> : null}
+      {permissions.error ? <ErrorNotice error={permissions.error} /> : null}
       {canMutate ? (
         <ScheduleForm
           key={formRevision}

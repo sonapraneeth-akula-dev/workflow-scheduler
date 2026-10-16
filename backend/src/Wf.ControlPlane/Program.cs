@@ -90,6 +90,7 @@ app.MapRunsEndpoints();
 app.MapSchedulesEndpoints();
 app.MapSeriesFiresEndpoints();
 app.MapUserSchedulesEndpoints();
+app.MapPermissionsEndpoints();
 app.MapWorkflowOpenApi();
 app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
 app.MapGet("/healthz", () => Results.Ok()).AllowAnonymous();

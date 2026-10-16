@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Headers;
@@ -63,6 +64,111 @@ public sealed class AuthorizationMatrixTests(AuthorizationDatabase database) : I
         }
         using var sibling = await server.Get("type", required, seed.Team + "/sibling", jwt);
         await Check(sibling, expected && teamScope);
+    }
+
+    [Theory]
+    [InlineData(RegistryRole.Viewer, false)]
+    [InlineData(RegistryRole.Operator, false)]
+    [InlineData(RegistryRole.Author, false)]
+    [InlineData(RegistryRole.Admin, false)]
+    [InlineData(RegistryRole.Viewer, true)]
+    [InlineData(RegistryRole.Operator, true)]
+    [InlineData(RegistryRole.Author, true)]
+    [InlineData(RegistryRole.Admin, true)]
+    public async Task Caller_permissions_match_stored_roles_and_deny_other_scopes(RegistryRole held, bool teamScope)
+    {
+        var group = Guid.NewGuid();
+        var seed = await Seed(held, group, teamScope);
+        await using var server = await Server.Start(database.DataSource);
+        var jwt = server.Token(group: group);
+        foreach (var (kind, id) in seed.InScope)
+        {
+            using var response = await server.GetPath("/api/v1/permissions/" + kind + "?id=" + Uri.EscapeDataString(id), jwt);
+            if (kind == "team" && !teamScope)
+            {
+                await Check(response, false);
+                continue;
+            }
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.True(response.Headers.CacheControl!.NoStore);
+            var permissions = await response.Content.ReadFromJsonAsync<CallerPermissions>(TestContext.Current.CancellationToken);
+            Assert.Equal(new(kind, id, true, held is RegistryRole.Author or RegistryRole.Admin,
+                held is RegistryRole.Operator or RegistryRole.Admin, held == RegistryRole.Admin), permissions);
+        }
+        foreach (var (kind, id) in seed.OtherTeam)
+        {
+            using var denied = await server.GetPath("/api/v1/permissions/" + kind + "?id=" + Uri.EscapeDataString(id), jwt);
+            await Check(denied, false);
+            Assert.True(denied.Headers.CacheControl!.NoStore);
+        }
+        using var sibling = await server.GetPath("/api/v1/permissions/type?id=" + Uri.EscapeDataString(seed.Team + "/sibling"), jwt);
+        Assert.Equal(teamScope ? HttpStatusCode.OK : HttpStatusCode.Forbidden, sibling.StatusCode);
+    }
+
+    [Fact]
+    public async Task Caller_permissions_recheck_revoked_bindings_without_token_renewal_and_fail_closed_on_invalid_resources()
+    {
+        var group = Guid.NewGuid();
+        var seed = await Seed(RegistryRole.Operator, group, false);
+        await using var server = await Server.Start(database.DataSource);
+        var jwt = server.Token(group: group);
+        var path = "/api/v1/permissions/type?id=" + Uri.EscapeDataString(seed.Type);
+        using (var before = await server.GetPath(path, jwt)) Assert.Equal(HttpStatusCode.OK, before.StatusCode);
+        await Save(new(seed.Team, [new(seed.Team, "release", "description", new([]))]));
+        using (var revoked = await server.GetPath(path, jwt)) await Check(revoked, false);
+        foreach (var resource in new[] { "run?id=invalid", "series?id=" + Guid.NewGuid(), "type?id=absent/type" })
+        {
+            using var missing = await server.GetPath("/api/v1/permissions/" + resource, server.Token(role: "Admin"));
+            await Check(missing, false);
+        }
+        foreach (var resource in new[] { "Type?id=team/type", "type?id=", "type?id=%0A", "type?id=" + new string('a', 1025) })
+        {
+            using var invalid = await server.GetPath("/api/v1/permissions/" + resource, jwt);
+            Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        }
+        using (var anonymous = await server.GetPath(path, null)) Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        using var globalAdmin = await server.GetPath(path, server.Token(identity: "app", scope: null, role: "Admin"));
+        Assert.Equal(new("type", seed.Type, true, true, true, true),
+            await globalAdmin.Content.ReadFromJsonAsync<CallerPermissions>(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    [Trait("Category", "FrontendBrowser")]
+    public async Task Caller_permissions_support_actual_browsers_with_signed_jwt_and_no_api_mocks()
+    {
+        Assert.SkipUnless(Environment.GetEnvironmentVariable("WF_PERMISSION_BROWSER") == "true",
+            "Set WF_PERMISSION_BROWSER=true and WF_FRONTEND_ROOT after installing frontend dependencies and Playwright browsers.");
+        var frontend = Environment.GetEnvironmentVariable("WF_FRONTEND_ROOT");
+        Assert.True(frontend is not null && File.Exists(Path.Combine(frontend, "scripts", "permission-browser.ts")),
+            "WF_FRONTEND_ROOT must identify the repository frontend directory.");
+        var group = Guid.NewGuid();
+        var viewer = await Seed(RegistryRole.Viewer, group, false);
+        var @operator = await Seed(RegistryRole.Operator, group, false);
+        await using var server = await Server.Start(database.DataSource);
+        var start = new ProcessStartInfo("bun")
+        {
+            WorkingDirectory = frontend, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        start.ArgumentList.Add(Path.Combine("scripts", "permission-browser.ts"));
+        start.Environment["WF_PERMISSION_API"] = server.Api;
+        start.Environment["WF_PERMISSION_TOKEN"] = server.Token(group: group);
+        start.Environment["WF_PERMISSION_VIEWER_WORKFLOW"] = viewer.Type + "/workflow";
+        start.Environment["WF_PERMISSION_OPERATOR_WORKFLOW"] = @operator.Type + "/workflow";
+        using var process = Process.Start(start)!;
+        var stdout = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+        var stderr = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            deadline.CancelAfter(TimeSpan.FromSeconds(90));
+            await process.WaitForExitAsync(deadline.Token);
+            Assert.True(process.ExitCode == 0, $"Permission browsers failed.\n{await stdout}\n{await stderr}");
+        }
+        finally
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync(CancellationToken.None);
+        }
     }
 
     [Theory]
@@ -413,6 +519,7 @@ public sealed class AuthorizationMatrixTests(AuthorizationDatabase database) : I
         private const string Audience = "562b0870-4522-43da-8587-41e9b788f309";
         private const string Issuer = $"https://login.microsoftonline.com/{Tenant}/v2.0";
         public WebApplication App => app;
+        public string Api => client.BaseAddress!.AbsoluteUri;
 
         public static async Task<Server> Start(NpgsqlDataSource source)
         {
@@ -446,6 +553,7 @@ public sealed class AuthorizationMatrixTests(AuthorizationDatabase database) : I
                 app.MapGet($"/matrix/{kind.ToString().ToLowerInvariant()}/{role}/{{**id}}", () => Results.Ok())
                     .RequireTeamRole(role, kind, "id");
             app.MapGet("/missing-metadata", () => Results.Ok()).RequireAuthorization(TeamAuthorizationExtensions.Policy(RegistryRole.Viewer));
+            app.MapPermissionsEndpoints();
             app.MapGet("/hubs/live/v1-evil", () => Results.Ok());
             app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
             await app.StartAsync(TestContext.Current.CancellationToken);

@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { useIsMutating, useMutation, useQuery } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
+import { Can } from "@/components/ui/Can"
 import {
   Field,
   FieldDescription,
@@ -15,6 +16,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { usePermissions } from "@/lib/auth/usePermissions"
 import {
   ApiError,
   previewSchedule,
@@ -45,10 +47,16 @@ export function ScheduleForm({
     workflowId: current?.schedule.workflowId ?? workflowId ?? "",
   }))
   const validation = validateDraft(draft)
+  const permissions = usePermissions(
+    validation.errors.has("workflowId")
+      ? undefined
+      : { scope: "type", id: draft.workflowId.split("/").slice(0, 2).join("/") }
+  )
+  const canWrite = permissions.can("Operator")
   const request = validation.request
   const preview = useQuery({
     queryKey: ["schedule-preview", request],
-    enabled: request !== undefined,
+    enabled: request !== undefined && canWrite,
     staleTime: 0,
     gcTime: 0,
     queryFn: ({ signal }) => {
@@ -61,6 +69,11 @@ export function ScheduleForm({
   const save = useMutation({
     mutationKey: ["schedule-write", current?.schedule.id ?? "new"],
     mutationFn: async () => {
+      if (!permissions.can("Operator")) {
+        throw new Error(
+          "Operator permission is required to manage this schedule."
+        )
+      }
       if (!request || !preview.isSuccess) {
         throw new Error(
           "Resolve validation errors and preview the next five fires before saving."
@@ -298,13 +311,13 @@ export function ScheduleForm({
         <h2 id="next-fires" className="mb-3 text-lg font-semibold">
           Next 5 fire times
         </h2>
-        {!request ? (
+        {!request || !canWrite ? (
           <p>Complete the valid schedule fields to preview upcoming fires.</p>
         ) : null}
         {preview.isFetching ? (
           <p role="status">Calculating fire times...</p>
         ) : null}
-        {request && preview.fetchStatus === "paused" ? (
+        {request && canWrite && preview.fetchStatus === "paused" ? (
           <ErrorNotice
             error={
               new Error(
@@ -313,10 +326,10 @@ export function ScheduleForm({
             }
           />
         ) : null}
-        {request && preview.error ? (
+        {request && canWrite && preview.error ? (
           <ErrorNotice error={preview.error} />
         ) : null}
-        {request && preview.isSuccess ? (
+        {request && canWrite && preview.isSuccess ? (
           <ol className="flex list-inside list-decimal flex-col gap-2">
             {preview.data.map((fire) => (
               <li key={fire}>
@@ -326,17 +339,37 @@ export function ScheduleForm({
           </ol>
         ) : null}
       </section>
+      {permissions.isFetching ? (
+        <p role="status">Checking permissions...</p>
+      ) : null}
+      {permissions.error ? <ErrorNotice error={permissions.error} /> : null}
+      {permissions.fetchStatus === "paused" ? (
+        <ErrorNotice
+          error={
+            new Error(
+              "Permission check paused. Reconnect before managing this schedule."
+            )
+          }
+        />
+      ) : null}
+      {permissions.isSuccess && !permissions.isFetching && !canWrite ? (
+        <p role="status">
+          Read-only: Operator permission is required to manage schedules.
+        </p>
+      ) : null}
       {save.error ? <ErrorNotice error={save.error} /> : null}
-      <Button
-        type="submit"
-        disabled={!request || !preview.isSuccess || isWriting || hasConflict}
-      >
-        {save.isPending
-          ? "Saving..."
-          : current
-            ? "Save changes"
-            : "Create schedule"}
-      </Button>
+      <Can permissions={permissions} role="Operator">
+        <Button
+          type="submit"
+          disabled={!request || !preview.isSuccess || isWriting || hasConflict}
+        >
+          {save.isPending
+            ? "Saving..."
+            : current
+              ? "Save changes"
+              : "Create schedule"}
+        </Button>
+      </Can>
     </form>
   )
 }

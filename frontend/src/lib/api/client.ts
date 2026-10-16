@@ -63,6 +63,41 @@ export class ApiError extends Error {
   }
 }
 
+export const permissionResourceSchema = z.object({
+  scope: z.enum(["team", "type", "run", "series", "machines"]),
+  id: z
+    .string()
+    .min(1)
+    .max(1024)
+    .regex(/^[^\p{Cc}]+$/u),
+})
+export type PermissionResource = z.infer<typeof permissionResourceSchema>
+export const permissionsSchema = permissionResourceSchema.extend({
+  viewer: z.boolean(),
+  author: z.boolean(),
+  operator: z.boolean(),
+  admin: z.boolean(),
+})
+
+export async function getPermissions(
+  resource: PermissionResource,
+  signal?: AbortSignal
+) {
+  const request = permissionResourceSchema.parse(resource)
+  const result = await uiApi.GET("/api/v1/permissions/{scope}", {
+    params: { path: { scope: request.scope }, query: { id: request.id } },
+    signal,
+  })
+  if (!result.response.ok) {
+    throw new ApiError(result.response, result.error)
+  }
+  const permissions = permissionsSchema.parse(result.data)
+  if (permissions.scope !== request.scope || permissions.id !== request.id) {
+    throw new Error("The API returned permissions for a different resource.")
+  }
+  return permissions
+}
+
 export type ScheduleRequest = components["schemas"]["UserScheduleRequest"]
 export const scheduleSchema = z.object({
   id: z.uuid(),

@@ -42,8 +42,14 @@ show a Code badge, applied file path and commit; UI-created schedules show a UI
 badge. Code views have no variable-edit form or edit/delete/pause/resume controls,
 and the actual API rejects all four mutations with 409. Legacy missing provenance
 is explicit rather than fabricated. Workflow catalogue entry points
-remain their own task. Current role enforcement is server-side; the shared
-permission-aware UI action layer remains task 10.1.2.1.3.
+remain their own task. The shared `usePermissions` hook and `Can` component hide
+unpermitted actions using authenticated `/api/v1/permissions/<scope>?id=...`
+reads, never token-decoded role guesses. Author and Operator remain independent;
+schedule mutations require Operator. Permission reads reuse server resource
+ownership and role checks, fail closed during loading, errors and refresh, and
+refresh every 30 seconds and on window focus. Forms stay mounted during these
+checks, preserving unsaved drafts. Mutation endpoints remain authoritative,
+including after a role is revoked.
 
 Commit links require an explicit workflow-repository browser template, for example:
 
@@ -154,6 +160,19 @@ failure and incomplete cleanup fail explicitly.
 layouts, keyboard modal cancellation/focus restoration, actual 412 conflicts,
 offline recovery and axe checks with zero critical/serious WCAG violations.
 Unit tests cover draft limits, UTF-8 byte counts, DST labels, response validation
-and the fail-closed development guard. `.github\workflows\frontend.yml` runs
+and fail-closed authentication/permission guards. The additional authorization
+browser lane uses the actual JWT-authenticated Kestrel server and PostgreSQL role
+bindings, not development API authentication or API mocks. It checks Operator →
+Viewer → denied-scope action visibility and retained drafts in all three engines.
+Run it from the repository root after installing the browser dependencies:
+
+```powershell
+$env:WF_PERMISSION_BROWSER = "true"
+$env:WF_FRONTEND_ROOT = (Resolve-Path frontend).Path
+dotnet test backend\tests\Wf.Integration.Tests --configuration Release --filter FullyQualifiedName~AuthorizationMatrixTests
+```
+
+Without the explicit browser opt-in, the .NET-only suite skips that one browser
+case; the frontend CI lane always opts in. `.github\workflows\frontend.yml` runs
 lint/build/units and the real PostgreSQL/browser lane on Linux; remote execution
 is not implied by local checks.

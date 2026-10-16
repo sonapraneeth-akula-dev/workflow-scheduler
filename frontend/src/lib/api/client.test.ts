@@ -1,5 +1,41 @@
 import { describe, expect, it } from "vitest"
-import { ApiError, scheduleSchema, seriesFiresSchema } from "./client"
+import {
+  ApiError,
+  permissionResourceSchema,
+  permissionsSchema,
+  scheduleSchema,
+  seriesFiresSchema,
+} from "./client"
+
+describe("caller permission trust boundaries", () => {
+  const resource = { scope: "type", id: "team/release" }
+  it("requires an explicit resource and booleans for every role", () => {
+    const valid = {
+      ...resource,
+      viewer: true,
+      author: false,
+      operator: false,
+      admin: false,
+    }
+    expect(permissionsSchema.parse(valid)).toEqual(valid)
+    for (const body of [
+      resource,
+      { ...valid, operator: "true" },
+      { ...valid, viewer: null },
+      { ...valid, scope: "Type" },
+    ]) {
+      expect(permissionsSchema.safeParse(body).success).toBe(false)
+    }
+  })
+  it.each(["", "\n", "bad\u0000resource", "a".repeat(1025)])(
+    "rejects invalid permission resource %j",
+    (id) => {
+      expect(
+        permissionResourceSchema.safeParse({ ...resource, id }).success
+      ).toBe(false)
+    }
+  )
+})
 
 describe("schedule API trust boundaries", () => {
   it("preserves stale-edit recovery instructions and status", () => {
