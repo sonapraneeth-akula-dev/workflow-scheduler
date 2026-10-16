@@ -13,6 +13,22 @@ const configuration = z.object({
 })
 
 function isDevelopmentAuth(): boolean {
+  if (import.meta.env.VITE_AUTH_MODE === "local-compose") {
+    if (
+      import.meta.env.MODE !== "local-compose" ||
+      ![
+        "127.2.6.2",
+        "127.2.6.7",
+        "dev.kardia.sonapraneeth.in",
+        "ppe.kardia.sonapraneeth.in",
+      ].includes(location.hostname)
+    ) {
+      throw new Error(
+        "Local Compose authentication requires its explicit build mode and trusted local host."
+      )
+    }
+    return true
+  }
   if (import.meta.env.VITE_AUTH_MODE !== "development") {
     return false
   }

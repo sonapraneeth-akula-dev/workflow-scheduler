@@ -46,6 +46,26 @@ services:
     build:
       context: "${KARDIA_REPOSITORY_ROOT:?Use wf local up}/backend"
       dockerfile: src/Wf.Agent/Dockerfile
+  wf-gateway:
+    image: "kardia-gateway:${KARDIA_ENVIRONMENT:?Use wf local up}"
+    build:
+      context: "${KARDIA_REPOSITORY_ROOT:?Use wf local up}"
+      dockerfile: infra/local/gateway.Dockerfile
+    depends_on:
+      wf-api:
+        condition: service_healthy
+      wf-engine-a:
+        condition: service_healthy
+      wf-engine-b:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    ports:
+      - "${KARDIA_BIND_IP:?Use wf local up}:80:8080"
   compose-dashboard:
     ports:
       - "${KARDIA_BIND_IP:?Use wf local up}:18888:18888"

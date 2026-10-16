@@ -32,9 +32,12 @@ public static class ComposeStack
         var database = postgres.AddDatabase("wf", "workflow");
         var migrations = builder.AddContainer("wf-migrations", "kardia-control-plane", environment)
             .WithReference(database, connectionName: "Workflow").WithArgs("--migrate").WaitFor(postgres);
-        AddHost("wf-api", engine: false);
+        var api = AddHost("wf-api", engine: false);
         var first = AddHost("wf-engine-a", engine: true);
         var second = AddHost("wf-engine-b", engine: true);
+        var gateway = builder.AddContainer("wf-gateway", "kardia-gateway", environment)
+            .WithHttpEndpoint(targetPort: 8080, name: "http")
+            .WaitFor(api).WaitFor(first).WaitFor(second);
         builder.AddContainer("wf-agent-linux", "kardia-agent", environment)
             .WithEnvironment("Agent__Id", id)
             .WithEnvironment("Agent__Name", "compose-" + environment + "-linux")
@@ -43,14 +46,13 @@ public static class ComposeStack
             .WithEnvironment("Agent__Labels__runtime", "container")
             .WithEnvironment("Agent__AllowInsecureTransport", "true")
             .WithEnvironment("Agent__InsecurePackageOrigin", "http://wf-api:8080")
-            .WithEnvironment("Agent__Engines__0", first.GetEndpoint("engine"))
-            .WithEnvironment("Agent__Engines__1", second.GetEndpoint("engine"))
+            .WithEnvironment("Agent__Engines__0", gateway.GetEndpoint("http"))
             .WithEnvironment("Agent__ResultJournalDirectory", "/var/lib/wf-agent/results")
             .WithEnvironment("Agent__LogSpoolDirectory", "/var/lib/wf-agent/logs")
             .WithEnvironment("Agent__PackageCache", "/var/lib/wf-agent/packages")
             .WithEnvironment("Secrets__Provider", "Local")
             .WithEnvironment("Secrets__LocalDirectory", "/var/lib/wf-agent/secrets")
-            .WithVolume("agent-data", "/var/lib/wf-agent").WaitFor(first).WaitFor(second);
+            .WithVolume("agent-data", "/var/lib/wf-agent").WaitFor(gateway);
 
         IResourceBuilder<ContainerResource> AddHost(string name, bool engine) =>
             builder.AddContainer(name, "kardia-control-plane", environment)

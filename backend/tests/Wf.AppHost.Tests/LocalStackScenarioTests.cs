@@ -145,7 +145,8 @@ public sealed class LocalStackScenarioTests(ITestOutputHelper output)
         }
     }
 
-    private static async Task<string> CompileAndPackage(string root, string team, string workflow, CancellationToken token)
+    internal static async Task<string> CompileAndPackage(string root, string team, string workflow, CancellationToken token,
+        string? workflowSource = null)
     {
         var sourceDirectory = Path.Combine(root, "source");
         Directory.CreateDirectory(sourceDirectory);
@@ -196,6 +197,7 @@ public sealed class LocalStackScenarioTests(ITestOutputHelper output)
                 .SystemPostProcess(ctx => Stamp(ctx, "SystemPostProcess")));
             return await workflow.RunAsync(args);
             """;
+        source = workflowSource ?? source;
         await File.WriteAllTextAsync(Path.Combine(sourceDirectory, "workflow.cs"), source, new UTF8Encoding(false), token);
         await File.WriteAllTextAsync(Path.Combine(sourceDirectory, "team.json"),
             JsonSerializer.Serialize(Registry(team)), new UTF8Encoding(false), token);
@@ -237,7 +239,7 @@ public sealed class LocalStackScenarioTests(ITestOutputHelper output)
         types = new[] { new { team, name = "release-validation", description = "Full-stack scenario A", metadataSchema = new { keys = Array.Empty<object>() } } }
     };
 
-    private static async Task Register(HttpClient client, string root, string source, string team, string workflow,
+    internal static async Task Register(HttpClient client, string root, string source, string team, string workflow,
         CancellationToken token)
     {
         await Post(client, "/api/v1/registrations",
@@ -306,7 +308,7 @@ public sealed class LocalStackScenarioTests(ITestOutputHelper output)
                 tasks[second].GetProperty("dispatchedAt").GetDateTimeOffset(), first + " must finish before " + second);
     }
 
-    private static async Task<JsonElement> Post(HttpClient client, string path, object body, HttpStatusCode expected,
+    internal static async Task<JsonElement> Post(HttpClient client, string path, object body, HttpStatusCode expected,
         CancellationToken token)
     {
         using var response = await client.PostAsJsonAsync(path, body, token);
@@ -316,7 +318,7 @@ public sealed class LocalStackScenarioTests(ITestOutputHelper output)
         return document.RootElement.Clone();
     }
 
-    private static async Task<JsonElement> Get(HttpClient client, string path, CancellationToken token)
+    internal static async Task<JsonElement> Get(HttpClient client, string path, CancellationToken token)
     {
         using var response = await client.GetAsync(path, token);
         var text = await response.Content.ReadAsStringAsync(token);

@@ -63,8 +63,10 @@ public sealed class LocalCommandTests : IDisposable
             }
         }
         Assert.Contains("kardia-" + env, result.Output);
+        Assert.Contains($"Gateway: http://{bind}; API: http://{bind}:5000; dashboard: http://{bind}:18888.", result.Output);
         Assert.Contains("http://" + bind + ":5000", result.Output);
         Assert.Contains("http://" + bind + ":18888", result.Output);
+        Assert.DoesNotContain("Gateway setup follows in a later task.", result.Output);
         Assert.DoesNotContain("login", result.Output, StringComparison.OrdinalIgnoreCase);
     }
 

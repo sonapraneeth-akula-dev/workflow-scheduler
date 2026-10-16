@@ -141,7 +141,7 @@ public static class LocalCommand
                 stage = "Docker Compose up";
                 await Execute("docker", [.. prefix, "up", "-d", "--build", "--wait", "--wait-timeout", "180"]);
                 await output.WriteLineAsync($"Local {environment} is ready: project {project}, bind {bind}.");
-                await output.WriteLineAsync($"API: http://{bind}:5000; dashboard: http://{bind}:18888. Gateway setup follows in a later task.");
+                await output.WriteLineAsync($"Gateway: http://{bind}; API: http://{bind}:5000; dashboard: http://{bind}:18888.");
             }
             else
             {

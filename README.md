@@ -93,18 +93,35 @@ dotnet run --project .\backend\src\Wf.Cli -- local down --env dev
 `up` publishes Compose through Aspire, builds managed Release API/engine/agent
 images, runs migrations and waits for healthy services. Each project has
 PostgreSQL 17, an API-only host, two leader-elected engines, one nonroot Linux
-agent and an anonymous Aspire dashboard. `kardia-dev` binds only `127.2.6.2`;
-`kardia-ppe` binds only `127.2.6.7`. API port 5000, HTTP/2 engine ports
-5001/5002 and dashboard port 18888 are isolated on those exact addresses.
-The SPA/gateway, edge HTTPS domains and nightly deployment checks are separate
-tasks; this profile does not yet serve the UI or bind port 80.
+agent, a Caddy gateway containing the built SPA and an anonymous Aspire
+dashboard. `kardia-dev` binds only `127.2.6.2`; `kardia-ppe` binds only
+`127.2.6.7`. Open `http://127.2.6.2` or `http://127.2.6.7` for the UI.
+Gateway port 80, API port 5000, HTTP/2 engine ports 5001/5002 and dashboard
+port 18888 are isolated on those exact addresses. Edge HTTPS domains and
+nightly deployment checks remain separate tasks.
 
 Both environments are **trusted-local, login-free Development prototypes**,
 including the environment named `ppe`, not production authentication profiles.
 HTTP between containers is explicitly restricted to each environment's fixed
 Docker subnet and configured package/engine origins. No login/logout flow,
 Entra setup, machine certificate installation or public-network exposure is
-added; production authentication guards remain unchanged.
+added; production authentication guards remain unchanged. The SPA is built
+with the explicit `local-compose` mode and permits its login-free identity
+only on the two local IPs and the two approved dev/PPE edge hostnames.
+Neither the existing loopback Vite-only development mode nor ordinary
+production builds inherit that bypass.
+
+Caddy preserves `/api` and `/hubs` paths, blocks gateway `/metrics*`,
+`/openapi*` and `/swagger*` ops paths, serves SPA deep links without caching
+`index.html`, and caches versioned assets immutably. Security headers protect
+ordinary pages; report content retains the API's enforced sandbox policy and
+same-origin iframe support rather than inheriting `X-Frame-Options: DENY`.
+The gateway proxies HTTP/2 agent gRPC to the first
+healthy engine. One-second `/healthz/leader` checks exclude the standby until
+it acquires the database lease and finishes recovery. The Linux agent has
+only the gateway configured, so reconnects pass through the same leader
+selection after an engine failure. Existing in-flight SDK task hosts remain
+on the agent while the replacement engine recovers and accepts their results.
 
 Project-scoped volumes isolate PostgreSQL, blobs, control-plane local secrets
 and agent state. Owner-only `.wf\local\<env>\runtime.env` stores a stable
@@ -134,6 +151,23 @@ both real environments, verifies exact published bindings and leader separation,
 restarts PPE while dev remains healthy, and checks database/blob/agent state,
 keys and UUID persistence. Cleanup removes only its own project resources and
 allowlisted volumes, leaving private CLI state for subsequent use.
+
+For the actual gateway/leader-kill acceptance, also install the frontend's
+frozen dependencies and Playwright browsers, then run:
+
+```powershell
+$env:WF_COMPOSE_GATEWAY = "true"
+dotnet test .\backend\tests\Wf.AppHost.Tests --filter FullyQualifiedName~ComposeGatewayTests
+```
+
+This test refuses an existing PPE project, compiles and registers a real SDK
+workflow through the public CLI/API, kills its leader while a Linux task is
+running, and requires the standby to finish the same attempt and dispatch the
+following task. Chromium, Firefox and WebKit exercise the actual built SPA,
+deep-link reload, login-free session, MessagePack WebSocket and a real
+published HTML report iframe through Caddy.
+Only owned PPE containers, network, volumes and temporary workflow files are
+removed.
 
 For explicit trusted-LAN access, install `mkcert` and trust its root once on
 each intended client. Then:

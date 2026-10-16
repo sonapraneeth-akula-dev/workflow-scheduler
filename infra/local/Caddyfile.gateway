@@ -1,0 +1,63 @@
+{
+	admin off
+	persist_config off
+	auto_https off
+	servers {
+		protocols h1 h2c
+	}
+}
+
+(engine_proxy) {
+	reverse_proxy h2c://wf-engine-a:8081 h2c://wf-engine-b:8081 {
+		lb_policy first
+		health_uri /healthz/leader
+		health_interval 1s
+		health_timeout 2s
+		lb_try_duration 3s
+		flush_interval -1
+	}
+}
+
+:8080 {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+	@notReport not path /api/v1/reports/*/content
+	header @notReport {
+		X-Frame-Options DENY
+		Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; worker-src 'self' blob:; connect-src 'self' https: wss:; frame-src 'self'; object-src 'none'; base-uri 'self'"
+	}
+	@ops path /metrics* /openapi* /swagger*
+	handle @ops {
+		respond 404
+	}
+	@engine {
+		path /healthz/leader
+	}
+	@grpc {
+		header Content-Type application/grpc*
+	}
+	handle @engine {
+		import engine_proxy
+	}
+	handle @grpc {
+		import engine_proxy
+	}
+	@api path /api /api/* /hubs /hubs/* /healthz
+	handle @api {
+		reverse_proxy wf-api:8080
+	}
+	handle {
+		root * /srv
+		route {
+			try_files {path} /index.html
+			header /assets/* Cache-Control "public, max-age=31536000, immutable"
+			header /index.html Cache-Control "no-store"
+			file_server
+		}
+	}
+}

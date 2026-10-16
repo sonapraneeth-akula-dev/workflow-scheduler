@@ -54,7 +54,8 @@ public sealed class LocalComposeLifecycleTests(ITestOutputHelper output)
                 var bindings = new Dictionary<string, int>
                 {
                     ["wf-api"] = 5000, ["wf-engine-a"] = 5001,
-                    ["wf-engine-b"] = 5002, ["compose-dashboard"] = 18888
+                    ["wf-engine-b"] = 5002, ["compose-dashboard"] = 18888,
+                    ["wf-gateway"] = 80
                 };
                 foreach (var (service, port) in bindings)
                 {

@@ -51,4 +51,42 @@ describe("authentication cannot silently bypass Entra", () => {
     const { getSession } = await import("./session")
     await expect(getSession()).rejects.toThrow()
   })
+
+  it.each([
+    "127.2.6.2",
+    "127.2.6.7",
+    "dev.kardia.sonapraneeth.in",
+    "ppe.kardia.sonapraneeth.in",
+  ])("allows the explicit local-compose build only on %s", async (hostname) => {
+    vi.stubEnv("VITE_AUTH_MODE", "local-compose")
+    vi.stubEnv("MODE", "local-compose")
+    vi.stubEnv("DEV", false)
+    vi.stubGlobal("location", { hostname })
+    const { getSession, accessToken } = await import("./session")
+    await expect(getSession()).resolves.toEqual({
+      displayName: "Local developer",
+      isDevelopment: true,
+    })
+    await expect(accessToken()).resolves.toBeNull()
+  })
+
+  it.each([
+    ["production", "127.2.6.7"],
+    ["development", "127.2.6.2"],
+    ["local-compose", "localhost"],
+    ["local-compose", "127.0.0.1"],
+    ["local-compose", "example.invalid"],
+    ["local-compose", "ppe.kardia.sonapraneeth.in.attacker.invalid"],
+  ])(
+    "rejects a local-compose bypass in mode %s on %s",
+    async (mode, hostname) => {
+      vi.stubEnv("VITE_AUTH_MODE", "local-compose")
+      vi.stubEnv("MODE", mode)
+      vi.stubEnv("DEV", false)
+      vi.stubGlobal("location", { hostname })
+      const { getSession, accessToken } = await import("./session")
+      await expect(getSession()).rejects.toThrow("explicit build mode")
+      await expect(accessToken()).rejects.toThrow("explicit build mode")
+    }
+  )
 })

@@ -48,8 +48,14 @@ public sealed class ComposeStackModelTests
         Assert.Contains("agent-id", agentValues["Agent__Id"]);
         Assert.Equal("true", agentValues["Agent__AllowInsecureTransport"]);
         Assert.Equal("http://wf-api:8080", agentValues["Agent__InsecurePackageOrigin"]);
-        Assert.Contains("wf-engine-a", agentValues["Agent__Engines__0"]);
-        Assert.Contains("wf-engine-b", agentValues["Agent__Engines__1"]);
+        Assert.Contains("wf-gateway", agentValues["Agent__Engines__0"]);
+        Assert.False(agentValues.ContainsKey("Agent__Engines__1"));
+        var gateway = Assert.Single(builder.Resources.OfType<ContainerResource>(),
+            resource => resource.Name == "wf-gateway");
+        Assert.Equal(8080, Assert.Single(gateway.Annotations.OfType<EndpointAnnotation>()).TargetPort);
+        Assert.Equal(new[] { "wf-api", "wf-engine-a", "wf-engine-b" },
+            gateway.Annotations.OfType<WaitAnnotation>().Select(wait => wait.Resource.Name).Order().ToArray());
+        Assert.Equal("wf-gateway", Assert.Single(agent.Annotations.OfType<WaitAnnotation>()).Resource.Name);
         Assert.Equal(environment, agentValues["Agent__Labels__environment"]);
         Assert.Equal("/var/lib/wf-agent/results", agentValues["Agent__ResultJournalDirectory"]);
         var postgres = Assert.Single(builder.Resources.OfType<PostgresServerResource>());
