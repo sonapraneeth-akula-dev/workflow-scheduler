@@ -26,6 +26,17 @@ cloud response body or exception chain. Transformed/encoded data beyond those
 forms, explicit report/artifact content and arbitrary task-side external writes
 are not a general data-loss-prevention boundary.
 
+`Wf.Integration.Tests.Security.SecretLeakTests` exercises protected local
+provisioning, actual agent/SDK tasks, gRPC, PostgreSQL and signed HTTP log
+uploads. Its audit scans every table in the isolated database schema, explicitly
+decodes event/snapshot `bytea` payloads, decompresses uploaded log blobs, and reads
+spool metadata and the result journal. Raw, UTF-8 base64 and nested JSON-escaped
+secret representations must have zero hits. Deliberate transactional database
+and gzip probes verify detection, then roll back or remove the probes. The
+shared execution scenario also checks dispatch references, task outputs/errors,
+launch arguments/environment and agent diagnostics. This is not a live Key
+Vault test or coverage of arbitrary transformed/report/artifact content.
+
 ## Local (default; no Azure account or login)
 
 Configuration keys (environment equivalents use `__`):

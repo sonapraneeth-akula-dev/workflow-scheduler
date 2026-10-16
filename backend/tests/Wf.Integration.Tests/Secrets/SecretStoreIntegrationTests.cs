@@ -27,7 +27,11 @@ public sealed class SecretStoreIntegrationTests(TaskOutputsDatabase database, IT
     private readonly string value = "runtime-only-clé-🔑-" + Guid.NewGuid().ToString("N");
 
     [Fact]
-    public async Task Protected_local_values_actual_agent_SDK_gateway_Postgres_errors_outputs_and_log_spool_are_safe()
+    public Task Protected_local_values_actual_agent_SDK_gateway_Postgres_errors_outputs_and_log_spool_are_safe() =>
+        RunScenarioAsync();
+
+    internal async Task RunScenarioAsync(bool uploadLogs = false,
+        Func<TaskOutputsTests.OutputHost, string, Task>? audit = null)
     {
         var completions = new ConcurrentQueue<TaskCompleted>();
         var packageGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -35,7 +39,7 @@ public sealed class SecretStoreIntegrationTests(TaskOutputsDatabase database, IT
         {
             builder.Services.AddSingleton(new CompletionObserver(completions.Enqueue, packageGate.Task));
             builder.Services.AddGrpc(options => options.Interceptors.Add<CompletionObserver>());
-        });
+        }, uploadLogs: uploadLogs);
         var package = await TaskOutputsTests.Package();
         host.App.MapGet("/package.zip", async (HttpContext context) =>
         {
@@ -117,7 +121,7 @@ public sealed class SecretStoreIntegrationTests(TaskOutputsDatabase database, IT
                     """);
                 AssertSafe(db!);
             }
-            var logRoot = Path.Combine(host.Root, "logs");
+            var logRoot = Path.Combine(host.Root, uploadLogs ? "blobs" : "logs");
             await Wait(() => Task.FromResult(Directory.Exists(logRoot) &&
                 Directory.GetFiles(logRoot, "index.json", SearchOption.AllDirectories).Length == 3));
             await Wait(() => Task.FromResult(Directory.GetFiles(logRoot, "*.log.gz", SearchOption.AllDirectories).Length >= 2));
@@ -144,6 +148,7 @@ public sealed class SecretStoreIntegrationTests(TaskOutputsDatabase database, IT
         AssertSafe(await stdout + await stderr);
         foreach (var file in Directory.GetFiles(Path.Combine(host.Root, "journal"), "*", SearchOption.AllDirectories))
             AssertSafe(Encoding.UTF8.GetString(await File.ReadAllBytesAsync(file, Token)));
+        if (audit is not null) await audit(host, value);
         output.WriteLine("Actual protected provisioning + runtime resolution, safe PostgreSQL/events/journal/gzip spool and missing-secret ValidationError verified. No live Azure tenant call.");
 
         async Task Wait(Func<Task<bool>> predicate)

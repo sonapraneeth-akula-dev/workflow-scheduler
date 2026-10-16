@@ -331,7 +331,7 @@ public sealed class TaskOutputsTests(TaskOutputsDatabase database, ITestOutputHe
         private bool seeded;
 
         public static async Task<OutputHost> Start(NpgsqlDataSource source, string artifacts = "task-outputs-3adec91f",
-            Action<WebApplicationBuilder>? configure = null)
+            Action<WebApplicationBuilder>? configure = null, bool uploadLogs = false)
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (!Directory.Exists(Path.Combine(directory.FullName, ".git")))
@@ -355,6 +355,14 @@ public sealed class TaskOutputsTests(TaskOutputsDatabase database, ITestOutputHe
             builder.Services.AddSingleton(registry);
             builder.Services.AddSingleton(runs);
             builder.Services.AddSingleton(new ResourceSampleSink(source, runs, blobs));
+            if (uploadLogs)
+            {
+                var logKey = RandomNumberGenerator.GetBytes(32);
+                builder.Services.AddSingleton(TimeProvider.System);
+                builder.Services.AddSingleton(new LogUploadCapabilities(logKey, TimeProvider.System));
+                builder.Services.AddSingleton(new BlobUploadGrants(logKey));
+                builder.Services.AddSingleton<IBlobStore>(blobs);
+            }
             var documentName = "v1";
             builder.Services.AddOpenApi(documentName);
             configure?.Invoke(builder);
@@ -363,6 +371,7 @@ public sealed class TaskOutputsTests(TaskOutputsDatabase database, ITestOutputHe
             app.UseAuthorization();
             app.MapGrpcService<AgentGatewayService>();
             app.MapTaskOutputsEndpoints();
+            if (uploadLogs) app.MapLogUploadEndpoints();
             app.MapOpenApi();
             await app.StartAsync(Token);
             var addresses = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.ToArray();
