@@ -166,13 +166,6 @@ test("run link reads its immutable Task Plan after a newer publish without expos
   expect(second).not.toBe(first)
   const planResponses: string[] = []
   const mutations: string[] = []
-  page.on("response", async (response) => {
-    if (
-      new URL(response.url()).pathname ===
-      `/api/v1/workflows/${workflowId}/versions/${first}`
-    )
-      planResponses.push(await response.text())
-  })
   page.on("request", (request) => {
     const path = new URL(request.url()).pathname
     if (path.startsWith("/api/") && request.method() !== "GET")
@@ -184,6 +177,16 @@ test("run link reads its immutable Task Plan after a newer publish without expos
     "href",
     `/t/ui-tests/release/w/${workflowId.split("/")[2]}/versions/${first}`
   )
+  await expect(
+    page.getByRole("region", { name: "Live run graph", exact: true })
+  ).toBeVisible()
+  page.on("response", async (response) => {
+    if (
+      new URL(response.url()).pathname ===
+      `/api/v1/workflows/${workflowId}/versions/${first}`
+    )
+      planResponses.push(await response.text())
+  })
   await link.click()
   await expect(
     page.getByRole("heading", { name: "Task Plan", exact: true })

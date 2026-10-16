@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { HistoryFilters, HistoryTable } from "@/features/runs/HistoryTable"
 import { historySearchSchema } from "@/features/runs/history"
+import { TriggerDialog } from "@/features/runs/TriggerDialog"
 
 export const Route = createFileRoute("/t/$team/$type/w/$wf/history")({
   validateSearch: historySearchSchema,
@@ -16,6 +17,7 @@ function WorkflowHistory() {
     <>
       <h1 className="text-2xl font-semibold">Workflow history</h1>
       <p className="break-words">{workflowId}</p>
+      <TriggerDialog workflowId={workflowId} />
       <HistoryFilters
         key={JSON.stringify(search)}
         search={search}

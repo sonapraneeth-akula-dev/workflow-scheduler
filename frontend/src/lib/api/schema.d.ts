@@ -242,6 +242,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workflows/{team}/{type}/{workflow}/variables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Trigger variable schema and literal defaults for an Operator or Admin on the exact type scope. Optional version is one canonical UUID belonging to this undeleted workflow; omitted selects its current active version. No other query parameters are supported. Secrets contain names only; no secret resolution or task configuration is exposed. */
+        get: {
+            parameters: {
+                query?: {
+                    version?: string;
+                };
+                header?: never;
+                path: {
+                    team: string;
+                    type: string;
+                    workflow: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WorkflowVariablesResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registrations": {
         parameters: {
             query?: never;
@@ -878,6 +974,165 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{id}/resource-metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ResourceAttemptSummary"][];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{id}/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Fresh run Viewer authorization; newest-first, integrity-verified resource samples. taskKey=node/task, attempt=1..32767, limit=1..120 (default 60), optional opaque cursor; nulls retain unavailable reasons. */
+        get: {
+            parameters: {
+                query: {
+                    /** @description Exact stored node/task key; URI-encode as a query value. */
+                    taskKey: string;
+                    /** @description Attempt number, 1..32767. */
+                    attempt: number;
+                    /** @description Page size, 1..120; default 60. */
+                    limit?: number;
+                    /** @description Opaque nextCursor from this attempt; expires after one hour. */
+                    cursor?: string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ResourceSeriesPage"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{id}/abort": {
         parameters: {
             query?: never;
@@ -1062,18 +1317,99 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Optional retry key: one value of 1 to 200 visible ASCII characters without whitespace. */
+                    "Idempotency-Key"?: string;
+                };
                 path?: never;
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TriggerRunRequest"];
+                };
+            };
             responses: {
-                /** @description OK */
-                200: {
+                /** @description Accepted */
+                202: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["TriggerRunResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Payload Too Large */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unsupported Media Type */
+                415: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
                 };
             };
         };
@@ -2520,6 +2856,7 @@ export interface components {
         FailureCategory: "TaskError" | "Timeout" | "AgentLost" | "PlatformError" | "ValidationError" | "Aborted" | "ResourceLimit" | "Placement";
         /** @enum {unknown} */
         FailurePolicy: "Hard" | "Soft";
+        JsonElement: unknown;
         LabelSelector: {
             key: string;
             value?: components["schemas"]["SelectorValue"];
@@ -2681,6 +3018,75 @@ export interface components {
             runId: string;
             /** Format: uuid */
             reportId: string;
+        };
+        ResourceAttemptSummary: {
+            taskKey: string;
+            /** Format: int32 */
+            attempt: number | string;
+            /** Format: uuid */
+            agentId: null | string;
+            /** Format: int64 */
+            sampleCount: number | string;
+            /** Format: double */
+            averageCpuPercent: null | number | string;
+            /** Format: double */
+            maxCpuPercent: null | number | string;
+            /** Format: double */
+            peakRamBytes: null | number | string;
+            /** Format: double */
+            networkSentBytes: null | number | string;
+            /** Format: double */
+            networkReceivedBytes: null | number | string;
+            /** Format: double */
+            cpuObservedSeconds: number | string;
+            /** Format: double */
+            networkObservedSeconds: number | string;
+            cpuUnavailableReason: null | string;
+            memoryUnavailableReason: null | string;
+            networkUnavailableReason: null | string;
+        };
+        ResourceObservation: {
+            task: components["schemas"]["ResourcePoint"];
+            machine: null | components["schemas"]["ResourcePoint"];
+            machineUnavailableReason?: null | string;
+        };
+        ResourcePoint: {
+            /** Format: date-time */
+            atUtc: string;
+            /** Format: double */
+            intervalSeconds: null | number | string;
+            /** Format: double */
+            cpuPercent: null | number | string;
+            /** Format: uint64 */
+            ramBytes: null | number | string;
+            /** Format: uint64 */
+            networkSentBytes: null | number | string;
+            /** Format: uint64 */
+            networkReceivedBytes: null | number | string;
+            /** Format: uint64 */
+            networkSentDeltaBytes: null | number | string;
+            /** Format: uint64 */
+            networkReceivedDeltaBytes: null | number | string;
+            /** Format: double */
+            networkSentBytesPerSecond: null | number | string;
+            /** Format: double */
+            networkReceivedBytesPerSecond: null | number | string;
+            cpuScope: string;
+            memoryScope: string;
+            networkScope: string;
+            cpuUnavailableReason: null | string;
+            memoryUnavailableReason: null | string;
+            networkUnavailableReason: null | string;
+            networkRateUnavailableReason: null | string;
+        };
+        ResourceSeriesPage: {
+            samples: components["schemas"]["ResourceSeriesSample"][];
+            nextCursor: null | string;
+        };
+        ResourceSeriesSample: {
+            /** Format: uint64 */
+            sequence: number | string;
+            observation: components["schemas"]["ResourceObservation"];
         };
         RunDelta: {
             runId: string;
@@ -2949,6 +3355,18 @@ export interface components {
             policy: components["schemas"]["TaskPlanExecutionPolicy"];
             placement: null | components["schemas"]["TaskPlanPlacement"];
         };
+        TriggerRunRequest: {
+            workflowId: string;
+            version?: null | string;
+            variables?: Record<string, unknown>;
+        };
+        TriggerRunResponse: {
+            /**
+             * Format: uuid
+             * @default 00000000-0000-0000-0000-000000000000
+             */
+            runId: string;
+        };
         UserScheduleResponse: {
             /** Format: uuid */
             id: string;
@@ -2972,11 +3390,27 @@ export interface components {
             sourcePath?: null | string;
             gitCommit?: null | string;
         };
+        /** @enum {string} */
+        VariableType: "String" | "Int" | "Long" | "Double" | "Bool" | "Enum" | "StringList" | "Duration" | "Secret";
         WorkflowMetadata: {
             type: string;
             values: {
                 [key: string]: string;
             };
+        };
+        WorkflowVariable: {
+            key: string;
+            type: components["schemas"]["VariableType"];
+            required: boolean;
+            default: null | components["schemas"]["JsonElement"];
+            allowedValues: string[];
+        };
+        WorkflowVariablesResponse: {
+            workflowId: string;
+            /** Format: uuid */
+            versionId: string;
+            version: string;
+            variables: components["schemas"]["WorkflowVariable"][];
         };
         WorkflowVersionPlan: {
             /** Format: uuid */

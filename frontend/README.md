@@ -21,8 +21,26 @@ bun run dev --host 127.0.0.1
 Open the printed Vite address, then Create schedule. Supply the exact
 `team/type/workflow` identity, name, IANA timezone and either five-field cron or
 positive whole-second interval. Variables are a JSON object of overrides;
-defaults and schema validation come from the selected workflow version. The
-schema-driven shared variable form is a separate task.
+defaults and schema validation come from the selected workflow version.
+
+Workflow history and immutable Task Plan pages expose **Trigger run** to
+Operators. The native modal reads a fresh, Operator-authorized variable schema,
+then captures its exact immutable version UUID. Defaults prefill the shared
+`VariablesForm`; strings/enums, Int32/Int64, finite doubles, booleans, JSON string
+lists, constant-format durations and name-only secret references validate inline.
+Optional overrides can be unset (the workflow default still applies). Required
+means supplied, not nonempty: an explicitly edited empty string remains valid.
+Secret literals are never requested or resolved by the form. Invalid fields or
+requests exceeding 1 MiB disable submission. Viewer task-plan responses still
+exclude defaults and variable values.
+
+Manual acceptance uses HTTP 202 and an idempotency key without automatic retries.
+After an uncertain response the exact payload, pinned UUID and key remain frozen,
+including across modal close/reopen; Retry cannot silently create another run.
+Definite validation/authorization/not-found rejections permit correction. A valid
+receipt links the asynchronously created run; **Prepare another run** explicitly
+starts a new request. Closing/reopening retains the captured version; reload the
+page to capture a newly active version. Schedule state is never modified.
 
 Large JSON numbers, including both Int64 limits, retain their exact source
 tokens through preview, create/edit, response validation and reload. Native raw

@@ -5,6 +5,9 @@ All notable frontend changes are documented here, using Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Operator-scoped workflow trigger dialogs with immutable version capture,
+  schema-driven defaults, exact typed variable validation and lossless Int64
+  requests; ambiguous acceptance retries preserve both payload and request key.
 - Bounded progressive report viewing above decimal 5 MB: backpressured CSV
   worker pages, validated JSON-table pages and exact UTF-8 text pages, with
   previous/next controls and persisted real-browser performance measurements.

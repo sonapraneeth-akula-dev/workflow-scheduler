@@ -14,7 +14,7 @@ declare global {
 export class JsonNumberSupportError extends Error {
   constructor() {
     super(
-      "This browser cannot preserve large JSON numbers. Use a current browser before editing this schedule."
+      "This browser cannot preserve large JSON numbers. Use a current browser before submitting large-number variables."
     )
   }
 }
