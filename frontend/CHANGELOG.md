@@ -5,6 +5,9 @@ All notable frontend changes are documented here, using Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Run Metrics tab with bounded CPU/RAM/network resource charts, exact integer
+  counter tables, per-attempt/machine scopes, explicit unavailable reasons and
+  integrity/authorization-aware refresh and cursor navigation.
 - Operator-scoped workflow trigger dialogs with immutable version capture,
   schema-driven defaults, exact typed variable validation and lossless Int64
   requests; ambiguous acceptance retries preserve both payload and request key.

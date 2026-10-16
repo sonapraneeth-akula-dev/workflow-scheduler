@@ -351,6 +351,34 @@ keyboard tabs/table collapse, explicit refresh without polling and zero
 critical/serious desktop-light/mobile-dark axe violations or page overflow.
 No timeline API response or transport is mocked.
 
+The **Metrics** tab reads attempt CPU average/maximum, peak RAM, network byte
+totals and observed coverage through fresh Viewer-authorized resource endpoints.
+Select an exact task/attempt, then task scope or machine context. Task CPU uses
+one core = 100%; machine CPU uses the whole machine. Windows JobObject memory
+includes descendants but task network transport bytes cover the host process
+only. Linux cgroup memory/network includes descendants; network counts L3 bytes.
+Machine non-loopback interface traffic is context, never task attribution.
+
+The shared lazy uPlot viewer draws CPU, RAM and sent/received rates with null
+gaps. At most 60 integrity-checked samples load per page; newer/older controls
+follow signed attempt-scoped cursors without accumulating old chart arrays.
+Sequence order survives UTC clock corrections: chart X is page-local sample
+order, not inferred elapsed time. The keyboard-scrollable table preserves exact
+64-bit byte counters, source timestamps, scope strings and recorded availability
+reasons. MiB chart coordinates are approximate; absent values never become zero
+and small nonzero measurements are not rounded to zero.
+
+Metrics refresh explicitly, not by timer polling or invented live values.
+Changing attempts aborts stale reads; errors hide the affected series, fresh
+authorization denial hides all cached metrics, and refresh restarts at the
+newest samples. `e2e/resource-charts.spec.ts` uses retained, integrity-checked
+blob/PostgreSQL contract fixtures through real HTTP, not response mocks or a
+claim that those fixtures ran on an OS sampler. Chromium, Firefox and WebKit
+check native chart pixels, exact counters, bounded paging, both OS scopes and
+unavailable/baseline reasons, machine context, owned-blob corruption/recovery,
+light/dark mobile accessibility and no page overflow. Actual agent shipping and
+sampler-overhead measurements have their separate backend evidence.
+
 Development authentication is opt-in and requires both a loopback hostname and
 the Vite development build. A production build rejects it even on localhost.
 No token is fabricated by the UI; the backend's own `--dev` handler supplies the

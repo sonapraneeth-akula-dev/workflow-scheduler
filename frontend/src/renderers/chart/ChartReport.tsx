@@ -16,7 +16,7 @@ const colors = [
   "#0891b2",
 ]
 
-function Plot({ data, title }: { data: ChartData; title: string }) {
+export function Plot({ data, title }: { data: ChartData; title: string }) {
   const container = useRef<HTMLDivElement>(null)
   const [error, setError] = useState<unknown>(null)
   const table = useMemo(

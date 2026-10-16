@@ -5,6 +5,7 @@ import { ReconnectingIndicator } from "@/components/ReconnectingIndicator"
 import { LiveRunGraph } from "@/features/graph/RunGraph"
 import { AbortDialog } from "@/features/runs/AbortDialog"
 import { Timeline } from "@/features/runs/Timeline"
+import { ResourceCharts } from "@/features/runs/ResourceCharts"
 import { ReportIndex } from "@/features/reports/ReportIndex"
 import { useRun } from "@/lib/live/useRun"
 
@@ -63,6 +64,12 @@ function RunDetail() {
                 Timeline
               </Tabs.Trigger>
               <Tabs.Trigger
+                value="metrics"
+                className="rounded border px-3 py-2 data-[state=active]:bg-muted"
+              >
+                Metrics
+              </Tabs.Trigger>
+              <Tabs.Trigger
                 value="reports"
                 className="rounded border px-3 py-2 data-[state=active]:bg-muted"
               >
@@ -81,6 +88,9 @@ function RunDetail() {
             </Tabs.Content>
             <Tabs.Content value="reports" className="min-w-0">
               <ReportIndex key={run.runId} runId={run.runId} />
+            </Tabs.Content>
+            <Tabs.Content value="metrics" className="min-w-0">
+              <ResourceCharts key={run.runId} runId={run.runId} />
             </Tabs.Content>
           </Tabs.Root>
         </>
