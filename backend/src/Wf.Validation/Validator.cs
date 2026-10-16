@@ -1,3 +1,4 @@
+using Wf.Contracts.Manifest;
 using Wf.Validation.Build;
 using Wf.Validation.Rules;
 using Wf.Validation.Schedules;
@@ -11,6 +12,31 @@ namespace Wf.Validation;
 /// </summary>
 public static class Validator
 {
+    /// <summary>
+    /// Validates an already-described manifest and optional companion files without compiling or running source.
+    /// Registration must validate raw manifest semantics before constructing the typed contract.
+    /// </summary>
+    public static ValidationResult Validate(WorkflowManifest manifest, ReadOnlyMemory<byte>? schedules = null,
+        ReadOnlyMemory<byte>? registry = null, string scheduleFile = ScheduleFileValidator.FileName,
+        string registryFile = TeamRegistryRules.FileName, ValidationOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(manifest);
+        var typeQuota = options?.TypeQuota ?? TeamRegistryRules.DefaultTypeQuota;
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(typeQuota);
+        var errors = ManifestRules.Validate(manifest, cancellationToken: cancellationToken);
+        if (!errors.IsEmpty) return new(errors);
+        if (schedules is { } scheduleContents)
+            errors = errors.AddRange(ScheduleFileValidator.Validate(scheduleContents, manifest.Variables,
+                scheduleFile, cancellationToken).Errors);
+        if (registry is { } registryContents)
+            errors = errors.AddRange(TeamRegistryRules.ValidateWorkflow(registryContents, manifest.Metadata,
+                registryFile, typeQuota: typeQuota, cancellationToken: cancellationToken));
+        cancellationToken.ThrowIfCancellationRequested();
+        return new(errors);
+    }
+
     /// <summary>Synchronous test/CLI entry point; use ValidateAsync in asynchronous callers.</summary>
     public static ValidationResult Validate(string directory, ScriptBuildCache? buildCache = null,
         IReadOnlyList<string>? additionalInputs = null, CancellationToken cancellationToken = default,
@@ -48,16 +74,14 @@ public static class Validator
             var build = await buildCache.BuildAsync(new(script, root, additionalInputs), cancellationToken)
                 .ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            var errors = ManifestRules.Validate(build.Manifest, cancellationToken: cancellationToken);
             var schedules = Path.Combine(root, ScheduleFileValidator.FileName);
+            ReadOnlyMemory<byte>? scheduleContents = null;
+            if (HasAttributes(schedules, FileAttributes.Directory, expected: false))
+                scheduleContents = await File.ReadAllBytesAsync(schedules, cancellationToken).ConfigureAwait(false);
+            var errors = Validate(build.Manifest, scheduleContents, options: options,
+                cancellationToken: cancellationToken).Errors;
             if (HasAttributes(schedules, FileAttributes.Directory, expected: true))
                 errors = errors.Add(RuleCatalog.ScheduleShape.CreateError(ScheduleFileValidator.FileName, "$"));
-            else if (HasAttributes(schedules, FileAttributes.Directory, expected: false))
-            {
-                var contents = await File.ReadAllBytesAsync(schedules, cancellationToken).ConfigureAwait(false);
-                errors = errors.AddRange(ScheduleFileValidator.Validate(contents, build.Manifest.Variables,
-                    cancellationToken: cancellationToken).Errors);
-            }
             var team = FindTeamRegistry(root);
             if (team is not null)
             {

@@ -945,8 +945,17 @@ requests omit workflow fields. Unknown/duplicate fields, missing/null mandatory
 values and malformed contracts fail explicitly; JSON body limits are 8 MiB for
 registrations and 4 KiB for grant issuance. Non-JSON content types return 415.
 
-The service runs shared DAG/variable/HTTP/policy/type-metadata/SemVer checks,
-verifies actual stored package bytes, and archives at most 1 MiB of UTF-8 source
+The service runs shared DAG/variable/HTTP/policy/type-metadata/SemVer checks.
+After raw-manifest preflight and strict contract/envelope checks, the non-compiling
+`Validator.Validate(manifest, schedules, registry)` backstop aggregates supplied
+schedule and registry errors in offline order. Invalid raw-manifest semantics
+return before companion checks, matching offline description preflight.
+400 Problem Details `errors[]` preserve every shared rule ID, file, path, message
+and hint; use the same logical file paths when comparing offline and server
+results. Request/provenance/ownership/package/policy failures remain registration
+envelope diagnostics. Authoritative stored registry, retained schedules and
+version compatibility are rechecked under the registration transaction.
+The service verifies actual stored package bytes and archives at most 1 MiB of UTF-8 source
 as a deterministic `workflow.cs` ZIP. Source keys follow the blob store's
 `sources/{sha256}` convention, not user paths. Uploaded immutable source blobs
 can remain unreferenced after a rejected transaction; clean those up through
@@ -1423,8 +1432,12 @@ both fresh and cached descriptions; errors sort by rule ID and indexed JSON path
 Required variables without defaults are valid definitions; runtime binding checks
 their supplied values. Cancellation, infrastructure/cache errors and malformed
 description contracts propagate, not turn into validation success.
-Validation executes trusted workflow code; it is not a sandbox. Team, schedule
-and version rules follow in separate backlog tasks.
+Directory validation executes trusted workflow code; it is not a sandbox.
+The typed `Validator.Validate(manifest, schedules, registry)` overload instead
+validates an already-described manifest and optional UTF-8 companion files
+without building or executing source; registration uses this backstop. Optional
+schedule and registry errors follow manifest errors; version comparisons remain
+a separate step.
 
 `Wf.Validation.SemVer.ApiBaseline.FromManifest` generates the immutable
 `workflow.api.json` contract: SemVer version, variable schemas and node keys.

@@ -44,6 +44,7 @@ public sealed class RegistrationService(NpgsqlDataSource dataSource, IBlobStore 
     public async Task<RegistrationResponse> RegisterAsync(RegistrationRequest request, string actor,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(actor);
         ValidateProvenance(request);
@@ -60,18 +61,12 @@ public sealed class RegistrationService(NpgsqlDataSource dataSource, IBlobStore 
             if (identity.Length != 3 || identity.Any(part => !ValidIdentifier(part)))
                 throw Invalid("$.workflowId", "Use an exact team/type/name identity, with at most 128 Unicode characters per segment.");
         }
-        if (request.Registry is { } rawRegistry)
-        {
-            var errors = TeamRegistryRules.Validate(Encoding.UTF8.GetBytes(rawRegistry.GetRawText()));
-            if (!errors.IsEmpty) throw new RegistrationValidationException(errors);
-            registry = rawRegistry.Deserialize(TeamRegistryJsonContext.Default.TeamRegistry)!;
-        }
         if (request.Manifest is { } rawManifest)
         {
             if (identity is null) throw Invalid("$.workflowId", "A workflow identity is required with a manifest.");
             try
             {
-                var errors = ManifestRules.Validate(rawManifest);
+                var errors = ManifestRules.Validate(rawManifest, cancellationToken: cancellationToken);
                 if (!errors.IsEmpty) throw new RegistrationValidationException(errors);
                 manifest = rawManifest.Deserialize<WorkflowManifest>(ManifestOptions);
                 if (manifest is null || manifest.Metadata is null || string.IsNullOrWhiteSpace(manifest.SdkVersion) ||
@@ -80,6 +75,12 @@ public sealed class RegistrationService(NpgsqlDataSource dataSource, IBlobStore 
                     manifest.Name != request.WorkflowId || manifest.Metadata.Type != identity[1])
                     throw Invalid("$.manifest", "Supply a complete manifest matching the workflow identity; SemVer is limited to 256 characters.");
                 _ = ApiBaseline.FromManifest(manifest);
+                var validation = Validator.Validate(manifest,
+                    request.Schedules is { } scheduleText ? Encoding.UTF8.GetBytes(scheduleText) : (ReadOnlyMemory<byte>?)null,
+                    request.Registry is { } companion ? Encoding.UTF8.GetBytes(companion.GetRawText()) : (ReadOnlyMemory<byte>?)null,
+                    scheduleFile: request.ScheduleSourcePath ?? Wf.Validation.Schedules.ScheduleFileValidator.FileName,
+                    cancellationToken: cancellationToken);
+                if (!validation.IsValid) throw new RegistrationValidationException(validation.Errors);
                 var policyErrors = PolicyRules.Validate(manifest.Nodes, manifest.RunTimeout)
                     .Where(diagnostic => diagnostic.Severity == PolicyDiagnosticSeverity.Error)
                     .Select(diagnostic => new ValidationError("REG001", "workflow.cs", "$.nodes",
@@ -101,6 +102,16 @@ public sealed class RegistrationService(NpgsqlDataSource dataSource, IBlobStore 
         else if (request.Package is not null || request.Source is not null)
             throw Invalid("$.manifest", "Package and source must accompany a manifest.");
 
+        if (request.Registry is { } rawRegistry)
+        {
+            if (manifest is null)
+            {
+                var errors = TeamRegistryRules.Validate(Encoding.UTF8.GetBytes(rawRegistry.GetRawText()),
+                    cancellationToken: cancellationToken);
+                if (!errors.IsEmpty) throw new RegistrationValidationException(errors);
+            }
+            registry = rawRegistry.Deserialize(TeamRegistryJsonContext.Default.TeamRegistry)!;
+        }
         if (manifest is null && registry is null && request.Schedules is null)
             throw Invalid("$", "Supply a workflow manifest, schedule file, or team registry.");
         var team = identity?[0] ?? registry!.Team;

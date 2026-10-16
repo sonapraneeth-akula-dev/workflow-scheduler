@@ -17,6 +17,7 @@
     <ProjectReference Include="..\Wf.Recovery.Fixture\Wf.Recovery.Fixture.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="..\Wf.Validation.Tests\ValidatorFixture.cs" Link="Registration\ValidatorFixture.cs" />
     <None Include="..\..\db\migrations\*.sql" Link="Migrations\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Update="LocalRun\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
