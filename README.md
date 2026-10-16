@@ -154,6 +154,20 @@ run UUID. It does not upload/register the workflow or wait for completion.
 Non-loopback HTTP, redirects, invalid/oversized replies and rejection statuses
 fail explicitly.
 
+Stage and node task delegates publish with
+`await ctx.Reports.PublishAsync(kind, title, payload, ctx.CancellationToken, tags)`.
+Inject `new ReportPublisher((publication, token) => ...)` through the existing
+`LocalEngine(..., reports: publisher)` port. Every publication carries the
+registry's exact full source key, including `$post/summary` for a named post-stage
+task; parallel delegates never share mutable source state. Payload bytes and
+tags are copied before the sink awaits. Kind/title/tags must be nonblank, unknown
+kinds remain valid, and metadata is not trimmed or rewritten. Empty payloads are
+valid. Cancellation and sink failures propagate into the ordinary task failure
+policy; the publisher does not retry. Missing or unbound publishers fail
+explicitly. Existing custom `IReports` implementations remain compatible.
+This SDK port does not yet provide quotas or remote task-host blob transport;
+those follow in the report-limit and report-store tasks.
+
 `POST /api/v1/runs` accepts `workflowId`, optional exact `version` (SemVer or
 version UUID), and optional `variables` (an empty object by default). A delegated
 Operator or scoped Admin must own the workflow's team/type; Author and Viewer
