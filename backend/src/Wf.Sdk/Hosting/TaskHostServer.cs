@@ -176,7 +176,18 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
                 Timeout = TimeSpan.FromSeconds(30)
             };
             var reports = reportHttp is null ? null : ReportUploadClient.Create(reportHttp, reportGrant!, dispatch.Task);
-            var taskContext = new TaskContext(linked.Token, variables, outputs, inputs, node.Inputs, reports: reports);
+            var artifactGrant = dispatch.Grants.SingleOrDefault(grant => grant.Kind == "artifacts");
+            using var artifactHttp = artifactGrant is null ? null : new HttpClient(new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false, ConnectTimeout = TimeSpan.FromSeconds(10)
+            })
+            {
+                DefaultRequestVersion = System.Net.HttpVersion.Version20,
+                DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact,
+                Timeout = Timeout.InfiniteTimeSpan
+            };
+            var artifacts = artifactHttp is null ? null : new ArtifactPublisher(artifactHttp, artifactGrant!, dispatch.Task);
+            var taskContext = new TaskContext(linked.Token, variables, outputs, inputs, node.Inputs, reports: reports, artifacts: artifacts);
             await new TaskRegistry(workflow).ExecuteAsync($"{node.Key}/{dispatch.Task.TaskKey}", taskContext);
             linked.Token.ThrowIfCancellationRequested();
             result.Outcome = TaskOutcome.Succeeded;

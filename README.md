@@ -849,6 +849,63 @@ checksum/size failures, atomicity, grant scope and path safety. Live cloud manag
 identity and 5 GB throughput are not claimed. Report routes and complete
 application-profile configuration remain their separate tasks.
 
+## SDK artifacts
+
+Dispatched SDK tasks publish with
+`await ctx.Artifacts.PublishAsync(name, stream, contentType, ctx.CancellationToken)`.
+The returned URI is a Viewer-authorized download route, not a storage capability.
+The caller retains ownership of its stream. Seekable inputs are hashed from their
+current position, rewound, then streamed; non-seekable inputs are hashed into a
+private, delete-on-close `.wf-artifact-*` file in the task host's working directory.
+That directory must be writable and service-private. Neither path buffers the
+artifact in memory. Names are single filenames (≤ 255 UTF-8 bytes), content types
+are bounded media types without parameters, and SHA-256/length are verified by
+the existing `IBlobStore`. Empty artifacts are valid.
+
+The gateway supplies an `artifacts` capability bound to run, exact task attempt,
+owning agent, current agent session, reservation epoch and attempt deadline. The
+agent restricts its destination to configured engine origins; the SDK uses exact
+HTTP/2 without redirects and never places capabilities in URLs. Upload admission
+and completion both recheck durable ownership/fencing. Aborted/lost/replaced
+attempts cannot create new artifacts; an exact committed replay remains
+idempotent while its original capability and agent session remain valid.
+
+`POST /api/v1/artifact-grants/{id}` accepts
+`{name,contentType,sizeBytes,sha256}` using an Authorization bearer capability and
+a canonical UUIDv7 ID. It returns `201 {artifactId,expiresAt,committed}`. PostgreSQL
+reserves the exact byte count before any upload: committed bytes plus all live
+reservations cannot exceed **5,000,000,000 bytes per run**. Same-ID/same-metadata
+retries consume no additional budget; changed metadata conflicts. Reservations
+last at most 15 minutes. `PUT /api/v1/artifact-publishes/{id}` streams raw
+`application/octet-stream` bytes with the exact Content-Length and the same
+capability, then returns `201 {runId,artifactId}` only after verified storage and
+metadata commit. A per-run advisory lock keeps an active upload counted even
+across grant expiry; parallel grants wait rather than oversubscribe. No engine
+run/attempt row lock is held while streaming.
+
+`DELETE /api/v1/artifact-grants/{id}` releases only the caller's uncommitted
+reservation; the SDK attempts this on upload failure/cancellation. Expired unused
+reservations are reclaimed during the next grant. Failed streams cannot create
+committed rows. A verified blob followed by a database/fencing failure can leave
+unreferenced immutable content; retention must collect such objects, as for
+reports. Committed metadata contains source, name, type, byte count, SHA-256 and
+an `artifacts/{sha256}` pointer, never payload bytes.
+
+`GET /api/v1/runs/{id}/artifacts` returns committed artifact summaries.
+`GET /api/v1/artifacts/{id}/content` rechecks fresh run-scoped Viewer permission
+and streams verified bytes as `application/octet-stream` attachment with
+`nosniff`, `no-store` and restrictive CSP; artifacts are never inline reports.
+Late checksum/read failures abort the response rather than completing partial
+content. User tokens cannot mint upload grants, and attempt capabilities cannot
+download artifacts. Budget failures raise nonretryable
+`ArtifactLimitExceededException` through the ordinary task failure policy.
+
+These routes use the existing configured/injected blob store and upload HMAC
+key; the default profile remains filesystem-backed. Tests exercise small real
+payloads through PostgreSQL, filesystem, authenticated HTTP and dispatched SDK
+child processes, plus synthetic exact 5 GB reservation arithmetic. The separate
+task 9.2.1.1.3 owns full 5 GB roundtrips, cross-OS RAM and Azure throughput gates.
+
 ## Registration
 
 The actual host exposes loopback HTTP/1.1 REST/SignalR on `Api:Port` (default

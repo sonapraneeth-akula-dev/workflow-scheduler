@@ -32,6 +32,8 @@ public static class RegistrationEndpoints
         services.AddSingleton(provider => new LogUploadCapabilities(key, provider.GetRequiredService<TimeProvider>()));
         services.AddSingleton(provider => new ReportUploadCapabilities(key, provider.GetRequiredService<TimeProvider>()));
         services.AddSingleton<ReportStore>();
+        services.AddSingleton(provider => new Wf.ControlPlane.Artifacts.ArtifactUploadCapabilities(key, provider.GetRequiredService<TimeProvider>()));
+        services.AddSingleton<Wf.ControlPlane.Artifacts.ArtifactGrantService>();
         services.AddSingleton<RegistrationService>();
         return services;
     }
@@ -43,6 +45,7 @@ public static class RegistrationEndpoints
         endpoints.MapPut("/api/v1/uploads/{grant}", Upload).AllowAnonymous();
         endpoints.MapLogUploadEndpoints();
         endpoints.MapReportPublishEndpoints();
+        Wf.ControlPlane.Artifacts.ArtifactEndpoints.MapArtifactEndpoints(endpoints);
         return endpoints;
     }
 

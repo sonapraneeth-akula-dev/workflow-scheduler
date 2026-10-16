@@ -42,7 +42,7 @@ public sealed class TaskContext
 
     internal TaskContext ForTask(string key) => new(CancellationToken, variables, Outputs, inputs,
         declaredInputs, Logger, reports is ReportPublisher publisher ? publisher.ForSource(key) : reports,
-        artifacts, key, Abort);
+        artifacts is ArtifactPublisher artifactPublisher ? artifactPublisher.ForSource(key) : artifacts, key, Abort);
 
     public void Log(string message)
     {

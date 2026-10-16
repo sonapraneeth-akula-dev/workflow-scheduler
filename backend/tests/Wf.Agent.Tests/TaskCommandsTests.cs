@@ -113,14 +113,21 @@ public sealed class TaskCommandsTests
     }
 
     [Theory]
-    [InlineData("https://unconfigured.example/api/v1/report-publishes/token")]
-    [InlineData("//unconfigured.example/api/v1/report-publishes/token")]
-    [InlineData("http://localhost@unconfigured.example/api/v1/report-publishes/token")]
-    [InlineData("http://localhost/api/v1/report-publishes/token?other=1")]
-    [InlineData("http://localhost/api/v1/report-publishes/token#fragment")]
-    [InlineData("http://localhost/api/v1/other/token")]
-    [InlineData("duplicate")]
-    public async Task ReportPublish_dispatch_capabilities_cannot_redirect_to_unconfigured_origins_or_ambiguous_targets(string uri)
+    [InlineData("reports", "https://unconfigured.example/api/v1/report-publishes/token")]
+    [InlineData("reports", "//unconfigured.example/api/v1/report-publishes/token")]
+    [InlineData("reports", "http://localhost@unconfigured.example/api/v1/report-publishes/token")]
+    [InlineData("reports", "http://localhost/api/v1/report-publishes/token?other=1")]
+    [InlineData("reports", "http://localhost/api/v1/report-publishes/token#fragment")]
+    [InlineData("reports", "http://localhost/api/v1/other/token")]
+    [InlineData("reports", "duplicate")]
+    [InlineData("artifacts", "https://unconfigured.example/api/v1/artifact-grants")]
+    [InlineData("artifacts", "//unconfigured.example/api/v1/artifact-grants")]
+    [InlineData("artifacts", "http://localhost@unconfigured.example/api/v1/artifact-grants")]
+    [InlineData("artifacts", "http://localhost/api/v1/artifact-grants?other=1")]
+    [InlineData("artifacts", "http://localhost/api/v1/artifact-grants#fragment")]
+    [InlineData("artifacts", "http://localhost/api/v1/report-publishes")]
+    [InlineData("artifacts", "duplicate")]
+    public async Task ReportPublish_dispatch_capabilities_cannot_redirect_to_unconfigured_origins_or_ambiguous_targets(string kind, string uri)
     {
         await using var cache = new PackageCacheTests.CacheFixture([]);
         await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
@@ -129,7 +136,8 @@ public sealed class TaskCommandsTests
         var message = Dispatch(cache.Sha);
         message.Dispatch.Grants.Add(new UploadGrant
         {
-            Kind = "reports", UploadUri = uri == "duplicate" ? "/api/v1/report-publishes/token" : uri
+            Kind = kind, UploadUri = uri == "duplicate"
+                ? kind == "reports" ? "/api/v1/report-publishes" : "/api/v1/artifact-grants" : uri
         });
         if (uri == "duplicate")
             message.Dispatch.Grants.Add(message.Dispatch.Grants[0].Clone());
