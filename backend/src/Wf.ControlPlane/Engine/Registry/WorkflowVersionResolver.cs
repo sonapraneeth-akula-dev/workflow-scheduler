@@ -9,6 +9,20 @@ public sealed record SelectedWorkflowVersion(Guid VersionId, WorkflowManifest Ma
 
 public static class WorkflowVersionResolver
 {
+    private static readonly WorkflowManifestJsonContext StrictManifestJson = new(new(WorkflowManifestJsonContext.Default.Options)
+    {
+        RespectRequiredConstructorParameters = true,
+        RespectNullableAnnotations = true
+    });
+
+    public static async Task<SelectedWorkflowVersion> ResolveAsync(NpgsqlDataSource source, string workflowId,
+        Guid? version, CancellationToken cancellationToken)
+    {
+        await using var connection = await source.OpenConnectionAsync(cancellationToken);
+        return await ReadAsync(workflowId, version?.ToString("D"), version.HasValue, version.GetValueOrDefault(),
+            connection, cancellationToken, strict: true);
+    }
+
     public static async Task<SelectedWorkflowVersion> ResolveAsync(ActiveVersionCache cache, NpgsqlDataSource source,
         string workflowId, string? version, bool allowRanges, CancellationToken cancellationToken,
         NpgsqlConnection? connection = null)
@@ -50,6 +64,12 @@ public static class WorkflowVersionResolver
             id = candidates[selected];
             isId = true;
         }
+        return await ReadAsync(workflowId, version, isId, id, database, cancellationToken);
+    }
+
+    private static async Task<SelectedWorkflowVersion> ReadAsync(string workflowId, string? version, bool isId, Guid id,
+        NpgsqlConnection database, CancellationToken cancellationToken, bool strict = false)
+    {
         await using var read = new NpgsqlCommand($"""
             SELECT v.id,v.semver,v.manifest::text FROM workflow_versions v
             JOIN workflows w ON w.id=v.workflow_id
@@ -65,7 +85,8 @@ public static class WorkflowVersionResolver
         await using var result = await read.ExecuteReaderAsync(cancellationToken);
         if (!await result.ReadAsync(cancellationToken))
             throw new KeyNotFoundException($"Workflow '{workflowId}' has no matching version.");
-        var manifest = JsonSerializer.Deserialize(result.GetString(2), WorkflowManifestJsonContext.Default.WorkflowManifest)
+        var manifest = JsonSerializer.Deserialize(result.GetString(2),
+            (strict ? StrictManifestJson : WorkflowManifestJsonContext.Default).WorkflowManifest)
             ?? throw new InvalidDataException("The selected workflow manifest is null.");
         if (manifest.Name != workflowId || manifest.Version != result.GetString(1))
             throw new InvalidDataException("The selected workflow manifest does not match its stored identity.");

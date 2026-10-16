@@ -1,4 +1,5 @@
 using Microsoft.OpenApi;
+using Wf.Contracts.Definition;
 using Wf.ControlPlane.Live;
 
 namespace Wf.ControlPlane.Api;
@@ -15,6 +16,8 @@ public static class OpenApiSetup
                 // Transformer-generated nested object schemas otherwise lose the nullable abort annotation.
                 if (context.JsonTypeInfo.Type == typeof(LiveAbort) && context.JsonPropertyInfo is { IsGetNullable: true })
                     schema.Type |= JsonSchemaType.Null;
+                if (context.JsonTypeInfo.Type == typeof(VariableType))
+                    schema.Type = JsonSchemaType.String;
                 return Task.CompletedTask;
             });
             options.AddDocumentTransformer(async (document, context, token) =>

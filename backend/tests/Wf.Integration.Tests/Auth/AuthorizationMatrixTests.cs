@@ -560,6 +560,7 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
             {
                 options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunEventsJsonContext.Default);
                 options.SerializerOptions.TypeInfoResolverChain.Insert(0, VersionsJsonContext.Default);
+                options.SerializerOptions.TypeInfoResolverChain.Insert(0, VariablesJsonContext.Default);
             });
             builder.Services.AddWorkflowOpenApi();
             if (live)
@@ -595,6 +596,7 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
             app.MapRegistryEndpoints();
             app.MapCatalogEndpoints();
             app.MapVersionsEndpoints();
+            app.MapVariablesEndpoints();
             app.MapRunEventsEndpoints();
             app.MapWorkflowOpenApi();
             app.MapGet("/hubs/live/v1-evil", () => Results.Ok());

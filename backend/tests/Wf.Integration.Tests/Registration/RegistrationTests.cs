@@ -571,6 +571,11 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
             builder.Services.AddWorkflowRegistrations(builder.Configuration);
             if (runs)
             {
+                builder.Services.ConfigureHttpJsonOptions(options =>
+                {
+                    options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.Contracts.Runs.RunJsonContext.Default);
+                    options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.VariablesJsonContext.Default);
+                });
                 builder.Services.AddTeamAuthorization();
                 builder.Services.AddSingleton<CommandInbox>();
                 builder.Services.AddSingleton<ActiveVersionCache>();
@@ -600,6 +605,7 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
             if (runs)
             {
                 app.MapRunsEndpoints();
+                app.MapVariablesEndpoints();
                 app.MapSchedulesEndpoints();
                 app.MapSeriesFiresEndpoints();
             }

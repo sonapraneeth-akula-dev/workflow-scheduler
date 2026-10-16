@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.OpenApi;
 using Npgsql;
 using Wf.Contracts.Registry;
 using Wf.Contracts.Runs;
@@ -24,6 +25,20 @@ public static class RunsEndpoints
     {
         endpoints.MapRunAbortEndpoint();
         endpoints.MapPost("/api/v1/runs", Trigger).RequireAuthorization()
+            .Accepts<TriggerRunRequest>("application/json").Produces<TriggerRunResponse>(202)
+            .ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404)
+            .ProducesProblem(409).ProducesProblem(413).ProducesProblem(415).ProducesProblem(503)
+            .AddOpenApiOperationTransformer((operation, _, _) =>
+            {
+                operation.Parameters ??= [];
+                operation.Parameters.Add(new OpenApiParameter
+                {
+                    Name = "Idempotency-Key", In = ParameterLocation.Header, Required = false,
+                    Description = "Optional retry key: one value of 1 to 200 visible ASCII characters without whitespace.",
+                    Schema = new OpenApiSchema { Type = JsonSchemaType.String, MinLength = 1, MaxLength = 200 }
+                });
+                return Task.CompletedTask;
+            })
             .AddEndpointFilter(AuthorizeRequest)
             .AddEndpointFilter<IdempotencyFilter>();
         return endpoints;
