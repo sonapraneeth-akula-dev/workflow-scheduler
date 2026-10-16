@@ -43,13 +43,30 @@ public sealed class ResourceSamplingService : BackgroundService
         get { lock (gate) return tasks.Select(task => task.Latest!).ToArray(); }
     }
 
-    public IDisposable Track(Process process, AttemptRef attempt)
+    internal ITaskResourceScope? CreateProcessScope(out string? unavailableReason)
+    {
+        var scope = sampler.TryCreateScope(out unavailableReason);
+        if (scope is null && sampler.NativeEnabled)
+            logger.LogWarning("Native task resource accounting unavailable: {Reason}", unavailableReason);
+        return scope;
+    }
+
+    internal void PrepareUnscopedStart(ProcessStartInfo startInfo) => sampler.PrepareUnscopedStart(startInfo);
+
+    public IDisposable Track(Process process, AttemptRef attempt, ITaskResourceScope? scope = null,
+        string? nativeUnavailableReason = null)
     {
         ArgumentNullException.ThrowIfNull(process);
         ArgumentNullException.ThrowIfNull(attempt);
         lock (gate)
         {
-            var tracking = new Tracking(this, process, attempt.Clone());
+            var tracking = new Tracking(this, process, attempt.Clone(), scope, nativeUnavailableReason);
+            try { scope?.BeginAttempt(); }
+            catch (Exception exception) when (exception is Win32Exception or IOException or InvalidOperationException or UnauthorizedAccessException)
+            {
+                tracking.Scope = null;
+                tracking.NativeUnavailableReason = exception.Message;
+            }
             SampleTask(tracking);
             tasks.Add(tracking);
             return tracking;
@@ -77,13 +94,24 @@ public sealed class ResourceSamplingService : BackgroundService
     {
         var sample = Read(() =>
         {
+            if (tracking.Scope is not null)
+            {
+                tracking.StartedAt ??= new DateTimeOffset(tracking.Process.StartTime.ToUniversalTime());
+                var scoped = tracking.Scope.ReadCounters();
+                return tracking.NativeUnavailableReason is null ? scoped : scoped with
+                {
+                    Network = null, NetworkUnavailableReason = tracking.NativeUnavailableReason, NetworkScope = "unavailable"
+                };
+            }
             tracking.Process.Refresh();
             if (tracking.Process.HasExited) throw new InvalidOperationException("Task process has exited.");
             var started = new DateTimeOffset(tracking.Process.StartTime.ToUniversalTime());
             if (tracking.StartedAt is { } expected && expected != started)
                 throw new InvalidOperationException("Task process identity changed; refusing a reused PID.");
             tracking.StartedAt = started;
-            return sampler.ReadProcess(tracking.Process);
+            var counters = sampler.ReadProcess(tracking.Process);
+            return tracking.NativeUnavailableReason is null ? counters
+                : counters with { NetworkUnavailableReason = tracking.NativeUnavailableReason };
         }, ref tracking.Counters, ref tracking.Timestamp, machine: false);
         var attempt = tracking.Attempt;
         tracking.Latest = new TaskResourceSample(attempt.RunId, attempt.NodeKey, attempt.TaskKey, attempt.Attempt,
@@ -111,10 +139,13 @@ public sealed class ResourceSamplingService : BackgroundService
         }
     }
 
-    private sealed class Tracking(ResourceSamplingService owner, Process process, AttemptRef attempt) : IDisposable
+    private sealed class Tracking(ResourceSamplingService owner, Process process, AttemptRef attempt,
+        ITaskResourceScope? scope, string? unavailable) : IDisposable
     {
         public readonly Process Process = process;
         public readonly AttemptRef Attempt = attempt;
+        public ITaskResourceScope? Scope = scope;
+        public string? NativeUnavailableReason = unavailable;
         public DateTimeOffset? StartedAt;
         public ResourceCounters? Counters;
         public long Timestamp;
@@ -125,8 +156,13 @@ public sealed class ResourceSamplingService : BackgroundService
             lock (owner.gate)
             {
                 if (!owner.tasks.Remove(this)) return;
-                owner.SampleTask(this);
             }
+            try { Scope?.EndAttempt(); }
+            catch (Exception exception) when (exception is Win32Exception or IOException or InvalidOperationException)
+            {
+                NativeUnavailableReason = exception.Message;
+            }
+            lock (owner.gate) owner.SampleTask(this);
         }
     }
 }

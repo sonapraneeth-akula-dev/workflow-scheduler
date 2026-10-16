@@ -5,6 +5,7 @@ executable=''
 agent_id=''
 agent_name="$(hostname)"
 validate_only=false
+native_resource_sampling=false
 engines=()
 while (($#)); do
   case "$1" in
@@ -18,6 +19,7 @@ while (($#)); do
       esac
       shift 2 ;;
     --validate-only) validate_only=true; shift ;;
+    --native-resource-sampling) native_resource_sampling=true; shift ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -42,10 +44,23 @@ for engine in "${engines[@]}"; do
 done
 unit="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/wf-agent.service"
 [[ -f "$unit" ]] || { echo "Unit not found: $unit" >&2; exit 2; }
+resource_profile="$(dirname -- "$unit")/wf-agent-resources.conf"
+if $native_resource_sampling; then
+  [[ -f "$resource_profile" ]] || { echo "Resource profile not found: $resource_profile" >&2; exit 2; }
+fi
 if $validate_only; then echo 'Agent installer inputs valid; no changes made.'; exit 0; fi
 ((EUID == 0)) || { echo 'Run this installer as root' >&2; exit 1; }
 [[ ! -e /etc/systemd/system/wf-agent.service && ! -e /etc/kardia/wf-agent.env && ! -e /opt/kardia/wf-agent/wf-agent ]] ||
   { echo 'Agent installation already exists; refusing to overwrite it' >&2; exit 1; }
+if $native_resource_sampling; then
+  [[ -x /usr/bin/setpriv ]] ||
+    { echo 'Native resource sampling requires /usr/bin/setpriv (util-linux) to drop task capabilities.' >&2; exit 2; }
+  systemd_version="$(systemd --version | head -n 1 | awk '{print $2}')"
+  [[ "$systemd_version" =~ ^[0-9]+$ ]] && ((systemd_version >= 254)) ||
+    { echo 'Native resource sampling profile requires systemd >=254 (DelegateSubgroup).' >&2; exit 2; }
+  [[ ! -e /etc/systemd/system/wf-agent.service.d/resources.conf ]] ||
+    { echo 'Resource service profile already exists; refusing to overwrite it' >&2; exit 1; }
+fi
 [[ -n "$agent_id" ]] || agent_id="$(cat /proc/sys/kernel/random/uuid)"
 if ! id -u wf-agent >/dev/null 2>&1; then useradd --system --home-dir /var/lib/wf-agent --shell /usr/sbin/nologin wf-agent; fi
 install -d -m 0755 /opt/kardia/wf-agent /etc/kardia
@@ -56,6 +71,10 @@ umask 077
   for index in "${!engines[@]}"; do printf 'Agent__Engines__%s=%s\n' "$index" "${engines[$index]}"; done
 } > /etc/kardia/wf-agent.env
 install -m 0644 "$unit" /etc/systemd/system/wf-agent.service
+if $native_resource_sampling; then
+  install -d -m 0755 /etc/systemd/system/wf-agent.service.d
+  install -m 0644 "$resource_profile" /etc/systemd/system/wf-agent.service.d/resources.conf
+fi
 systemctl daemon-reload
 systemctl enable --now wf-agent.service
 systemctl is-active --quiet wf-agent.service

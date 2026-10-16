@@ -144,7 +144,7 @@ public sealed class TaskHostPool : IAsyncDisposable
         finally { try { ScheduleSweep(); } finally { gate.Release(); } }
         try
         {
-            using var resourceTracking = sampling?.Track(host.Process, dispatch.Task);
+            using var resourceTracking = sampling?.Track(host.Process, dispatch.Task, host.ResourceScope, host.ResourceUnavailableReason);
             host.CaptureLog = captureLog;
             host.Masker = secretMasker ?? new SecretMasker([]);
             using var call = host.Client.ExecuteAsync(new ExecuteRequest
@@ -172,6 +172,11 @@ public sealed class TaskHostPool : IAsyncDisposable
                 catch (TimeoutException)
                 {
                     logger.LogWarning("Task host {Pid} ignored cancellation; killing its process tree.", host.Process.Id);
+                    if (host.ResourceScope is not null && !host.Process.HasExited)
+                    {
+                        host.Process.Kill(entireProcessTree: true);
+                        await host.Process.WaitForExitAsync();
+                    }
                     return new TaskCompleted
                     {
                         Task = dispatch.Task.Clone(), At = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow),
@@ -218,6 +223,15 @@ public sealed class TaskHostPool : IAsyncDisposable
         info.ArgumentList.Add("--task-host");
         info.ArgumentList.Add("--socket");
         info.ArgumentList.Add(socketPath);
+        string? resourceUnavailable = null;
+        var resourceScope = sampling?.CreateProcessScope(out resourceUnavailable);
+        try { resourceScope?.PrepareStart(info); }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
+        {
+            resourceUnavailable = exception.Message;
+            DisposeResourceScope(resourceScope);
+            resourceScope = null;
+        }
         var process = new Process { StartInfo = info };
         var started = false;
         PackageLease? processLease = null;
@@ -225,6 +239,7 @@ public sealed class TaskHostPool : IAsyncDisposable
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (resourceScope is null) sampling?.PrepareUnscopedStart(info);
             processLease = startingLease?.Retain();
             // Exit owns the final safety pin even if readiness or process cleanup fails.
             process.EnableRaisingEvents = true;
@@ -232,6 +247,14 @@ public sealed class TaskHostPool : IAsyncDisposable
             if (!process.Start()) throw new InvalidOperationException("Task-host process did not start.");
             started = true;
             Interlocked.Increment(ref processStartCount);
+            var resourceBound = resourceScope is not null;
+            try { resourceScope?.Bind(process); }
+            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
+            {
+                resourceBound = false;
+                resourceUnavailable = exception.Message;
+                logger.LogWarning("Task host native resource scope unavailable: {Reason}", resourceUnavailable);
+            }
             var endpoint = new UnixDomainSocketEndPoint(socketPath);
             var handler = new SocketsHttpHandler
             {
@@ -252,7 +275,8 @@ public sealed class TaskHostPool : IAsyncDisposable
                 HttpHandler = handler, DisposeHttpClient = true,
                 MaxReceiveMessageSize = 1024 * 1024, MaxSendMessageSize = 1024 * 1024
             });
-            host = new Host(package, directory, socketPath, process, channel, logger, processLease);
+            host = new Host(package, directory, socketPath, process, channel, logger, processLease,
+                resourceScope, resourceBound, resourceUnavailable);
             live.TryAdd(process.Id, host);
             if (prewarming)
             {
@@ -308,6 +332,7 @@ public sealed class TaskHostPool : IAsyncDisposable
             {
                 if (started && !process.HasExited) { process.Kill(entireProcessTree: true); await process.WaitForExitAsync(); }
                 process.Dispose();
+                DisposeResourceScope(resourceScope);
                 if (File.Exists(socketPath)) File.Delete(socketPath);
                 Directory.Delete(directory);
             }
@@ -346,7 +371,21 @@ public sealed class TaskHostPool : IAsyncDisposable
                 if (File.Exists(host.SocketPath)) File.Delete(host.SocketPath);
                 if (Directory.Exists(host.Directory)) Directory.Delete(host.Directory);
             }
-            finally { host.Process.Dispose(); live.TryRemove(host.Id, out _); }
+            finally
+            {
+                host.Process.Dispose();
+                DisposeResourceScope(host.CleanupResourceScope);
+                live.TryRemove(host.Id, out _);
+            }
+        }
+    }
+
+    private void DisposeResourceScope(ITaskResourceScope? scope)
+    {
+        try { scope?.Dispose(); }
+        catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning("Owned task resource scope cleanup failed: {Reason}", exception.Message);
         }
     }
 
@@ -468,6 +507,9 @@ public sealed class TaskHostPool : IAsyncDisposable
         public Task Output { get; }
         public Task Error { get; }
         public PackageLease? PackageLease { get; }
+        public ITaskResourceScope? ResourceScope { get; }
+        public ITaskResourceScope? CleanupResourceScope { get; }
+        public string? ResourceUnavailableReason { get; }
         public int Id { get; }
         public long IdleSince { get; set; }
         public bool Ready { get; set; }
@@ -477,8 +519,12 @@ public sealed class TaskHostPool : IAsyncDisposable
         public string Diagnostics => string.Join(Environment.NewLine, diagnostics);
 
         public Host(TaskHostPackage package, string directory, string socketPath, Process process, GrpcChannel channel,
-            ILogger<TaskHostPool> logger, PackageLease? packageLease)
+            ILogger<TaskHostPool> logger, PackageLease? packageLease, ITaskResourceScope? resourceScope,
+            bool resourceBound, string? resourceUnavailableReason)
         {
+            CleanupResourceScope = resourceScope;
+            ResourceScope = resourceBound ? resourceScope : null;
+            ResourceUnavailableReason = resourceUnavailableReason;
             PackageLease = packageLease;
             Id = process.Id;
             Package = package; Directory = directory; SocketPath = socketPath; Process = process; Channel = channel;

@@ -5,7 +5,8 @@ param(
     [guid]$AgentId = [guid]::NewGuid(),
     [ValidatePattern('^[a-zA-Z0-9._-]{1,200}$')][string]$AgentName = $env:COMPUTERNAME,
     [ValidatePattern('^[a-zA-Z0-9._-]{1,80}$')][string]$ServiceName = 'wf-agent',
-    [string]$InstallationDirectory
+    [string]$InstallationDirectory,
+    [switch]$NativeResourceSampling
 )
 $ErrorActionPreference = 'Stop'
 if (!$IsWindows) { throw 'This installer requires Windows.' }
@@ -31,7 +32,10 @@ New-Item -ItemType Directory -Path $InstallationDirectory -Force | Out-Null
 $binary = Join-Path $InstallationDirectory 'wf-agent.exe'
 Copy-Item -LiteralPath $Executable -Destination $binary
 @{
-    Agent = @{ Id = $AgentId.ToString(); Name = $AgentName; ServiceName = $ServiceName; Engines = @($Engines.AbsoluteUri) }
+    Agent = @{
+        Id = $AgentId.ToString(); Name = $AgentName; ServiceName = $ServiceName; Engines = @($Engines.AbsoluteUri)
+        Sampling = @{ Enabled = $NativeResourceSampling.IsPresent }
+    }
 } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $InstallationDirectory 'appsettings.json') -Encoding utf8NoBOM
 if (![Diagnostics.EventLog]::SourceExists('wf-agent')) { [Diagnostics.EventLog]::CreateEventSource('wf-agent', 'Application') }
 $credential = [pscredential]::new('NT AUTHORITY\LocalService', [securestring]::new())

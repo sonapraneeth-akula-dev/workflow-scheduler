@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.ComponentModel;
 using System.Net.NetworkInformation;
 
 namespace Wf.Agent.Sampling;
@@ -7,22 +8,49 @@ public sealed record NetworkBytes(ulong Sent, ulong Received);
 
 public sealed record ResourceCounters(ulong CpuBusy, ulong CpuTotal, ulong RamBytes,
     IReadOnlyDictionary<string, NetworkBytes>? Network, string? NetworkUnavailableReason = null,
-    string? CpuUnavailableReason = null);
+    string? CpuUnavailableReason = null, string CpuScope = "process", string MemoryScope = "process-rss",
+    string NetworkScope = "unavailable");
 
 public sealed record ResourceMeasurement(DateTimeOffset At, double? CpuPercent, ulong? RamBytes,
     NetworkBytes? Network, double? BytesSentPerSecond, double? BytesReceivedPerSecond,
-    string? NetworkUnavailableReason, string? CpuUnavailableReason = null, string? Error = null);
+    string? NetworkUnavailableReason, string? CpuUnavailableReason = null, string? Error = null,
+    string CpuScope = "process", string MemoryScope = "process-rss", string NetworkScope = "unavailable",
+    TimeSpan? Interval = null);
 
-public abstract class ResourceSampler
+public abstract class ResourceSampler(NativeSamplingOptions? options = null) : IDisposable
 {
     public const string ProcessNetworkUnavailable =
         "Native per-process network byte accounting is unavailable; dedicated kernel network telemetry is required.";
 
-    public static ResourceSampler Create() => OperatingSystem.IsWindows() ? new WindowsResourceSampler()
-        : OperatingSystem.IsLinux() ? new LinuxResourceSampler()
+    protected NativeSamplingOptions Options { get; } = options ?? new();
+    public bool NativeEnabled => Options.Enabled;
+
+    public static ResourceSampler Create(NativeSamplingOptions? options = null) => OperatingSystem.IsWindows() ? new WindowsResourceSampler(options)
+        : OperatingSystem.IsLinux() ? new LinuxResourceSampler(options)
         : throw new PlatformNotSupportedException("Resource sampling supports Windows and Linux.");
 
     public abstract ResourceCounters ReadMachine();
+
+    public ITaskResourceScope? TryCreateScope(out string? unavailableReason)
+    {
+        unavailableReason = null;
+        if (!Options.Enabled)
+        {
+            unavailableReason = ProcessNetworkUnavailable + " Enable Agent:Sampling:Enabled for native accounting.";
+            return null;
+        }
+        try { return CreateScope(); }
+        catch (Exception exception) when (exception is Win32Exception or IOException or UnauthorizedAccessException or
+            InvalidOperationException or PlatformNotSupportedException)
+        {
+            unavailableReason = "Native task resource scope unavailable: " + exception.Message;
+            return null;
+        }
+    }
+
+    protected virtual ITaskResourceScope CreateScope() => throw new PlatformNotSupportedException("Native task accounting is unsupported.");
+    internal virtual void PrepareUnscopedStart(ProcessStartInfo startInfo) { }
+    public virtual void Dispose() { }
 
     public virtual ResourceCounters ReadProcess(Process process)
     {
@@ -79,6 +107,7 @@ public abstract class ResourceSampler
             }
         }
         return new ResourceMeasurement(at, cpu, current.RamBytes, network, sentRate, receivedRate,
-            current.NetworkUnavailableReason, current.CpuUnavailableReason);
+            current.NetworkUnavailableReason, current.CpuUnavailableReason, CpuScope: current.CpuScope,
+            MemoryScope: current.MemoryScope, NetworkScope: current.NetworkScope, Interval: previous is null ? null : elapsed);
     }
 }

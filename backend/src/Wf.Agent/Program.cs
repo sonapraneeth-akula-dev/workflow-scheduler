@@ -19,7 +19,8 @@ builder.Services.AddSingleton(provider =>
     return new ResultJournal(options.ResultJournalDirectory, options.Id);
 });
 builder.Services.AddSingleton<AgentOutbox>();
-builder.Services.AddSingleton(_ => ResourceSampler.Create());
+builder.Services.AddSingleton(NativeSamplingOptions.FromConfiguration(builder.Configuration));
+builder.Services.AddSingleton(provider => ResourceSampler.Create(provider.GetRequiredService<NativeSamplingOptions>()));
 builder.Services.AddSingleton<ResourceSamplingService>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<ResourceSamplingService>());
 builder.Services.AddSingleton<TaskHostPool>();
