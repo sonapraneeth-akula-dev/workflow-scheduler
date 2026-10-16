@@ -169,6 +169,28 @@ published HTML report iframe through Caddy.
 Only owned PPE containers, network, volumes and temporary workflow files are
 removed.
 
+`.github/workflows/nightly-compose.yml` runs the full Scenario A on Ubuntu
+nightly at 08:45 UTC and on manual dispatch. It pins .NET 10.0.402 and Aspire
+13.6.0 (with archive SHA-256 verification); the gateway image installs Bun
+dependencies with the frozen lockfile. No edge, host Bun or browser install is
+needed. For the same test on a Linux host with Docker and Aspire installed:
+
+```bash
+dotnet build backend/src/Wf.Cli "-p:WarningsNotAsErrors=NU1902%3BNU1903"
+dotnet build backend/tests/Wf.AppHost.Tests "-p:WarningsNotAsErrors=NU1902%3BNU1903"
+WF_COMPOSE_SCENARIO=true dotnet test backend/tests/Wf.AppHost.Tests --no-build --filter FullyQualifiedName~ComposeStackTests
+```
+
+Both `kardia-dev` and `kardia-ppe` must have no existing containers or volumes.
+The test invokes public `wf local up --env dev`, registers and triggers Scenario A
+through `127.2.6.2:80`, hard-kills the SQL-identified leader during the build task,
+then starts PPE beside dev. It requires all eleven attempts to succeed without
+retry, a higher leader epoch, real Linux SDK child outputs and diamond ordering,
+distinct environment agents, and HTTP 200 from both exact-IP `/healthz` endpoints.
+Cleanup removes only started projects and allowlisted test volumes; private CLI
+state persists. CI retains the TRX (including diagnostic output) for fourteen
+days. A local pass does not imply a hosted GitHub Actions result.
+
 ### Trusted local HTTPS edge
 
 The shared GrihaSetu platform edge already contains the Kardia dev/PPE routes.

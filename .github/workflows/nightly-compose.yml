@@ -1,0 +1,44 @@
+name: Nightly Linux Compose
+on:
+  schedule:
+    - cron: "45 8 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: nightly-compose-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  scenario-a:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - name: Install pinned Aspire CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/aspire-cli-linux-x64-13.6.0.tar.gz"
+          curl --fail --location --retry 3 https://github.com/microsoft/aspire/releases/download/v13.6.0/aspire-cli-linux-x64-13.6.0.tar.gz --output "$archive"
+          echo "97302b8aa040f35ecce92e49cbb216ce77d4d7f32c8c25f3dc206b93b3a358e2  $archive" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/aspire-cli"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/aspire-cli"
+          echo "$RUNNER_TEMP/aspire-cli" >> "$GITHUB_PATH"
+      - name: Verify runner tooling
+        run: docker info && docker compose version && aspire --version
+      - name: Build Debug compiler and acceptance tests
+        run: dotnet build backend/src/Wf.Cli "-p:WarningsNotAsErrors=NU1902%3BNU1903" && dotnet build backend/tests/Wf.AppHost.Tests "-p:WarningsNotAsErrors=NU1902%3BNU1903"
+      - name: Execute Scenario A, leader hard-kill and dev/PPE coexistence
+        env:
+          WF_COMPOSE_SCENARIO: "true"
+        run: dotnet test backend/tests/Wf.AppHost.Tests --no-build --filter "FullyQualifiedName~ComposeStackTests" --logger "trx;LogFileName=compose-stack.trx"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-compose-${{ github.run_id }}-${{ github.run_attempt }}
+          path: backend/tests/Wf.AppHost.Tests/TestResults
+          if-no-files-found: error
+          retention-days: 14

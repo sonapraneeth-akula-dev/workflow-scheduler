@@ -20,8 +20,8 @@ public sealed class ComposeGatewayTests(ITestOutputHelper output)
         var repository = LocalStackModelTests.Repository();
         var cli = Path.Combine(repository, "backend", "src", "Wf.Cli", "bin", "Debug", "net10.0", "wf.dll");
         Assert.True(File.Exists(cli), "Build the normal Debug CLI before running this acceptance test.");
-        Assert.Empty(await Resources("ps", token));
-        Assert.Empty(await Resources("volume", token));
+        Assert.Empty(await ProjectResources("ppe", "ps", token));
+        Assert.Empty(await ProjectResources("ppe", "volume", token));
         var root = Path.Combine(repository, ".agent-artifacts", "compose-gateway", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false })
@@ -167,14 +167,7 @@ public sealed class ComposeGatewayTests(ITestOutputHelper output)
             {
                 try
                 {
-                    await Command("dotnet", [cli, "local", "down"], cleanup.Token);
-                    Assert.Empty(await Resources("ps", cleanup.Token));
-                    var volumes = await Resources("volume", cleanup.Token);
-                    var allowed = new[] { "postgres-data", "blobs", "control-secrets", "agent-data" }
-                        .Select(name => "kardia-ppe_" + name).ToArray();
-                    Assert.All(volumes, volume => Assert.Contains(volume, allowed));
-                    if (volumes.Length != 0)
-                        await Command("docker", ["volume", "rm", .. volumes], cleanup.Token);
+                    await CleanupProject(cli, "ppe", cleanup.Token);
                 }
                 catch
                 {
@@ -190,17 +183,31 @@ public sealed class ComposeGatewayTests(ITestOutputHelper output)
                 "export PGPASSWORD=\"$POSTGRES_PASSWORD\"; exec psql -U postgres -d workflow -v ON_ERROR_STOP=1 -Atc \"$1\"",
                 "sh", sql], cancellation);
 
-        async Task<string[]> Resources(string type, CancellationToken cancellation)
-        {
-            var args = type == "ps" ? new[] { "ps", "-a" } : new[] { "volume", "ls" };
-            var result = await Command("docker", [.. args, "--filter",
-                "label=com.docker.compose.project=kardia-ppe", "--format",
-                type == "ps" ? "{{.Names}}" : "{{.Name}}"], cancellation);
-            return result.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        }
     }
 
     private static string Container(string service) => "kardia-ppe-" + service + "-1";
+
+    internal static async Task<string[]> ProjectResources(string environment, string type, CancellationToken token)
+    {
+        Assert.Contains(environment, new[] { "dev", "ppe" });
+        Assert.Contains(type, new[] { "ps", "volume" });
+        var args = type == "ps" ? new[] { "ps", "-a" } : new[] { "volume", "ls" };
+        var result = await Command("docker", [.. args, "--filter",
+            "label=com.docker.compose.project=kardia-" + environment, "--format",
+            type == "ps" ? "{{.Names}}" : "{{.Name}}"], token);
+        return result.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    internal static async Task CleanupProject(string cli, string environment, CancellationToken token)
+    {
+        await Command("dotnet", [cli, "local", "down", "--env", environment], token);
+        Assert.Empty(await ProjectResources(environment, "ps", token));
+        var volumes = await ProjectResources(environment, "volume", token);
+        var allowed = new[] { "postgres-data", "blobs", "control-secrets", "agent-data" }
+            .Select(name => $"kardia-{environment}_" + name).ToArray();
+        Assert.All(volumes, volume => Assert.Contains(volume, allowed));
+        if (volumes.Length != 0) await Command("docker", ["volume", "rm", .. volumes], token);
+    }
 
     private static async Task Wait(Func<Task<bool>> condition, CancellationToken token)
     {
@@ -209,7 +216,7 @@ public sealed class ComposeGatewayTests(ITestOutputHelper output)
         while (!await condition()) await Task.Delay(100, deadline.Token);
     }
 
-    private static async Task<string> Command(string executable, string[] arguments, CancellationToken token,
+    internal static async Task<string> Command(string executable, string[] arguments, CancellationToken token,
         string? workingDirectory = null)
     {
         var start = new ProcessStartInfo(executable)

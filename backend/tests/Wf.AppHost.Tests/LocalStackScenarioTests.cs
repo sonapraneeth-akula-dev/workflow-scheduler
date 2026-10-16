@@ -146,7 +146,7 @@ public sealed class LocalStackScenarioTests(ITestOutputHelper output)
     }
 
     internal static async Task<string> CompileAndPackage(string root, string team, string workflow, CancellationToken token,
-        string? workflowSource = null)
+        string? workflowSource = null, bool composeScenario = false)
     {
         var sourceDirectory = Path.Combine(root, "source");
         Directory.CreateDirectory(sourceDirectory);
@@ -162,6 +162,7 @@ public sealed class LocalStackScenarioTests(ITestOutputHelper output)
                 ctx.Outputs["assembly"] = System.Reflection.Assembly.GetExecutingAssembly().Location;
                 ctx.Outputs["env"] = ctx.Var<string>("env");
                 ctx.Outputs["version"] = ctx.Var<string>("version");
+                ctx.Outputs["isLinux"] = OperatingSystem.IsLinux();
             }
             static void Deploy(TaskContext ctx, string region)
             {
@@ -179,9 +180,10 @@ public sealed class LocalStackScenarioTests(ITestOutputHelper output)
                 .Variables(v => v.String("env", "dev", allowed: ["dev", "ppe"]).String("version", "0.0.0"))
                 .SystemInit(ctx => Stamp(ctx, "SystemInit"))
                 .PreSetup(ctx => Stamp(ctx, "PreSetup"))
-                .Node("build", n => n.Series().Task("sdk", Tasks.Command("dotnet", "--version"))
-                    .Task("compile", ctx => {
+                .Node("build", n => n.Series().Task("sdk", Tasks.Command("dotnet", "{{(composeScenario ? "--list-runtimes" : "--version")}}"))
+                    .Task("compile", async ctx => {
                         Stamp(ctx, "Build");
+                        await Task.Delay(TimeSpan.FromSeconds({{(composeScenario ? 30 : 0)}}), ctx.CancellationToken);
                         ctx.Outputs["artifact"] = ctx.Var<string>("env") + ":" + ctx.Var<string>("version");
                     }))
                 .Node("deploy-eu", n => n.DependsOn("build").Input("build", "artifact")
@@ -261,7 +263,8 @@ public sealed class LocalStackScenarioTests(ITestOutputHelper output)
         }, HttpStatusCode.Created, token);
     }
 
-    private static async Task AssertExecution(HttpClient client, string root, Guid runId, Guid agentId, CancellationToken token)
+    internal static async Task AssertExecution(HttpClient client, string root, Guid runId, Guid agentId, CancellationToken token,
+        string? packageRoot = null, string environment = "ppe")
     {
         string[] keys = ["$init/run", "$pre/run", "build/sdk", "build/compile", "deploy-eu/deploy",
             "deploy-us/deploy", "smoke/api", "smoke/ui", "smoke/perf-probe", "$post/run", "$sys-post/run"];
@@ -293,15 +296,27 @@ public sealed class LocalStackScenarioTests(ITestOutputHelper output)
             var response = await Get(client, $"/api/v1/runs/{runId}/outputs?taskKey={Uri.EscapeDataString(key)}&attempt=1", token);
             var result = response.GetProperty("outputs");
             Assert.True(result.GetProperty("pid").GetInt32() > 0);
-            Assert.NotEqual(Environment.ProcessId, result.GetProperty("pid").GetInt32());
+            if (packageRoot is null) Assert.NotEqual(Environment.ProcessId, result.GetProperty("pid").GetInt32());
+            else Assert.True(result.GetProperty("isLinux").GetBoolean());
             var assembly = result.GetProperty("assembly").GetString()!;
-            Assert.True(assembly.StartsWith(Path.Combine(root, "agents", "local", "packages") + Path.DirectorySeparatorChar,
+            Assert.True(assembly.StartsWith((packageRoot ?? Path.Combine(root, "agents", "local", "packages")).TrimEnd('/', '\\') +
+                (packageRoot is null ? Path.DirectorySeparatorChar : '/'),
                 OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal), assembly);
-            Assert.Equal("ppe", result.GetProperty("env").GetString());
+            Assert.Equal(environment, result.GetProperty("env").GetString());
             Assert.Equal("9.8.7", result.GetProperty("version").GetString());
-            if (key == "build/compile") Assert.Equal("ppe:9.8.7", result.GetProperty("artifact").GetString());
+            var stage = key switch
+            {
+                "$init/run" => "SystemInit", "$pre/run" => "PreSetup", "build/compile" => "Build",
+                "deploy-eu/deploy" => "Deploy-eu", "deploy-us/deploy" => "Deploy-us",
+                "$post/run" => "PostProcess", "$sys-post/run" => "SystemPostProcess",
+                _ => "Smoke-" + key["smoke/".Length..]
+            };
+            Assert.Equal(stage, result.GetProperty("stage").GetString());
+            if (key == "build/compile") Assert.Equal(environment + ":9.8.7", result.GetProperty("artifact").GetString());
+            if (key.StartsWith("deploy-", StringComparison.Ordinal))
+                Assert.Equal(key[7..9] + ":" + environment + ":9.8.7", result.GetProperty("receipt").GetString());
             if (key.StartsWith("smoke/", StringComparison.Ordinal))
-                Assert.Equal("eu:ppe:9.8.7|us:ppe:9.8.7", result.GetProperty("joined").GetString());
+                Assert.Equal($"eu:{environment}:9.8.7|us:{environment}:9.8.7", result.GetProperty("joined").GetString());
         }
         void Before(string first, string second) =>
             Assert.True(tasks[first].GetProperty("endedAt").GetDateTimeOffset() <=
