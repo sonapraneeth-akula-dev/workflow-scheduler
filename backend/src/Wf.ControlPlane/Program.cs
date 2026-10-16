@@ -62,6 +62,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.Contracts.Runs.RunJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunEventsJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunQueryJsonContext.Default);
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, ReservationQueueJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunHistoryJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, MetricsJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunTimelineJsonContext.Default);

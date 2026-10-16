@@ -72,6 +72,11 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
                 .GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
             var schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
             Assert.True(schemas.TryGetProperty("RunHistoryPage", out _));
+            Assert.Equal("#/components/schemas/ReservationQueueResponse",
+                paths.GetProperty("/api/v1/runs/{id}/reservation-queue").GetProperty("get")
+                    .GetProperty("responses").GetProperty("200").GetProperty("content").GetProperty("application/json")
+                    .GetProperty("schema").GetProperty("$ref").GetString());
+            Assert.True(schemas.GetProperty("ReservationQueueItem").GetProperty("properties").TryGetProperty("blockingRunId", out _));
             Assert.True(schemas.GetProperty("RunQueryRow").GetProperty("properties").TryGetProperty("metadata", out _));
             Assert.Contains(schemas.GetProperty("RunQueryRow").GetProperty("required").EnumerateArray(),
                 property => property.GetString() == "metadata");
@@ -81,6 +86,31 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             using var query = await client.GetAsync("/api/v1/runs/history", deadline.Token);
             Assert.Equal(HttpStatusCode.BadRequest, query.StatusCode);
             Assert.True(query.Headers.CacheControl!.NoStore);
+            if (Environment.GetEnvironmentVariable("WF_FRONTEND_API_CHECK") is { } frontend)
+            {
+                var generate = new ProcessStartInfo("bun")
+                {
+                    WorkingDirectory = frontend, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
+                };
+                generate.ArgumentList.Add("run");
+                generate.ArgumentList.Add("api:check");
+                generate.Environment["KARDIA_API_URL"] = client.BaseAddress!.AbsoluteUri.TrimEnd('/');
+                generate.Environment.Remove("KARDIA_API_TOKEN");
+                using var generated = Process.Start(generate)!;
+                var generatedOut = generated.StandardOutput.ReadToEndAsync(token);
+                var generatedError = generated.StandardError.ReadToEndAsync(token);
+                try
+                {
+                    await generated.WaitForExitAsync(deadline.Token);
+                    Assert.True(generated.ExitCode == 0, $"API contract drift check failed.\n{await generatedOut}\n{await generatedError}");
+                }
+                finally
+                {
+                    if (!generated.HasExited) generated.Kill(entireProcessTree: true);
+                    await generated.WaitForExitAsync(CancellationToken.None);
+                    await Task.WhenAll(generatedOut, generatedError);
+                }
+            }
         }
         finally
         {

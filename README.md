@@ -1048,9 +1048,22 @@ after leader replacement, and removes aborted/ended owners. FIFO is global and
 strict: an unsatisfied head blocks later requests even if a later selector fits
 currently free machines; neither request policy nor `ReserveAsync` can jump it.
 The lease lifetime starts when machines are granted, not while waiting, and
-pending physical fences continue to block grants. API/live UI queue details
-remain the following task. Initial reservation requests are still explicit
-engine calls; this does not claim an autonomous hosted DAG execution loop.
+pending physical fences continue to block grants.
+
+`GET /api/v1/runs/{id}/reservation-queue` returns each live waiting node's
+one-based position, required count, enqueue time and one matching blocking
+reservation/run. Fresh Viewer permission is required for the requested run;
+both blocker IDs are returned as `null` when its run is not currently visible to that
+caller. No selectors, labels, variables or capabilities are returned.
+Closing reservations remain blockers until physically fenced. Ended/aborting
+owners disappear from queue positions immediately, even before maintenance
+removes their intent rows. An empty `items` array means no current wait.
+The run page's accessible queue banner refreshes these details every two
+seconds, links visible blockers and disappears after allocation. Failed reads
+hide stale blocker details; 401/403 stops interval polling, with explicit retry available.
+Queue reads do not consume or invent run-event sequences. Initial reservation
+requests are still explicit engine calls; this does not claim an autonomous
+hosted DAG execution loop.
 
 ## Blob storage
 

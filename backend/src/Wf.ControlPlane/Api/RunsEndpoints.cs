@@ -26,6 +26,7 @@ public static class RunsEndpoints
     {
         endpoints.MapRunAbortEndpoint();
         endpoints.MapTaskOutputsEndpoints();
+        endpoints.MapReservationQueueEndpoints();
         endpoints.MapPost("/api/v1/runs", Trigger).RequireAuthorization()
             .Accepts<TriggerRunRequest>("application/json").Produces<TriggerRunResponse>(202)
             .ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404)

@@ -7,6 +7,7 @@ import { AbortDialog } from "@/features/runs/AbortDialog"
 import { Timeline } from "@/features/runs/Timeline"
 import { ResourceCharts } from "@/features/runs/ResourceCharts"
 import { TaskOutputs } from "@/features/runs/TaskOutputs"
+import { QueuedBanner } from "@/features/runs/QueuedBanner"
 import { ReportIndex } from "@/features/reports/ReportIndex"
 import { useRun } from "@/lib/live/useRun"
 
@@ -28,6 +29,11 @@ function RunDetail() {
       {run ? (
         <>
           <p className="break-words">{run.workflowId}</p>
+          <QueuedBanner
+            key={run.runId}
+            runId={run.runId}
+            active={run.status <= 1}
+          />
           <AbortDialog
             key={run.runId}
             runId={run.runId}

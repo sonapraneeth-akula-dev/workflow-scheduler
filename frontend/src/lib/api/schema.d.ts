@@ -1619,6 +1619,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{id}/reservation-queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Current one-based global FIFO position of each waiting node. Fresh Run Viewer authorization. Includes one matching unreleased blocking reservation and its run only when that run is also currently visible. Ended/aborted owners are excluded immediately; empty items means no live reservation wait. No selectors, variables, machine labels or capabilities. Independent of run-event sequence; poll for changes. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ReservationQueueResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs": {
         parameters: {
             query?: never;
@@ -3432,6 +3515,24 @@ export interface components {
             runId: string;
             /** Format: uuid */
             reportId: string;
+        };
+        ReservationQueueItem: {
+            nodeKey: string;
+            /** Format: int32 */
+            position: number | string;
+            /** Format: int32 */
+            count: number | string;
+            /** Format: date-time */
+            queuedAt: string;
+            /** Format: uuid */
+            blockingReservationId: null | string;
+            /** Format: uuid */
+            blockingRunId: null | string;
+        };
+        ReservationQueueResponse: {
+            /** Format: uuid */
+            runId: string;
+            items: components["schemas"]["ReservationQueueItem"][];
         };
         ResourceAttemptSummary: {
             taskKey: string;
