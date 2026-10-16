@@ -38,9 +38,27 @@ unsaved edits; reload intentionally discards them. Delete requires confirmation
 and retains historical runs/series.
 
 `/schedules/<uuid>` reloads a persisted schedule directly. Code-origin schedules
-are read-only; richer source/commit badges and workflow catalogue entry points
-remain their own tasks. Current role enforcement is server-side; the shared
+show a Code badge, applied file path and commit; UI-created schedules show a UI
+badge. Code views have no variable-edit form or edit/delete/pause/resume controls,
+and the actual API rejects all four mutations with 409. Legacy missing provenance
+is explicit rather than fabricated. Workflow catalogue entry points
+remain their own task. Current role enforcement is server-side; the shared
 permission-aware UI action layer remains task 10.1.2.1.3.
+
+Commit links require an explicit workflow-repository browser template, for example:
+
+```text
+VITE_COMMIT_URL_TEMPLATE=https://github.com/example/workflows/commit/{commit}
+```
+
+Use exactly one `{commit}` placeholder. Only absolute HTTPS URLs without embedded
+credentials are accepted; the full 40- or 64-character applied commit is substituted.
+Links open a new tab without opener access. Missing configuration keeps the SHA
+visible with a configuration notice; invalid configuration shows an error rather
+than an unsafe link. The application's own repository is never assumed to own
+registered workflows. Use a template only when it correctly identifies the
+workflow repository for that deployment; per-workflow repository mappings are
+not part of the current registration contract.
 
 Schedule details link to `/series/<uuid>`. The read-only, Viewer-scoped fire
 table shows exact recorded outcomes, reasons and associated run IDs, including
@@ -123,6 +141,8 @@ helper with Ctrl+C when ready. Normal browser runs always check contract drift.
 The history fixture seeds 60 retained skipped fires for paging; a separate
 browser case waits for the real hosted scheduler to start a run and skip its
 overlapping next fire without creating another run.
+The read-only fixture registers an actual code schedule, verifies its applied
+file/SHA/link and checks all four server-side 409 responses.
 
 The fixture checks live public/internal OpenAPI drift before starting Vite.
 Playwright's teardown explicitly signals the helper to stop both child processes,

@@ -186,6 +186,8 @@ try {
     Storage__Root: storage,
     Storage__UploadHmacKey: randomBytes(32).toString("base64"),
     VITE_AUTH_MODE: "development",
+    VITE_COMMIT_URL_TEMPLATE:
+      "https://github.com/example/workflows/commit/{commit}",
     KARDIA_API_URL: api,
   }
   run("dotnet", [host, "--migrate"], environment)
@@ -257,6 +259,9 @@ try {
     },
     package: { sha256, size: bytes.length },
     source: "// schedule UI integration",
+    schedules:
+      '{"instances":[{"id":"code-nightly","timezone":"Etc/UTC","interval":"01:00:00"}]}',
+    scheduleSourcePath: "workflows/ui-tests.schedules.json",
     registry: {
       team: "ui-tests",
       types: [
@@ -269,6 +274,21 @@ try {
       ],
     },
   })
+  const codeScheduleId = z
+    .uuid()
+    .parse(
+      run("docker", [
+        "exec",
+        container,
+        "psql",
+        "-U",
+        "workflow",
+        "-d",
+        "workflow",
+        "-Atc",
+        "SELECT id FROM schedules WHERE workflow_id='ui-tests/release/workflow' AND origin=0",
+      ])
+    )
   const history = z.object({ id: z.uuid(), seriesId: z.uuid() }).parse(
     await request("/api/v1/schedules", {
       workflowId: "ui-tests/release/workflow",
@@ -338,6 +358,7 @@ try {
       historyScheduleId: history.id,
       historySeriesId: history.seriesId,
       catchUpSeriesId: catchUp.seriesId,
+      codeScheduleId,
     }),
     {
       flag: "wx",

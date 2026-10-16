@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { ScheduleForm } from "@/features/schedules/ScheduleForm"
+import { OriginBadge } from "@/features/schedules/OriginBadge"
 import { formatFire } from "@/features/schedules/schedule-draft"
 import {
   deleteSchedule,
@@ -90,10 +91,11 @@ function ScheduleDetail() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold">{schedule.name}</h1>
         <Badge variant="secondary">
-          {schedule.origin} schedule - {schedule.paused ? "Paused" : "Active"}
+          {schedule.paused ? "Paused" : "Active"}
         </Badge>
       </div>
       <p>{schedule.workflowId}</p>
+      <OriginBadge schedule={schedule} />
       <Link to="/series/$id" params={{ id: schedule.seriesId }}>
         View series history
       </Link>

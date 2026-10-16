@@ -9,7 +9,9 @@ pause, resume, delete, timezone selection and server-calculated next-five-fire
 preview. Bun manages dependencies and scripts; Vite proxies API traffic to the
 control plane. See `frontend\README.md` for local/Entra configuration, generated
 public/internal clients, actual PostgreSQL/browser tests and current hosting
-boundaries.
+boundaries. Code schedules show applied file/commit provenance without mutation
+controls; commit-browser links use an explicitly configured HTTPS template,
+never an assumed application repository.
 
 Schedule details link to `/series/<uuid>` for durable scheduled-fire history.
 `GET /api/v1/series/{id}/fires` requires fresh Viewer access to the owning

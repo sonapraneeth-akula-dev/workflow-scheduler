@@ -130,6 +130,8 @@ are not implied by local task completion.
 
 | 3.3.1.2.1 | Complete | Public Viewer schedule reads expose nullable sourcePath/gitCommit alongside origin, joined to the instance's exact applied schedule_config_versions row with workflow ownership enforced. User schedules and legacy code rows without a config retain explicit null provenance. Schedule-only content/path/40- or 64-character commit changes update provenance without a workflow-version or series change; identical-content registration retries keep their original applied provenance and ETag. Existing authorization-first 409 guards cover all code PUT/delete/pause/resume routes before If-Match validation and leave configuration xmin/series unchanged. Three new source-generated contract cases plus all 61 affected control-plane units pass; six targeted actual CodeScheduleReadOnly HTTP/PostgreSQL cases and all 47 affected schedule/registration integrations pass in Release, zero skips. Includes real non-SPA Viewer reads, fresh scoped access and forbidden responses without source-path leakage. Both public/internal clients regenerated from the live host; normal bootstrap and explicit correct-port drift checks pass, as do strict frontend build/lint and all 84 units. Rich origin badge/path/commit-link rendering remains the next task. |
 
+| 3.3.1.2.2 | Complete | OriginBadge shows Code/UI origin, exact applied source path and full 40/64-character commit; code schedules retain read-only details with no variable-edit form or edit/delete/pause/resume controls. Legacy missing provenance is explicit. Because registration has no repository URL, commit browsing uses an explicit deployment VITE_COMMIT_URL_TEMPLATE, never the application's assumed repository: exactly one commit placeholder, absolute HTTPS, no embedded credentials, safe new-tab rel. Missing configuration keeps the SHA with a notice; invalid templates surface an error rather than an unsafe or invented link. Eleven origin/link boundary units join all 95 passing frontend units; strict app/tools/E2E typing, lint, production build and formatting pass. Full 27-case actual HTTP/host/PostgreSQL browser suite passes on Chromium, Firefox and WebKit in 3.6 minutes, including three new code-read-only cases. Those verify path/commit/link, absence of forms/mutation controls, all four actual API 409 responses with unchanged ETag/configuration/series, direct reload and light/dark/mobile axe with zero critical/serious violations. Per-workflow repository mappings remain outside the existing registration contract; a deployment template must correctly identify its registered workflow repository. |
+
 ## Summary Rollup
 
 | Requirement | Milestone | Est. Manual | Est. AI | Savings (%) |
@@ -624,9 +626,9 @@ are not implied by local task completion.
 | 3.3.2.1.3 | Task | Add apply-under-load test: 50 schedule-file changes during continuous firing — `backend/tests/Wf.Integration.Tests/ScheduleFileApplyTests.cs` | 02:30 | 00:10 | `dotnet test backend/tests/Wf.Integration.Tests --filter ScheduleFileApply` green: 0 missed, 0 duplicated fires; removed instances stop | M-003.3 exit criterion; after US-026 task 2 |
 
 **Milestone Exit Criteria** (from the PRD):
-- [ ] **Unit tests**: schedule file schema + override resolution tests, including categorised defaults.
-- [ ] **Integration tests**: apply 50 schedule-file changes during continuous firing: 0 missed, 0 duplicated fires.
-- [ ] **UI / E2E tests**: US-028 read-only rendering and 409 on mutation.
+- [x] **Unit tests**: schedule file schema + override resolution tests, including categorised defaults.
+- [x] **Integration tests**: apply 50 schedule-file changes during continuous firing: 0 missed, 0 duplicated fires.
+- [x] **UI / E2E tests**: US-028 read-only rendering and 409 on mutation.
 
 ## Requirement 4 (REQ-004): Pre-check-in validation and testability — Must Have
 - **Outcome**: Every rule the engine enforces at registration is reproducible in `dotnet test`, and workflow logic is unit-testable offline in dry-run mode.

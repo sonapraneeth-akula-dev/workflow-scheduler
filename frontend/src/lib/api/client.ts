@@ -70,6 +70,11 @@ export const scheduleSchema = z.object({
   workflowId: z.string(),
   name: z.string(),
   origin: z.enum(["User", "Code"]),
+  sourcePath: z.string().min(1).max(1024).nullable(),
+  gitCommit: z
+    .string()
+    .regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/)
+    .nullable(),
   timezone: z.string(),
   cron: z.string().nullable(),
   interval: z.string().nullable(),
