@@ -58,8 +58,9 @@ function RootLayout() {
       </a>
       <header className="border-b">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 p-5">
-          <nav aria-label="Main navigation">
+          <nav aria-label="Main navigation" className="flex flex-wrap gap-4">
             <Link to="/">Kardia</Link>
+            <Link to="/runs">Runs</Link>
           </nav>
           <div className="flex flex-wrap items-center gap-3">
             <Button

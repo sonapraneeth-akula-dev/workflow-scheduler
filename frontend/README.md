@@ -156,6 +156,32 @@ Missed. The badge uses the durable source marker and run reference, not a
 reclassification of missed fire history. Full run history and
 trends remain separate tasks.
 
+The main navigation's Runs view (`/runs`) searches authorized durable run
+summaries by exact team, type, workflow, series, named status, created-time range
+and copied metadata. Type views provide a prefiltered entry. All filters combine
+with AND; times require an explicit RFC3339 offset, with inclusive start and
+exclusive end, preserving up to microsecond precision. Metadata filters are a
+JSON object of exact strings, including empty values and significant whitespace.
+Invalid or contradictory drafts show a form error without sending a request.
+
+TanStack Router validates typed URL search parameters, including metadata grouping;
+copying or reloading the URL restores the form and view. Grouping uses the run's
+copied historical metadata, never its workflow's current metadata. Missing legacy
+metadata remains explicitly unrecorded. Groups cover only loaded pages and may
+grow after Load more runs; grouping alone does not repeat the server query.
+Requests retain the server's descending keyset cursor and fixed 50-row page size.
+Malformed, unordered, duplicate, out-of-scope or filter-mismatched responses fail
+explicitly rather than being rendered as matching results.
+
+The scrollable list renders at most ten fixed-height rows regardless of loaded
+count, with logical list positions and full IDs available to assistive tools.
+Page Up/Down works in the focusable scroll region. Use accessible full list
+disables windowing for sequential keyboard/screen-reader access to every loaded
+record; it does not fetch additional pages. Refresh and Load more runs are
+explicit, without polling. Revoked access hides cached results. These summaries
+do not expose variables, task payloads or storage capabilities; the richer
+workflow/series history and abort controls are separate surfaces.
+
 Development authentication is opt-in and requires both a loopback hostname and
 the Vite development build. A production build rejects it even on localhost.
 No token is fabricated by the UI; the backend's own `--dev` handler supplies the

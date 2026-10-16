@@ -70,6 +70,9 @@ export function TypeWorkflows({ team, type }: { team: string; type: string }) {
             ? "Live updates unavailable. Refresh workflows or retry."
             : "Connecting live updates..."}
       </p>
+      <Link to="/runs" search={{ team, type }}>
+        Search runs in this type
+      </Link>
       <PresentationFilters config={config} />
       {live.snapshot?.error ? (
         <Button variant="outline" onClick={live.retry}>

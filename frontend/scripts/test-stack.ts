@@ -348,6 +348,42 @@ try {
       })
     }
   }
+  for (const browser of ["chromium", "firefox", "webkit"]) {
+    for (const environment of ["dev", "prod"]) {
+      const workflowId = `filter-tests/search/${browser}-${environment}`
+      await request("/api/v1/registrations", {
+        gitCommit: "d".repeat(40),
+        gitAuthor: "Run filter UI integration",
+        workflowId,
+        manifest: {
+          ...manifest,
+          name: workflowId,
+          metadata: {
+            type: "search",
+            values: {
+              environment,
+              component: environment === "dev" ? "api" : "web",
+            },
+          },
+        },
+        package: { sha256, size: bytes.length },
+        source: "// run filter UI integration",
+        registry: {
+          team: "filter-tests",
+          types: [
+            {
+              team: "filter-tests",
+              name: "search",
+              description: "Run filter UI integration",
+              metadataSchema: {
+                keys: [{ key: "environment" }, { key: "component" }],
+              },
+            },
+          ],
+        },
+      })
+    }
+  }
   const codeScheduleId = z
     .uuid()
     .parse(
