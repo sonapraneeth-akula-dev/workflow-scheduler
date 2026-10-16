@@ -232,6 +232,26 @@ every self-frame navigation. Authenticated clients fetching a Blob must preserve
 equivalent CSP/sandbox restrictions when rendering it; response CSP is not copied
 automatically to an object URL.
 
+`GET /api/v1/runs/{id}/reports` requires fresh Run Viewer permission and returns
+`{runId,items:[{id,runId,sourceKey,attempt,kind,title,tags,sizeBytes,createdAt}]}`.
+All fields are required/non-null; source/attempt are exact historical facts and
+timestamps are committed UTC, not active clocks. No payload, hash, blob path,
+capability or variables appear. Optional single `kind`/`tag` filters are exact,
+case-sensitive, nonblank, at most 128 UTF-8 bytes, and combine with AND.
+Duplicate/unknown filters fail with 400. Results use stable `createdAt,id` order
+and `no-store`.
+
+The SQL `report_added` notification is consumed by the existing live listener.
+A separate immediate `ReportAdded` MessagePack message `{runId,reportId}` reaches
+only an authorized subscribed run scope, with fresh role checks on every send.
+It is an index invalidation, **not** a lifecycle event or `RunDelta` sequence.
+The durable fact is the report row: on live `Resync` for a run, listener reconnect,
+or client transport reconnect/resubscribe, explicitly refetch the report index
+alongside normal durable run resynchronization. Notifications missed while
+disconnected cannot be replayed; the index recovers them without REST polling.
+Pending overflow or malformed/unavailable notifications also request explicit
+resynchronization instead of silently losing updates.
+
 `POST /api/v1/runs` accepts `workflowId`, optional exact `version` (SemVer or
 version UUID), and optional `variables` (an empty object by default). A delegated
 Operator or scoped Admin must own the workflow's team/type; Author and Viewer

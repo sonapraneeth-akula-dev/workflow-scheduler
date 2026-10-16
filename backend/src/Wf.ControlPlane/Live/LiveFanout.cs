@@ -11,10 +11,12 @@ public sealed class LiveFanout(NpgsqlDataSource source, LiveSubscriptions subscr
 {
     private readonly object gate = new();
     private readonly Dictionary<Guid, long> changes = [];
+    private readonly Dictionary<Guid, ReportAdded> reports = [];
     private readonly Dictionary<string, LiveRunSummary> lists = new(StringComparer.Ordinal);
     private readonly Dictionary<Guid, long> published = [];
     private readonly Channel<bool> changed = Signal();
     private readonly Channel<bool> listChanged = Signal();
+    private readonly Channel<bool> reportChanged = Signal();
     private bool resync;
     private bool reauthorize;
     private int ready;
@@ -24,7 +26,8 @@ public sealed class LiveFanout(NpgsqlDataSource source, LiveSubscriptions subscr
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        var workers = new[] { ListenAsync(lifetime.Token), PublishAsync(lifetime.Token), PublishListsAsync(lifetime.Token) };
+        var workers = new[] { ListenAsync(lifetime.Token), PublishAsync(lifetime.Token),
+            PublishListsAsync(lifetime.Token), PublishReportsAsync(lifetime.Token) };
         await Task.WhenAny(workers);
         await lifetime.CancelAsync();
         try { await Task.WhenAll(workers); }
@@ -44,6 +47,11 @@ public sealed class LiveFanout(NpgsqlDataSource source, LiveSubscriptions subscr
                     lock (gate)
                     {
                         if (notification.Channel == "registry") reauthorize = true;
+                        else if (notification.Channel == "report_added")
+                        {
+                            if (subscriptions.HasAnySubscribers) QueueReport(notification.Payload);
+                            reportChanged.Writer.TryWrite(true);
+                        }
                         else if (subscriptions.HasAnySubscribers)
                         {
                             var parts = notification.Payload.Split(':');
@@ -61,7 +69,8 @@ public sealed class LiveFanout(NpgsqlDataSource source, LiveSubscriptions subscr
                     }
                     changed.Writer.TryWrite(true);
                 };
-                await using (var listen = new NpgsqlCommand("SET application_name='wf-live-feed'; LISTEN live_runs; LISTEN registry", listener))
+                await using (var listen = new NpgsqlCommand(
+                    "SET application_name='wf-live-feed'; LISTEN live_runs; LISTEN registry; LISTEN report_added", listener))
                     await listen.ExecuteNonQueryAsync(token);
                 lock (gate) resync = true;
                 changed.Writer.TryWrite(true);
@@ -116,6 +125,69 @@ public sealed class LiveFanout(NpgsqlDataSource source, LiveSubscriptions subscr
                 changed.Writer.TryWrite(true);
             }
         }
+    }
+
+    private void QueueReport(string payload)
+    {
+        try
+        {
+            using var json = JsonDocument.Parse(payload);
+            if (json.RootElement.GetProperty("kind").GetString() != "ReportAdded")
+                throw new InvalidDataException();
+            var runId = json.RootElement.GetProperty("runId").GetGuid();
+            var reportId = json.RootElement.GetProperty("reportId").GetGuid();
+            if (runId.Version != 7 || reportId.Version != 7) throw new InvalidDataException();
+            if (reports.Count >= 10000 && !reports.ContainsKey(reportId))
+            {
+                reports.Clear();
+                resync = true;
+                logger.LogWarning("Live report feed exceeded 10000 pending reports; requesting index resynchronization.");
+            }
+            reports[reportId] = new(runId.ToString("D"), reportId.ToString("D"));
+        }
+        catch (Exception error) when (error is JsonException or InvalidDataException or KeyNotFoundException or
+            InvalidOperationException or FormatException)
+        {
+            resync = true;
+            logger.LogWarning("Invalid report notification; requesting durable index resynchronization.");
+        }
+    }
+
+    private async Task PublishReportsAsync(CancellationToken token)
+    {
+        while (await reportChanged.Reader.WaitToReadAsync(token))
+        {
+            reportChanged.Reader.TryRead(out _);
+            ReportAdded[] pending;
+            lock (gate)
+            {
+                pending = reports.Values.ToArray();
+                reports.Clear();
+            }
+            try
+            {
+                foreach (var report in pending) await PublishReportAsync(report, token);
+            }
+            catch (Exception error) when (error is NpgsqlException { IsTransient: true } or IOException or TimeoutException)
+            {
+                logger.LogError(error, "Live report publication unavailable; requesting durable index resynchronization.");
+                lock (gate) resync = true;
+                changed.Writer.TryWrite(true);
+            }
+        }
+    }
+
+    private async Task PublishReportAsync(ReportAdded report, CancellationToken token)
+    {
+        if (!subscriptions.HasSubscribers("run", report.RunId)) return;
+        await using var query = source.CreateCommand("""
+            SELECT EXISTS(SELECT 1 FROM report_ids i JOIN reports r ON r.run_day=i.run_day AND r.id=i.id
+                WHERE i.id=$1 AND r.run_id=$2)
+            """);
+        query.Parameters.AddWithValue(Guid.ParseExact(report.ReportId, "D"));
+        query.Parameters.AddWithValue(Guid.ParseExact(report.RunId, "D"));
+        if (await query.ExecuteScalarAsync(token) is true)
+            await subscriptions.PublishAsync("run", report.RunId, "ReportAdded", report, token);
     }
 
     private async Task PublishRunAsync(Guid id, long sequence, CancellationToken token)

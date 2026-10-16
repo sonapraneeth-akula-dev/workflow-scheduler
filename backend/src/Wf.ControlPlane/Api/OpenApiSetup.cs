@@ -20,7 +20,8 @@ public static class OpenApiSetup
             options.AddDocumentTransformer(async (document, context, token) =>
             {
                 foreach (var type in new[] { typeof(RunDelta), typeof(ListDelta), typeof(LiveResync),
-                    typeof(LiveEvent), typeof(LiveAbort), typeof(LiveRunSummary), typeof(LiveSubscriptionProblem) })
+                    typeof(LiveEvent), typeof(LiveAbort), typeof(LiveRunSummary), typeof(LiveSubscriptionProblem),
+                    typeof(ReportAdded) })
                     document.AddComponent(type.Name, await context.GetOrCreateSchemaAsync(type, null, token));
             });
         });

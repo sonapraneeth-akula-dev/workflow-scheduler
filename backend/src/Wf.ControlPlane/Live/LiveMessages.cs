@@ -60,3 +60,10 @@ public sealed record LiveRunSummary(
 public sealed record LiveResync(
     [property: Key("scope")] string Scope,
     [property: Key("id")] string Id);
+
+/// <summary>Run-index invalidation only; never consumes a run-event sequence.
+/// A run Resync/reconnect requires refetching the report index as well as durable run state.</summary>
+[MessagePackObject]
+public sealed record ReportAdded(
+    [property: Key("runId")] string RunId,
+    [property: Key("reportId")] string ReportId);

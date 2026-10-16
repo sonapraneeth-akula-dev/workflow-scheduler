@@ -16,6 +16,7 @@ using Wf.ControlPlane.Hosting;
 using Wf.ControlPlane.Live;
 using Wf.ControlPlane.Registry;
 using Wf.ControlPlane.Registration;
+using Wf.Contracts.Reports;
 using Wf.Engine.Core.Placement;
 
 if (args.Count(argument => argument == "--migrate") > 1)
@@ -61,6 +62,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunHistoryJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, MetricsJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunTimelineJsonContext.Default);
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, ReportIndexJsonContext.Default);
 });
 builder.Services.AddWorkflowOpenApi();
 builder.Services.AddWorkflowLive();
@@ -108,6 +110,7 @@ app.MapMetricsEndpoints();
 app.MapRunTimelineEndpoints();
 app.MapTaskLogsEndpoints();
 app.MapReportContentEndpoints();
+app.MapReportIndexEndpoints();
 app.MapSchedulesEndpoints();
 app.MapSeriesFiresEndpoints();
 app.MapUserSchedulesEndpoints();
