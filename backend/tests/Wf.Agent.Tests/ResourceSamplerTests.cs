@@ -64,14 +64,19 @@ public sealed class ResourceSamplerTests
         var initial = ResourceSampler.Measure(first, null, TimeSpan.Zero, DateTimeOffset.UtcNow, machine: false);
         Assert.Null(initial.CpuPercent);
         Assert.Null(initial.BytesSentPerSecond);
+        Assert.Null(initial.NetworkDelta);
+        Assert.Contains("First", initial.NetworkRateUnavailableReason);
         var sample = ResourceSampler.Measure(second, first, TimeSpan.FromSeconds(2), DateTimeOffset.UtcNow, machine: false);
         Assert.Equal(200, sample.CpuPercent);
         Assert.Equal(100, sample.BytesSentPerSecond);
         Assert.Equal(200, sample.BytesReceivedPerSecond);
         Assert.Equal(8192UL, sample.RamBytes);
         Assert.Equal(300UL, sample.Network!.Sent);
+        Assert.Equal(new NetworkBytes(200, 400), sample.NetworkDelta);
+        Assert.Null(sample.NetworkRateUnavailableReason);
         Assert.Null(ResourceSampler.Measure(first, second, TimeSpan.FromSeconds(1), DateTimeOffset.UtcNow, false).CpuPercent);
         Assert.Null(ResourceSampler.Measure(first, second, TimeSpan.FromSeconds(1), DateTimeOffset.UtcNow, false).BytesSentPerSecond);
+        Assert.Null(ResourceSampler.Measure(first, second, TimeSpan.FromSeconds(1), DateTimeOffset.UtcNow, false).NetworkDelta);
         var changed = second with { Network = new Dictionary<string, NetworkBytes> { ["eth1"] = new(300, 600) } };
         Assert.Null(ResourceSampler.Measure(changed, first, TimeSpan.FromSeconds(1), DateTimeOffset.UtcNow, false).BytesSentPerSecond);
         Assert.Null(ResourceSampler.Measure(second, first, TimeSpan.Zero, DateTimeOffset.UtcNow, false).BytesSentPerSecond);
@@ -140,8 +145,7 @@ public sealed class ResourceSamplerTests
             var result = await pool.ExecuteAsync(package, sibling, ByteString.CopyFromUtf8("""{"previous":3}"""),
                 cancellationToken: TestContext.Current.CancellationToken, journalResult: _ =>
                 {
-                    Assert.Equal(2, service.ActiveTasks.Count);
-                    Assert.Equal(2, service.ActiveTasks.Select(task => task.ProcessId).Distinct().Count());
+                    Assert.Equal(pid, Assert.Single(service.ActiveTasks).ProcessId);
                 });
             Assert.Equal(TaskOutcome.Succeeded, result.Outcome);
             Assert.Equal(pid, Assert.Single(service.ActiveTasks).ProcessId);

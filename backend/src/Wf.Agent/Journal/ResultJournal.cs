@@ -147,16 +147,24 @@ public sealed class ResultJournal : IDisposable
 
     internal static void Validate(AgentMessage message)
     {
-        if (message.PayloadCase is not (AgentMessage.PayloadOneofCase.TaskStarted or AgentMessage.PayloadOneofCase.TaskCompleted) ||
+        if (message.PayloadCase is not (AgentMessage.PayloadOneofCase.TaskStarted or AgentMessage.PayloadOneofCase.TaskCompleted or
+            AgentMessage.PayloadOneofCase.ResourceSample) ||
             message.CalculateSize() > MaximumRecordBytes)
             throw new InvalidDataException("Journal accepts only bounded task events.");
-        var task = message.TaskStarted?.Task ?? message.TaskCompleted?.Task;
+        var task = message.TaskStarted?.Task ?? message.TaskCompleted?.Task ?? message.ResourceSample?.Task;
         if (task is null || !Guid.TryParse(task.RunId, out var runId) || runId == Guid.Empty ||
             string.IsNullOrWhiteSpace(task.NodeKey) || task.NodeKey.Contains('/') ||
             string.IsNullOrWhiteSpace(task.TaskKey) || task.TaskKey.Contains('/') ||
             Encoding.UTF8.GetByteCount(task.NodeKey) > 512 || Encoding.UTF8.GetByteCount(task.TaskKey) > 512 ||
             task.Attempt is 0 or > 32767)
             throw new InvalidDataException("Journal task event requires a valid attempt.");
+        if (message.ResourceSample is { } sample)
+        {
+            if (sample.ReservationEpoch == 0 || sample.SampleSequence is 0 or > long.MaxValue)
+                throw new InvalidDataException("Resource sample requires a reservation and ordinal.");
+            _ = Wf.Contracts.Resources.ResourceContract.Parse(sample.SampleJson.Memory);
+            return;
+        }
         var timestamp = message.TaskStarted?.At ?? message.TaskCompleted?.At;
         if (timestamp is null) throw new InvalidDataException("Journal task event requires a timestamp.");
         try { _ = timestamp.ToDateTimeOffset(); }

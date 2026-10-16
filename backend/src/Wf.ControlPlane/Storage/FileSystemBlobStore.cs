@@ -59,6 +59,39 @@ public sealed class FileSystemBlobStore
         await BlobStreaming.CopyVerifiedAsync(input, destination, content, maximumBytes, cancellationToken);
     }
 
+    public async IAsyncEnumerable<Guid> ResourceRunsAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        var prefix = Path.Combine(root, "resources");
+        RejectLinks(prefix);
+        if (!Directory.Exists(prefix)) yield break;
+        foreach (var directory in Directory.EnumerateDirectories(prefix))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            RejectLinks(directory);
+            var name = Path.GetFileName(directory);
+            if (Guid.TryParseExact(name, "D", out var run) && run.Version == 7 && name == run.ToString("D"))
+                yield return run;
+        }
+        await Task.CompletedTask;
+    }
+
+    public Task DeleteResourceRunAsync(Guid runId, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (runId.Version != 7) throw new ArgumentException("Resource retention requires a version-7 run.");
+        cancellationToken.ThrowIfCancellationRequested();
+        var prefix = Path.Combine(root, "resources", runId.ToString("D"));
+        RejectLinks(prefix);
+        if (Directory.Exists(prefix))
+        {
+            foreach (var child in Directory.EnumerateFileSystemEntries(prefix, "*", SearchOption.AllDirectories)) RejectLinks(child);
+            Directory.Delete(prefix, recursive: true);
+        }
+        return Task.CompletedTask;
+    }
+
     public Task<Stream> OpenLogReadAsync(string key, long maximumBytes, CancellationToken cancellationToken = default)
     {
         BlobStreaming.ValidateLogRead(key, maximumBytes);

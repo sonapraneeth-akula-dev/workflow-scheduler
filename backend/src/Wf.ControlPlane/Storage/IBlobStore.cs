@@ -18,7 +18,8 @@ public sealed class BlobContent
         Sha256 = sha256.ToLowerInvariant();
         SizeBytes = sizeBytes;
         if (logKey is not null && !(kind == BlobKind.Logs && IsLogKey(logKey) ||
-                                   kind == BlobKind.Reports && IsReportKey(logKey)))
+                                   kind == BlobKind.Reports && IsReportKey(logKey) ||
+                                   kind == BlobKind.Resources && IsResourceKey(logKey)))
             throw new ArgumentException("Named content requires a canonical log-attempt or report key.", nameof(logKey));
         Key = logKey ?? $"{Kind.ToString().ToLowerInvariant()}/{Sha256}{(Kind == BlobKind.Packages ? ".zip" : "")}";
     }
@@ -27,6 +28,19 @@ public sealed class BlobContent
     public string Sha256 { get; }
     public long SizeBytes { get; }
     public string Key { get; }
+
+    internal static bool IsResourceKey(string key)
+    {
+        var parts = key.Split('/');
+        var file = parts.LastOrDefault()?.Split('-');
+        return parts.Length == 5 && parts[0] == "resources" &&
+            Guid.TryParseExact(parts[1], "D", out var run) && run.Version == 7 && parts[1] == run.ToString("D") &&
+            parts[2].Length == 64 && parts[2].All(char.IsAsciiHexDigit) &&
+            int.TryParse(parts[3], out var attempt) && attempt is > 0 and <= 32767 && parts[3] == attempt.ToString(System.Globalization.CultureInfo.InvariantCulture) &&
+            file is { Length: 2 } && ulong.TryParse(file[0], out var ordinal) && ordinal is > 0 and <= long.MaxValue &&
+            file[0] == ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture) &&
+            file[1].Length == 69 && file[1].EndsWith(".json", StringComparison.Ordinal) && file[1][..^5].All(char.IsAsciiHexDigit);
+    }
 
     internal static bool IsReportKey(string key)
     {
@@ -51,6 +65,11 @@ public sealed class BlobContent
 
 public interface IBlobStore
 {
+    IAsyncEnumerable<Guid> ResourceRunsAsync(CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Resource retention is unsupported.");
+    Task DeleteResourceRunAsync(Guid runId, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Resource retention is unsupported.");
+
     /// <summary>Opens immutable named log content after authorization. Caller owns the stream.
     /// Enforces the byte ceiling before returning; no SAS or filesystem path is exposed.</summary>
     Task<Stream> OpenLogReadAsync(string key, long maximumBytes, CancellationToken cancellationToken = default) =>

@@ -12,7 +12,7 @@ namespace Wf.ControlPlane.Engine.Agents;
 public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGatewayService> logger, RunStore? runs = null,
     LeaseManager? leadership = null, AgentLossSweeper? losses = null, LogUploadCapabilities? logUploads = null,
     Wf.ControlPlane.Reports.ReportUploadCapabilities? reportUploads = null,
-    Wf.ControlPlane.Artifacts.ArtifactUploadCapabilities? artifactUploads = null)
+    Wf.ControlPlane.Artifacts.ArtifactUploadCapabilities? artifactUploads = null, ResourceSampleSink? resources = null)
     : AgentGateway.AgentGatewayBase
 {
     public override async Task Connect(IAsyncStreamReader<AgentMessage> requestStream,
@@ -64,6 +64,11 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                         }
                         switch (message.PayloadCase)
                         {
+                            case AgentMessage.PayloadOneofCase.ResourceSample:
+                                if (resources is null)
+                                    throw new RpcException(new Status(StatusCode.Unimplemented, "Resource persistence is not configured."));
+                                await resources.AcceptAsync(session, message.ResourceSample, token);
+                                break;
                             case AgentMessage.PayloadOneofCase.Heartbeat:
                                 if (!await registry.HeartbeatAsync(session, message.Heartbeat, token))
                                     throw new RpcException(new Status(StatusCode.FailedPrecondition, "Agent connection was superseded by a new Hello."));

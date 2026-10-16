@@ -1,8 +1,11 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text.Json;
+using Google.Protobuf;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Wf.Contracts.Agent.V1;
+using Wf.Contracts.Resources;
 
 namespace Wf.Agent.Sampling;
 
@@ -54,13 +57,13 @@ public sealed class ResourceSamplingService : BackgroundService
     internal void PrepareUnscopedStart(ProcessStartInfo startInfo) => sampler.PrepareUnscopedStart(startInfo);
 
     public IDisposable Track(Process process, AttemptRef attempt, ITaskResourceScope? scope = null,
-        string? nativeUnavailableReason = null)
+        string? nativeUnavailableReason = null, Action<AgentMessage>? publish = null, ulong reservationEpoch = 0)
     {
         ArgumentNullException.ThrowIfNull(process);
         ArgumentNullException.ThrowIfNull(attempt);
         lock (gate)
         {
-            var tracking = new Tracking(this, process, attempt.Clone(), scope, nativeUnavailableReason);
+            var tracking = new Tracking(this, process, attempt.Clone(), scope, nativeUnavailableReason, publish, reservationEpoch);
             try { scope?.BeginAttempt(); }
             catch (Exception exception) when (exception is Win32Exception or IOException or InvalidOperationException or UnauthorizedAccessException)
             {
@@ -116,6 +119,34 @@ public sealed class ResourceSamplingService : BackgroundService
         var attempt = tracking.Attempt;
         tracking.Latest = new TaskResourceSample(attempt.RunId, attempt.NodeKey, attempt.TaskKey, attempt.Attempt,
             tracking.Process.Id, tracking.StartedAt, sample);
+        if (tracking.Publish is not null)
+        {
+            var observation = new ResourceObservation(Point(sample), latestMachine is { } machine ? Point(machine, true) : null,
+                latestMachine is null ? "Machine sampling has not produced its first observation." : null);
+            var json = JsonSerializer.SerializeToUtf8Bytes(observation, ResourceJsonContext.Default.ResourceObservation);
+            _ = ResourceContract.Parse(json);
+            tracking.Publish(new AgentMessage { ResourceSample = new ResourceSample
+            {
+                Task = attempt.Clone(), ReservationEpoch = tracking.ReservationEpoch,
+                SampleSequence = checked(++tracking.Sequence), SampleJson = ByteString.CopyFrom(json)
+            } });
+        }
+    }
+
+    private static ResourcePoint Point(ResourceMeasurement sample, bool machine = false)
+    {
+        static string? Reason(string? reason) => reason is null ? null :
+            new string(reason.Where(character => !char.IsControl(character)).Take(512).ToArray());
+        return new(sample.At.ToUniversalTime(), sample.Interval is { } interval && interval > TimeSpan.Zero ? interval.TotalSeconds : null,
+            sample.CpuPercent, sample.RamBytes, sample.Network?.Sent, sample.Network?.Received,
+            sample.NetworkDelta?.Sent, sample.NetworkDelta?.Received, sample.BytesSentPerSecond, sample.BytesReceivedPerSecond,
+            machine ? "machine" : sample.Error is not null ? "unavailable" : sample.CpuScope,
+            machine ? "physical-used" : sample.Error is not null ? "unavailable" : sample.MemoryScope, sample.NetworkScope,
+            sample.CpuPercent is null ? Reason(sample.CpuUnavailableReason ?? sample.Error) ??
+                (sample.Interval is null ? "First sample; no CPU baseline." : "CPU counter reset or stalled; new baseline.") : null,
+            sample.RamBytes is null ? Reason(sample.Error) ?? "Memory counters unavailable." : null,
+            Reason(sample.NetworkUnavailableReason), sample.BytesSentPerSecond is null ?
+                Reason(sample.NetworkRateUnavailableReason ?? sample.NetworkUnavailableReason ?? sample.Error) ?? "Network rate baseline unavailable." : null);
     }
 
     private ResourceMeasurement Read(Func<ResourceCounters> read, ref ResourceCounters? previous, ref long timestamp, bool machine)
@@ -140,8 +171,11 @@ public sealed class ResourceSamplingService : BackgroundService
     }
 
     private sealed class Tracking(ResourceSamplingService owner, Process process, AttemptRef attempt,
-        ITaskResourceScope? scope, string? unavailable) : IDisposable
+        ITaskResourceScope? scope, string? unavailable, Action<AgentMessage>? publish, ulong reservationEpoch) : IDisposable
     {
+        public readonly Action<AgentMessage>? Publish = publish;
+        public readonly ulong ReservationEpoch = reservationEpoch;
+        public ulong Sequence;
         public readonly Process Process = process;
         public readonly AttemptRef Attempt = attempt;
         public ITaskResourceScope? Scope = scope;

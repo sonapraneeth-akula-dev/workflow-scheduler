@@ -65,6 +65,24 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
                 (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         })
         .Task("delay", async ctx => await Task.Delay(TimeSpan.FromSeconds(30), ctx.CancellationToken))
+        .Task("resources", async ctx =>
+        {
+            var memory = new byte[32 * 1024 * 1024];
+            for (var index = 0; index < memory.Length; index += 4096) memory[index] = 1;
+            using var socket = new System.Net.Sockets.UdpClient(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 0));
+            socket.Connect((System.Net.IPEndPoint)socket.Client.LocalEndPoint!);
+            var payload = new byte[1024];
+            for (var index = 0; index < 100; index++)
+            {
+                await socket.SendAsync(payload, ctx.CancellationToken);
+                _ = await socket.ReceiveAsync(ctx.CancellationToken);
+                var until = Stopwatch.GetTimestamp() + Stopwatch.Frequency / 100;
+                while (Stopwatch.GetTimestamp() < until) _ = Math.Sqrt(index + 3);
+                await Task.Delay(12, ctx.CancellationToken);
+            }
+            GC.KeepAlive(memory);
+            ctx.Outputs["pid"] = Environment.ProcessId;
+        })
         .Task("agentloss", async ctx =>
         {
             var delay = Environment.GetEnvironmentVariable("WF_FIXTURE_AGENT_LOSS_HOLD") == "true"

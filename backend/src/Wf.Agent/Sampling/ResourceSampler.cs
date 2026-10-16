@@ -15,7 +15,7 @@ public sealed record ResourceMeasurement(DateTimeOffset At, double? CpuPercent, 
     NetworkBytes? Network, double? BytesSentPerSecond, double? BytesReceivedPerSecond,
     string? NetworkUnavailableReason, string? CpuUnavailableReason = null, string? Error = null,
     string CpuScope = "process", string MemoryScope = "process-rss", string NetworkScope = "unavailable",
-    TimeSpan? Interval = null);
+    TimeSpan? Interval = null, NetworkBytes? NetworkDelta = null, string? NetworkRateUnavailableReason = null);
 
 public abstract class ResourceSampler(NativeSamplingOptions? options = null) : IDisposable
 {
@@ -94,6 +94,11 @@ public abstract class ResourceSampler(NativeSamplingOptions? options = null) : I
         }
         NetworkBytes? network = null;
         double? sentRate = null, receivedRate = null;
+        NetworkBytes? delta = null;
+        var rateReason = current.NetworkUnavailableReason ?? (previous is null ? "First sample; no rate baseline."
+            : previous.Network is null ? "Previous network counters unavailable; new baseline."
+            : elapsed <= TimeSpan.Zero ? "Non-positive monotonic interval; no network rate."
+            : "Network counter reset or interface set changed; new baseline.");
         if (current.Network is { } interfaces)
         {
             network = new NetworkBytes(interfaces.Values.Aggregate(0UL, (sum, value) => checked(sum + value.Sent)),
@@ -102,12 +107,16 @@ public abstract class ResourceSampler(NativeSamplingOptions? options = null) : I
                 interfaces.All(pair => old.TryGetValue(pair.Key, out var value) &&
                     pair.Value.Sent >= value.Sent && pair.Value.Received >= value.Received))
             {
+                delta = new NetworkBytes(interfaces.Aggregate(0UL, (sum, pair) => checked(sum + (pair.Value.Sent - old[pair.Key].Sent))),
+                    interfaces.Aggregate(0UL, (sum, pair) => checked(sum + (pair.Value.Received - old[pair.Key].Received))));
                 sentRate = interfaces.Sum(pair => (double)(pair.Value.Sent - old[pair.Key].Sent)) / elapsed.TotalSeconds;
                 receivedRate = interfaces.Sum(pair => (double)(pair.Value.Received - old[pair.Key].Received)) / elapsed.TotalSeconds;
+                rateReason = null;
             }
         }
         return new ResourceMeasurement(at, cpu, current.RamBytes, network, sentRate, receivedRate,
             current.NetworkUnavailableReason, current.CpuUnavailableReason, CpuScope: current.CpuScope,
-            MemoryScope: current.MemoryScope, NetworkScope: current.NetworkScope, Interval: previous is null ? null : elapsed);
+            MemoryScope: current.MemoryScope, NetworkScope: current.NetworkScope, Interval: previous is null ? null : elapsed,
+            NetworkDelta: delta, NetworkRateUnavailableReason: rateReason);
     }
 }

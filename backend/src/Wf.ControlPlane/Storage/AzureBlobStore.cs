@@ -60,6 +60,26 @@ public sealed class AzureBlobStore : IBlobStore
         await BlobStreaming.CopyVerifiedAsync(input, destination, content, maximumBytes, cancellationToken);
     }
 
+    public async IAsyncEnumerable<Guid> ResourceRunsAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await foreach (var item in container.GetBlobsByHierarchyAsync(traits: BlobTraits.None, states: BlobStates.None, prefix: "resources/", delimiter: "/",
+                           cancellationToken: cancellationToken))
+        {
+            if (!item.IsPrefix) continue;
+            var name = item.Prefix["resources/".Length..].TrimEnd('/');
+            if (Guid.TryParseExact(name, "D", out var run) && run.Version == 7 && name == run.ToString("D"))
+                yield return run;
+        }
+    }
+
+    public async Task DeleteResourceRunAsync(Guid runId, CancellationToken cancellationToken = default)
+    {
+        if (runId.Version != 7) throw new ArgumentException("Resource retention requires a version-7 run.");
+        await foreach (var item in container.GetBlobsAsync(traits: BlobTraits.None, states: BlobStates.None, prefix: $"resources/{runId:D}/", cancellationToken: cancellationToken))
+            await container.DeleteBlobIfExistsAsync(item.Name, DeleteSnapshotsOption.IncludeSnapshots, cancellationToken: cancellationToken);
+    }
+
     public async Task<Stream> OpenLogReadAsync(string key, long maximumBytes, CancellationToken cancellationToken = default)
     {
         BlobStreaming.ValidateLogRead(key, maximumBytes);

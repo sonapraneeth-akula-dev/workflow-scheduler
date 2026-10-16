@@ -48,7 +48,8 @@ public sealed class AgentOutbox : IDisposable
     {
         ArgumentNullException.ThrowIfNull(message);
         if (message.PayloadCase is not (AgentMessage.PayloadOneofCase.TaskStarted or
-            AgentMessage.PayloadOneofCase.TaskCompleted or AgentMessage.PayloadOneofCase.Heartbeat))
+            AgentMessage.PayloadOneofCase.TaskCompleted or AgentMessage.PayloadOneofCase.Heartbeat or
+            AgentMessage.PayloadOneofCase.ResourceSample))
             throw new ArgumentException("Only task events and heartbeats belong in the agent outbox.", nameof(message));
         lock (gate)
         {
@@ -107,7 +108,7 @@ public sealed class AgentOutbox : IDisposable
     public IReadOnlyList<AttemptRef> UnacknowledgedAttempts()
     {
         lock (gate)
-            return pending.Values.Select(message => message.TaskStarted?.Task ?? message.TaskCompleted?.Task)
+            return pending.Values.Select(message => message.TaskStarted?.Task ?? message.TaskCompleted?.Task ?? message.ResourceSample?.Task)
                 .OfType<AttemptRef>().Select(task => task.Clone()).ToArray();
     }
 

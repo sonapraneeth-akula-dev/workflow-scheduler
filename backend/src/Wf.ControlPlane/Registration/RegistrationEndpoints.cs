@@ -34,6 +34,9 @@ public static class RegistrationEndpoints
         services.AddSingleton<ReportStore>();
         services.AddSingleton(provider => new Wf.ControlPlane.Artifacts.ArtifactUploadCapabilities(key, provider.GetRequiredService<TimeProvider>()));
         services.AddSingleton<Wf.ControlPlane.Artifacts.ArtifactGrantService>();
+        services.AddSingleton<Wf.ControlPlane.Engine.ResourceSampleSink>();
+        services.AddSingleton(provider => new Wf.ControlPlane.Api.ResourceReadCursors(key, provider.GetRequiredService<TimeProvider>()));
+        services.AddHostedService<Wf.ControlPlane.Engine.ResourceRetentionService>();
         services.AddSingleton<RegistrationService>();
         return services;
     }
@@ -46,6 +49,7 @@ public static class RegistrationEndpoints
         endpoints.MapLogUploadEndpoints();
         endpoints.MapReportPublishEndpoints();
         Wf.ControlPlane.Artifacts.ArtifactEndpoints.MapArtifactEndpoints(endpoints);
+        Wf.ControlPlane.Api.ResourceMetricsEndpoints.MapResourceMetricsEndpoints(endpoints);
         return endpoints;
     }
 

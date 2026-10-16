@@ -109,7 +109,7 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
                 execution.Cancellation.Token);
             result = await hosts.ExecuteAsync(package, dispatch, cancellationToken: execution.Cancellation.Token,
                 captureLog: capture is null ? null : capture.WriteAsync,
-                journalResult: completion =>
+                publishResources: outbox.Enqueue, journalResult: completion =>
                 {
                     publishing = true;
                     outbox.Enqueue(new AgentMessage { TaskCompleted = completion });

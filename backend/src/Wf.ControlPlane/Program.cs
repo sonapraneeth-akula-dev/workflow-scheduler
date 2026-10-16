@@ -64,6 +64,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunTimelineJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, ReportIndexJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, ReportCompareJsonContext.Default);
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.Contracts.Resources.ResourceJsonContext.Default);
 });
 builder.Services.AddWorkflowOpenApi();
 builder.Services.AddWorkflowLive();

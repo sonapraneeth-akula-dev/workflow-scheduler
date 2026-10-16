@@ -11,7 +11,7 @@ internal sealed unsafe partial class WindowsNetworkTrace : IDisposable
 {
     private static readonly Guid NetworkProvider = new("7dd42a49-5329-4832-8dfd-43d979153a88");
     private readonly Guid markerProvider = Guid.NewGuid();
-    private readonly string name = $"wf-resource-{Guid.NewGuid():N}";
+    private readonly string name = SessionName();
     private readonly ConcurrentDictionary<int, Subscription> processes = new();
     private readonly object controlGate = new();
     private readonly object flushGate = new();
@@ -23,6 +23,12 @@ internal sealed unsafe partial class WindowsNetworkTrace : IDisposable
     private Task? consumer;
     private string? failure;
     private volatile bool disposed;
+
+    private static string SessionName()
+    {
+        using var process = Process.GetCurrentProcess();
+        return $"wf-resource-{process.Id}-{process.StartTime.ToUniversalTime().Ticks:x}-{Guid.NewGuid():N}";
+    }
 
     public WindowsNetworkTrace()
     {

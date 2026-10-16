@@ -20,6 +20,7 @@ message AgentMessage {
     TaskStarted task_started = 12;
     TaskCompleted task_completed = 13;
     Ack ack = 14;
+    ResourceSample resource_sample = 15;
   }
 }
 
@@ -156,4 +157,14 @@ message ResourceSummary {
   uint64 peak_ram_mb = 1;
   uint64 cpu_time_ms = 2;
   uint64 elapsed_ms = 3;
+}
+
+// Journaled before TaskCompleted, including the final pre-Ack process read.
+// sample_json is the strict Wf.Contracts.Resources.ResourceObservation contract,
+// never task inputs, outputs, secrets, packet data or arbitrary telemetry.
+message ResourceSample {
+  AttemptRef task = 1;
+  uint64 reservation_epoch = 2;
+  uint64 sample_sequence = 3;
+  bytes sample_json = 4;
 }

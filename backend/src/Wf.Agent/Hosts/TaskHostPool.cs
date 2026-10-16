@@ -120,7 +120,7 @@ public sealed class TaskHostPool : IAsyncDisposable
     public async Task<TaskCompleted> ExecuteAsync(TaskHostPackage package, Dispatch dispatch,
         ByteString? nodeOutputsJson = null, TimeSpan? cancellationGrace = null, CancellationToken cancellationToken = default,
         Action<TaskCompleted>? journalResult = null, Func<string, string, Task>? captureLog = null,
-        SecretMasker? secretMasker = null)
+        SecretMasker? secretMasker = null, Action<AgentMessage>? publishResources = null)
     {
         ArgumentNullException.ThrowIfNull(package);
         ArgumentNullException.ThrowIfNull(dispatch);
@@ -144,7 +144,8 @@ public sealed class TaskHostPool : IAsyncDisposable
         finally { try { ScheduleSweep(); } finally { gate.Release(); } }
         try
         {
-            using var resourceTracking = sampling?.Track(host.Process, dispatch.Task, host.ResourceScope, host.ResourceUnavailableReason);
+            using var resourceTracking = sampling?.Track(host.Process, dispatch.Task, host.ResourceScope,
+                host.ResourceUnavailableReason, publishResources, dispatch.ReservationEpoch);
             host.CaptureLog = captureLog;
             host.Masker = secretMasker ?? new SecretMasker([]);
             using var call = host.Client.ExecuteAsync(new ExecuteRequest
@@ -192,8 +193,8 @@ public sealed class TaskHostPool : IAsyncDisposable
             if (result.Task is null || !result.Task.Equals(dispatch.Task) ||
                 result.Outcome == TaskOutcome.Unspecified || !System.Enum.IsDefined(result.Outcome))
                 throw new InvalidDataException("Task host returned an invalid attempt result.");
-            journalResult?.Invoke(result);
             resourceTracking?.Dispose();
+            journalResult?.Invoke(result);
             using var acknowledgement = host.Client.AcknowledgeAsync(new AcknowledgeRequest { Task = dispatch.Task },
                 deadline: DateTime.UtcNow.AddSeconds(5));
             await acknowledgement.ResponseAsync;
