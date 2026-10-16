@@ -946,6 +946,34 @@ task 9.2.1.1.3 owns full 5 GB roundtrips, cross-OS RAM and Azure throughput gate
 
 ## Registration
 
+### Publish to a local/dev engine
+
+`wf publish` reuses the offline validator and deterministic CI package builder,
+then obtains an upload grant, uploads the package and registers immutable content:
+
+```powershell
+wf publish .\teams\<team>\<type>\<workflow> --engine <engine-origin> `
+  --git-commit <lowercase-40-or-64-character-commit> --git-author '<author>' `
+  --change-note 'Local development publication'
+```
+
+The CLI never opens a sign-in flow. It requires an explicit `WF_ACCESS_TOKEN`
+environment value, including on loopback; normally authenticated engines require
+a Registrar application token. The existing isolated Development `--dev` backend
+instead uses its fixed local identity, without enterprise login. Development
+authentication must not be exposed to untrusted callers.
+
+Only trusted local source is compiled. Declare external project/import inputs
+with repeated `--input`. If `schedules.json` exists, supply its exact
+repository-relative `--schedule-source-path`; absent schedules preserve the
+engine's existing schedule configuration. Git author/commit are explicit, never
+guessed from the current checkout. Publication never retries automatically.
+Post-submission cancellation or failure may already be durable: inspect engine
+history before retrying. See `backend\src\Wf.Cli\Publishing\README.md` for complete
+options and bounds.
+
+### HTTP registration
+
 The actual host exposes loopback HTTP/1.1 REST/SignalR on `Api:Port` (default
 5001), beside the unchanged HTTP/2 agent/engine listener on `Engine:Port`
 (default 5000). Ports must differ. Configure `Storage__UploadHmacKey` with an
