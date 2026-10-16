@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ApiError } from "@/lib/api/client"
-import { getReportIndex, getReportView } from "./api"
+import { getReportComparison, getReportIndex, getReportView } from "./api"
 
 const { call } = vi.hoisted(() => ({ call: vi.fn() }))
 vi.mock("@/lib/api/client", async (original) => ({
@@ -27,6 +27,136 @@ describe("trusted report metadata and content reads", () => {
   it("retains exact source, attempt, title and ordered duplicate tags", async () => {
     call.mockResolvedValue(success({ runId, items: [item] }))
     expect(await getReportIndex(runId)).toEqual({ runId, items: [item] })
+  })
+
+  describe("exact cross-run report comparisons", () => {
+    const seriesId = "019ed132-2f44-7000-8000-000000000003"
+    const rightRunId = "019ed132-2f44-7000-8000-000000000004"
+    const query = {
+      leftRunId: runId,
+      rightRunId,
+      sourceKey: "$post/summary",
+      title: " Summary \u03bb ",
+    }
+    const left = { ...item, title: query.title }
+    const right = {
+      ...left,
+      id: "019ed132-2f44-7000-8000-000000000005",
+      runId: rightRunId,
+      kind: "markdown",
+      attempt: 3,
+    }
+    const pair = { seriesId, left, right }
+
+    it("validates both exact identities then loads both Blobs without re-reading indexes", async () => {
+      const content = new Blob(["payload"])
+      call
+        .mockResolvedValueOnce(success(pair))
+        .mockResolvedValueOnce(success(content))
+        .mockResolvedValueOnce(success(content))
+      const signal = new AbortController().signal
+      expect(await getReportComparison(seriesId, query, signal)).toEqual({
+        left: { report: left, content },
+        right: { report: right, content },
+      })
+      expect(call).toHaveBeenCalledTimes(3)
+      expect(call).toHaveBeenNthCalledWith(
+        1,
+        "/api/v1/series/{id}/reports/compare",
+        { params: { path: { id: seriesId }, query }, signal }
+      )
+      for (const [index, report] of [left, right].entries())
+        expect(call).toHaveBeenNthCalledWith(
+          index + 2,
+          "/api/v1/reports/{id}/content",
+          {
+            params: { path: { id: report.id } },
+            parseAs: "blob",
+            signal,
+          }
+        )
+    })
+    it.each([
+      { ...pair, seriesId: rightRunId },
+      { ...pair, left: right, right: left },
+      { ...pair, left: { ...left, sourceKey: "$post/Summary" } },
+      { ...pair, right: { ...right, title: query.title.trim() } },
+      { ...pair, right: { ...right, id: left.id } },
+    ])(
+      "rejects mismatched metadata before fetching either payload",
+      async (data) => {
+        call.mockResolvedValueOnce(success(data))
+        await expect(getReportComparison(seriesId, query)).rejects.toThrow(
+          "The API returned an inconsistent report comparison."
+        )
+        expect(call).toHaveBeenCalledOnce()
+      }
+    )
+    it.each([
+      { ...pair, right: null },
+      { ...pair, left: { ...left, attempt: 0 } },
+      { ...pair, right: { ...right, sizeBytes: -1 } },
+    ])("rejects invalid response metadata before content", async (data) => {
+      call.mockResolvedValueOnce(success(data))
+      await expect(getReportComparison(seriesId, query)).rejects.toThrow()
+      expect(call).toHaveBeenCalledOnce()
+    })
+    it.each([
+      { ...query, rightRunId: runId },
+      { ...query, leftRunId: runId.toUpperCase() },
+      { ...query, sourceKey: "not-a-task" },
+      { ...query, sourceKey: `node/${"x".repeat(1021)}` },
+      { ...query, title: "\u03bb".repeat(257) },
+      { ...query, title: " " },
+    ])(
+      "rejects invalid selections before network access",
+      async (selection) => {
+        await expect(getReportComparison(seriesId, selection)).rejects.toThrow()
+        expect(call).not.toHaveBeenCalled()
+      }
+    )
+    it.each([
+      seriesId.toUpperCase(),
+      "00000000-0000-0000-0000-000000000000",
+      "invalid",
+    ])("rejects noncanonical series IDs", async (id) => {
+      await expect(getReportComparison(id, query)).rejects.toThrow()
+      expect(call).not.toHaveBeenCalled()
+    })
+    it.each([401, 403, 404, 409, 503])(
+      "surfaces HTTP %i without reading content or manufacturing an empty side",
+      async (status) => {
+        call.mockResolvedValueOnce({
+          response: new Response(null, { status }),
+          error: { title: "Comparison unavailable." },
+        })
+        await expect(getReportComparison(seriesId, query)).rejects.toThrow(
+          "Comparison unavailable."
+        )
+        expect(call).toHaveBeenCalledOnce()
+      }
+    )
+    it("fails the comparison if either content is truncated", async () => {
+      call
+        .mockResolvedValueOnce(success(pair))
+        .mockResolvedValueOnce(success(new Blob(["payload"])))
+        .mockResolvedValueOnce(success(new Blob(["short"])))
+      await expect(getReportComparison(seriesId, query)).rejects.toThrow(
+        "Report content does not match its committed byte size."
+      )
+    })
+    it("fails the comparison if a content authorization is revoked", async () => {
+      call
+        .mockResolvedValueOnce(success(pair))
+        .mockResolvedValueOnce(success(new Blob(["payload"])))
+        .mockResolvedValueOnce({
+          response: new Response(null, { status: 403 }),
+          error: { title: "Content refused." },
+        })
+      await expect(getReportComparison(seriesId, query)).rejects.toThrow(
+        "Content refused."
+      )
+    })
   })
   it("supports an empty index", async () => {
     call.mockResolvedValue(success({ runId, items: [] }))

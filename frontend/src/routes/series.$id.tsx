@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, Link } from "@tanstack/react-router"
 import { z } from "zod"
 import { HistoryFilters, HistoryTable } from "@/features/runs/HistoryTable"
 import { historySearchSchema } from "@/features/runs/history"
@@ -17,6 +17,13 @@ function SeriesHistory() {
     <>
       <h1 className="text-2xl font-semibold">Series history</h1>
       <p className="text-sm break-all text-muted-foreground">Series: {id}</p>
+      <Link
+        to="/series/$id/compare"
+        params={{ id }}
+        className="text-primary underline"
+      >
+        Compare reports
+      </Link>
       <HistoryFilters
         key={JSON.stringify(search)}
         search={search}

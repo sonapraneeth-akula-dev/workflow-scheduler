@@ -15,6 +15,7 @@ import { Route as RunsIdRouteImport } from './routes/runs.$id'
 import { Route as SchedulesIdRouteImport } from './routes/schedules.$id'
 import { Route as SchedulesNewRouteImport } from './routes/schedules.new'
 import { Route as SeriesIdRouteImport } from './routes/series.$id'
+import { Route as SeriesIdCompareRouteImport } from './routes/series.$id_.compare'
 import { Route as TTeamIndexRouteImport } from './routes/t/$team/index'
 import { Route as RunsIdReportsReportIdRouteImport } from './routes/runs.$id_.reports.$reportId'
 import { Route as TTeamTypeIndexRouteImport } from './routes/t/$team/$type/index'
@@ -50,6 +51,11 @@ const SchedulesNewRoute = SchedulesNewRouteImport.update({
 const SeriesIdRoute = SeriesIdRouteImport.update({
   id: '/series/$id',
   path: '/series/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SeriesIdCompareRoute = SeriesIdCompareRouteImport.update({
+  id: '/series/$id_/compare',
+  path: '/series/$id/compare',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TTeamIndexRoute = TTeamIndexRouteImport.update({
@@ -91,6 +97,7 @@ export interface FileRoutesByFullPath {
   '/schedules/new': typeof SchedulesNewRoute
   '/series/$id': typeof SeriesIdRoute
   '/runs/': typeof RunsIndexRoute
+  '/series/$id/compare': typeof SeriesIdCompareRoute
   '/t/$team/': typeof TTeamIndexRoute
   '/runs/$id/reports/$reportId': typeof RunsIdReportsReportIdRoute
   '/t/$team/$type/': typeof TTeamTypeIndexRoute
@@ -105,6 +112,7 @@ export interface FileRoutesByTo {
   '/schedules/new': typeof SchedulesNewRoute
   '/series/$id': typeof SeriesIdRoute
   '/runs': typeof RunsIndexRoute
+  '/series/$id/compare': typeof SeriesIdCompareRoute
   '/t/$team': typeof TTeamIndexRoute
   '/runs/$id/reports/$reportId': typeof RunsIdReportsReportIdRoute
   '/t/$team/$type': typeof TTeamTypeIndexRoute
@@ -120,6 +128,7 @@ export interface FileRoutesById {
   '/schedules/new': typeof SchedulesNewRoute
   '/series/$id': typeof SeriesIdRoute
   '/runs/': typeof RunsIndexRoute
+  '/series/$id_/compare': typeof SeriesIdCompareRoute
   '/t/$team/': typeof TTeamIndexRoute
   '/runs/$id_/reports/$reportId': typeof RunsIdReportsReportIdRoute
   '/t/$team/$type/': typeof TTeamTypeIndexRoute
@@ -136,6 +145,7 @@ export interface FileRouteTypes {
     | '/schedules/new'
     | '/series/$id'
     | '/runs/'
+    | '/series/$id/compare'
     | '/t/$team/'
     | '/runs/$id/reports/$reportId'
     | '/t/$team/$type/'
@@ -150,6 +160,7 @@ export interface FileRouteTypes {
     | '/schedules/new'
     | '/series/$id'
     | '/runs'
+    | '/series/$id/compare'
     | '/t/$team'
     | '/runs/$id/reports/$reportId'
     | '/t/$team/$type'
@@ -164,6 +175,7 @@ export interface FileRouteTypes {
     | '/schedules/new'
     | '/series/$id'
     | '/runs/'
+    | '/series/$id_/compare'
     | '/t/$team/'
     | '/runs/$id_/reports/$reportId'
     | '/t/$team/$type/'
@@ -179,6 +191,7 @@ export interface RootRouteChildren {
   SchedulesNewRoute: typeof SchedulesNewRoute
   SeriesIdRoute: typeof SeriesIdRoute
   RunsIndexRoute: typeof RunsIndexRoute
+  SeriesIdCompareRoute: typeof SeriesIdCompareRoute
   TTeamIndexRoute: typeof TTeamIndexRoute
   RunsIdReportsReportIdRoute: typeof RunsIdReportsReportIdRoute
   TTeamTypeIndexRoute: typeof TTeamTypeIndexRoute
@@ -229,6 +242,13 @@ declare module '@tanstack/react-router' {
       path: '/series/$id'
       fullPath: '/series/$id'
       preLoaderRoute: typeof SeriesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/series/$id_/compare': {
+      id: '/series/$id_/compare'
+      path: '/series/$id/compare'
+      fullPath: '/series/$id/compare'
+      preLoaderRoute: typeof SeriesIdCompareRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/t/$team/': {
@@ -283,6 +303,7 @@ const rootRouteChildren: RootRouteChildren = {
   SchedulesNewRoute: SchedulesNewRoute,
   SeriesIdRoute: SeriesIdRoute,
   RunsIndexRoute: RunsIndexRoute,
+  SeriesIdCompareRoute: SeriesIdCompareRoute,
   TTeamIndexRoute: TTeamIndexRoute,
   RunsIdReportsReportIdRoute: RunsIdReportsReportIdRoute,
   TTeamTypeIndexRoute: TTeamTypeIndexRoute,

@@ -37,6 +37,32 @@ export interface ReportViewData {
   report: ReportItem
   content: Blob
 }
+export interface ReportComparisonQuery {
+  leftRunId: string
+  rightRunId: string
+  sourceKey: string
+  title: string
+}
+const seriesIdSchema = z
+  .uuid()
+  .refine(
+    (id) =>
+      id === id.toLowerCase() && id !== "00000000-0000-0000-0000-000000000000",
+    "Use a canonical lowercase nonempty series UUID."
+  )
+const comparisonQuerySchema = z
+  .object({
+    leftRunId: idSchema,
+    rightRunId: idSchema,
+    sourceKey: metadataText(1025).and(z.string().regex(/^[^/]+\/[^/]+$/)),
+    title: metadataText(512),
+  })
+  .refine((query) => query.leftRunId !== query.rightRunId, "Choose two runs.")
+const comparisonSchema = z.object({
+  seriesId: seriesIdSchema,
+  left: reportSchema,
+  right: reportSchema,
+})
 
 export async function getReportIndex(runId: string, signal?: AbortSignal) {
   const id = idSchema.parse(runId)
@@ -66,8 +92,15 @@ export async function getReportView(
   const index = await getReportIndex(runId, signal)
   const report = index.items.find((item) => item.id === id)
   if (!report) throw new Error("Report was not found in this run.")
+  return getReportContent(report, signal)
+}
+
+async function getReportContent(
+  report: ReportItem,
+  signal?: AbortSignal
+): Promise<ReportViewData> {
   const response = await publicApi.GET("/api/v1/reports/{id}/content", {
-    params: { path: { id } },
+    params: { path: { id: report.id } },
     parseAs: "blob",
     signal,
   })
@@ -77,4 +110,36 @@ export async function getReportView(
   if (!(content instanceof Blob) || content.size !== report.sizeBytes)
     throw new Error("Report content does not match its committed byte size.")
   return { report, content }
+}
+
+export async function getReportComparison(
+  seriesId: string,
+  selection: ReportComparisonQuery,
+  signal?: AbortSignal
+) {
+  const id = seriesIdSchema.parse(seriesId)
+  const query = comparisonQuerySchema.parse(selection)
+  const response = await publicApi.GET("/api/v1/series/{id}/reports/compare", {
+    params: { path: { id }, query },
+    signal,
+  })
+  if (!response.response.ok)
+    throw new ApiError(response.response, response.error)
+  const pair = comparisonSchema.parse(response.data)
+  if (
+    pair.seriesId !== id ||
+    pair.left.runId !== query.leftRunId ||
+    pair.right.runId !== query.rightRunId ||
+    pair.left.id === pair.right.id ||
+    [pair.left, pair.right].some(
+      (report) =>
+        report.sourceKey !== query.sourceKey || report.title !== query.title
+    )
+  )
+    throw new Error("The API returned an inconsistent report comparison.")
+  const [left, right] = await Promise.all([
+    getReportContent(pair.left, signal),
+    getReportContent(pair.right, signal),
+  ])
+  return { left, right }
 }

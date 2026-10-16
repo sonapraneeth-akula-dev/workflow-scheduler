@@ -149,6 +149,17 @@ WebSocket, no periodic reads, real viewer navigation and two-theme accessibility
 It does not represent SQL fixture insertion as SDK publishing; separate backend
 tests exercise the production publishing endpoint.
 
+Series history links to `/series/<series UUID>/compare`. Load more series runs
+continues the complete run history, not just the newest 50. Choose any distinct
+left/right pair and a committed report from the left run. Comparison matches
+its exact source key and title, preserving case, whitespace and Unicode.
+The authenticated comparison endpoint checks all three resource scopes;
+both returned metadata identities are validated before fetching raw content.
+Each side reuses its own kind renderer, even if kinds or attempts differ.
+Missing matches (404) and ambiguous matches (409) remain explicit failures:
+no fabricated empty side or arbitrary latest attempt. Changing either run or
+report clears the old comparison; failed refreshes hide both cached panes.
+
 `e2e/report-renderers.spec.ts` reads real HTTP content from immutable filesystem
 objects and PostgreSQL report/attempt rows in the isolated UI fixture. Fixture
 rows model retained published reports; this browser fixture does not claim to
