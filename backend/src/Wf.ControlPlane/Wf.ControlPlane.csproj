@@ -14,4 +14,9 @@
   <ItemGroup>
     <EmbeddedResource Include="..\..\db\migrations\*.sql" LogicalName="Wf.Migrations.%(Filename)%(Extension)" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Syntax-only scaffold rewriting; ship the compiler libraries, never invoke a compiler on retained source. -->
+    <Reference Include="Microsoft.CodeAnalysis" HintPath="$(MSBuildBinPath)\Roslyn\bincore\Microsoft.CodeAnalysis.dll" />
+    <Reference Include="Microsoft.CodeAnalysis.CSharp" HintPath="$(MSBuildBinPath)\Roslyn\bincore\Microsoft.CodeAnalysis.CSharp.dll" />
+  </ItemGroup>
 </Project>
