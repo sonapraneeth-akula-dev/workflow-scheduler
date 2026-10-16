@@ -51,6 +51,27 @@ and UI, require health within 120 seconds per startup, and verify persisted
 database/blob data and agent identity after recreation. Each test owns and
 removes only its unique temporary database directory or Docker volume.
 
+`GET /api/v1/machines` returns `{ items: [...] }`, ordered by immutable machine
+ID, with OS/architecture, hardware, slot/load metrics, pool, labels, heartbeat
+health and the current reservation. Optional `pool`, `os=windows|linux`,
+`status=Healthy|Unhealthy|Draining` and repeated `label=key=value` filters combine
+with AND. Expired reservations remain visible until physical fencing settles;
+a stale heartbeat reports `Unhealthy` even before the next sweep.
+Inventory and edits reuse the existing global Admin authorization boundary.
+The explicit loopback development profile remains login-free.
+
+Admin `PATCH /api/v1/machines/{id}` accepts a nonempty JSON object containing
+`labels` and/or `pool`; labels replace the whole map, and `{ "labels": {} }`
+clears it. Omitted fields stay unchanged; explicit nulls, duplicate/unknown
+fields, invalid metadata and bodies over 64 KiB are rejected. A successful
+edit returns 204 and atomically records before/after metadata in `audit_log`.
+Each supplied field becomes an override retained across agent reconnects;
+unsupplied fields still follow agent configuration until overridden. Placement
+reads edited metadata before its next dispatch, including on a different
+control-plane process, without interrupting existing work or freeing a
+reservation. Responses are never cached and expose no agent sessions or
+storage capabilities.
+
 ## Frontend
 
 `frontend` contains the React/TypeScript schedule-management SPA: create, edit,

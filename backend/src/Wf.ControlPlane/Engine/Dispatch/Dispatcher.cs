@@ -192,6 +192,19 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
         CancellationToken cancellationToken)
     {
         var capacity = agents.DispatchableAgents().Select(agent => agent.Capacity(timeProvider.GetUtcNow())).ToDictionary(agent => agent.Id);
+        await using (var metadata = new NpgsqlCommand("SELECT id,labels,pool FROM agents WHERE id=ANY($1)", connection))
+        {
+            metadata.Parameters.AddWithValue(capacity.Keys.ToArray());
+            await using var reader = await metadata.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var id = reader.GetGuid(0);
+                capacity[id] = capacity[id] with
+                {
+                    Labels = AgentRegistry.ParseLabels(reader.GetFieldValue<string[]>(1)), Pool = reader.GetString(2)
+                };
+            }
+        }
         var owned = new HashSet<Guid>();
         await using (var reservations = new NpgsqlCommand("""
             SELECT agent_id,run_id,node_key,epoch,expires_at,release_requested_at IS NULL

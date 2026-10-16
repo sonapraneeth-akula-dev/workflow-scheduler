@@ -3192,6 +3192,208 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/machines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Global Admin inventory, ordered by immutable machine ID. Optional pool, os=windows|linux, status=Healthy|Unhealthy|Draining and repeated label=key=value filters combine with AND. Stale healthy heartbeats are reported Unhealthy. Current reservation remains until physical fence settlement. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Exact pool name. */
+                    pool?: string;
+                    /** @description windows or linux. */
+                    os?: string;
+                    /** @description Healthy, Unhealthy or Draining; includes heartbeat freshness. */
+                    status?: string;
+                    /** @description Repeat label=key=value for AND matching, with distinct keys; at most 100. */
+                    label?: string[];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MachineListResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/machines/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** @description Global Admin only. Atomically replaces supplied labels and/or pool with a before/after audit. Omitted fields stay unchanged; empty labels clears labels. Overrides survive agent reconnects. Does not interrupt running attempts or release reservations. */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MachinePatchRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Payload Too Large */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unsupported Media Type */
+                415: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3407,6 +3609,57 @@ export interface components {
             stream: string;
             level: string;
             text: string;
+        };
+        MachineListResponse: {
+            items: components["schemas"]["MachineResponse"][];
+        };
+        MachinePatchRequest: {
+            labels?: null | {
+                [key: string]: string;
+            };
+            pool?: null | string;
+        };
+        MachineReservationResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            runId: string;
+            nodeKey: string;
+            /** Format: int64 */
+            epoch: number | string;
+            /** Format: date-time */
+            expiresAt: string;
+            releasePending: boolean;
+        };
+        MachineResponse: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            os: string;
+            arch: string;
+            /** Format: int32 */
+            cores: number | string;
+            /** Format: int32 */
+            ramMb: number | string;
+            /** Format: int32 */
+            maxTasks: number | string;
+            /** Format: int32 */
+            slotsUsed: number | string;
+            pool: string;
+            labels: {
+                [key: string]: string;
+            };
+            status: string;
+            /** Format: date-time */
+            lastHeartbeatAt: string;
+            version: string;
+            /** Format: double */
+            cpuPercent: number | string;
+            /** Format: int64 */
+            ramUsedMb: number | string;
+            /** Format: int64 */
+            diskFreeMb: number | string;
+            currentReservation: null | components["schemas"]["MachineReservationResponse"];
         };
         ManifestChange: {
             key: string;

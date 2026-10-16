@@ -33,8 +33,7 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                var labels = reader.GetFieldValue<string[]>(7).Select(label => label.Split('=', 2))
-                    .ToImmutableDictionary(parts => parts[0], parts => parts[1], StringComparer.Ordinal);
+                var labels = ParseLabels(reader.GetFieldValue<string[]>(7));
                 loaded.Add(new AgentRecord(reader.GetGuid(0), reader.GetString(1), (AgentOs)reader.GetInt16(2),
                     (AgentArchitecture)reader.GetInt16(3), reader.GetInt32(4), reader.GetInt32(5), reader.GetInt32(6),
                     labels, reader.GetString(8), (AgentStatus)reader.GetInt16(9), reader.GetFieldValue<DateTimeOffset>(10),
@@ -63,11 +62,12 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$11,$12,$13)
                 ON CONFLICT (id) DO UPDATE SET
                     name=EXCLUDED.name,os=EXCLUDED.os,arch=EXCLUDED.arch,cores=EXCLUDED.cores,
-                    ram_mb=EXCLUDED.ram_mb,max_tasks=EXCLUDED.max_tasks,labels=EXCLUDED.labels,pool=EXCLUDED.pool,
+                    ram_mb=EXCLUDED.ram_mb,max_tasks=EXCLUDED.max_tasks,
+                    labels=COALESCE(agents.labels_override,EXCLUDED.labels),pool=COALESCE(agents.pool_override,EXCLUDED.pool),
                     status=CASE WHEN agents.status=2 THEN 2 ELSE 0 END,
                     last_heartbeat_at=EXCLUDED.last_heartbeat_at,agent_version=EXCLUDED.agent_version,
                     session_id=EXCLUDED.session_id,slots_used=EXCLUDED.slots_used,cpu_percent=0,ram_used_mb=0,disk_free_mb=0
-                RETURNING status
+                RETURNING status,labels,pool
                 """, connection, transaction);
             command.Parameters.AddWithValue(agent.Id);
             command.Parameters.AddWithValue(agent.Name);
@@ -82,9 +82,14 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
             command.Parameters.AddWithValue(agent.Version);
             command.Parameters.AddWithValue(agent.SessionId);
             command.Parameters.AddWithValue(agent.SlotsUsed);
-            var status = (short)(await command.ExecuteScalarAsync(cancellationToken))!;
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken)) throw new InvalidDataException("Agent registration returned no row.");
+            var status = (AgentStatus)reader.GetInt16(0);
+            var labels = ParseLabels(reader.GetFieldValue<string[]>(1));
+            var pool = reader.GetString(2);
+            await reader.DisposeAsync();
             await transaction.CommitAsync(cancellationToken);
-            agents[agent.Id] = agent with { Status = (AgentStatus)status };
+            agents[agent.Id] = agent with { Status = status, Labels = labels, Pool = pool };
             return new AgentSession(agent.Id, agent.SessionId);
         }
         finally { writes.Release(); }
@@ -187,9 +192,7 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
             "x64" => AgentArchitecture.X64, "arm64" => AgentArchitecture.Arm64,
             _ => throw new ArgumentException("Hello.arch must be x64 or arm64.", nameof(hello))
         };
-        if (hello.Labels.Count > 100 || hello.Labels.Any(pair => string.IsNullOrWhiteSpace(pair.Key) ||
-                pair.Key.Length > 100 || pair.Key.Contains('=') || string.IsNullOrWhiteSpace(pair.Value) || pair.Value.Length > 200))
-            throw new ArgumentException("Hello contains invalid labels.", nameof(hello));
+        ValidateMetadata(hello.Labels, hello.Pool);
         var inflight = new HashSet<string>(StringComparer.Ordinal);
         foreach (var attempt in hello.Inflight)
         {
@@ -204,6 +207,20 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
             // Unacknowledged completions remain in the logical inventory but no longer occupy physical slots.
             Guid.NewGuid(), SlotsUsed: Math.Min((int)hello.MaxTasks, hello.Inflight.Count));
     }
+
+    public static void ValidateMetadata(IReadOnlyDictionary<string, string> labels, string pool)
+    {
+        ArgumentNullException.ThrowIfNull(labels);
+        if (string.IsNullOrWhiteSpace(pool) || pool.Length > 200 || pool.Any(char.IsControl) ||
+            labels.Count > 100 || labels.Any(pair => string.IsNullOrWhiteSpace(pair.Key) ||
+                pair.Key.Length > 100 || pair.Key.Contains('=') || pair.Key.Any(char.IsControl) ||
+                string.IsNullOrWhiteSpace(pair.Value) || pair.Value.Length > 200 || pair.Value.Any(char.IsControl)))
+            throw new ArgumentException("Machine pool or labels do not match the supported metadata bounds.");
+    }
+
+    public static ImmutableDictionary<string, string> ParseLabels(IEnumerable<string> labels) =>
+        labels.Select(label => label.Split('=', 2))
+            .ToImmutableDictionary(parts => parts[0], parts => parts[1], StringComparer.Ordinal);
 
     public void Dispose() => writes.Dispose();
 }

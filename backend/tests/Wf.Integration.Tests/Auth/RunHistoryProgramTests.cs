@@ -71,6 +71,13 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             Assert.Equal("#/components/schemas/ScheduleRunNowResponse", runNow.GetProperty("responses").GetProperty("202")
                 .GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
             var schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
+            var machines = paths.GetProperty("/api/v1/machines").GetProperty("get");
+            Assert.Equal("#/components/schemas/MachineListResponse", machines.GetProperty("responses").GetProperty("200")
+                .GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
+            Assert.Equal(["label", "os", "pool", "status"], machines.GetProperty("parameters").EnumerateArray()
+                .Select(parameter => parameter.GetProperty("name").GetString()).Order());
+            Assert.True(paths.GetProperty("/api/v1/machines/{id}").GetProperty("patch").GetProperty("responses").TryGetProperty("204", out _));
+            Assert.True(schemas.GetProperty("MachineResponse").GetProperty("properties").TryGetProperty("currentReservation", out _));
             Assert.True(schemas.TryGetProperty("RunHistoryPage", out _));
             Assert.Equal("#/components/schemas/ReservationQueueResponse",
                 paths.GetProperty("/api/v1/runs/{id}/reservation-queue").GetProperty("get")
@@ -88,27 +95,32 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             Assert.True(query.Headers.CacheControl!.NoStore);
             if (Environment.GetEnvironmentVariable("WF_FRONTEND_API_CHECK") is { } frontend)
             {
-                var generate = new ProcessStartInfo("bun")
+                var commands = Environment.GetEnvironmentVariable("WF_FRONTEND_API_GENERATE") == "true"
+                    ? new[] { "api:generate", "api:check" } : ["api:check"];
+                foreach (var command in commands)
                 {
-                    WorkingDirectory = frontend, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
-                };
-                generate.ArgumentList.Add("run");
-                generate.ArgumentList.Add("api:check");
-                generate.Environment["KARDIA_API_URL"] = client.BaseAddress!.AbsoluteUri.TrimEnd('/');
-                generate.Environment.Remove("KARDIA_API_TOKEN");
-                using var generated = Process.Start(generate)!;
-                var generatedOut = generated.StandardOutput.ReadToEndAsync(token);
-                var generatedError = generated.StandardError.ReadToEndAsync(token);
-                try
-                {
-                    await generated.WaitForExitAsync(deadline.Token);
-                    Assert.True(generated.ExitCode == 0, $"API contract drift check failed.\n{await generatedOut}\n{await generatedError}");
-                }
-                finally
-                {
-                    if (!generated.HasExited) generated.Kill(entireProcessTree: true);
-                    await generated.WaitForExitAsync(CancellationToken.None);
-                    await Task.WhenAll(generatedOut, generatedError);
+                    var generate = new ProcessStartInfo("bun")
+                    {
+                        WorkingDirectory = frontend, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
+                    };
+                    generate.ArgumentList.Add("run");
+                    generate.ArgumentList.Add(command);
+                    generate.Environment["KARDIA_API_URL"] = client.BaseAddress!.AbsoluteUri.TrimEnd('/');
+                    generate.Environment.Remove("KARDIA_API_TOKEN");
+                    using var generated = Process.Start(generate)!;
+                    var generatedOut = generated.StandardOutput.ReadToEndAsync(token);
+                    var generatedError = generated.StandardError.ReadToEndAsync(token);
+                    try
+                    {
+                        await generated.WaitForExitAsync(deadline.Token);
+                        Assert.True(generated.ExitCode == 0, $"API contract drift check failed.\n{await generatedOut}\n{await generatedError}");
+                    }
+                    finally
+                    {
+                        if (!generated.HasExited) generated.Kill(entireProcessTree: true);
+                        await generated.WaitForExitAsync(CancellationToken.None);
+                        await Task.WhenAll(generatedOut, generatedError);
+                    }
                 }
             }
         }

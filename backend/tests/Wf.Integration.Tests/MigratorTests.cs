@@ -26,6 +26,32 @@ public sealed class MigratorTests(MigrationDatabase database) : IClassFixture<Mi
     }
 
     [Fact]
+    public async Task Machine_metadata_upgrade_preserves_existing_rows_and_legacy_writer_columns()
+    {
+        await using var scope = await Scope();
+        var scripts = Migrator.LoadScripts();
+        Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance, scripts.Where(script => string.CompareOrdinal(script.Name, "0031") < 0));
+        var id = await CapacityMigrationsTests.SeedAgent(scope.DataSource);
+        await using var original = scope.DataSource.CreateCommand("SELECT xmin::text FROM agents WHERE id=$1");
+        original.Parameters.AddWithValue(id);
+        var xmin = await original.ExecuteScalarAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(["0031_machine_metadata_overrides.sql"], Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance));
+        Assert.Equal(xmin, await original.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+        await using var query = scope.DataSource.CreateCommand(
+            "SELECT labels_override IS NULL,pool_override IS NULL,pool,cardinality(labels) FROM agents WHERE id=$1");
+        query.Parameters.AddWithValue(id);
+        await using var reader = await query.ExecuteReaderAsync(TestContext.Current.CancellationToken);
+        Assert.True(await reader.ReadAsync(TestContext.Current.CancellationToken));
+        Assert.True(reader.GetBoolean(0));
+        Assert.True(reader.GetBoolean(1));
+        Assert.Equal("default", reader.GetString(2));
+        Assert.Equal(0, reader.GetInt32(3));
+        await reader.DisposeAsync();
+        Assert.NotEqual(id, await CapacityMigrationsTests.SeedAgent(scope.DataSource));
+        Assert.Empty(Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance));
+    }
+
+    [Fact]
     public async Task Journaled_previous_release_upgrades_without_rewriting_agents_or_run_deadlines()
     {
         await using var scope = await Scope();

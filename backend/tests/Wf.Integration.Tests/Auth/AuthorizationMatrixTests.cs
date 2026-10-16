@@ -635,9 +635,10 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
         public Task<HttpResponseMessage> Get(string kind, RegistryRole role, string id, string jwt) =>
             GetPath($"/matrix/{kind}/{role}/{id}", jwt);
 
-        public async Task<HttpResponseMessage> GetPath(string path, string? jwt, HttpMethod? method = null)
+        public async Task<HttpResponseMessage> GetPath(string path, string? jwt, HttpMethod? method = null, HttpContent? content = null)
         {
             using var request = new HttpRequestMessage(method ?? HttpMethod.Get, path);
+            request.Content = content;
             if (jwt is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwt);
             return await client.SendAsync(request, TestContext.Current.CancellationToken);
         }
