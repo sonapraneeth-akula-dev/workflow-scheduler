@@ -10,6 +10,7 @@ using Wf.Contracts.Events;
 using Wf.Contracts.Registry;
 using Wf.ControlPlane.Auth;
 using Wf.ControlPlane.Engine.Dispatch;
+using Wf.ControlPlane.Engine.Recovery;
 using Wf.ControlPlane.Live;
 using Wf.Engine.Core;
 
@@ -18,6 +19,10 @@ namespace Wf.ControlPlane.Api;
 public static class RunEventsEndpoints
 {
     private static readonly RunStoreJson DurableJson = new(new JsonSerializerOptions(RunStoreJson.Default.Options)
+    {
+        RespectRequiredConstructorParameters = true
+    });
+    private static readonly RecoveryJson TriggerJson = new(new JsonSerializerOptions(RecoveryJson.Default.Options)
     {
         RespectRequiredConstructorParameters = true
     });
@@ -44,6 +49,7 @@ public static class RunEventsEndpoints
             .Produces<RunSnapshotResponse>().ProducesProblem(400).ProducesProblem(401).ProducesProblem(403)
             .ProducesProblem(500).ProducesProblem(503)
             .WithDescription("Authoritative committed run state restored from its materialized snapshot and event tail. " +
+                "An accepted pending trigger exposes its queued initial state at lastSeq 0 before materialization. " +
                 "lastSeq matches the returned graph state. No variables, payloads, outputs, or storage capabilities.");
         return endpoints;
     }
@@ -92,7 +98,7 @@ public static class RunEventsEndpoints
         {
             await using var connection = await source.OpenConnectionAsync(token);
             await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
-            var header = await Header(connection, run, token);
+            var header = await Header(connection, run, token) ?? await PendingTrigger(connection, run, token);
             if (header is null) return Results.Problem(TeamAuthorizationExtensions.Forbidden());
             if (!snapshot && after > header.LastSeq)
                 return Problem(400, "afterSeq exceeds the committed run sequence", "after_seq_ahead");
@@ -127,6 +133,7 @@ public static class RunEventsEndpoints
     private static async Task<IResult> ReadEvents(NpgsqlConnection connection, RunHeader header, long after,
         CancellationToken token)
     {
+        if (header.PendingState is not null) return ResyncResponse(header.RunId, after, header.LastSeq, []);
         await using var command = Tail(connection, header.RunId, after, RunEventsQuery.MaximumEvents + 1);
         await using var reader = await command.ExecuteReaderAsync(token);
         var events = new List<LiveEvent>();
@@ -158,6 +165,7 @@ public static class RunEventsEndpoints
 
     private static async Task<IResult> ReadSnapshot(NpgsqlConnection connection, RunHeader header, CancellationToken token)
     {
+        if (header.PendingState is { } pending) return SnapshotResponse(header, pending);
         await using var command = new NpgsqlCommand("""
             SELECT payload FROM run_snapshots
             WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND seq=$2
@@ -174,7 +182,11 @@ public static class RunEventsEndpoints
         await using (var reader = await tail.ExecuteReaderAsync(token))
             while (await reader.ReadAsync(token))
                 state.Apply(Event(reader, header.RunId, checked(state.Snapshot.LastSequence + 1)));
-        var restored = state.Snapshot;
+        return SnapshotResponse(header, state.Snapshot);
+    }
+
+    private static IResult SnapshotResponse(RunHeader header, RunSnapshot restored)
+    {
         if (restored.LastSequence != header.LastSeq || (int)restored.Status != header.Status)
             throw new InvalidDataException();
         var abort = restored.Abort is not { } accepted ? null : new LiveAbort(accepted.By, accepted.ByName,
@@ -184,6 +196,25 @@ public static class RunEventsEndpoints
             restored.Nodes.ToDictionary(pair => pair.Key, pair => (int)pair.Value),
             restored.Tasks.ToDictionary(pair => pair.Key, pair => (int)pair.Value), abort,
             restored.EndedAt?.ToString("O", CultureInfo.InvariantCulture)), RunEventsJsonContext.Default.RunSnapshotResponse);
+    }
+
+    private static async Task<RunHeader?> PendingTrigger(NpgsqlConnection connection, Guid run, CancellationToken token)
+    {
+        await using var command = new NpgsqlCommand("""
+            SELECT payload::text,created_at FROM commands
+            WHERE run_id=$1 AND kind=0 AND processed_at IS NULL
+            """, connection);
+        command.Parameters.AddWithValue(run);
+        await using var reader = await command.ExecuteReaderAsync(token);
+        if (!await reader.ReadAsync(token)) return null;
+        var trigger = JsonSerializer.Deserialize(reader.GetString(0), TriggerJson.TriggerRunCommand)
+            ?? throw new InvalidDataException();
+        CommandInbox.Validate(trigger);
+        if (trigger.InitialState.RunId != run || trigger.DeadlineAt <= reader.GetFieldValue<DateTimeOffset>(1) ||
+            !WorkflowIdentity.TryGetTypeScope(trigger.WorkflowId, out _))
+            throw new InvalidDataException();
+        return new(run, trigger.WorkflowId, trigger.VersionId, trigger.SeriesId,
+            (int)trigger.InitialState.Status, 0, 0, trigger.InitialState);
     }
 
     private static NpgsqlCommand Tail(NpgsqlConnection connection, Guid run, long after, int? limit = null)
@@ -221,5 +252,5 @@ public static class RunEventsEndpoints
         Results.Problem(statusCode: status, title: title, extensions: new Dictionary<string, object?> { ["reason"] = reason });
 
     private sealed record RunHeader(Guid RunId, string WorkflowId, Guid VersionId, Guid? SeriesId,
-        int Status, long LastSeq, long SnapshotSeq);
+        int Status, long LastSeq, long SnapshotSeq, RunSnapshot? PendingState = null);
 }

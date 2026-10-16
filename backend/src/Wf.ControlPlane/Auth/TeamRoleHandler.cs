@@ -99,11 +99,18 @@ public sealed class TeamRoleHandler(NpgsqlDataSource dataSource) : Authorization
         {
             TeamResourceKind.Team => "SELECT id,NULL::text FROM teams WHERE id=$1",
             TeamResourceKind.Type => "SELECT team_id,id FROM workflow_types WHERE id=$1",
+            // Accepted triggers own a run scope before recovery materializes the run row.
             TeamResourceKind.Run => """
-                SELECT t.team_id,t.id FROM runs r JOIN workflow_types t
+                WITH owner AS (
+                    SELECT workflow_id FROM runs WHERE id=$1 AND run_day=uuid_v7_run_day($1)
+                    UNION ALL
+                    SELECT payload->>'WorkflowId' FROM commands
+                    WHERE run_id=$1 AND kind=0 AND processed_at IS NULL
+                        AND NOT EXISTS(SELECT 1 FROM runs WHERE id=$1 AND run_day=uuid_v7_run_day($1))
+                )
+                SELECT t.team_id,t.id FROM owner r JOIN workflow_types t
                   ON t.id=split_part(r.workflow_id,'/',1)||'/'||split_part(r.workflow_id,'/',2)
-                WHERE r.id=$1 AND r.run_day=uuid_v7_run_day($1)
-                  AND r.workflow_id ~ '^[^/]+/[^/]+/[^/]+$'
+                WHERE r.workflow_id ~ '^[^/]+/[^/]+/[^/]+$'
                 """,
             TeamResourceKind.Series => """
                 WITH owners AS (

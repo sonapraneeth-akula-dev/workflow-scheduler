@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -22,10 +23,13 @@ using Wf.Contracts;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
 using Wf.Contracts.Registry;
+using Wf.Contracts.Runs;
 using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Auth;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Events;
+using Wf.ControlPlane.Engine.Recovery;
+using Wf.ControlPlane.Engine.Registry;
 using Wf.ControlPlane.Live;
 using Wf.ControlPlane.Registry;
 using Wf.Engine.Core;
@@ -526,13 +530,13 @@ public sealed class RunEventsResyncTests(AuthorizationDatabase database) : IClas
         public Guid Id => State.Snapshot.RunId;
     }
 
-    private sealed class Server(WebApplication app, HttpClient client, RSA rsa, RsaSecurityKey key) : IAsyncDisposable
+    internal sealed class Server(WebApplication app, HttpClient client, RSA rsa, RsaSecurityKey key) : IAsyncDisposable
     {
         private const string Tenant = "ef8a05a0-451c-4479-9c8d-391b6bc7ee1a";
         private const string Audience = "562b0870-4522-43da-8587-41e9b788f309";
         private const string Issuer = $"https://login.microsoftonline.com/{Tenant}/v2.0";
 
-        public static async Task<Server> Start(NpgsqlDataSource source)
+        public static async Task<Server> Start(NpgsqlDataSource source, bool runs = false, TimeProvider? time = null)
         {
             var rsa = RSA.Create(2048);
             var key = new RsaSecurityKey(rsa) { KeyId = "resync-test" };
@@ -545,6 +549,13 @@ public sealed class RunEventsResyncTests(AuthorizationDatabase database) : IClas
             builder.Services.AddSingleton(source);
             builder.Services.AddTeamAuthorization();
             builder.Services.AddWorkflowOpenApi();
+            if (runs)
+            {
+                builder.Services.AddSingleton(time ?? TimeProvider.System);
+                builder.Services.AddSingleton<CommandInbox>();
+                builder.Services.AddSingleton<ActiveVersionCache>();
+                builder.Services.AddHostedService<ActiveVersionCache>(services => services.GetRequiredService<ActiveVersionCache>());
+            }
             builder.Services.ConfigureHttpJsonOptions(options =>
                 options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunEventsJsonContext.Default));
             var metadata = new OpenIdConnectConfiguration { Issuer = Issuer };
@@ -562,8 +573,15 @@ public sealed class RunEventsResyncTests(AuthorizationDatabase database) : IClas
             app.UseAuthentication();
             app.UseAuthorization();
             app.MapRunEventsEndpoints();
+            if (runs) app.MapRunsEndpoints();
             app.MapWorkflowOpenApi();
             await app.StartAsync(TestContext.Current.CancellationToken);
+            if (runs)
+            {
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+                deadline.CancelAfter(TimeSpan.FromSeconds(10));
+                while (!app.Services.GetRequiredService<ActiveVersionCache>().IsReady) await Task.Delay(10, deadline.Token);
+            }
             var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
             return new(app, new HttpClient { BaseAddress = new(address), Timeout = TimeSpan.FromSeconds(20) }, rsa, key);
         }
@@ -589,6 +607,17 @@ public sealed class RunEventsResyncTests(AuthorizationDatabase database) : IClas
                 new UriCreationOptions { DangerousDisablePathAndQueryCanonicalization = true });
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
             if (jwt is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwt);
+            return await client.SendAsync(request, TestContext.Current.CancellationToken);
+        }
+
+        public async Task<HttpResponseMessage> Trigger(string workflowId, string jwt, string? idempotencyKey = null)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/runs")
+            {
+                Content = JsonContent.Create(new TriggerRunRequest(workflowId), RunJsonContext.Default.TriggerRunRequest)
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwt);
+            if (idempotencyKey is not null) request.Headers.Add("Idempotency-Key", idempotencyKey);
             return await client.SendAsync(request, TestContext.Current.CancellationToken);
         }
 
