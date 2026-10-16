@@ -17,6 +17,7 @@ using Npgsql;
 using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Auth;
 using Wf.ControlPlane.Engine.Dispatch;
+using Wf.ControlPlane.Live;
 
 namespace Wf.Integration.Tests.Execution;
 
@@ -26,7 +27,7 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
     private const string Audience = "562b0870-4522-43da-8587-41e9b788f309";
     private const string Issuer = $"https://login.microsoftonline.com/{Tenant}/v2.0";
 
-    public static async Task<MetricsApiServer> Start(NpgsqlDataSource source, CancellationToken token)
+    public static async Task<MetricsApiServer> Start(NpgsqlDataSource source, CancellationToken token, bool browser = false)
     {
         var rsa = RSA.Create(2048);
         var key = new RsaSecurityKey(rsa) { KeyId = "run-metrics-test" };
@@ -40,8 +41,21 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
         builder.Services.AddTeamAuthorization();
         builder.Services.AddWorkflowOpenApi();
         builder.Services.AddSingleton<RunStore>();
+        if (browser)
+        {
+            builder.Services.AddSingleton(TimeProvider.System);
+            builder.Services.AddWorkflowLive();
+        }
         builder.Services.ConfigureHttpJsonOptions(options =>
-            options.SerializerOptions.TypeInfoResolverChain.Insert(0, MetricsJsonContext.Default));
+        {
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, MetricsJsonContext.Default);
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunTimelineJsonContext.Default);
+            if (browser)
+            {
+                options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunEventsJsonContext.Default);
+                options.SerializerOptions.TypeInfoResolverChain.Insert(0, VersionsJsonContext.Default);
+            }
+        });
         var metadata = new OpenIdConnectConfiguration { Issuer = Issuer };
         metadata.SigningKeys.Add(key);
         var manager = new StaticConfigurationManager<OpenIdConnectConfiguration>(metadata);
@@ -59,8 +73,23 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
             app.UseAuthentication();
             app.UseAuthorization();
             app.MapMetricsEndpoints();
+            app.MapRunTimelineEndpoints();
+            if (browser)
+            {
+                app.MapRunEventsEndpoints();
+                app.MapVersionsEndpoints();
+                app.MapPermissionsEndpoints();
+                app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
+            }
             app.MapWorkflowOpenApi();
             await app.StartAsync(token);
+            if (browser)
+            {
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(10));
+                while (!app.Services.GetRequiredService<LiveFanout>().IsReady)
+                    await Task.Delay(10, deadline.Token);
+            }
             var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
             return new(app, new HttpClient(new SocketsHttpHandler { UseProxy = false })
                 { BaseAddress = new(address), Timeout = TimeSpan.FromSeconds(20) }, rsa, key);
@@ -72,6 +101,8 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
             throw;
         }
     }
+
+    public string Api => client.BaseAddress!.ToString().TrimEnd('/');
 
     public string Jwt(Guid? group = null, string role = "", string identity = "user")
     {
