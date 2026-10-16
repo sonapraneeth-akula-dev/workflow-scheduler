@@ -342,6 +342,184 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Committed live resync after one canonical nonnegative Int64 afterSeq. Returns at most 5000 ordered events and their authoritative lastSeq; 409 requires a new run snapshot. */
+        get: {
+            parameters: {
+                query: {
+                    /** @description Canonical nonnegative Int64 decimal (0–9223372036854775807); preserve exact digits. */
+                    afterSeq: string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RunEventsPage"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Authoritative committed run state restored from its materialized snapshot and event tail. An accepted pending trigger exposes its queued initial state at lastSeq 0 before materialization. lastSeq matches the returned graph state. No variables, payloads, outputs, or storage capabilities. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RunSnapshotResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{id}/tasks/{task}/{attempt}/logs": {
         parameters: {
             query?: never;
@@ -766,7 +944,7 @@ export interface components {
                 endedAt: null | string;
             }[];
         };
-        LiveAbort: {
+        LiveAbort: null | {
             by: string;
             byName: string;
             at: string;
@@ -782,13 +960,7 @@ export interface components {
             key: null | string;
             /** Format: int32 */
             state: number | string;
-            abort: null | {
-                by: string;
-                byName: string;
-                at: string;
-                reason: string;
-                source: string;
-            };
+            abort: null | components["schemas"]["LiveAbort"];
         };
         LiveResync: {
             scope: string;
@@ -854,6 +1026,34 @@ export interface components {
                     source: string;
                 };
             }[];
+        };
+        RunEventsPage: {
+            /** Format: uuid */
+            runId: string;
+            /** Format: int64 */
+            lastSeq: number | string;
+            events: components["schemas"]["LiveEvent"][];
+        };
+        RunSnapshotResponse: {
+            /** Format: uuid */
+            runId: string;
+            workflowId: string;
+            /** Format: uuid */
+            versionId: string;
+            /** Format: uuid */
+            seriesId: null | string;
+            /** Format: int32 */
+            status: number | string;
+            /** Format: int64 */
+            lastSeq: number | string;
+            nodes: {
+                [key: string]: number | string;
+            };
+            tasks: {
+                [key: string]: number | string;
+            };
+            abort: null | components["schemas"]["LiveAbort"];
+            endedAt: null | string;
         };
         /** @enum {unknown} */
         ScheduleCatchUpPolicy: "None" | "Latest";
