@@ -75,8 +75,8 @@ No exception-message or generic out-of-memory/argument-error guessing occurs.
 Attempt lifecycle status and existing author/platform retry budgets remain
 separate from category. Scripted typed signals exercise all eight categories
 through actual local and child SDK hosts; this does not implement every external
-fault producer. Gateway persistence of category and metrics views remain separate
-work; the classifier does not add a stored-category guarantee.
+fault producer. The committed metrics path described below preserves these known
+categories through gateway completion, durable attempts/events and replay.
 
 `RunSnapshot.Metrics` projects run, lifecycle-stage/node, task and attempt timing
 only when committed events are applied. Queue wait is separate from execution;
@@ -92,8 +92,25 @@ Full replay and serialized snapshot-plus-tail recovery agree; legacy snapshots
 without metrics reconstruct from their original sequence-zero snapshot and
 retained committed history. Missing history fails explicitly rather than
 inventing times. Failed transactions leave caller-visible proposals unchanged.
-These are transition metrics, not process-resource sampling or a metrics API;
-stored failure categories remain separate work.
+These are transition metrics, not process-resource sampling.
+
+`GET /api/v1/runs/{id}/metrics` requires fresh stored-resource Viewer access and
+returns committed run, lifecycle-stage, node, task and attempt timing, actual
+retry totals and known failure categories. Active values are recorded values,
+not a second ticking clock. Pending accepted runs expose their queued baseline;
+skipped/reused/nonstarted work does not acquire invented attempts or timings.
+The response includes the authoritative sequence and no variables, metadata,
+error messages, outputs, payloads or storage capabilities.
+
+Typed producer categories survive gateway completion, `task_attempts`, committed
+events, snapshots and replay without changing retry budgets or the existing enum.
+Unknown/absent/numeric/noncanonical wire names remain unknown; messages are never
+classified by guessing. A parent without an explicit cause exposes a category
+only when its terminal failing children have one unambiguous known cause.
+Historical attempt failures remain after a later retry succeeds. Responses are
+never cached; malformed identities/queries return 400, denied scopes 403,
+inconsistent persisted data 500 and unavailable storage 503. Legacy metrics-free
+snapshots rebuild from retained original history instead of fabricated zeros.
 
 Secret variables accept `secret://<store>/<name>` through the existing
 `SecretReference` contract and `.Secret("token", "secret://local/deploy-token")`.
