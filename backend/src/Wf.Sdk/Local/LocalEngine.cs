@@ -154,10 +154,10 @@ public sealed class LocalEngine
 
     private DateTimeOffset Now => time.GetUtcNow();
     private void Emit(EventEntity entity, string? key, int state, AbortRecord? abort = null,
-        ExecutionStatus? attemptStatus = null, DateTimeOffset? attemptEndedAt = null)
+        ExecutionStatus? attemptStatus = null, DateTimeOffset? attemptEndedAt = null, FailureCategory? failureCategory = null)
     {
         var committed = run.CreateEvent(entity, key, state, Now, abort) with
-            { AttemptStatus = attemptStatus, AttemptEndedAt = attemptEndedAt };
+            { AttemptStatus = attemptStatus, AttemptEndedAt = attemptEndedAt, FailureCategory = failureCategory };
         run.Apply(committed);
         renderer.Render(committed);
     }
@@ -197,7 +197,8 @@ public sealed class LocalEngine
             var local = node.Tasks.ToDictionary(t => t.Key, t => run.Snapshot.Tasks[$"{node.Key}/{t.Key}"]);
             if (FailurePropagation.ResolveNode(node, local) is { } outcome)
             {
-                Emit(EventEntity.Node, node.Key, (int)stoppedNodes.GetValueOrDefault(node.Key, outcome));
+                Emit(EventEntity.Node, node.Key, (int)stoppedNodes.GetValueOrDefault(node.Key, outcome),
+                    failureCategory: stoppedNodes.ContainsKey(node.Key) ? FailureCategory.Timeout : null);
                 RemoveTimer(new(TimerScope.Node, node.Key));
             }
         }
@@ -215,7 +216,8 @@ public sealed class LocalEngine
             else
                 Emit(EventEntity.Run, null, (int)(timedOut ? RunStatus.TimedOut :
                     run.Snapshot.Nodes.Values.Any(s => s is ExecutionStatus.Failed or ExecutionStatus.TimedOut or ExecutionStatus.Cancelled)
-                        ? RunStatus.Failed : RunStatus.Succeeded));
+                        ? RunStatus.Failed : RunStatus.Succeeded),
+                    failureCategory: timedOut ? FailureCategory.Timeout : null);
             return;
         }
         foreach (var node in workflow.Nodes)
@@ -306,7 +308,7 @@ public sealed class LocalEngine
             renderer.Log($"{completed.Key}: {error.GetType().Name}: {error.Message}");
         if (!failed || cancelled)
         {
-            Emit(EventEntity.Task, completed.Key, (int)status);
+            Emit(EventEntity.Task, completed.Key, (int)status, failureCategory: category);
             return;
         }
         var budget = budgets[completed.Key];
@@ -322,7 +324,7 @@ public sealed class LocalEngine
             budgets[completed.Key] = (budget.Author + (retry.Budget == RetryBudget.Author ? 1 : 0),
                 budget.Platform + (retry.Budget == RetryBudget.Platform ? 1 : 0), budget.Attempts);
             Emit(EventEntity.Task, completed.Key, (int)ExecutionStatus.Retrying,
-                attemptStatus: status, attemptEndedAt: attempts[^1].EndedAt);
+                attemptStatus: status, attemptEndedAt: attempts[^1].EndedAt, failureCategory: category);
             timers.Track(new(new(TimerScope.Retry, completed.Key), RetryAt: retry.RetryAt));
             return;
         }
@@ -334,7 +336,8 @@ public sealed class LocalEngine
             var key = $"{node.Key}/{change.Task}";
             RemoveTimer(new(TimerScope.Retry, key));
             retryReady.Remove(key);
-            Emit(EventEntity.Task, key, (int)change.Status);
+            Emit(EventEntity.Task, key, (int)change.Status,
+                failureCategory: key == completed.Key ? category : null);
         }
         foreach (var key in propagation.CancelRunning)
             CancelAttempt($"{node.Key}/{key}", CancellationCause.HardFailure);
@@ -398,7 +401,7 @@ public sealed class LocalEngine
         }
         foreach (var node in plan.Nodes)
         {
-            ChangeNode(node);
+            ChangeNode(node, node.Status == ExecutionStatus.Cancelled ? FailureCategory.Aborted : null);
             RemoveTimer(new(TimerScope.Node, node.Node));
         }
         if (plan.Status is { } status)
@@ -407,7 +410,7 @@ public sealed class LocalEngine
             CancelAttempt(key, CancellationCause.Abort);
     }
 
-    private void ChangeNode(NodeStateChange change)
+    private void ChangeNode(NodeStateChange change, FailureCategory? failureCategory = null)
     {
         if (change.Status == ExecutionStatus.Skipped)
             foreach (var task in workflow.Nodes.Single(n => n.Key == change.Node).Tasks)
@@ -420,7 +423,7 @@ public sealed class LocalEngine
                     Emit(EventEntity.Task, key, (int)ExecutionStatus.Skipped);
                 }
             }
-        Emit(EventEntity.Node, change.Node, (int)change.Status);
+        Emit(EventEntity.Node, change.Node, (int)change.Status, failureCategory: failureCategory);
     }
 
     private void CancelAttempt(string key, CancellationCause cause)

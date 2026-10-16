@@ -1,22 +1,31 @@
 using System.Collections.Immutable;
+using System.Text.Json.Serialization;
 using Wf.Contracts;
 using Wf.Contracts.Events;
+using Wf.Contracts.Definition;
 using Wf.Engine.Core.StateMachine;
 
 namespace Wf.Engine.Core.Metrics;
 
-public sealed record AttemptMetrics(int Attempt, DateTimeOffset QueuedAt, DateTimeOffset DispatchedAt,
-    DateTimeOffset? StartedAt = null, DateTimeOffset? EndedAt = null, double QueueWaitMs = 0,
-    double DurationMs = 0, ExecutionStatus? TerminalStatus = null);
+public sealed record AttemptMetrics([property: JsonRequired] int Attempt,
+    [property: JsonRequired] DateTimeOffset QueuedAt, [property: JsonRequired] DateTimeOffset DispatchedAt,
+    [property: JsonRequired] DateTimeOffset? StartedAt = null, [property: JsonRequired] DateTimeOffset? EndedAt = null,
+    [property: JsonRequired] double QueueWaitMs = 0, [property: JsonRequired] double DurationMs = 0,
+    [property: JsonRequired] ExecutionStatus? TerminalStatus = null)
+{
+    public FailureCategory? FailureCategory { get; init; }
+}
 
 /// <summary>TerminalStatus uses the owning entity's RunStatus or ExecutionStatus values.
 /// Task duration sums execution time only; node and run duration measures their running lifecycle.</summary>
-public sealed record EntityMetrics(DateTimeOffset? QueuedAt = null, DateTimeOffset? StartedAt = null,
-    DateTimeOffset? EndedAt = null, double QueueWaitMs = 0, double DurationMs = 0, int RetryCount = 0,
-    int? TerminalStatus = null)
+public sealed record EntityMetrics([property: JsonRequired] DateTimeOffset? QueuedAt = null,
+    [property: JsonRequired] DateTimeOffset? StartedAt = null, [property: JsonRequired] DateTimeOffset? EndedAt = null,
+    [property: JsonRequired] double QueueWaitMs = 0, [property: JsonRequired] double DurationMs = 0,
+    [property: JsonRequired] int RetryCount = 0, [property: JsonRequired] int? TerminalStatus = null)
 {
     public DateTimeOffset? WaitingSince { get; init; }
-    public ImmutableArray<AttemptMetrics> Attempts { get; init; } = [];
+    [JsonRequired] public ImmutableArray<AttemptMetrics> Attempts { get; init; } = [];
+    public FailureCategory? FailureCategory { get; init; }
 }
 
 public sealed record RunMetrics(EntityMetrics Run, ImmutableDictionary<string, EntityMetrics> Nodes,
@@ -38,12 +47,27 @@ public static class RunMetricsRecorder
         if (change.RunQueuedAt is { } queuedAt)
             metrics = metrics with { Run = metrics.Run with { QueuedAt = queuedAt } };
         if (change.Entity == EventEntity.Run)
-            return metrics with { Run = Lifecycle(metrics.Run, change, change.State == (int)RunStatus.Running,
-                TransitionTable.IsTerminal((RunStatus)change.State)) };
+        {
+            var status = (RunStatus)change.State;
+            var run = Lifecycle(metrics.Run, change, status == RunStatus.Running, TransitionTable.IsTerminal(status));
+            return metrics with { Run = run with { FailureCategory = change.FailureCategory ??
+                (change.Abort is not null ? FailureCategory.Aborted :
+                    status == RunStatus.Aborted && metrics.Run.FailureCategory == FailureCategory.Aborted
+                        ? FailureCategory.Aborted :
+                    status is RunStatus.Failed or RunStatus.TimedOut or RunStatus.Aborted
+                        ? Category(metrics.Nodes.Values) : null) } };
+        }
         if (change.Entity == EventEntity.Node)
-            return metrics with { Nodes = metrics.Nodes.SetItem(change.Key!,
-                Lifecycle(metrics.Nodes[change.Key!], change, change.State == (int)ExecutionStatus.Running,
-                    TransitionTable.IsTerminal((ExecutionStatus)change.State))) };
+        {
+            var status = (ExecutionStatus)change.State;
+            var metric = Lifecycle(metrics.Nodes[change.Key!], change, status == ExecutionStatus.Running,
+                TransitionTable.IsTerminal(status));
+            return metrics with { Nodes = metrics.Nodes.SetItem(change.Key!, metric with
+            {
+                FailureCategory = change.FailureCategory ?? (Failed(status)
+                    ? Category(metrics.Tasks.Where(t => t.Key[..t.Key.IndexOf('/')] == change.Key).Select(t => t.Value)) : null)
+            }) };
+        }
 
         var key = change.Key!;
         var previous = metrics.Tasks[key];
@@ -88,6 +112,7 @@ public static class RunMetricsRecorder
             {
                 Attempts = metric.Attempts.Add(attempt),
                 RetryCount = metric.Attempts.Length,
+                FailureCategory = null,
                 QueueWaitMs = metric.QueueWaitMs + attempt.QueueWaitMs
             };
         }
@@ -104,7 +129,8 @@ public static class RunMetricsRecorder
                     EndedAt = endedAt,
                     QueueWaitMs = Elapsed(attempt.QueuedAt, attempt.StartedAt ?? endedAt),
                     DurationMs = Elapsed(attempt.StartedAt, endedAt),
-                    TerminalStatus = change.AttemptStatus ?? (status == ExecutionStatus.Retrying ? ExecutionStatus.Failed : status)
+                    TerminalStatus = change.AttemptStatus ?? (status == ExecutionStatus.Retrying ? ExecutionStatus.Failed : status),
+                    FailureCategory = change.FailureCategory
                 };
             attempts = attempts.SetItem(attempts.Length - 1, attempt);
         }
@@ -114,6 +140,7 @@ public static class RunMetricsRecorder
             StartedAt = metric.StartedAt ?? (status == ExecutionStatus.Running ? change.At : (DateTimeOffset?)null),
             EndedAt = terminal ? change.At : null,
             TerminalStatus = terminal ? change.State : null,
+            FailureCategory = terminal || status == ExecutionStatus.Retrying ? change.FailureCategory : null,
             WaitingSince = status == ExecutionStatus.Retrying ? change.AttemptEndedAt ?? change.At : metric.WaitingSince,
             Attempts = attempts,
             QueueWaitMs = attempts.Length == 0 && terminal ? Elapsed(metric.QueuedAt, change.At) : attempts.Sum(a => a.QueueWaitMs),
@@ -123,4 +150,19 @@ public static class RunMetricsRecorder
 
     private static double Elapsed(DateTimeOffset? start, DateTimeOffset end) =>
         start is { } at ? Math.Max(0, (end - at).TotalMilliseconds) : 0;
+
+    private static FailureCategory? Category(IEnumerable<EntityMetrics> children)
+    {
+        // Unknown or conflicting failing children never manufacture a parent cause.
+        FailureCategory? category = null;
+        foreach (var child in children.Where(c => c.TerminalStatus is { } status && Failed((ExecutionStatus)status)))
+        {
+            if (child.FailureCategory is not { } known || category is { } previous && previous != known) return null;
+            category = known;
+        }
+        return category;
+    }
+
+    private static bool Failed(ExecutionStatus status) => status is ExecutionStatus.Failed or ExecutionStatus.SoftFailed or
+        ExecutionStatus.TimedOut or ExecutionStatus.Cancelled;
 }

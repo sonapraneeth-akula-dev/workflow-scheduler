@@ -160,8 +160,15 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
         return snapshot with { Metrics = RunMetricsRecorder.Initialize(snapshot, reader.GetFieldValue<DateTimeOffset>(1)) };
     }
 
-    public async Task AppendAsync(RunState run, EventEntity entity, string? key, int state, DateTimeOffset at,
-        CancellationToken cancellationToken = default)
+    public Task AppendAsync(RunState run, EventEntity entity, string? key, int state, DateTimeOffset at,
+        CancellationToken cancellationToken = default) =>
+        AppendAsync(run, durable => durable.CreateEvent(entity, key, state, at), cancellationToken);
+
+    public Task AppendAsync(RunState run, RunEvent change, CancellationToken cancellationToken = default) =>
+        AppendAsync(run, _ => change, cancellationToken);
+
+    private async Task AppendAsync(RunState run, Func<RunState, RunEvent> create,
+        CancellationToken cancellationToken)
     {
         var lease = CaptureLease();
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
@@ -170,7 +177,7 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
         var durable = await LoadAsync(connection, run.Snapshot.RunId, true, cancellationToken);
         if (durable.Snapshot.LastSequence != run.Snapshot.LastSequence)
             throw new InvalidOperationException("Run changed since it was loaded.");
-        var change = durable.CreateEvent(entity, key, state, at);
+        var change = create(durable);
         await AppendAsync(connection, durable, change, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         run.Apply(change);
@@ -201,12 +208,13 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
             var attempt = attempts[^1];
             await ExecuteAsync(connection, """
                 UPDATE task_attempts SET queue_wait_ms=$4,started_at=$5,ended_at=$6,queued_at=$8,
-                    status=$7
+                    status=$7,failure_category=COALESCE($9,failure_category)
                 WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 AND attempt=$3
                 """, cancellationToken, change.RunId, change.Key!, (short)attempt.Attempt, attempt.QueueWaitMs,
                 (object?)attempt.StartedAt ?? DBNull.Value, (object?)attempt.EndedAt ?? DBNull.Value,
                 (short)(attempt.TerminalStatus ?? ((ExecutionStatus)change.State == ExecutionStatus.Running
-                    ? ExecutionStatus.Running : ExecutionStatus.Dispatched)), attempt.QueuedAt);
+                    ? ExecutionStatus.Running : ExecutionStatus.Dispatched)), attempt.QueuedAt,
+                (object?)(short?)attempt.FailureCategory ?? DBNull.Value);
         }
     }
 
@@ -291,7 +299,12 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
             TaskOutcome.TimedOut => ExecutionStatus.TimedOut,
             _ => throw new ArgumentException("Unsupported task outcome.", nameof(message))
         };
-        var change = run.CreateEvent(EventEntity.Task, taskKey, (int)target, at) with { Attempt = identity.Attempt };
+        // Only preserve explicit, known wire metadata. Older/foreign producers may omit it.
+        var category = completed is not null && completed.Outcome != TaskOutcome.Succeeded &&
+            Enum.TryParse<FailureCategory>(completed.Error?.Category, out var parsed) &&
+            Enum.IsDefined(parsed) && completed.Error!.Category == parsed.ToString() ? parsed : (FailureCategory?)null;
+        var change = run.CreateEvent(EventEntity.Task, taskKey, (int)target, at) with
+            { Attempt = identity.Attempt, FailureCategory = category };
         await AppendAsync(connection, run, change, cancellationToken);
         await ExecuteAsync(connection, """
             WITH removed AS (

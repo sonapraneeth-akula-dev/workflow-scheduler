@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Wf.Contracts.Definition;
 
 namespace Wf.Contracts.Events;
 
@@ -15,4 +16,6 @@ public sealed record RunEvent(Guid RunId, long Sequence, DateTimeOffset At, Even
     public DateTimeOffset? AttemptEndedAt { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ExecutionStatus? AttemptStatus { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public FailureCategory? FailureCategory { get; init; }
 }

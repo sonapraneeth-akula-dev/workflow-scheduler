@@ -151,7 +151,8 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             {
                 await RunStore.AppendAsync(connection, run,
                     run.CreateEvent(EventEntity.Task, taskKey, (int)ExecutionStatus.Failed, now) with
-                        { Attempt = attempt, AttemptEndedAt = lostAt, AttemptStatus = ExecutionStatus.Failed }, cancellationToken);
+                        { Attempt = attempt, AttemptEndedAt = lostAt, AttemptStatus = ExecutionStatus.Failed,
+                            FailureCategory = FailureCategory.AgentLost }, cancellationToken);
                 await RunStore.ExecuteAsync(connection, """
                     UPDATE task_attempts SET error=$4,replacement_processed_at=$5
                     WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 AND attempt=$3
@@ -173,7 +174,8 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             dispatch.ReservationEpoch = 1;
             await RunStore.AppendAsync(connection, run,
                 run.CreateEvent(EventEntity.Task, taskKey, (int)ExecutionStatus.Retrying, now) with
-                    { Attempt = attempt, AttemptEndedAt = lostAt, AttemptStatus = ExecutionStatus.Failed }, cancellationToken);
+                    { Attempt = attempt, AttemptEndedAt = lostAt, AttemptStatus = ExecutionStatus.Failed,
+                        FailureCategory = FailureCategory.AgentLost }, cancellationToken);
             await SaveDispatchAsync(connection, run, request, dispatch, decision.Agent.Id, policy,
                 checked((short)(platformRetries + 1)), authorRetries, cancellationToken);
             await RunStore.ExecuteAsync(connection, """

@@ -129,6 +129,15 @@ public sealed class RunState
             Reject($"Run '{Snapshot.RunId}' expected event sequence {Snapshot.LastSequence + 1} for the same run.");
         if (@event.At.Offset != TimeSpan.Zero)
             Reject("Event timestamps must use UTC.");
+        if (@event.FailureCategory is { } category && (!Enum.IsDefined(category) ||
+            !(@event.Entity switch
+            {
+                EventEntity.Run => (RunStatus)@event.State is RunStatus.Failed or RunStatus.TimedOut or RunStatus.Aborting or RunStatus.Aborted,
+                EventEntity.Node => (ExecutionStatus)@event.State is ExecutionStatus.Failed or ExecutionStatus.SoftFailed or ExecutionStatus.TimedOut or ExecutionStatus.Cancelled,
+                EventEntity.Task => (ExecutionStatus)@event.State is ExecutionStatus.Retrying or ExecutionStatus.Failed or ExecutionStatus.SoftFailed or ExecutionStatus.TimedOut or ExecutionStatus.Cancelled,
+                _ => false
+            })))
+            Reject("Failure categories require a known category on a failed, cancelled, aborting or retrying entity.");
         if (@event.RunQueuedAt is { } queuedAt && (queuedAt.Offset != TimeSpan.Zero || @event.Sequence != 1))
             Reject("Run queue time can only be recorded in UTC on the first event.");
         if (@event.Attempt is { } attempt && (@event.Entity != EventEntity.Task || attempt is <= 0 or > short.MaxValue))

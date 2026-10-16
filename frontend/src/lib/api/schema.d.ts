@@ -796,6 +796,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{id}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Committed run, lifecycle-stage, node, task and attempt timings, in milliseconds. Stages use their reserved keys; nodes excludes stages. Active durations are recorded values, not live clocks. Task duration sums execution only; retries count redispatches. Failure categories preserve known producer metadata; absent legacy/unknown categories are null. Never-started/skipped/reused work has no fabricated attempts. Fresh Run Viewer authorization; no query parameters, variables, errors, outputs or storage capabilities. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RunMetricsResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{id}/tasks/{task}/{attempt}/logs": {
         parameters: {
             query?: never;
@@ -1308,6 +1391,42 @@ export interface components {
             level: string;
             text: string;
         };
+        MetricAttempt: {
+            /** Format: int32 */
+            attempt: number | string;
+            /** Format: date-time */
+            queuedAt: string;
+            /** Format: date-time */
+            dispatchedAt: string;
+            /** Format: date-time */
+            startedAt: null | string;
+            /** Format: date-time */
+            endedAt: null | string;
+            /** Format: double */
+            queueWaitMs: number | string;
+            /** Format: double */
+            durationMs: number | string;
+            terminalStatus: null | string;
+            failureCategory: null | string;
+        };
+        MetricEntity: {
+            status: string;
+            /** Format: date-time */
+            queuedAt: null | string;
+            /** Format: date-time */
+            startedAt: null | string;
+            /** Format: date-time */
+            endedAt: null | string;
+            /** Format: double */
+            queueWaitMs: number | string;
+            /** Format: double */
+            durationMs: number | string;
+            /** Format: int32 */
+            retryCount: number | string;
+            terminalStatus: null | string;
+            failureCategory: null | string;
+            attempts: components["schemas"]["MetricAttempt"][];
+        };
         /** @enum {unknown} */
         NodeExecutionMode: "Series" | "Parallel";
         PlacementAffinity: {
@@ -1355,6 +1474,23 @@ export interface components {
             /** Format: int64 */
             lastSeq: number | string;
             events: components["schemas"]["LiveEvent"][];
+        };
+        RunMetricsResponse: {
+            /** Format: uuid */
+            runId: string;
+            /** Format: int64 */
+            lastSeq: number | string;
+            status: string;
+            run: components["schemas"]["MetricEntity"];
+            stages: {
+                [key: string]: components["schemas"]["MetricEntity"];
+            };
+            nodes: {
+                [key: string]: components["schemas"]["MetricEntity"];
+            };
+            tasks: {
+                [key: string]: components["schemas"]["MetricEntity"];
+            };
         };
         RunQueryPage: {
             items: components["schemas"]["RunQueryRow"][];
