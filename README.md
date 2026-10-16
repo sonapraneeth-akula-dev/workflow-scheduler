@@ -169,6 +169,62 @@ published HTML report iframe through Caddy.
 Only owned PPE containers, network, volumes and temporary workflow files are
 removed.
 
+### Trusted local HTTPS edge
+
+The shared GrihaSetu platform edge already contains the Kardia dev/PPE routes.
+`infra\local\edge\kardia.caddy` is the matching source copy; it forwards gRPC
+over h2c and other traffic normally to the two loopback gateways. Its
+trusted-caller restriction remains unchanged. Start the desired Compose
+environments first, then run the existing platform scripts from an elevated
+PowerShell session, using this machine's actual LAN IPv4:
+
+```powershell
+$platform = "<path to grihasetu\platform>"
+$env:EDGE_BIND_IP = "<local LAN IPv4>"
+& "$platform\scripts\edge-up.ps1" -Action regen-cert -SkipPublish
+& "$platform\scripts\edge-up.ps1" -Action reload
+& "$platform\scripts\apply-edge-hosts.ps1" -ServerIp $env:EDGE_BIND_IP
+Clear-DnsClientCache
+```
+
+If the native edge is not already running, use `-Action up` before reloading.
+Regeneration covers all discovered hostnames; `-SkipPublish` avoids unrelated
+consumer-repository certificate writes. The managed hosts script backs up the
+hosts file and updates its shared managed block. This does not replace or
+restart an already-running edge process.
+
+Open `https://dev.kardia.sonapraneeth.in` or
+`https://ppe.kardia.sonapraneeth.in` while the corresponding stack is up.
+The local mkcert root must be trusted on every intended client; distribute
+only the public `rootCA.pem`, never `rootCA-key.pem` or a server private key.
+Do not broaden `EDGE_TRUSTED_CIDRS` to an untrusted network. Windows native
+agents can register through the PPE HTTPS origin with
+`Agent:AllowInsecureTransport=false`, a stable UUID/state directory and the
+existing protected Local secret provider. The edge validation uses the
+separate `edge-validation` pool; it proves native registration, not external
+Windows package execution.
+
+Windows Schannel curl may report `CRYPT_E_NO_REVOCATION_CHECK` for this local
+CA, which does not publish CRL distribution points. Use its per-command
+best-effort option for missing/offline CRL metadata, not `--insecure` or a
+global certificate-verification bypass:
+
+```powershell
+curl.exe --noproxy "*" --ssl-revoke-best-effort -fsS https://ppe.kardia.sonapraneeth.in/healthz
+```
+
+The read-only edge smoke test uses default .NET certificate/hostname
+validation and requires HTTP/2, both healthy Linux agents and a native Windows
+agent in the validation pool; it does not provision or reconfigure the edge:
+
+```powershell
+$env:WF_EDGE_SMOKE = "true"
+$env:WF_EDGE_PLATFORM_ROOT = $platform
+dotnet test .\backend\tests\Wf.AppHost.Tests --filter FullyQualifiedName~LocalEdgeTests
+```
+
+### Native trusted-LAN listener
+
 For explicit trusted-LAN access, install `mkcert` and trust its root once on
 each intended client. Then:
 
