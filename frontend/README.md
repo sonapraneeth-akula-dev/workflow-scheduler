@@ -160,6 +160,15 @@ Missing matches (404) and ambiguous matches (409) remain explicit failures:
 no fabricated empty side or arbitrary latest attempt. Changing either run or
 report clears the old comparison; failed refreshes hide both cached panes.
 
+`e2e/report-compare.spec.ts` creates three real manually triggered runs in a
+new series per browser and seeds retained report bytes/metadata. Chromium,
+Firefox and WebKit exercise different run pairs, independent text/Markdown
+renderers, exact whitespace/Unicode, wrong-source absence, ambiguous duplicate
+matches, refresh recovery and direct-route reload. Desktop-light and mobile-dark
+views have no critical/serious axe violations or document overflow. Fixture
+insertion does not claim SDK publishing; requests use the actual comparison,
+history, index and raw-content endpoints.
+
 `e2e/report-renderers.spec.ts` reads real HTTP content from immutable filesystem
 objects and PostgreSQL report/attempt rows in the isolated UI fixture. Fixture
 rows model retained published reports; this browser fixture does not claim to
