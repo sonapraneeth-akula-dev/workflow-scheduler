@@ -5,6 +5,7 @@ using Wf.Agent;
 using Wf.Agent.Hosts;
 using Wf.Agent.Packages;
 using Wf.Agent.Journal;
+using Wf.Agent.Logs;
 
 var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = args, ContentRootPath = AppContext.BaseDirectory });
 builder.Services.AddWindowsService(options => options.ServiceName = builder.Configuration["Agent:ServiceName"] ?? "wf-agent");
@@ -18,6 +19,7 @@ builder.Services.AddSingleton(provider =>
 });
 builder.Services.AddSingleton<AgentOutbox>();
 builder.Services.AddSingleton<TaskHostPool>();
+builder.Services.AddSingleton<AgentLogService>();
 builder.Services.AddSingleton(provider => new PackageCache(
     Path.GetFullPath(builder.Configuration["Agent:PackageCache"] ??
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wf-agent", "packages")),
@@ -29,11 +31,15 @@ builder.Services.AddSingleton<AgentConnection>();
 builder.Services.AddHostedService<AgentWorker>();
 await builder.Build().RunAsync();
 
-internal sealed class AgentWorker(AgentConnection connection, ILogger<AgentWorker> logger) : BackgroundService
+internal sealed class AgentWorker(AgentConnection connection, AgentLogService logs, ILogger<AgentWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        try { await connection.RunAsync(stoppingToken); }
+        try
+        {
+            await logs.RecoverAsync(stoppingToken);
+            await connection.RunAsync(stoppingToken);
+        }
         catch (Exception exception)
         {
             logger.LogCritical(exception, "Agent stopped after an unrecoverable failure.");

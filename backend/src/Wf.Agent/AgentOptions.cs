@@ -14,10 +14,14 @@ public sealed class AgentOptions
     public IReadOnlyDictionary<string, string> Labels { get; }
     public TimeSpan HeartbeatInterval { get; }
     public string ResultJournalDirectory { get; }
+    public string LogSpoolDirectory { get; }
+    public long MaxLogBytes { get; }
+    public long LogSpoolQuotaBytes { get; }
 
     public AgentOptions(IEnumerable<Uri> engines, string id, string name, string pool, uint maxTasks,
         IReadOnlyDictionary<string, string>? labels = null, TimeSpan? heartbeatInterval = null,
-        bool allowInsecureTransport = false, string? resultJournalDirectory = null)
+        bool allowInsecureTransport = false, string? resultJournalDirectory = null, string? logSpoolDirectory = null,
+        long maxLogBytes = 2_000_000_000, long logSpoolQuotaBytes = 20_000_000_000)
     {
         ArgumentNullException.ThrowIfNull(engines);
         var endpoints = engines.Distinct().ToArray();
@@ -36,6 +40,8 @@ public sealed class AgentOptions
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentException.ThrowIfNullOrWhiteSpace(pool);
         if (maxTasks == 0) throw new ArgumentOutOfRangeException(nameof(maxTasks));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxLogBytes);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(logSpoolQuotaBytes);
         var interval = heartbeatInterval ?? TimeSpan.FromSeconds(5);
         if (interval <= TimeSpan.Zero || interval > TimeSpan.FromSeconds(5))
             throw new ArgumentOutOfRangeException(nameof(heartbeatInterval), "Heartbeat interval must be positive and at most 5 seconds.");
@@ -55,6 +61,9 @@ public sealed class AgentOptions
         HeartbeatInterval = interval;
         ResultJournalDirectory = Path.GetFullPath(resultJournalDirectory ??
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wf", "agents", identity.ToString("N"), "results"));
+        LogSpoolDirectory = Path.GetFullPath(logSpoolDirectory ?? Path.Combine(Path.GetDirectoryName(ResultJournalDirectory)!, "logs"));
+        MaxLogBytes = maxLogBytes;
+        LogSpoolQuotaBytes = logSpoolQuotaBytes;
     }
 
     public static AgentOptions FromConfiguration(IConfiguration configuration)
@@ -72,6 +81,13 @@ public sealed class AgentOptions
             section.GetSection("Labels").GetChildren().ToDictionary(item => item.Key,
                 item => item.Value ?? throw new ArgumentException("An agent label is empty."), StringComparer.Ordinal),
             allowInsecureTransport: section["AllowInsecureTransport"] is { } insecure && bool.Parse(insecure),
-            resultJournalDirectory: section["ResultJournalDirectory"]);
+            resultJournalDirectory: section["ResultJournalDirectory"],
+            logSpoolDirectory: section["LogSpoolDirectory"],
+            maxLogBytes: ReadLimit("MaxLogBytes", 2_000_000_000),
+            logSpoolQuotaBytes: ReadLimit("LogSpoolQuotaBytes", 20_000_000_000));
+
+        long ReadLimit(string key, long fallback) => section[key] is not { } value ? fallback :
+            long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) && parsed > 0 ? parsed :
+            throw new ArgumentException($"Agent:{key} must be a positive byte count.");
     }
 }

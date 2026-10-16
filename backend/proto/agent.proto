@@ -88,6 +88,8 @@ message ResourceLimits {
   // Zero means no task-specific limit.
   double cpu_cores = 1;
   uint64 ram_mb = 2;
+  // Uncompressed per-attempt log cap; zero uses the agent's configured ceiling.
+  uint64 max_log_bytes = 3;
 }
 
 message UploadGrant {

@@ -5,11 +5,12 @@ using Wf.Contracts.Agent.V1;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Leadership;
 using Wf.ControlPlane.Engine.Sweeper;
+using Wf.ControlPlane.Storage;
 
 namespace Wf.ControlPlane.Engine.Agents;
 
 public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGatewayService> logger, RunStore? runs = null,
-    LeaseManager? leadership = null, AgentLossSweeper? losses = null)
+    LeaseManager? leadership = null, AgentLossSweeper? losses = null, LogUploadCapabilities? logUploads = null)
     : AgentGateway.AgentGatewayBase
 {
     public override async Task Connect(IAsyncStreamReader<AgentMessage> requestStream,
@@ -104,11 +105,15 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                         if (runs is not null)
                             foreach (var (id, command) in await runs.PendingAsync(session, token))
                                 if (sent.Add(id))
+                                {
+                                    if (logUploads is not null && command.Grants.All(grant => grant.Kind != "logs"))
+                                        command.Grants.Add(logUploads.Create(command.Task, command.DeadlineAt.ToDateTimeOffset()));
                                     await responseStream.WriteAsync(new ControlMessage
                                     {
                                         Sequence = checked((ulong)Interlocked.Increment(ref sequence)),
                                         LeaderEpoch = epoch, Dispatch = command
                                     }, token);
+                                }
                         using var wait = CancellationTokenSource.CreateLinkedTokenSource(token);
                         wait.CancelAfter(TimeSpan.FromMilliseconds(25));
                         try { _ = await acknowledgements.Reader.WaitToReadAsync(wait.Token); }

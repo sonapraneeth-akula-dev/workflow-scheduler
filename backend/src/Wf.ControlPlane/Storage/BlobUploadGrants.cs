@@ -47,7 +47,8 @@ public sealed class BlobUploadGrants : IDisposable
             if (!CryptographicOperations.FixedTimeEquals(HMACSHA256.HashData(key, payload), signature))
                 throw new FormatException();
             var data = JsonSerializer.Deserialize<GrantPayload>(payload) ?? throw new FormatException();
-            var content = new BlobContent(data.Kind, data.Sha256, data.SizeBytes);
+            var content = new BlobContent(data.Kind, data.Sha256, data.SizeBytes,
+                data.Kind == BlobKind.Logs && data.Key is not null && data.Key.Count(character => character == '/') == 4 ? data.Key : null);
             BlobStreaming.Validate(content, maximumBytes);
             var now = time.GetUtcNow().UtcTicks;
             if (data.Key != content.Key || data.MaxBytes < content.SizeBytes || data.MaxBytes > maximumBytes ||

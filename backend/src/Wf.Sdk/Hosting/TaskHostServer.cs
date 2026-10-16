@@ -31,6 +31,7 @@ public static class TaskHostServer
             throw new ArgumentException("The task-host socket must be an absolute path shorter than 108 UTF-8 bytes.", nameof(socketPath));
         if (File.Exists(socketPath))
             throw new IOException("The task-host socket path already exists.");
+        Console.OutputEncoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
         // Private IPC needs no application configuration watchers or public-web middleware defaults.
         var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions { Args = [], ContentRootPath = AppContext.BaseDirectory });
         builder.Logging.ClearProviders();

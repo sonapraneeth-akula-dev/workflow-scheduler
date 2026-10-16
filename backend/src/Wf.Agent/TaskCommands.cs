@@ -4,12 +4,13 @@ using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Wf.Agent.Hosts;
 using Wf.Agent.Packages;
+using Wf.Agent.Logs;
 using Wf.Contracts.Agent.V1;
 
 namespace Wf.Agent;
 
 public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskHostPool hosts,
-    AgentOutbox outbox, TimeProvider timeProvider, ILogger<TaskCommands> logger) : IAgentCommandHandler, IAsyncDisposable
+    AgentOutbox outbox, TimeProvider timeProvider, ILogger<TaskCommands> logger, AgentLogService? logs = null) : IAgentCommandHandler, IAsyncDisposable
 {
     private readonly object gate = new();
     private readonly ConcurrentDictionary<AttemptKey, Execution> active = new();
@@ -73,8 +74,15 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
         TaskCompleted? result = null;
         var persisted = false;
         var publishing = false;
+        AgentLogService.Capture? capture = null;
         try
         {
+            if (logs is not null)
+            {
+                try { capture = await logs.BeginAsync(dispatch); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
+                { logs.Report(error); }
+            }
             outbox.Enqueue(new AgentMessage
             {
                 TaskStarted = new TaskStarted { Task = dispatch.Task.Clone(), At = Timestamp.FromDateTimeOffset(timeProvider.GetUtcNow()) }
@@ -82,6 +90,7 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
             using var package = await cache.GetAsync(dispatch.Version, new Uri(dispatch.PackageUri), dispatch.Sha256,
                 execution.Cancellation.Token);
             result = await hosts.ExecuteAsync(package, dispatch, cancellationToken: execution.Cancellation.Token,
+                captureLog: capture is null ? null : capture.WriteAsync,
                 journalResult: completion =>
                 {
                     publishing = true;
@@ -100,6 +109,7 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
                 key.RunId, key.NodeKey, key.TaskKey, key.Attempt);
             result = Failure(TaskOutcome.Failed, "PlatformError", exception.Message, false);
         }
+        if (capture is not null) await capture.CompleteAsync();
         if (!persisted) outbox.Enqueue(new AgentMessage { TaskCompleted = result });
         lock (gate)
         {

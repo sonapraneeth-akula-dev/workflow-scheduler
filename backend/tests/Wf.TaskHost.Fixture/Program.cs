@@ -16,6 +16,24 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
             ctx.Log("Executed actual SDK task delegate.");
         })
         .Task("fail", _ => throw new InvalidOperationException("fixture failure"))
+        .Task("logs", async ctx =>
+        {
+            ctx.Outputs["pid"] = Environment.ProcessId;
+            var secret = ctx.Input<string>("source", "value")!;
+            Console.Out.Write("stdout sec");
+            Console.Out.Flush();
+            await Task.Delay(30, ctx.CancellationToken);
+            Console.Out.WriteLine("ret-token tail");
+            Console.Error.WriteLine("stderr " + secret);
+            ctx.Log("ctx " + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(secret)));
+            Console.Out.Write("unterminated");
+        })
+        .Task("unicodeLogs", ctx =>
+        {
+            ctx.Outputs["pid"] = Environment.ProcessId;
+            Console.Out.Write(new string('x', 16383) + "\U0001F511\r\n");
+            Console.Out.Write(new string('y', 16384) + "\n\n");
+        })
         .Task("nonretryable", _ => throw new NonRetryableException("do not retry"))
         .Task("selfcancel", _ => throw new OperationCanceledException("self cancellation"))
         .Task("permissions", ctx =>

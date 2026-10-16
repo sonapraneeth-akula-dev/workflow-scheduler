@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net.Sockets;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Text;
 using System.Threading.Channels;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
@@ -10,6 +11,7 @@ using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Wf.Agent.Packages;
+using Wf.Agent.Secrets;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Host.V1;
 
@@ -114,7 +116,8 @@ public sealed class TaskHostPool : IAsyncDisposable
 
     public async Task<TaskCompleted> ExecuteAsync(TaskHostPackage package, Dispatch dispatch,
         ByteString? nodeOutputsJson = null, TimeSpan? cancellationGrace = null, CancellationToken cancellationToken = default,
-        Action<TaskCompleted>? journalResult = null)
+        Action<TaskCompleted>? journalResult = null, Func<string, string, Task>? captureLog = null,
+        SecretMasker? secretMasker = null)
     {
         ArgumentNullException.ThrowIfNull(package);
         ArgumentNullException.ThrowIfNull(dispatch);
@@ -138,6 +141,8 @@ public sealed class TaskHostPool : IAsyncDisposable
         finally { try { ScheduleSweep(); } finally { gate.Release(); } }
         try
         {
+            host.CaptureLog = captureLog;
+            host.Masker = secretMasker ?? new SecretMasker([]);
             using var call = host.Client.ExecuteAsync(new ExecuteRequest
             {
                 Dispatch = dispatch.Clone(), NodeOutputsJson = nodeOutputsJson ?? dispatch.NodeOutputsJson
@@ -201,7 +206,8 @@ public sealed class TaskHostPool : IAsyncDisposable
         var info = new ProcessStartInfo(package.Executable)
         {
             WorkingDirectory = package.WorkingDirectory, UseShellExecute = false,
-            RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true
+            RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
         };
         foreach (var argument in package.Arguments) info.ArgumentList.Add(argument);
         info.ArgumentList.Add("--task-host");
@@ -327,11 +333,16 @@ public sealed class TaskHostPool : IAsyncDisposable
         catch (Exception exception) when ((exception is System.ComponentModel.Win32Exception or InvalidOperationException) && host.Process.HasExited) { }
         await host.Process.WaitForExitAsync();
         host.PackageLease?.Dispose();
-        await Task.WhenAll(host.Output, host.Error);
-        if (File.Exists(host.SocketPath)) File.Delete(host.SocketPath);
-        if (Directory.Exists(host.Directory)) Directory.Delete(host.Directory);
-        host.Process.Dispose();
-        live.TryRemove(host.Id, out _);
+        try { await Task.WhenAll(host.Output, host.Error); }
+        finally
+        {
+            try
+            {
+                if (File.Exists(host.SocketPath)) File.Delete(host.SocketPath);
+                if (Directory.Exists(host.Directory)) Directory.Delete(host.Directory);
+            }
+            finally { host.Process.Dispose(); live.TryRemove(host.Id, out _); }
+        }
     }
 
     private async Task EvictAsync(Host host)
@@ -408,7 +419,7 @@ public sealed class TaskHostPool : IAsyncDisposable
         timer.Change(delay, Timeout.InfiniteTimeSpan);
     }
 
-    private static void CreatePrivateDirectory(string path)
+    internal static void CreatePrivateDirectory(string path)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -456,6 +467,8 @@ public sealed class TaskHostPool : IAsyncDisposable
         public long IdleSince { get; set; }
         public bool Ready { get; set; }
         public Task? Release { get; set; }
+        public Func<string, string, Task>? CaptureLog { get; set; }
+        public SecretMasker Masker { get; set; } = new([]);
         public string Diagnostics => string.Join(Environment.NewLine, diagnostics);
 
         public Host(TaskHostPackage package, string directory, string socketPath, Process process, GrpcChannel channel,
@@ -465,16 +478,63 @@ public sealed class TaskHostPool : IAsyncDisposable
             Id = process.Id;
             Package = package; Directory = directory; SocketPath = socketPath; Process = process; Channel = channel;
             Client = new(channel);
-            Output = DrainAsync(process.StandardOutput);
-            Error = DrainAsync(process.StandardError);
+            Output = DrainAsync(process.StandardOutput, "stdout");
+            Error = DrainAsync(process.StandardError, "stderr");
 
-            async Task DrainAsync(StreamReader reader)
+            async Task DrainAsync(StreamReader reader, string stream)
             {
-                while (await reader.ReadLineAsync() is { } line)
+                SecretMasker? currentMasker = null;
+                SecretMasker.TextStream? masking = null;
+                var line = new StringBuilder();
+                var fragmented = false;
+                var buffer = new char[4096];
+                int read;
+                while ((read = await reader.ReadAsync(buffer)) > 0)
                 {
-                    diagnostics.Enqueue(line.Length > 4096 ? line[..4096] : line);
+                    if (!ReferenceEquals(currentMasker, Masker))
+                    {
+                        currentMasker = Masker;
+                        masking = currentMasker.CreateStream();
+                    }
+                    await ConsumeAsync(masking!.Append(new string(buffer, 0, read)));
+                }
+                if (masking is not null) await ConsumeAsync(masking.Complete());
+                if (line.Length > 0) await PublishAsync(line.ToString());
+
+                async Task ConsumeAsync(string text)
+                {
+                    foreach (var character in text)
+                    {
+                        if (character == '\n')
+                        {
+                            var value = line.ToString();
+                            if (value.EndsWith('\r')) value = value[..^1];
+                            if (value.Length > 0 || !fragmented) await PublishAsync(value);
+                            line.Clear();
+                            fragmented = false;
+                        }
+                        else line.Append(character);
+                        // A malicious task cannot make the agent buffer an unbounded newline-free string.
+                        if (line.Length >= 16 * 1024)
+                        {
+                            var count = line.Length;
+                            if (char.IsHighSurrogate(line[^1]) || line[^1] == '\r') count--;
+                            if (count >= 16 * 1024)
+                            {
+                                await PublishAsync(line.ToString(0, count));
+                                line.Remove(0, count);
+                                fragmented = true;
+                            }
+                        }
+                    }
+                }
+
+                async Task PublishAsync(string text)
+                {
+                    diagnostics.Enqueue(text.Length > 4096 ? text[..4096] : text);
                     while (diagnostics.Count > 20) diagnostics.TryDequeue(out _);
-                    logger.LogInformation("Task host {Pid}: {Line}", process.Id, line);
+                    if (CaptureLog is { } capture) await capture(stream, text);
+                    else logger.LogInformation("Task host {Pid}: {Line}", process.Id, text);
                 }
             }
         }
