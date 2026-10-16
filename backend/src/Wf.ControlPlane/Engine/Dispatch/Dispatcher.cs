@@ -64,7 +64,6 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             var decision = await ChooseAsync(connection, request, cancellationToken);
             if (decision.Agent is null) return decision;
             var dispatch = command.Clone();
-            dispatch.ReservationEpoch = checked((ulong)(decision.Agent.ReservedForRun is null ? 1 : decision.Agent.ReservationEpoch));
             var change = await SaveDispatchAsync(connection, durable, request, dispatch, decision.Agent.Id, executionPolicy, 0, 0, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             run.Apply(change);
@@ -172,7 +171,6 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             deadline = deadline < runDeadline ? deadline : runDeadline;
             deadline = deadline < nodeDeadline ? deadline : nodeDeadline;
             dispatch.DeadlineAt = Timestamp.FromDateTimeOffset(deadline);
-            dispatch.ReservationEpoch = checked((ulong)(decision.Agent.ReservedForRun is null ? 1 : decision.Agent.ReservationEpoch));
             await RunStore.AppendAsync(connection, run,
                 run.CreateEvent(EventEntity.Task, taskKey, (int)ExecutionStatus.Retrying, now) with
                     { Attempt = attempt, AttemptEndedAt = lostAt, AttemptStatus = ExecutionStatus.Failed,
@@ -196,7 +194,8 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
         var capacity = agents.DispatchableAgents().Select(agent => agent.Capacity(timeProvider.GetUtcNow())).ToDictionary(agent => agent.Id);
         var owned = new HashSet<Guid>();
         await using (var reservations = new NpgsqlCommand("""
-            SELECT agent_id,run_id,node_key,epoch,expires_at FROM reservations WHERE released_at IS NULL
+            SELECT agent_id,run_id,node_key,epoch,expires_at,release_requested_at IS NULL
+            FROM reservations WHERE released_at IS NULL
             """, connection))
         await using (var reader = await reservations.ExecuteReaderAsync(cancellationToken))
             while (await reader.ReadAsync(cancellationToken))
@@ -209,7 +208,8 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
                     capacity[id] = agent with
                     {
                         ReservedForRun = runId, ReservedForNode = node, ReservationEpoch = reader.GetInt64(3),
-                        Healthy = agent.Healthy && reader.GetFieldValue<DateTimeOffset>(4) > timeProvider.GetUtcNow()
+                        Healthy = agent.Healthy && reader.GetFieldValue<DateTimeOffset>(4) > timeProvider.GetUtcNow() &&
+                            reader.GetBoolean(5)
                     };
             }
         if (owned.Count > 0) capacity = capacity.Where(pair => owned.Contains(pair.Key)).ToDictionary();
@@ -231,6 +231,12 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
         DispatchCommand dispatch, Guid agentId, ExecutionPolicy policy, short platformRetries, short authorRetries,
         CancellationToken cancellationToken)
     {
+        await using (var epoch = new NpgsqlCommand("SELECT reservation_epoch FROM agents WHERE id=$1", connection))
+        {
+            epoch.Parameters.AddWithValue(agentId);
+            dispatch.ReservationEpoch = await epoch.ExecuteScalarAsync(cancellationToken) is long current
+                ? checked((ulong)current) : throw new InvalidDataException("Dispatch machine has no authoritative reservation epoch.");
+        }
         var key = $"{request.NodeKey}/{request.TaskKey}";
         var change = run.CreateEvent(EventEntity.Task, key, (int)ExecutionStatus.Dispatched, timeProvider.GetUtcNow()) with
             { Attempt = request.Attempt };
@@ -239,8 +245,8 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
         await RunStore.ExecuteAsync(connection, """
             WITH attempt AS (
                 INSERT INTO task_attempts(run_day,run_id,task_key,attempt,agent_id,status,queued_at,deadline_at,required_ram_mb,
-                    dispatch_payload,placement_request,execution_policy,platform_retries,author_retries,queue_wait_ms)
-                VALUES(uuid_v7_run_day($1),$1,$2,$3,$4,2,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13)
+                    dispatch_payload,placement_request,execution_policy,platform_retries,author_retries,queue_wait_ms,reservation_epoch)
+                VALUES(uuid_v7_run_day($1),$1,$2,$3,$4,2,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,$14)
                 RETURNING run_day,run_id,task_key,attempt,agent_id
             )
             INSERT INTO dispatch_outbox(run_day,run_id,task_key,attempt,agent_id,payload)
@@ -248,7 +254,8 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             """, cancellationToken, request.RunId, key, (short)request.Attempt, agentId,
             metric.QueuedAt, dispatch.DeadlineAt.ToDateTimeOffset(), request.RequiredRamMb, dispatch.ToByteArray(),
             JsonSerializer.Serialize(request, DispatchJson.Default.PlacementRequest),
-            JsonSerializer.Serialize(policy, DispatchJson.Default.ExecutionPolicy), platformRetries, authorRetries, metric.QueueWaitMs);
+            JsonSerializer.Serialize(policy, DispatchJson.Default.ExecutionPolicy), platformRetries, authorRetries,
+            metric.QueueWaitMs, checked((long)dispatch.ReservationEpoch));
         return change;
     }
 

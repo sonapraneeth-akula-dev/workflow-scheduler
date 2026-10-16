@@ -6,6 +6,7 @@ using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Resources;
 using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Dispatch;
+using Wf.ControlPlane.Engine.Reservations;
 using Wf.ControlPlane.Storage;
 using Wf.Engine.Core.Results;
 
@@ -23,11 +24,15 @@ public sealed class ResourceSampleSink(NpgsqlDataSource source, RunStore runs, I
         await using var connection = await source.OpenConnectionAsync(token);
         await using var transaction = await connection.BeginTransactionAsync(token);
         await runs.FenceAsync(connection, transaction, lease, token);
-        await using (var fence = new NpgsqlCommand("SELECT session_id FROM agents WHERE id=$1 FOR UPDATE", connection))
+        await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock($1)", token, ReservationManager.AllocationLock);
+        long currentEpoch;
+        await using (var fence = new NpgsqlCommand("SELECT session_id,reservation_epoch FROM agents WHERE id=$1 FOR UPDATE", connection))
         {
             fence.Parameters.AddWithValue(session.AgentId);
-            if (await fence.ExecuteScalarAsync(token) is not Guid current || current != session.SessionId)
+            await using var row = await fence.ExecuteReaderAsync(token);
+            if (!await row.ReadAsync(token) || row.GetGuid(0) != session.SessionId)
                 throw new ArgumentException("Resource sample agent session was superseded.");
+            currentEpoch = row.GetInt64(1);
         }
         await using (var run = new NpgsqlCommand("SELECT id FROM runs WHERE run_day=uuid_v7_run_day($1) AND id=$1 FOR UPDATE", connection))
         {
@@ -39,7 +44,9 @@ public sealed class ResourceSampleSink(NpgsqlDataSource source, RunStore runs, I
         ResourcePointer? previous;
         await using (var query = new NpgsqlCommand("""
             SELECT resource_sample_count,resource_series_uri,resource_series_sha256,resource_series_bytes,
-                   dispatch_payload,status
+                   dispatch_payload,status,reservation_epoch,NOT EXISTS(
+                       SELECT 1 FROM reservations r WHERE r.agent_id=$4 AND r.released_at IS NULL
+                           AND (r.epoch<>task_attempts.reservation_epoch OR r.expires_at<=$5 OR r.release_requested_at IS NOT NULL))
             FROM task_attempts WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 AND attempt=$3 AND agent_id=$4
             FOR UPDATE
             """, connection))
@@ -48,10 +55,16 @@ public sealed class ResourceSampleSink(NpgsqlDataSource source, RunStore runs, I
             query.Parameters.AddWithValue(identity.TaskKey);
             query.Parameters.AddWithValue(identity.Attempt);
             query.Parameters.AddWithValue(session.AgentId);
+            query.Parameters.AddWithValue(runs.UtcNow);
             await using var row = await query.ExecuteReaderAsync(token);
             if (!await row.ReadAsync(token) || row.IsDBNull(4) ||
                 Wf.Contracts.Agent.V1.Dispatch.Parser.ParseFrom(row.GetFieldValue<byte[]>(4)).ReservationEpoch != sample.ReservationEpoch)
                 throw new ArgumentException("Resource sample does not match the assigned attempt reservation.");
+            if (sample.ReservationEpoch != (ulong)row.GetInt64(6) || row.GetInt64(6) != currentEpoch || !row.GetBoolean(7))
+            {
+                runs.LogStaleReservation(identity, session.AgentId, sample.ReservationEpoch);
+                return;
+            }
             count = row.GetInt64(0);
             previous = row.IsDBNull(1) ? null : new(row.GetString(1), row.GetString(2), row.GetInt64(3));
             status = row.GetInt16(5);

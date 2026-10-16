@@ -19,13 +19,13 @@ using DispatchCommand = Wf.Contracts.Agent.V1.Dispatch;
 
 namespace Wf.Integration.Tests;
 
-public sealed class ReservationManagerTests(ReservationDatabase database) : IClassFixture<ReservationDatabase>
+public sealed partial class ReservationManagerTests(ReservationDatabase database, ITestOutputHelper output) : IClassFixture<ReservationDatabase>
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
     private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(1);
     private const string Sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     private readonly Clock clock = new();
-    private RunStore Store => new(database.DataSource, NullLogger<RunStore>.Instance);
+    private RunStore Store => new(database.DataSource, NullLogger<RunStore>.Instance, timeProvider: clock);
     private ReservationManager Manager => new(database.DataSource, Store, clock);
 
     [Theory]
@@ -220,9 +220,11 @@ public sealed class ReservationManagerTests(ReservationDatabase database) : ICla
             Assert.Equal(command.ReservationEpoch, stored.ReservationEpoch);
         }
         await Store.AcceptAsync(fleet[0], new AgentMessage { TaskStarted = new()
-            { Task = command.Task.Clone(), At = Timestamp.FromDateTimeOffset(clock.Now) } }, Token);
+            { Task = command.Task.Clone(), At = Timestamp.FromDateTimeOffset(clock.Now),
+                ReservationEpoch = command.ReservationEpoch } }, Token);
         await Store.AcceptAsync(fleet[0], new AgentMessage { TaskCompleted = new()
-            { Task = command.Task.Clone(), At = Timestamp.FromDateTimeOffset(clock.Now), Outcome = TaskOutcome.Succeeded } }, Token);
+            { Task = command.Task.Clone(), At = Timestamp.FromDateTimeOffset(clock.Now), Outcome = TaskOutcome.Succeeded,
+                ReservationEpoch = command.ReservationEpoch } }, Token);
         owner = await Store.LoadAsync(owner.Snapshot.RunId, Token);
         using var restoredRegistry = new AgentRegistry(database.DataSource, clock);
         await restoredRegistry.LoadAsync(Token);
@@ -378,7 +380,7 @@ public sealed class ReservationManagerTests(ReservationDatabase database) : ICla
             original.Parameters.AddWithValue(agent);
             var xmin = await original.ExecuteScalarAsync(Token);
             var installed = Migrator.Upgrade(connectionString, NullLogger.Instance);
-            if (upgrade) Assert.Equal(["0028_reservations.sql"], installed);
+            if (upgrade) Assert.Equal(scripts.Where(s => string.CompareOrdinal(s.Name, "0028") >= 0).Select(s => s.Name), installed);
             else Assert.Empty(installed);
             Assert.Equal(xmin, await original.ExecuteScalarAsync(Token));
             await using var journal = source.CreateCommand("SELECT count(*) FROM schema_versions");
@@ -389,10 +391,10 @@ public sealed class ReservationManagerTests(ReservationDatabase database) : ICla
         finally { await Execute($"DROP SCHEMA \"{schema}\" CASCADE"); }
     }
 
-    private async Task<RunState> Ready()
+    private async Task<RunState> Ready(string firstTask = "first")
     {
         var nodes = ImmutableArray.Create(
-            new NodeDefinition("work", [], [new("first"), new("second")]),
+            new NodeDefinition("work", [], [new(firstTask), new("second")]),
             new NodeDefinition("other", [], [new("first")]));
         var run = new RunState(Guid.CreateVersion7(clock.Now), nodes,
             new("perf", ImmutableSortedDictionary<string, string>.Empty), Assert.Fail);
@@ -450,5 +452,5 @@ public sealed class ReservationDatabase : AgentDatabase
     public string ConnectionString => DatabaseConnectionString;
     protected override IReadOnlyList<string> Migrations =>
         ["0002_runs_events.sql", "0003_attempt_timers.sql", "0005_agents.sql", "0006_dispatch_outbox.sql",
-            "0009_leases.sql", "0011_attempt_replacement.sql"];
+            "0009_leases.sql", "0011_attempt_replacement.sql", "0025_resource_samples.sql"];
 }

@@ -156,17 +156,19 @@ public sealed class ResultJournalTests : IDisposable
     [InlineData("count")]
     [InlineData("length")]
     [InlineData("sequence")]
+    [InlineData("reservationEpoch")]
     public void Structurally_invalid_records_are_rejected_even_with_a_valid_checksum(string field)
     {
         using (var outbox = Open()) outbox.Enqueue(Result());
         var file = Path.Combine(root, "results.wfj");
         var bytes = File.ReadAllBytes(file);
-        if (field == "count") BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(36), ResultJournal.MaximumRecords + 1);
-        if (field == "length") BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(40), ResultJournal.MaximumRecordBytes + 1);
-        if (field == "sequence") bytes[45] = 1;
+        if (field == "count") BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(44), ResultJournal.MaximumRecords + 1);
+        if (field == "length") BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(48), ResultJournal.MaximumRecordBytes + 1);
+        if (field == "sequence") bytes[53] = 1;
+        if (field == "reservationEpoch") BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(36), 0);
         SHA256.HashData(bytes.AsSpan(0, bytes.Length - 32)).CopyTo(bytes, bytes.Length - 32);
         File.WriteAllBytes(file, bytes);
-        Assert.Throws<InvalidDataException>(() => Open());
+        Assert.Throws<InvalidDataException>(() => { using var opened = Open(); });
         Assert.Equal(bytes, File.ReadAllBytes(file));
     }
 

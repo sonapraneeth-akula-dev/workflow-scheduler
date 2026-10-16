@@ -321,7 +321,7 @@ public sealed class DispatchTests(DispatchDatabase database) : IClassFixture<Dis
                 var stderr = second.StandardError.ReadToEndAsync(Token);
                 try
                 {
-                    await Wait(() => Task.FromResult(new FileInfo(Path.Combine(journalPath, "results.wfj")).Length == 72),
+                    await Wait(() => Task.FromResult(new FileInfo(Path.Combine(journalPath, "results.wfj")).Length == 80),
                         second.WaitForExitAsync(Token));
                     Assert.False(second.HasExited);
                 }
@@ -444,7 +444,8 @@ public sealed class DispatchTests(DispatchDatabase database) : IClassFixture<Dis
         try
         {
             using var cache = new PackageCache(root, NullLogger<PackageCache>.Instance);
-            await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
+            await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance,
+                containmentDirectory: Path.Combine(root, "host-lifetimes"));
             var outbox = new AgentOutbox();
             var id = Guid.NewGuid();
             var options = new AgentOptions([Address(gateway)], id.ToString(), $"dispatch-{id:N}", "ci", 2,

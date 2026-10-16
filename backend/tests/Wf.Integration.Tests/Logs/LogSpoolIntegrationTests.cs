@@ -81,7 +81,7 @@ public sealed class LogSpoolIntegrationTests
         try
         {
             var completed = await server.Gateway.Completion.Task.WaitAsync(TimeSpan.FromSeconds(30), Token);
-            Assert.Equal(TaskOutcome.Succeeded, completed.Outcome);
+            Assert.True(completed.Outcome == TaskOutcome.Succeeded, $"Task failed: {completed.Error}");
             if (restartDuringUpload)
             {
                 await server.FirstPut.Task.WaitAsync(TimeSpan.FromSeconds(10), Token);
@@ -136,7 +136,8 @@ public sealed class LogSpoolIntegrationTests
         var dispatch = Dispatch("logs");
         dispatch.InputsJson = ByteString.CopyFromUtf8("""{"source":{"value":"secret-token"}}""");
         await using var spool = new LogSpooler(server.SpoolRoot, dispatch.Task, new SecretMasker([]));
-        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
+        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance,
+            containmentDirectory: Path.Combine(server.Root, "host-lifetimes"));
         var result = await hosts.ExecuteAsync(Package(), dispatch, cancellationToken: Token,
             secretMasker: new SecretMasker(["secret-token"]),
             captureLog: (stream, text) => spool.WriteAsync(stream, text,
@@ -175,7 +176,8 @@ public sealed class LogSpoolIntegrationTests
         await using var server = await LogReceiver.StartAsync();
         var dispatch = Dispatch("unicodeLogs");
         await using var spool = new LogSpooler(server.SpoolRoot, dispatch.Task, new SecretMasker([]));
-        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
+        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance,
+            containmentDirectory: Path.Combine(server.Root, "host-lifetimes"));
         var result = await hosts.ExecuteAsync(Package(), dispatch, cancellationToken: Token,
             captureLog: (stream, text) => spool.WriteAsync(stream, text, cancellationToken: Token));
         Assert.Equal(TaskOutcome.Succeeded, result.Outcome);
@@ -198,7 +200,7 @@ public sealed class LogSpoolIntegrationTests
         var options = new AgentOptions([server.Address], Guid.NewGuid().ToString(), "log-integration", "ci", 1,
             resultJournalDirectory: Path.Combine(server.Root, "results"), logSpoolDirectory: server.SpoolRoot);
         using var cache = new PackageCache(Path.Combine(server.Root, "packages"), NullLogger<PackageCache>.Instance);
-        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
+        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance, options: options);
         await using var logs = new AgentLogService(options, TimeProvider.System, NullLogger<AgentLogService>.Instance,
             NullLogger<LogChunkUploader>.Instance);
         using var outbox = new AgentOutbox(new ResultJournal(options.ResultJournalDirectory, options.Id));
@@ -206,7 +208,7 @@ public sealed class LogSpoolIntegrationTests
             NullLogger<TaskCommands>.Instance, logs);
         await commands.HandleAsync(new ControlMessage { Dispatch = dispatch }, Token);
         await UntilAsync(() => Task.FromResult(Completion(outbox) is not null));
-        Assert.Equal(TaskOutcome.Succeeded, Completion(outbox)!.Outcome);
+        Assert.True(Completion(outbox)!.Outcome == TaskOutcome.Succeeded, $"Task failed: {Completion(outbox)!.Error}");
         await UntilAsync(() => Task.FromResult(File.Exists(server.IndexPath(dispatch.Task))));
         var index = server.ReadIndex(dispatch.Task);
         Assert.True(index.Complete);
@@ -348,7 +350,7 @@ public sealed class LogSpoolIntegrationTests
         var directory = Path.Combine(server.SpoolRoot, LogIndex.PrefixFor(dispatch.Task).Replace('/', Path.DirectorySeparatorChar));
         var obstruction = Path.Combine(directory, "index.json.pending");
         Directory.CreateDirectory(obstruction);
-        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
+        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance, options: options);
         var result = await hosts.ExecuteAsync(Package(), dispatch, ByteString.CopyFromUtf8("""{"previous":0}"""),
             cancellationToken: Token, captureLog: capture.WriteAsync);
         Assert.Equal(TaskOutcome.Succeeded, result.Outcome);
@@ -487,7 +489,7 @@ public sealed class LogSpoolIntegrationTests
 
 internal sealed class LogReceiver : IAsyncDisposable
 {
-    public string Root { get; } = Path.GetFullPath(Path.Combine(".log-http-tests", Guid.NewGuid().ToString("N")));
+    public string Root { get; } = Path.Combine(Path.GetTempPath(), "wf-log-" + Guid.NewGuid().ToString("N")[..12]);
     public string SpoolRoot => Path.Combine(Root, "spool");
     public string BlobRoot => Path.Combine(Root, "blobs");
     public WebApplication App { get; private set; } = null!;

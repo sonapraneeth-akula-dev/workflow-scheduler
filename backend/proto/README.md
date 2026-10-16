@@ -14,6 +14,18 @@ agent sends Hello, including in-flight attempts, before replaying results.
 Missing payloads, invalid identities, unsupported protocol versions and stale
 epochs must be rejected by the receiving service.
 
+Machine reservation epochs are separate from leader epochs and stream sequence
+numbers. Dispatch, task-start/completion events and resource samples retain the
+assigned reservation epoch. Release sends `ReservationFence` with a strictly
+newer epoch. The agent persists that fence before cancelling older work and
+must stop its physical task-host work before journaling `ReservationFenced`.
+Only that acknowledgement, from the current agent session and matching the
+requested fence, frees the reserved machine. Disconnected machines remain
+unavailable. Retried fence confirmations are idempotent; stale dispatches,
+results and samples cannot revive old ownership. Legacy task events without an
+epoch are accepted only for ordinary attempts originally assigned epoch 1,
+while that machine still has epoch 1.
+
 `compatibility.binpb` is the immutable initial v1 descriptor image, generated
 with `buf build backend/proto -o backend/proto/compatibility.binpb`.
 CI runs `buf lint`, format, and `buf breaking` against that baseline and,

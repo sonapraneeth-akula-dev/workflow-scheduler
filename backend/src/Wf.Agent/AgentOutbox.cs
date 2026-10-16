@@ -14,6 +14,7 @@ public sealed class AgentOutbox : IDisposable
     });
     private ulong sequence;
     private ulong leaderEpoch;
+    private ulong reservationEpoch;
     private readonly ResultJournal? journal;
 
     public AgentOutbox(ResultJournal? journal = null)
@@ -21,9 +22,12 @@ public sealed class AgentOutbox : IDisposable
         this.journal = journal;
         sequence = journal?.Sequence ?? 0;
         leaderEpoch = journal?.LeaderEpoch ?? 0;
+        reservationEpoch = journal?.ReservationEpoch ?? 1;
         foreach (var message in journal?.Pending ?? [])
             pending.Add(message.Sequence, message.Clone());
     }
+
+    public ulong ReservationEpoch { get { lock (gate) return reservationEpoch; } }
 
     public AgentMessage CreateHello(Hello hello)
     {
@@ -49,8 +53,8 @@ public sealed class AgentOutbox : IDisposable
         ArgumentNullException.ThrowIfNull(message);
         if (message.PayloadCase is not (AgentMessage.PayloadOneofCase.TaskStarted or
             AgentMessage.PayloadOneofCase.TaskCompleted or AgentMessage.PayloadOneofCase.Heartbeat or
-            AgentMessage.PayloadOneofCase.ResourceSample))
-            throw new ArgumentException("Only task events and heartbeats belong in the agent outbox.", nameof(message));
+            AgentMessage.PayloadOneofCase.ResourceSample or AgentMessage.PayloadOneofCase.ReservationFenced))
+            throw new ArgumentException("Only task events, heartbeats and fence acknowledgements belong in the agent outbox.", nameof(message));
         lock (gate)
         {
             var copy = message.Clone();
@@ -105,6 +109,17 @@ public sealed class AgentOutbox : IDisposable
                 run == expected && result.NodeKey == task.NodeKey && result.TaskKey == task.TaskKey && result.Attempt == task.Attempt);
     }
 
+    public void ObserveReservationEpoch(ulong epoch)
+    {
+        lock (gate)
+        {
+            if (epoch == 0 || epoch < reservationEpoch) throw new InvalidDataException("Command is from a stale machine reservation.");
+            if (epoch == reservationEpoch) return;
+            journal?.Save(sequence, leaderEpoch, pending.Values.Where(message => message.Heartbeat is null).ToArray(), epoch);
+            reservationEpoch = epoch;
+        }
+    }
+
     public IReadOnlyList<AttemptRef> UnacknowledgedAttempts()
     {
         lock (gate)
@@ -113,7 +128,7 @@ public sealed class AgentOutbox : IDisposable
     }
 
     private void Persist(ulong next, ulong epoch, IEnumerable<AgentMessage> messages) =>
-        journal?.Save(next, epoch, messages.Where(message => message.Heartbeat is null).ToArray());
+        journal?.Save(next, epoch, messages.Where(message => message.Heartbeat is null).ToArray(), reservationEpoch);
 
     public void Dispose() => journal?.Dispose();
 

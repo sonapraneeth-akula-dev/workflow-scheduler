@@ -370,6 +370,8 @@ public class AgentDatabase : IAsyncLifetime
             migrations = [.. migrations, "0027_task_outputs.sql"];
         if (migrations.Contains("0006_dispatch_outbox.sql") && !migrations.Contains("0028_reservations.sql"))
             migrations = [.. migrations, "0028_reservations.sql"];
+        if (migrations.Contains("0006_dispatch_outbox.sql") && !migrations.Contains("0029_reservation_fences.sql"))
+            migrations = [.. migrations, "0029_reservation_fences.sql"];
         foreach (var name in migrations)
         {
             var migration = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Migrations", name), token);

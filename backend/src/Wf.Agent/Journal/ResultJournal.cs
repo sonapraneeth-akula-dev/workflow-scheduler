@@ -17,13 +17,15 @@ public sealed class ResultJournal : IDisposable
     public const int MaximumRecordBytes = 1024 * 1024;
     public const int MaximumRecords = 4096;
     public const int MaximumJournalBytes = 32 * 1024 * 1024;
-    private const uint Magic = 0x314a4657;
+    private const uint LegacyMagic = 0x314a4657;
+    private const uint Magic = 0x324a4657;
     private readonly string path;
     private readonly Guid agentId;
     private readonly FileStream ownership;
     private bool disposed;
     internal ulong Sequence { get; private set; }
     internal ulong LeaderEpoch { get; private set; }
+    internal ulong ReservationEpoch { get; private set; } = 1;
     internal IReadOnlyList<AgentMessage> Pending { get; private set; } = [];
 
     public ResultJournal(string directory, string agentId)
@@ -58,18 +60,20 @@ public sealed class ResultJournal : IDisposable
         catch { ownership.Dispose(); throw; }
     }
 
-    internal void Save(ulong sequence, ulong leaderEpoch, IReadOnlyList<AgentMessage> pending)
+    internal void Save(ulong sequence, ulong leaderEpoch, IReadOnlyList<AgentMessage> pending, ulong reservationEpoch = 1)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         if (pending.Count > MaximumRecords) throw new IOException("Result journal record capacity exhausted; results were not discarded.");
+        if (reservationEpoch == 0) throw new InvalidDataException("Result journal requires a positive machine fence.");
         using var buffer = new MemoryStream();
-        // WFJ1 | agent UUID | sequence | leader epoch | count | (length, protobuf)* | SHA-256.
+        // WFJ2 adds the durable machine fence; WFJ1 remains readable.
         using (var writer = new BinaryWriter(buffer, Encoding.UTF8, leaveOpen: true))
         {
             writer.Write(Magic);
             writer.Write(agentId.ToByteArray());
             writer.Write(sequence);
             writer.Write(leaderEpoch);
+            writer.Write(reservationEpoch);
             writer.Write(pending.Count);
             ulong previous = 1;
             foreach (var message in pending)
@@ -101,6 +105,7 @@ public sealed class ResultJournal : IDisposable
         File.Move(next, path, overwrite: true);
         Sequence = sequence;
         LeaderEpoch = leaderEpoch;
+        ReservationEpoch = reservationEpoch;
         Pending = pending.Select(message => message.Clone()).ToArray();
     }
 
@@ -116,10 +121,13 @@ public sealed class ResultJournal : IDisposable
         using var reader = new BinaryReader(buffer);
         try
         {
-            if (reader.ReadUInt32() != Magic || new Guid(reader.ReadBytes(16)) != agentId)
+            var format = reader.ReadUInt32();
+            if (format is not (Magic or LegacyMagic) || new Guid(reader.ReadBytes(16)) != agentId)
                 throw new InvalidDataException("Result journal format or agent identity mismatch.");
             Sequence = reader.ReadUInt64();
             LeaderEpoch = reader.ReadUInt64();
+            ReservationEpoch = format == Magic ? reader.ReadUInt64() : 1;
+            if (ReservationEpoch == 0) throw new InvalidDataException("Invalid journal machine fence.");
             var count = reader.ReadInt32();
             if (count is < 0 or > MaximumRecords) throw new InvalidDataException("Invalid result journal record count.");
             var pending = new List<AgentMessage>(count);
@@ -148,9 +156,14 @@ public sealed class ResultJournal : IDisposable
     internal static void Validate(AgentMessage message)
     {
         if (message.PayloadCase is not (AgentMessage.PayloadOneofCase.TaskStarted or AgentMessage.PayloadOneofCase.TaskCompleted or
-            AgentMessage.PayloadOneofCase.ResourceSample) ||
+            AgentMessage.PayloadOneofCase.ResourceSample or AgentMessage.PayloadOneofCase.ReservationFenced) ||
             message.CalculateSize() > MaximumRecordBytes)
             throw new InvalidDataException("Journal accepts only bounded task events.");
+        if (message.ReservationFenced is { } fenced)
+        {
+            if (fenced.ReservationEpoch == 0) throw new InvalidDataException("Fence acknowledgement requires a positive epoch.");
+            return;
+        }
         var task = message.TaskStarted?.Task ?? message.TaskCompleted?.Task ?? message.ResourceSample?.Task;
         if (task is null || !Guid.TryParse(task.RunId, out var runId) || runId == Guid.Empty ||
             string.IsNullOrWhiteSpace(task.NodeKey) || task.NodeKey.Contains('/') ||

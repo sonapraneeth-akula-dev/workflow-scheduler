@@ -98,7 +98,7 @@ public sealed partial class ReportPublishTests
             host.Pool, 2, heartbeatInterval: TimeSpan.FromMilliseconds(50),
             resultJournalDirectory: Path.Combine(host.Root, "artifact-journal"));
         using var cache = new PackageCache(Path.Combine(host.Root, "artifact-packages"), NullLogger<PackageCache>.Instance);
-        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
+        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance, options: options);
         using var outbox = new AgentOutbox();
         await using var commands = new TaskCommands(options, cache, hosts, outbox, TimeProvider.System, NullLogger<TaskCommands>.Instance);
         using var connection = new AgentConnection(options, new AgentTelemetry(TimeProvider.System, commands), commands,

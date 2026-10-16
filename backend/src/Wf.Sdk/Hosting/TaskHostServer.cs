@@ -32,6 +32,8 @@ public static class TaskHostServer
             throw new ArgumentException("The task-host socket must be an absolute path shorter than 108 UTF-8 bytes.", nameof(socketPath));
         if (File.Exists(socketPath))
             throw new IOException("The task-host socket path already exists.");
+        if (LinuxHostSupervisor.Required)
+            return await LinuxHostSupervisor.RunAsync(socketPath, cancellationToken);
         Console.OutputEncoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
         // Private IPC needs no application configuration watchers or public-web middleware defaults.
         var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions { Args = [], ContentRootPath = AppContext.BaseDirectory });
@@ -62,7 +64,9 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
         lock (sync)
             return Task.FromResult(new HostReady
             {
-                ProtocolVersion = 2, ProcessId = (uint)Environment.ProcessId,
+                ProtocolVersion = 3, ProcessId = uint.TryParse(
+                    Environment.GetEnvironmentVariable("WF_TASK_HOST_SUPERVISOR_PID"), out var supervisor)
+                    ? supervisor : (uint)Environment.ProcessId,
                 WorkflowVersion = workflow.Version, Bound = bound is not null
             });
     }

@@ -21,6 +21,7 @@ message AgentMessage {
     TaskCompleted task_completed = 13;
     Ack ack = 14;
     ResourceSample resource_sample = 15;
+    ReservationFenced reservation_fenced = 16;
   }
 }
 
@@ -34,6 +35,7 @@ message ControlMessage {
     Drain drain = 12;
     Ack ack = 13;
     NotLeader not_leader = 14;
+    ReservationFence reservation_fence = 15;
   }
 }
 
@@ -113,6 +115,16 @@ message Drain {
   string reason = 2;
 }
 
+// Agent must durably advance the fence, cancel and drain all older work before replying.
+message ReservationFence {
+  uint64 reservation_epoch = 1;
+  string reason = 2;
+}
+
+message ReservationFenced {
+  uint64 reservation_epoch = 1;
+}
+
 // Cumulative: all messages through sequence were durably accepted.
 // Ack-only messages must not themselves trigger an Ack.
 message Ack {
@@ -128,6 +140,7 @@ message NotLeader {
 message TaskStarted {
   AttemptRef task = 1;
   google.protobuf.Timestamp at = 2;
+  uint64 reservation_epoch = 3;
 }
 
 message TaskCompleted {
@@ -137,6 +150,7 @@ message TaskCompleted {
   bytes outputs_json = 4;
   TaskError error = 5;
   ResourceSummary resource_summary = 6;
+  uint64 reservation_epoch = 7;
 }
 
 enum TaskOutcome {

@@ -4,6 +4,7 @@ using System.Threading.Channels;
 using Wf.Contracts.Agent.V1;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Leadership;
+using Wf.ControlPlane.Engine.Reservations;
 using Wf.ControlPlane.Engine.Sweeper;
 using Wf.ControlPlane.Storage;
 
@@ -12,7 +13,8 @@ namespace Wf.ControlPlane.Engine.Agents;
 public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGatewayService> logger, RunStore? runs = null,
     LeaseManager? leadership = null, AgentLossSweeper? losses = null, LogUploadCapabilities? logUploads = null,
     Wf.ControlPlane.Reports.ReportUploadCapabilities? reportUploads = null,
-    Wf.ControlPlane.Artifacts.ArtifactUploadCapabilities? artifactUploads = null, ResourceSampleSink? resources = null)
+    Wf.ControlPlane.Artifacts.ArtifactUploadCapabilities? artifactUploads = null, ResourceSampleSink? resources = null,
+    ReservationLeaseService? reservations = null)
     : AgentGateway.AgentGatewayBase
 {
     public override async Task Connect(IAsyncStreamReader<AgentMessage> requestStream,
@@ -79,6 +81,11 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                                     throw new RpcException(new Status(StatusCode.Unimplemented, "Task dispatch persistence is not configured."));
                                 await runs.AcceptAsync(session, message, token);
                                 break;
+                            case AgentMessage.PayloadOneofCase.ReservationFenced:
+                                if (reservations is null)
+                                    throw new RpcException(new Status(StatusCode.Unimplemented, "Reservation persistence is not configured."));
+                                await reservations.ConfirmAsync(session, message.ReservationFenced.ReservationEpoch, token);
+                                break;
                             case AgentMessage.PayloadOneofCase.Ack:
                                 if (message.Ack.Sequence == 0 || message.Ack.Sequence > (ulong)Volatile.Read(ref sequence) ||
                                     message.Ack.LeaderEpoch != epoch)
@@ -98,6 +105,7 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
             async Task SendAsync()
             {
                 var sent = new HashSet<long>();
+                var sentFences = new HashSet<ulong>();
                 try
                 {
                     while (!token.IsCancellationRequested)
@@ -109,6 +117,14 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                                 Sequence = checked((ulong)Interlocked.Increment(ref sequence)), LeaderEpoch = epoch,
                                 Ack = new Ack { Sequence = accepted }
                             }, token);
+                        if (reservations is not null)
+                            foreach (var fence in await reservations.PendingAsync(session, token))
+                                if (sentFences.Add(fence.ReservationEpoch))
+                                    await responseStream.WriteAsync(new ControlMessage
+                                    {
+                                        Sequence = checked((ulong)Interlocked.Increment(ref sequence)),
+                                        LeaderEpoch = epoch, ReservationFence = fence
+                                    }, token);
                         if (runs is not null)
                             foreach (var (id, command) in await runs.PendingAsync(session, token))
                                 if (sent.Add(id))

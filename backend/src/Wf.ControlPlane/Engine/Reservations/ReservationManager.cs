@@ -54,7 +54,8 @@ public sealed class ReservationManager(NpgsqlDataSource dataSource, RunStore run
         var now = timeProvider.GetUtcNow();
         var existing = new List<MachineReservation>();
         await using (var retry = new NpgsqlCommand("""
-            SELECT id,run_id,node_key,agent_id,epoch,created_at,renewed_at,expires_at,selector=$3::jsonb
+            SELECT id,run_id,node_key,agent_id,epoch,created_at,renewed_at,expires_at,selector=$3::jsonb,
+                release_requested_at IS NULL
             FROM reservations WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND node_key=$2
                 AND released_at IS NULL ORDER BY agent_id FOR UPDATE
             """, connection, transaction))
@@ -68,7 +69,8 @@ public sealed class ReservationManager(NpgsqlDataSource dataSource, RunStore run
                 if (!reader.GetBoolean(8))
                     throw new InvalidOperationException("An active node reservation cannot change its selector.");
                 var reservation = Read(reader);
-                if (reservation.ExpiresAt <= now) throw new ReservationUnavailableException(runId, nodeKey, count);
+                if (reservation.ExpiresAt <= now || !reader.GetBoolean(9))
+                    throw new ReservationUnavailableException(runId, nodeKey, count);
                 existing.Add(reservation);
             }
         }
@@ -119,7 +121,11 @@ public sealed class ReservationManager(NpgsqlDataSource dataSource, RunStore run
             await using var reader = await insert.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken))
                 throw new InvalidDataException("Reservation insert returned no identity.");
-            existing.Add(Read(reader));
+            var reservation = Read(reader);
+            existing.Add(reservation);
+            await reader.DisposeAsync();
+            await RunStore.ExecuteAsync(connection, "UPDATE agents SET reservation_epoch=$2 WHERE id=$1",
+                cancellationToken, agent.Id, reservation.Epoch);
         }
         await transaction.CommitAsync(cancellationToken);
         return existing;

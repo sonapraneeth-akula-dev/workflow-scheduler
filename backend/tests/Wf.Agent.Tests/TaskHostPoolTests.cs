@@ -10,14 +10,17 @@ using Wf.TaskHost.Fixture;
 
 namespace Wf.Agent.Tests;
 
-public sealed class TaskHostPoolTests
+public sealed class TaskHostPoolTests : IDisposable
 {
+    private readonly string containmentRoot = Path.GetFullPath(Path.Combine(".agent-artifacts", "physical-fence-3adec91f",
+        "pool-recovery", Guid.NewGuid().ToString("N")));
     private static TaskHostPackage Package => new("1.0.0", "dotnet",
         ["exec", "--runtimeconfig", Path.ChangeExtension(typeof(TaskHostPoolTests).Assembly.Location, ".runtimeconfig.json"),
             "--depsfile", Path.ChangeExtension(typeof(TaskHostPoolTests).Assembly.Location, ".deps.json"), typeof(FixtureMarker).Assembly.Location],
         AppContext.BaseDirectory);
 
-    private static TaskHostPool Pool() => new(NullLogger<TaskHostPool>.Instance);
+    private TaskHostPool Pool() => new(NullLogger<TaskHostPool>.Instance,
+        maxWarmRssBytes: 1_000_000_000, containmentDirectory: containmentRoot);
     private static Dispatch Dispatch(string task = "echo", TimeSpan? timeout = null) => new()
     {
         Task = new AttemptRef { RunId = Guid.NewGuid().ToString(), NodeKey = "work", TaskKey = task, Attempt = 1 },
@@ -34,13 +37,14 @@ public sealed class TaskHostPoolTests
         var pid = Assert.Single(pool.WarmProcessIds);
         Assert.Equal(1, pool.ProcessStartCount);
         var result = await pool.ExecuteAsync(Package, Dispatch(), ByteString.CopyFromUtf8("""{"previous":3}"""),
-            cancellationToken: TestContext.Current.CancellationToken);
+            cancellationToken: TestContext.Current.CancellationToken,
+            journalResult: completed => Assert.Equal(pid, OwnerPid(completed)));
         Assert.Equal(1, pool.ProcessStartCount);
         Assert.Empty(pool.WarmProcessIds);
         Assert.Equal(TaskOutcome.Succeeded, result.Outcome);
         using var outputs = JsonDocument.Parse(result.OutputsJson.Memory);
         Assert.Equal(15, outputs.RootElement.GetProperty("result").GetInt32());
-        Assert.Equal(pid, outputs.RootElement.GetProperty("pid").GetInt32());
+        AssertStopped(outputs.RootElement.GetProperty("pid").GetInt32());
         Assert.Equal("work/echo", outputs.RootElement.GetProperty("taskKey").GetString());
         AssertStopped(pid);
     }
@@ -84,8 +88,10 @@ public sealed class TaskHostPoolTests
         await pool.PrewarmAsync(Package, TestContext.Current.CancellationToken);
         await pool.PrewarmAsync(Package, TestContext.Current.CancellationToken);
         var pids = pool.WarmProcessIds;
+        var owners = new System.Collections.Concurrent.ConcurrentBag<int>();
         var attempts = Enumerable.Range(0, 2).Select(_ => pool.ExecuteAsync(Package, Dispatch(),
-            ByteString.CopyFromUtf8("""{"previous":0}"""), cancellationToken: TestContext.Current.CancellationToken)).ToArray();
+            ByteString.CopyFromUtf8("""{"previous":0}"""), cancellationToken: TestContext.Current.CancellationToken,
+            journalResult: completed => owners.Add(OwnerPid(completed)))).ToArray();
         var results = await Task.WhenAll(attempts);
         Assert.Equal(2, pool.ProcessStartCount);
         var actual = results.Select(result =>
@@ -93,9 +99,10 @@ public sealed class TaskHostPoolTests
             using var output = JsonDocument.Parse(result.OutputsJson.Memory);
             return output.RootElement.GetProperty("pid").GetInt32();
         }).ToArray();
-        Assert.Equal(pids.Order(), actual.Order());
+        Assert.Equal(pids.Order(), owners.Order());
         Assert.NotEqual(actual[0], actual[1]);
         foreach (var pid in pids) AssertStopped(pid);
+        foreach (var pid in actual) AssertStopped(pid);
     }
 
     [Theory]
@@ -337,9 +344,23 @@ public sealed class TaskHostPoolTests
         Assert.Throws<ArgumentException>(() => new TaskHostPackage("1", "", [], AppContext.BaseDirectory));
     }
 
+    private static int OwnerPid(TaskCompleted completed)
+    {
+        using var outputs = JsonDocument.Parse(completed.OutputsJson.Memory);
+        var pid = outputs.RootElement.GetProperty("pid").GetInt32();
+        if (!OperatingSystem.IsLinux()) return pid;
+        var stat = File.ReadAllText($"/proc/{pid}/stat");
+        return int.Parse(stat[(stat.LastIndexOf(')') + 2)..].Split(' ')[1], System.Globalization.CultureInfo.InvariantCulture);
+    }
+
     private static void AssertStopped(int pid)
     {
         try { using var process = Process.GetProcessById(pid); Assert.True(process.HasExited); }
         catch (ArgumentException) { }
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(containmentRoot)) Directory.Delete(containmentRoot, recursive: true);
     }
 }

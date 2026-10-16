@@ -35,7 +35,7 @@ public sealed class SecretExecutionTests : IDisposable
         var store = new RecordingStore(local);
         var logger = new Recorder();
         var messages = new ConcurrentQueue<string>();
-        await using var hosts = new TaskHostPool(logger, secretStore: store);
+        await using var hosts = new TaskHostPool(logger, secretStore: store, containmentDirectory: Path.Combine(root, "host-lifetimes"));
         var package = Package(defaults);
         await hosts.PrewarmAsync(package, Token);
         Assert.Empty(store.Reads);
@@ -78,7 +78,7 @@ public sealed class SecretExecutionTests : IDisposable
     public async Task Actual_missing_secret_fails_correct_attempt_nonretryable_ValidationError_before_user_delegate(string reference)
     {
         var local = new LocalSecretStore(Path.Combine(root, "values"));
-        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance, secretStore: local);
+        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance, secretStore: local, containmentDirectory: Path.Combine(root, "host-lifetimes"));
         var dispatch = Dispatch();
         dispatch.VariablesJson = ByteString.CopyFromUtf8(JsonSerializer.Serialize(new { credential = new { Name = reference } }));
         var result = await hosts.ExecuteAsync(Package(), dispatch, cancellationToken: Token);
@@ -95,7 +95,7 @@ public sealed class SecretExecutionTests : IDisposable
     {
         var local = new LocalSecretStore(Path.Combine(root, "values"));
         var store = new RecordingStore(local);
-        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance, secretStore: store);
+        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance, secretStore: store, containmentDirectory: Path.Combine(root, "host-lifetimes"));
         foreach (var value in new[] { "first", "second-distinct-value" })
         {
             await hosts.PrewarmAsync(Package(defaults: true), Token);
@@ -112,7 +112,7 @@ public sealed class SecretExecutionTests : IDisposable
     public async Task Invalid_reference_cannot_call_provider_and_unprovided_reference_cannot_be_read_by_SDK()
     {
         var store = new RecordingStore(new LocalSecretStore(Path.Combine(root, "values")));
-        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance, secretStore: store);
+        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance, secretStore: store, containmentDirectory: Path.Combine(root, "host-lifetimes"));
         var dispatch = Dispatch();
         dispatch.SecretRefs.Add("secret://local/../escape");
         var invalid = await hosts.ExecuteAsync(Package(), dispatch, cancellationToken: Token);
@@ -138,7 +138,7 @@ public sealed class SecretExecutionTests : IDisposable
         await local.WriteAsync(new("secret://local/task-token"), "task-value", Token);
         await local.WriteAsync(new("secret://local/explicit"), "explicit-value", Token);
         var store = new RecordingStore(local);
-        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance, secretStore: store);
+        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance, secretStore: store, containmentDirectory: Path.Combine(root, "host-lifetimes"));
         Assert.Equal(TaskOutcome.Succeeded, (await hosts.ExecuteAsync(Package(), Dispatch("outputs"), cancellationToken: Token)).Outcome);
         Assert.Empty(store.Reads);
         var operation = await hosts.ExecuteAsync(Package(), Dispatch("secretOperation"), cancellationToken: Token);
@@ -158,7 +158,7 @@ public sealed class SecretExecutionTests : IDisposable
         var local = new LocalSecretStore(Path.Combine(root, "values"));
         await local.WriteAsync(new("secret://local/first"), "second-missing", Token);
         var store = new RecordingStore(local);
-        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance, secretStore: store);
+        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance, secretStore: store, containmentDirectory: Path.Combine(root, "host-lifetimes"));
         var dispatch = Dispatch("outputs");
         dispatch.SecretRefs.AddRange(["secret://local/first", "second-missing"]);
         var result = await hosts.ExecuteAsync(Package(), dispatch, cancellationToken: Token);
@@ -173,7 +173,7 @@ public sealed class SecretExecutionTests : IDisposable
     public async Task Expired_attempt_keeps_existing_timeout_semantics_without_resolving_or_executing_user_code()
     {
         var store = new RecordingStore(new LocalSecretStore(Path.Combine(root, "values")));
-        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance, secretStore: store);
+        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance, secretStore: store, containmentDirectory: Path.Combine(root, "host-lifetimes"));
         await hosts.PrewarmAsync(Package(), Token);
         var dispatch = Dispatch();
         dispatch.DeadlineAt = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddSeconds(-1));

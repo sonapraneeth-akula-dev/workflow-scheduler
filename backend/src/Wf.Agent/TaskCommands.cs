@@ -16,13 +16,15 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
     private readonly object gate = new();
     private readonly ConcurrentDictionary<AttemptKey, Execution> active = new();
     private readonly HashSet<AttemptKey> accepted = [];
+    private readonly SemaphoreSlim fenceSerial = new(1, 1);
     private bool disposed;
+    private bool fencePending;
     private readonly TaskCompletionSource failure = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public IReadOnlyList<AttemptRef> Inflight => active.Values.Select(item => item.Dispatch.Task.Clone()).ToArray();
     public Task Failure => failure.Task;
 
-    public ValueTask HandleAsync(ControlMessage message, CancellationToken cancellationToken)
+    public async ValueTask HandleAsync(ControlMessage message, CancellationToken cancellationToken)
     {
         switch (message.PayloadCase)
         {
@@ -34,10 +36,43 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
                 lock (gate)
                     if (active.TryGetValue(key, out var execution)) execution.Cancellation.Cancel();
                 break;
+            case ControlMessage.PayloadOneofCase.ReservationFence:
+                await FenceAsync(message.ReservationFence.ReservationEpoch, cancellationToken);
+                break;
             default:
                 throw new NotSupportedException($"Agent command '{message.PayloadCase}' is not implemented.");
         }
-        return ValueTask.CompletedTask;
+    }
+
+    private async Task FenceAsync(ulong epoch, CancellationToken cancellationToken)
+    {
+        if (epoch == 0) throw new InvalidDataException("Reservation fence must be positive.");
+        await fenceSerial.WaitAsync(cancellationToken);
+        try
+        {
+            Execution[] cancelled;
+            lock (gate)
+            {
+                ObjectDisposedException.ThrowIf(disposed, this);
+                if (epoch < outbox.ReservationEpoch || active.Values.Any(execution => execution.Dispatch.ReservationEpoch >= epoch))
+                {
+                    logger.LogWarning("Rejected stale reservation fence {Epoch}; newer machine work must not be stopped.", epoch);
+                    return;
+                }
+                if (epoch > outbox.ReservationEpoch) outbox.ObserveReservationEpoch(epoch);
+                fencePending = true;
+                cancelled = active.Values.ToArray();
+                foreach (var execution in cancelled) execution.Cancellation.Cancel();
+            }
+            await hosts.FenceAsync(cancellationToken);
+            await Task.WhenAll(cancelled.Select(execution => execution.Work)).WaitAsync(cancellationToken);
+            lock (gate)
+            {
+                outbox.Enqueue(new AgentMessage { ReservationFenced = new() { ReservationEpoch = epoch } });
+                fencePending = false;
+            }
+        }
+        finally { fenceSerial.Release(); }
     }
 
     private void Accept(Dispatch dispatch, CancellationToken stoppingToken)
@@ -55,6 +90,14 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
+            if (dispatch.ReservationEpoch < outbox.ReservationEpoch)
+            {
+                logger.LogWarning("Rejected stale reservation epoch {Epoch} for task {RunId}/{NodeKey}/{TaskKey}/{Attempt}.",
+                    dispatch.ReservationEpoch, key.RunId, key.NodeKey, key.TaskKey, key.Attempt);
+                return;
+            }
+            if (fencePending)
+                throw new InvalidDataException("Dispatch cannot start until physical reservation fencing completes.");
             if (accepted.Contains(key) || outbox.ContainsResult(dispatch.Task)) return;
             if (active.Count >= options.MaxTasks)
                 throw new InvalidDataException("Dispatch exceeds the agent's configured task capacity.");
@@ -72,6 +115,12 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
                 }
                 grant.UploadUri = uri.AbsoluteUri;
             }
+            if (active.Values.Any(item => item.Dispatch.ReservationEpoch < dispatch.ReservationEpoch))
+            {
+                execution.Cancellation.Dispose();
+                throw new InvalidDataException("A newer reservation cannot start before older machine work is fenced.");
+            }
+            outbox.ObserveReservationEpoch(dispatch.ReservationEpoch);
             accepted.Add(key);
             active[key] = execution;
             execution.Work = Task.Run(async () =>
@@ -103,7 +152,8 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
             }
             outbox.Enqueue(new AgentMessage
             {
-                TaskStarted = new TaskStarted { Task = dispatch.Task.Clone(), At = Timestamp.FromDateTimeOffset(timeProvider.GetUtcNow()) }
+                TaskStarted = new TaskStarted { Task = dispatch.Task.Clone(), At = Timestamp.FromDateTimeOffset(timeProvider.GetUtcNow()),
+                    ReservationEpoch = dispatch.ReservationEpoch }
             });
             using var package = await cache.GetAsync(dispatch.Version, new Uri(dispatch.PackageUri), dispatch.Sha256,
                 execution.Cancellation.Token);
@@ -112,6 +162,7 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
                 publishResources: outbox.Enqueue, journalResult: completion =>
                 {
                     publishing = true;
+                    completion.ReservationEpoch = dispatch.ReservationEpoch;
                     outbox.Enqueue(new AgentMessage { TaskCompleted = completion });
                     persisted = true;
                     publishing = false;
@@ -128,7 +179,11 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
             result = Failure(TaskOutcome.Failed, "PlatformError", exception.Message, false);
         }
         if (capture is not null) await capture.CompleteAsync();
-        if (!persisted) outbox.Enqueue(new AgentMessage { TaskCompleted = result });
+        if (!persisted)
+        {
+            result!.ReservationEpoch = dispatch.ReservationEpoch;
+            outbox.Enqueue(new AgentMessage { TaskCompleted = result });
+        }
         lock (gate)
         {
             active.TryRemove(key, out _);

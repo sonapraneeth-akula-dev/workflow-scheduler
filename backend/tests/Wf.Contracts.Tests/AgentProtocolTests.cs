@@ -33,7 +33,8 @@ public sealed class AgentProtocolTests
         }];
         yield return [new AgentMessage
         {
-            Sequence = 3, TaskStarted = new TaskStarted { Task = Attempt, At = Timestamp.FromDateTime(DateTime.UnixEpoch) }
+            Sequence = 3, TaskStarted = new TaskStarted
+                { Task = Attempt, At = Timestamp.FromDateTime(DateTime.UnixEpoch), ReservationEpoch = 4 }
         }];
         yield return [new AgentMessage
         {
@@ -42,10 +43,12 @@ public sealed class AgentProtocolTests
                 Task = Attempt, At = Timestamp.FromDateTime(DateTime.UnixEpoch), Outcome = TaskOutcome.Failed,
                 OutputsJson = ByteString.CopyFromUtf8("""{"result":"partial"}"""),
                 Error = new TaskError { Category = "ResourceLimit", Message = "Memory exceeded", NonRetryable = true },
-                ResourceSummary = new ResourceSummary { PeakRamMb = 512, CpuTimeMs = 15, ElapsedMs = 100 }
+                ResourceSummary = new ResourceSummary { PeakRamMb = 512, CpuTimeMs = 15, ElapsedMs = 100 },
+                ReservationEpoch = 4
             }
         }];
         yield return [new AgentMessage { Sequence = 5, Ack = new Ack { Sequence = 7, LeaderEpoch = 3 } }];
+        yield return [new AgentMessage { Sequence = 6, ReservationFenced = new() { ReservationEpoch = 5 } }];
     }
 
     public static IEnumerable<object[]> ControlMessages()
@@ -79,6 +82,10 @@ public sealed class AgentProtocolTests
         yield return [new ControlMessage
         {
             Sequence = 5, LeaderEpoch = 3, NotLeader = new NotLeader { LeaderHint = "https://leader:7443" }
+        }];
+        yield return [new ControlMessage
+        {
+            Sequence = 6, LeaderEpoch = 3, ReservationFence = new() { ReservationEpoch = 5, Reason = "Lease expired" }
         }];
     }
 
@@ -129,6 +136,17 @@ public sealed class AgentProtocolTests
     {
         var bytes = new byte[] { 8, 1, 0xa0, 6, 42 };
         Assert.Equal(bytes, AgentMessage.Parser.ParseFrom(bytes).ToByteArray());
+    }
+
+    [Fact]
+    public void Additive_machine_fences_preserve_legacy_event_defaults_and_stable_field_numbers()
+    {
+        Assert.Equal(0UL, TaskStarted.Parser.ParseFrom(new TaskStarted { Task = Attempt }.ToByteArray()).ReservationEpoch);
+        Assert.Equal(0UL, TaskCompleted.Parser.ParseFrom(new TaskCompleted { Task = Attempt }.ToByteArray()).ReservationEpoch);
+        Assert.Equal(3, TaskStarted.Descriptor.FindFieldByName("reservation_epoch").FieldNumber);
+        Assert.Equal(7, TaskCompleted.Descriptor.FindFieldByName("reservation_epoch").FieldNumber);
+        Assert.Equal(15, ControlMessage.Descriptor.FindFieldByName("reservation_fence").FieldNumber);
+        Assert.Equal(16, AgentMessage.Descriptor.FindFieldByName("reservation_fenced").FieldNumber);
     }
 
     [Fact]

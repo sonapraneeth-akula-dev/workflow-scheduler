@@ -71,12 +71,15 @@ public sealed class TaskHostPool : IAsyncDisposable
     private readonly Task maintenance;
     private readonly ResourceSamplingService? sampling;
     private readonly ISecretStore? secretStore;
+    private readonly HostRecoveryBarrier recovery;
+    private Exception? containmentFailure;
     private int processStartCount;
     private bool disposed;
 
     public TaskHostPool(ILogger<TaskHostPool> logger, TimeProvider? timeProvider = null,
         int maxWarmProcesses = DefaultMaxWarmProcesses, long maxWarmRssBytes = DefaultMaxWarmRssBytes,
-        TimeSpan? warmIdleTimeout = null, ResourceSamplingService? sampling = null, ISecretStore? secretStore = null)
+        TimeSpan? warmIdleTimeout = null, ResourceSamplingService? sampling = null, ISecretStore? secretStore = null,
+        string? containmentDirectory = null, AgentOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxWarmProcesses);
@@ -90,12 +93,33 @@ public sealed class TaskHostPool : IAsyncDisposable
         this.warmIdleTimeout = idle;
         this.sampling = sampling;
         this.secretStore = secretStore;
+        recovery = new HostRecoveryBarrier(containmentDirectory ?? (options is null ? null :
+            Path.Combine(options.ResultJournalDirectory, "host-lifetimes", Guid.Parse(options.Id).ToString("N"))));
         timer = clock.CreateTimer(static state => ((ChannelWriter<byte>)state!).TryWrite(0), wake.Writer,
             Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         maintenance = MaintainAsync();
     }
 
     public int ProcessStartCount => Volatile.Read(ref processStartCount);
+
+    /// <summary>
+    /// Stops every host in this pool, not only a particular reservation epoch. Callers must block admission
+    /// and reject stale fences before calling, then drain execution tasks before acknowledging the fence.
+    /// Unclean same-boot lifetimes quarantine this stable agent/journal identity until a machine reboot.
+    /// </summary>
+    public async Task FenceAsync(CancellationToken cancellationToken = default)
+    {
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (containmentFailure is not null)
+                throw new InvalidOperationException("Physical task-host cleanup failed; reservation fencing is quarantined.", containmentFailure);
+            await Task.WhenAll(live.Values.Select(ReleaseAsync)).WaitAsync(cancellationToken);
+            warm.Clear();
+            recovery.AssertSafe(allowActive: false);
+        }
+        finally { gate.Release(); }
+    }
     public IReadOnlyList<int> WarmProcessIds
     {
         get
@@ -213,11 +237,7 @@ public sealed class TaskHostPool : IAsyncDisposable
                 catch (TimeoutException)
                 {
                     logger.LogWarning("Task host {Pid} ignored cancellation; killing its process tree.", host.Process.Id);
-                    if (host.ResourceScope is not null && !host.Process.HasExited)
-                    {
-                        host.Process.Kill(entireProcessTree: true);
-                        await host.Process.WaitForExitAsync();
-                    }
+                    await host.Containment.StopAsync(host.Process);
                     return new TaskCompleted
                     {
                         Task = dispatch.Task.Clone(), At = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow),
@@ -261,6 +281,9 @@ public sealed class TaskHostPool : IAsyncDisposable
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, shutdown.Token);
         cancellationToken = lifetime.Token;
         using var startingLease = package.CacheLease?.Retain();
+        if (containmentFailure is not null)
+            throw new InvalidOperationException("Physical task-host cleanup failed; new work is quarantined.", containmentFailure);
+        recovery.AssertSafe();
         var directory = Path.Combine(Path.GetTempPath(), $"wf-h-{Guid.NewGuid():N}");
         CreatePrivateDirectory(directory);
         var socketPath = Path.Combine(directory, "s");
@@ -277,13 +300,14 @@ public sealed class TaskHostPool : IAsyncDisposable
         string? resourceUnavailable = null;
         var resourceScope = sampling?.CreateProcessScope(out resourceUnavailable);
         try { resourceScope?.PrepareStart(info); }
-        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or IOException or ArgumentException)
         {
             resourceUnavailable = exception.Message;
             DisposeResourceScope(resourceScope);
             resourceScope = null;
         }
         var process = new Process { StartInfo = info };
+        var containment = new TaskHostContainment(recovery, info, socketPath);
         var started = false;
         PackageLease? processLease = null;
         Host? host = null;
@@ -297,6 +321,7 @@ public sealed class TaskHostPool : IAsyncDisposable
             process.Exited += (_, _) => processLease?.Dispose();
             if (!process.Start()) throw new InvalidOperationException("Task-host process did not start.");
             started = true;
+            containment.Bind(process);
             Interlocked.Increment(ref processStartCount);
             var resourceBound = resourceScope is not null;
             try { resourceScope?.Bind(process); }
@@ -327,7 +352,7 @@ public sealed class TaskHostPool : IAsyncDisposable
                 MaxReceiveMessageSize = 1024 * 1024, MaxSendMessageSize = 1024 * 1024
             });
             host = new Host(package, directory, socketPath, process, channel, logger, processLease,
-                resourceScope, resourceBound, resourceUnavailable);
+                resourceScope, resourceBound, resourceUnavailable, containment);
             live.TryAdd(process.Id, host);
             if (prewarming)
             {
@@ -360,8 +385,9 @@ public sealed class TaskHostPool : IAsyncDisposable
                         if (prewarming && !warm.Contains(host)) return null;
                     }
                     var ready = await call.ResponseAsync;
-                    if (ready.ProtocolVersion != 2 || ready.ProcessId != process.Id || ready.WorkflowVersion != package.Version || ready.Bound)
+                    if (ready.ProtocolVersion != 3 || ready.ProcessId != process.Id || ready.WorkflowVersion != package.Version || ready.Bound)
                         throw new InvalidDataException("Task-host readiness identity, version or state is invalid.");
+                    containment.VerifyReady();
                     await TrimWarmAsync(prewarming ? host : null);
                     if (prewarming && !warm.Contains(host)) return null;
                     host.IdleSince = clock.GetTimestamp();
@@ -381,7 +407,17 @@ public sealed class TaskHostPool : IAsyncDisposable
             if (host is not null) await EvictAsync(host);
             else
             {
-                if (started && !process.HasExited) { process.Kill(entireProcessTree: true); await process.WaitForExitAsync(); }
+                try
+                {
+                    if (started) await containment.StopAsync(process);
+                    containment.Complete();
+                }
+                catch (Exception cleanupError)
+                {
+                    containmentFailure = cleanupError;
+                    containment.Dispose();
+                    throw;
+                }
                 process.Dispose();
                 DisposeResourceScope(resourceScope);
                 if (File.Exists(socketPath)) File.Delete(socketPath);
@@ -409,10 +445,15 @@ public sealed class TaskHostPool : IAsyncDisposable
         host.Channel.Dispose();
         try
         {
-            if (!host.Process.HasExited) host.Process.Kill(entireProcessTree: true);
+            await host.Containment.StopAsync(host.Process);
+            host.Containment.Complete();
         }
-        catch (Exception exception) when ((exception is System.ComponentModel.Win32Exception or InvalidOperationException) && host.Process.HasExited) { }
-        await host.Process.WaitForExitAsync();
+        catch (Exception exception)
+        {
+            containmentFailure = exception;
+            host.Containment.Dispose();
+            throw;
+        }
         host.PackageLease?.Dispose();
         try { await Task.WhenAll(host.Output, host.Error); }
         finally
@@ -463,8 +504,8 @@ public sealed class TaskHostPool : IAsyncDisposable
                 continue;
             }
             long bytes;
-            try { bytes = host.Process.WorkingSet64; }
-            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+            try { bytes = WarmWorkingSet(host.Process); }
+            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
             {
                 logger.LogWarning(exception, "Cannot sample warm task host {Pid}; evicting it.", host.Id);
                 await EvictAsync(host);
@@ -499,6 +540,26 @@ public sealed class TaskHostPool : IAsyncDisposable
             }
         }
         catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { }
+    }
+
+    private static long WarmWorkingSet(Process root)
+    {
+        if (!OperatingSystem.IsLinux()) return root.WorkingSet64;
+        long bytes = 0;
+        var pending = new Stack<int>();
+        var seen = new HashSet<int>();
+        pending.Push(root.Id);
+        while (pending.TryPop(out var pid))
+        {
+            if (!seen.Add(pid)) continue;
+            using var process = Process.GetProcessById(pid);
+            bytes = checked(bytes + process.WorkingSet64);
+            foreach (var thread in Directory.EnumerateDirectories($"/proc/{pid}/task"))
+                foreach (var child in File.ReadAllText(Path.Combine(thread, "children"))
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                    pending.Push(int.Parse(child, System.Globalization.CultureInfo.InvariantCulture));
+        }
+        return bytes;
     }
 
     private void ScheduleSweep()
@@ -560,6 +621,7 @@ public sealed class TaskHostPool : IAsyncDisposable
         public PackageLease? PackageLease { get; }
         public ITaskResourceScope? ResourceScope { get; }
         public ITaskResourceScope? CleanupResourceScope { get; }
+        public TaskHostContainment Containment { get; }
         public string? ResourceUnavailableReason { get; }
         public int Id { get; }
         public long IdleSince { get; set; }
@@ -572,8 +634,9 @@ public sealed class TaskHostPool : IAsyncDisposable
 
         public Host(TaskHostPackage package, string directory, string socketPath, Process process, GrpcChannel channel,
             ILogger<TaskHostPool> logger, PackageLease? packageLease, ITaskResourceScope? resourceScope,
-            bool resourceBound, string? resourceUnavailableReason)
+            bool resourceBound, string? resourceUnavailableReason, TaskHostContainment containment)
         {
+            Containment = containment;
             CleanupResourceScope = resourceScope;
             ResourceScope = resourceBound ? resourceScope : null;
             ResourceUnavailableReason = resourceUnavailableReason;

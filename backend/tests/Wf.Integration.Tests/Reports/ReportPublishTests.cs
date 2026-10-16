@@ -389,7 +389,7 @@ public sealed partial class ReportPublishTests(ReportPublishDatabase database) :
             host.Pool, 2, heartbeatInterval: TimeSpan.FromMilliseconds(50),
             resultJournalDirectory: Path.Combine(host.Root, "journal"));
         using var cache = new PackageCache(Path.Combine(host.Root, "packages"), NullLogger<PackageCache>.Instance);
-        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
+        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance, options: options);
         using var outbox = new AgentOutbox();
         await using var commands = new TaskCommands(options, cache, hosts, outbox, TimeProvider.System,
             NullLogger<TaskCommands>.Instance);

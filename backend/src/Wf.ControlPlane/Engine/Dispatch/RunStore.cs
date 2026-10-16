@@ -12,6 +12,7 @@ using Wf.Contracts.Runs;
 using Wf.Contracts.Outputs;
 using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Leadership;
+using Wf.ControlPlane.Engine.Reservations;
 using Wf.Engine.Core;
 using Wf.Engine.Core.StateMachine;
 using Wf.Engine.Core.Results;
@@ -20,8 +21,10 @@ using DispatchCommand = Wf.Contracts.Agent.V1.Dispatch;
 
 namespace Wf.ControlPlane.Engine.Dispatch;
 
-public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logger, LeaseManager? leadership = null)
+public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logger, LeaseManager? leadership = null,
+    TimeProvider? timeProvider = null)
 {
+    internal DateTimeOffset UtcNow => (timeProvider ?? TimeProvider.System).GetUtcNow();
     internal LeaseToken? CaptureLease() => leadership?.RequireLease();
 
     internal Task FenceAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, LeaseToken? lease,
@@ -265,6 +268,7 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
             ?? throw new ArgumentException("Task event requires a timestamp.", nameof(message));
         var taskKey = identity.TaskKey;
         var completed = message.TaskCompleted;
+        var reportedEpoch = message.TaskStarted?.ReservationEpoch ?? completed?.ReservationEpoch ?? 0;
         if (completed is not null && TaskOutputJson.Error(completed.OutputsJson.Memory) is { } outputError)
             completed = TaskOutputJson.Reject(completed, outputError);
         if (completed is not null) ResultDeduplicator.Validate(completed);
@@ -272,15 +276,22 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await FenceAsync(connection, transaction, lease, cancellationToken);
-        await using (var fence = new NpgsqlCommand("SELECT session_id FROM agents WHERE id=$1 FOR UPDATE", connection))
+        await ExecuteAsync(connection, "SELECT pg_advisory_xact_lock($1)", cancellationToken, ReservationManager.AllocationLock);
+        long currentEpoch;
+        await using (var fence = new NpgsqlCommand("SELECT session_id,reservation_epoch FROM agents WHERE id=$1 FOR UPDATE", connection))
         {
             fence.Parameters.AddWithValue(session.AgentId);
-            if (await fence.ExecuteScalarAsync(cancellationToken) is not Guid current || current != session.SessionId)
+            await using var row = await fence.ExecuteReaderAsync(cancellationToken);
+            if (!await row.ReadAsync(cancellationToken) || row.GetGuid(0) != session.SessionId)
                 throw new InvalidOperationException("Agent connection was superseded by a new Hello.");
+            currentEpoch = row.GetInt64(1);
         }
         var run = await LoadAsync(connection, runId, true, cancellationToken);
         await using (var attempt = new NpgsqlCommand("""
-            SELECT status FROM task_attempts WHERE run_day=uuid_v7_run_day($1) AND run_id=$1
+            SELECT status,reservation_epoch,NOT EXISTS(
+                SELECT 1 FROM reservations r WHERE r.agent_id=$4 AND r.released_at IS NULL
+                    AND (r.epoch<>task_attempts.reservation_epoch OR r.expires_at<=$5 OR r.release_requested_at IS NOT NULL))
+            FROM task_attempts WHERE run_day=uuid_v7_run_day($1) AND run_id=$1
               AND task_key=$2 AND attempt=$3 AND agent_id=$4 FOR UPDATE
             """, connection))
         {
@@ -288,8 +299,18 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
             attempt.Parameters.AddWithValue(taskKey);
             attempt.Parameters.AddWithValue(identity.Attempt);
             attempt.Parameters.AddWithValue(session.AgentId);
-            if (await attempt.ExecuteScalarAsync(cancellationToken) is not short status)
+            attempt.Parameters.AddWithValue(UtcNow);
+            await using var row = await attempt.ExecuteReaderAsync(cancellationToken);
+            if (!await row.ReadAsync(cancellationToken))
                 throw new ArgumentException("Task event does not match an attempt assigned to this agent.", nameof(message));
+            var status = row.GetInt16(0);
+            var assignedEpoch = row.GetInt64(1);
+            if ((reportedEpoch == 0 ? assignedEpoch != 1 || currentEpoch != 1 :
+                    reportedEpoch != (ulong)assignedEpoch || assignedEpoch != currentEpoch) || !row.GetBoolean(2))
+            {
+                LogStaleReservation(identity, session.AgentId, reportedEpoch);
+                return;
+            }
             if (ResultDeduplicator.IsDuplicate((ExecutionStatus)status, completed is not null))
                 return;
         }
@@ -344,6 +365,10 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
                 """, cancellationToken, runId, reference!.NodeKey, completed.OutputsJson.ToStringUtf8());
         await transaction.CommitAsync(cancellationToken);
     }
+
+    internal void LogStaleReservation(Wf.Engine.Core.Results.ResultIdentity identity, Guid agentId, ulong epoch) =>
+        logger.LogWarning("Discarded expired or fenced reservation epoch {Epoch} from agent {AgentId}, run {RunId}, task {TaskKey}, attempt {Attempt}.",
+            epoch, agentId, identity.RunId, identity.TaskKey, identity.Attempt);
 
     internal static async Task ExecuteAsync(NpgsqlConnection connection, string sql, CancellationToken cancellationToken,
         params object[] parameters)

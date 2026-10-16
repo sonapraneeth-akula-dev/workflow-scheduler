@@ -8,6 +8,12 @@ using Wf.TaskHost.Fixture;
 
 if (args.Length > 0 && args[0] == "--secret-default-fixture")
     return await SecretFixture.Create(withDefault: true).RunAsync(args[1..]);
+if (args.Length > 0 && args[0] == "--physical-lifetime-fixture")
+    return await PhysicalLifetimeFixture.Create().RunAsync(args[1..]);
+if (args.Length > 0 && args[0] == "--physical-protocol2-fixture")
+    return await PhysicalLifetimeFixture.RunProtocol2Async(args[^1]);
+if (args.Length > 0 && args[0] == "--physical-empty-argument-fixture")
+    return args.Length > 1 && args[1] == "" ? await PhysicalLifetimeFixture.Create().RunAsync(args[2..]) : 99;
 
 var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test")
     .Variables(v => v.Int("amount", 10).Secret("credential"))

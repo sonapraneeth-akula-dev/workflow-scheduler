@@ -255,7 +255,7 @@ system-assigned identity. No developer/browser/CLI credential fallback.
 `ctx.Secret(ctx.Var<SecretReference>("credential"))` accesses a declared resolved
 value. Missing or unavailable secrets become safe nonretryable `ValidationError`;
 resolved values never enter manifests, dispatches, journals or process arguments.
-Rebuild existing SDK packages: task-host private protocol 2 is required.
+Rebuild existing SDK packages: task-host private readiness protocol 3 is required.
 Provisioning and provider details: [agent secrets](backend/src/Wf.Agent/Secrets/README.md).
 
 `Tasks.HttpOperation(...)` declares an opt-in long-running HTTP operation:
@@ -1002,9 +1002,33 @@ every other node/run and persists each machine's reservation epoch in the
 dispatch and outbox. Expired but unreleased rows still block other work and new
 owner dispatches; expiry alone never makes a machine free. The database-backed
 manager lives in the control plane so `Wf.Engine.Core` remains database-free;
-both reuse its pure selector filter. Renewal, cancel-before-release, agent epoch
-fencing, failover adoption and workflow-facing reservation policies follow in
-their own tasks; automatic reservation lifecycle orchestration is not claimed.
+both reuse its pure selector filter.
+
+`ReservationLeaseService` renews live owner leases at half their original
+lifetime, preserving IDs and epochs. Explicit `RenewAsync` also retains that
+lifetime; an expired, closing or ended owner's lease cannot be revived.
+The hosted one-second sweep requests release on node/run completion or failure,
+abort or expiry. Release atomically cancels unfinished owner tasks, removes their
+dispatch outbox entries and advances each machine's fence. A machine stays
+reserved while disconnected or awaiting the current session's exact
+`ReservationFenced` acknowledgement; merely updating database state or receiving
+an ordinary transport acknowledgement never frees it. Late results and resource
+samples from expired or fenced reservations are discarded without changing
+outputs, events or resource blobs. Ordinary work after release carries the
+machine's advanced epoch, not a reset to epoch 1.
+Physical containment is mandatory even when resource sampling is unavailable:
+Windows uses kill-on-close jobs; Linux uses an SDK subreaper supervisor and
+pidfds to terminate and reap detached descendants. Persist each agent's UUID,
+result-journal directory and its `host-lifetimes` records across restarts.
+Uncertain same-boot crashes or unsupported containment primitives quarantine
+new work and fence acknowledgements. Recover uncertain crash records through a
+whole-machine reboot with that state intact, not an agent/container restart or
+deleting records. Independently constructed test pools need an isolated
+`containmentDirectory` or their own stable `AgentOptions`; hosted DI supplies
+the production agent identity automatically.
+Workflow-facing reservation policies and failover/chaos verification remain
+their following tasks. Reservation allocation is still an explicit engine API;
+this does not claim an autonomous hosted DAG execution loop.
 
 ## Blob storage
 
