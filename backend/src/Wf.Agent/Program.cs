@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Wf.Agent;
@@ -50,6 +51,10 @@ builder.Services.AddSingleton(secretStore);
 builder.Services.AddWindowsService(options => options.ServiceName = builder.Configuration["Agent:ServiceName"] ?? "wf-agent");
 builder.Services.AddSystemd();
 builder.Services.AddSingleton(AgentOptions.FromConfiguration(builder.Configuration));
+var insecurePackageOrigin = builder.Configuration["Agent:InsecurePackageOrigin"] is { } origin
+    ? new Uri(origin, UriKind.Absolute) : null;
+if (insecurePackageOrigin is not null && !builder.Configuration.GetValue("Agent:AllowInsecureTransport", false))
+    throw new InvalidOperationException("Agent:InsecurePackageOrigin also requires the explicit isolated-network AllowInsecureTransport opt-in.");
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(provider =>
 {
@@ -66,7 +71,7 @@ builder.Services.AddSingleton<AgentLogService>();
 builder.Services.AddSingleton(provider => new PackageCache(
     Path.GetFullPath(builder.Configuration["Agent:PackageCache"] ??
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wf-agent", "packages")),
-    provider.GetRequiredService<ILogger<PackageCache>>()));
+    provider.GetRequiredService<ILogger<PackageCache>>(), insecureOrigin: insecurePackageOrigin));
 builder.Services.AddSingleton<TaskCommands>();
 builder.Services.AddSingleton<IAgentTelemetry, AgentTelemetry>();
 builder.Services.AddSingleton<IAgentCommandHandler>(provider => provider.GetRequiredService<TaskCommands>());

@@ -29,7 +29,9 @@ var migrate = args.Contains("--migrate", StringComparer.Ordinal);
 var developmentAuth = args.Contains("--dev", StringComparer.Ordinal);
 var builder = WebApplication.CreateBuilder(args.Where(argument => argument is not ("--migrate" or "--dev" or "--lan")).ToArray());
 if (args.Contains("--lan", StringComparer.Ordinal)) builder.Configuration["Lan:Enabled"] = "true";
+var compose = LocalComposeOptions.Read(builder.Configuration, builder.Environment);
 using var lan = LanListener.Read(builder.Configuration, builder.Environment);
+var engineEnabled = builder.Configuration.GetValue("Engine:Enabled", true);
 // Upload paths and live query strings carry bearer capabilities; suppress raw framework request/route logs.
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 var port = builder.Configuration.GetValue("Engine:Port", 5000);
@@ -39,8 +41,9 @@ if (apiPort is < 1 or > 65535 || apiPort == port)
     throw new InvalidOperationException("Api:Port must be between 1 and 65535 and differ from Engine:Port.");
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.Listen(IPAddress.Loopback, port, listen => listen.Protocols = HttpProtocols.Http2);
-    options.Listen(IPAddress.Loopback, apiPort, listen => listen.Protocols = HttpProtocols.Http1);
+    var address = compose is null ? IPAddress.Loopback : IPAddress.Any;
+    options.Listen(address, port, listen => listen.Protocols = HttpProtocols.Http2);
+    options.Listen(address, apiPort, listen => listen.Protocols = HttpProtocols.Http1);
     lan?.Configure(options);
 });
 builder.Services.AddGrpc(options => options.MaxReceiveMessageSize = 1024 * 1024);
@@ -85,49 +88,60 @@ builder.Services.AddHostedService<ActiveVersionCache>(services => services.GetRe
 builder.Services.AddSingleton(new LeaseOptions(Guid.NewGuid().ToString("N"),
     new Uri(builder.Configuration["Engine:PublicEndpoint"] ?? lan?.Endpoint.AbsoluteUri ?? $"http://localhost:{port}", UriKind.Absolute)));
 builder.Services.AddSingleton<LeaseManager>();
-builder.Services.AddHostedService<LeaseManager>(services => services.GetRequiredService<LeaseManager>());
+if (engineEnabled)
+    builder.Services.AddHostedService<LeaseManager>(services => services.GetRequiredService<LeaseManager>());
 builder.Services.Configure<HostOptions>(options => options.ServicesStopConcurrently = false);
-builder.Services.AddHostedService<EngineShutdownService>();
+if (engineEnabled) builder.Services.AddHostedService<EngineShutdownService>();
 builder.Services.AddSingleton<AgentRegistry>();
 builder.Services.AddSingleton<RunStore>();
 builder.Services.AddSingleton<CommandInbox>();
 builder.Services.AddSingleton<RunRecovery>();
-builder.Services.AddHostedService<RunRecovery>(services => services.GetRequiredService<RunRecovery>());
+if (engineEnabled)
+    builder.Services.AddHostedService<RunRecovery>(services => services.GetRequiredService<RunRecovery>());
 builder.Services.AddSingleton(services => new ScheduleCatchUp(services.GetRequiredService<TimeProvider>(),
     builder.Configuration.GetValue<TimeSpan?>("Scheduler:FireGrace")));
 builder.Services.AddSingleton<ScheduleFireService>();
-builder.Services.AddHostedService<ScheduleFireService>(services => services.GetRequiredService<ScheduleFireService>());
+if (engineEnabled)
+    builder.Services.AddHostedService<ScheduleFireService>(services => services.GetRequiredService<ScheduleFireService>());
 builder.Services.AddSingleton<GroupCommitAppender>();
 builder.Services.AddSingleton<PlacementEngine>();
 builder.Services.AddSingleton<Dispatcher>();
 builder.Services.AddSingleton<Wf.ControlPlane.Engine.Reservations.ReservationManager>();
 if (builder.Configuration.GetValue("Engine:ExecuteRuns", false))
 {
+    if (!engineEnabled) throw new InvalidOperationException("Engine:ExecuteRuns requires Engine:Enabled.");
     var endpoint = new Uri(builder.Configuration["Engine:ApiEndpoint"] ?? lan?.Endpoint.AbsoluteUri ??
         $"http://localhost:{apiPort}", UriKind.Absolute);
-    if (endpoint.Scheme is not ("https" or "http") || endpoint.Scheme == "http" && !endpoint.IsLoopback ||
+    if (endpoint.Scheme is not ("https" or "http") ||
+        endpoint.Scheme == "http" && !endpoint.IsLoopback && !(compose is not null && LocalComposeOptions.IsPackageOrigin(endpoint)) ||
         endpoint.UserInfo.Length != 0 || endpoint.AbsolutePath != "/" || endpoint.Query.Length != 0 || endpoint.Fragment.Length != 0)
         throw new InvalidOperationException("Engine:ApiEndpoint must be an HTTPS origin or loopback HTTP origin.");
     builder.Services.AddSingleton(new RunExecutionOptions(endpoint));
     builder.Services.AddHostedService<RunExecutionService>();
 }
-builder.Services.AddHostedService<Wf.ControlPlane.Engine.Reservations.ReservationQueueService>();
+if (engineEnabled) builder.Services.AddHostedService<Wf.ControlPlane.Engine.Reservations.ReservationQueueService>();
 builder.Services.AddSingleton<Wf.ControlPlane.Engine.Reservations.ReservationLeaseService>();
-builder.Services.AddHostedService<Wf.ControlPlane.Engine.Reservations.ReservationLeaseService>(
-    services => services.GetRequiredService<Wf.ControlPlane.Engine.Reservations.ReservationLeaseService>());
-builder.Services.AddHostedService<AgentRegistryService>();
+if (engineEnabled)
+    builder.Services.AddHostedService<Wf.ControlPlane.Engine.Reservations.ReservationLeaseService>(
+        services => services.GetRequiredService<Wf.ControlPlane.Engine.Reservations.ReservationLeaseService>());
+if (engineEnabled) builder.Services.AddHostedService<AgentRegistryService>();
 builder.Services.AddSingleton<AgentLossSweeper>();
-builder.Services.AddHostedService<AgentLossSweeper>(services => services.GetRequiredService<AgentLossSweeper>());
+if (engineEnabled)
+    builder.Services.AddHostedService<AgentLossSweeper>(services => services.GetRequiredService<AgentLossSweeper>());
 builder.Services.AddSingleton<AgentLossHandler>();
-builder.Services.AddHostedService<AgentLossHandler>(services => services.GetRequiredService<AgentLossHandler>());
+if (engineEnabled)
+    builder.Services.AddHostedService<AgentLossHandler>(services => services.GetRequiredService<AgentLossHandler>());
 var app = builder.Build();
 if (lan is not null)
     app.Logger.LogWarning("Trusted local LAN profile: {Endpoint}. Development authentication grants LAN clients full access; use only on a trusted network.",
         lan.Endpoint);
+if (compose is not null)
+    app.Logger.LogWarning("Local Compose {Environment}: login-free Development access is restricted to the dedicated {Network} container network. Publish only on the configured host loopback.",
+        compose.Environment, compose.Network);
 app.UseReportResponseHeaders();
 app.UseAuthentication();
 app.UseAuthorization();
-app.MapGrpcService<AgentGatewayService>().RequireAuthorization(AuthExtensions.Agent);
+if (engineEnabled) app.MapGrpcService<AgentGatewayService>().RequireAuthorization(AuthExtensions.Agent);
 app.MapRegistryEndpoints();
 app.MapCatalogEndpoints();
 app.MapVersionsEndpoints();

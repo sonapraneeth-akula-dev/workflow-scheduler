@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
 using Microsoft.Identity.Web;
 using Wf.ControlPlane.Live;
+using Wf.ControlPlane.Hosting;
 
 namespace Wf.ControlPlane.Auth;
 
@@ -20,6 +21,8 @@ public static class AuthExtensions
     public static IServiceCollection AddWorkflowAuthentication(this IServiceCollection services,
         IConfiguration configuration, IHostEnvironment environment)
     {
+        var compose = LocalComposeOptions.Read(configuration, environment);
+        if (compose is not null) services.AddSingleton(compose);
         var mode = configuration["Authentication:Mode"] ?? "Entra";
         if (mode == DevelopmentScheme)
         {
@@ -92,8 +95,10 @@ public static class AuthExtensions
         {
             if (Context.Connection.RemoteIpAddress is { } remote && !IPAddress.IsLoopback(remote) &&
                 !(configuration.GetValue("Lan:Enabled", false) && Request.IsHttps &&
-                  Context.Connection.LocalIpAddress?.ToString() == configuration["Lan:Address"]))
-                return Task.FromResult(AuthenticateResult.Fail("Development authentication is restricted to loopback or the explicit trusted LAN TLS listener."));
+                  Context.Connection.LocalIpAddress?.ToString() == configuration["Lan:Address"]) &&
+                !(Context.RequestServices.GetService<LocalComposeOptions>() is { } compose &&
+                  compose.Allows(Context.Connection.LocalIpAddress, remote)))
+                return Task.FromResult(AuthenticateResult.Fail("Development authentication requires loopback or an explicit trusted local listener."));
             var spa = Context.GetEndpoint()?.Metadata.GetMetadata<UserScheduleRoute>() is not null
                 ? Context.RequestServices.GetService<UserScheduleClient>() : null;
             var identity = new ClaimsIdentity(

@@ -9,7 +9,16 @@ public static class LocalStack
     {
         ArgumentNullException.ThrowIfNull(builder);
         if (!builder.ExecutionContext.IsRunMode)
+        {
+            if (builder.Configuration.GetValue("Local:Compose", false))
+            {
+                ComposeStack.Configure(builder);
+                return;
+            }
             throw new InvalidOperationException("This AppHost currently supports local development only; deployment profiles are separate tasks.");
+        }
+        if (builder.Configuration.GetValue("Local:Compose", false))
+            throw new InvalidOperationException("The local Compose profile is a publish target; use wf local up.");
         var enginePort = Port("Engine", 5001);
         var apiPort = Port("Api", 5000);
         var uiPort = Port("Ui", 5173);

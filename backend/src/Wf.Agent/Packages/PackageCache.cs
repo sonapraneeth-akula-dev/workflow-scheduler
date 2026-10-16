@@ -25,15 +25,22 @@ public sealed class PackageCache : IDisposable
     private readonly long maxCacheBytes;
     private readonly int maxPackages;
     private readonly TimeProvider timeProvider;
+    private readonly Uri? insecureOrigin;
     private bool disposed;
 
     public PackageCache(string root, ILogger<PackageCache> logger, HttpMessageHandler? handler = null,
-        long maxCacheBytes = DefaultMaxCacheBytes, int maxPackages = DefaultMaxPackages, TimeProvider? timeProvider = null)
+        long maxCacheBytes = DefaultMaxCacheBytes, int maxPackages = DefaultMaxPackages, TimeProvider? timeProvider = null,
+        Uri? insecureOrigin = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         if (!Path.IsPathFullyQualified(root)) throw new ArgumentException("Package-cache root must be absolute.", nameof(root));
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxCacheBytes);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPackages);
+        if (insecureOrigin is not null && (!insecureOrigin.IsAbsoluteUri ||
+            insecureOrigin.Scheme != Uri.UriSchemeHttp || insecureOrigin.AbsolutePath != "/" ||
+            insecureOrigin.UserInfo.Length != 0 || insecureOrigin.Query.Length != 0 || insecureOrigin.Fragment.Length != 0))
+            throw new ArgumentException("An isolated-network package origin must be an explicit HTTP origin.", nameof(insecureOrigin));
+        this.insecureOrigin = insecureOrigin;
         this.root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         this.maxCacheBytes = maxCacheBytes;
         this.maxPackages = maxPackages;
@@ -53,9 +60,11 @@ public sealed class PackageCache : IDisposable
         if (sha256 is null || sha256.Length != 64 || sha256.Any(character => !char.IsAsciiHexDigit(character)))
             throw new ArgumentException("Compiled-package SHA-256 must contain 64 hexadecimal digits.", nameof(sha256));
         if (!packageUri.IsAbsoluteUri || packageUri.Scheme is not ("https" or "http") ||
-            (packageUri.Scheme == "http" && !packageUri.IsLoopback) ||
+            (packageUri.Scheme == "http" && !packageUri.IsLoopback &&
+                !string.Equals(packageUri.GetLeftPart(UriPartial.Authority),
+                    insecureOrigin?.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase)) ||
             packageUri.UserInfo.Length != 0 || packageUri.Fragment.Length != 0)
-            throw new ArgumentException("Packages require an HTTPS URL (HTTP only on loopback), without user info or fragments.", nameof(packageUri));
+            throw new ArgumentException("Packages require HTTPS, loopback HTTP or the explicitly configured isolated-network HTTP origin, without user info or fragments.", nameof(packageUri));
         sha256 = sha256.ToLowerInvariant();
         var target = Path.Combine(root, sha256);
         await writes.WaitAsync(cancellationToken);

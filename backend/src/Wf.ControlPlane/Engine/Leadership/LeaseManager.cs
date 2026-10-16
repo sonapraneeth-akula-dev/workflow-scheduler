@@ -1,4 +1,5 @@
 using Npgsql;
+using Wf.ControlPlane.Hosting;
 
 namespace Wf.ControlPlane.Engine.Leadership;
 
@@ -25,7 +26,7 @@ public sealed class LeaseManager : BackgroundService
     private int stopping;
 
     public LeaseManager(NpgsqlDataSource dataSource, LeaseOptions options, ILogger<LeaseManager> logger,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null, LocalComposeOptions? compose = null)
     {
         this.dataSource = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         this.options = options ?? throw new ArgumentNullException(nameof(options));
@@ -35,9 +36,10 @@ public sealed class LeaseManager : BackgroundService
             throw new ArgumentException("Lease holder must be a nonempty instance identifier of at most 200 characters.", nameof(options));
         var endpoint = options.Endpoint;
         if (endpoint is null || !endpoint.IsAbsoluteUri || endpoint.Scheme is not ("http" or "https") ||
-            endpoint.Scheme == "http" && !endpoint.IsLoopback || endpoint.UserInfo.Length != 0 ||
+            endpoint.Scheme == "http" && !endpoint.IsLoopback &&
+                !(compose is not null && LocalComposeOptions.IsEngineOrigin(endpoint)) || endpoint.UserInfo.Length != 0 ||
             endpoint.AbsolutePath != "/" || endpoint.Query.Length != 0 || endpoint.Fragment.Length != 0)
-            throw new ArgumentException("Leader endpoint must be an HTTPS origin, or loopback HTTP origin.", nameof(options));
+            throw new ArgumentException("Leader endpoint must be an HTTPS origin, or loopback HTTP origin, except for the explicit local Compose engine origins.", nameof(options));
     }
 
     public LeaseToken? Current

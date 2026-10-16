@@ -73,8 +73,67 @@ This is not an AOT image or a production deployment profile.
 
 Override ports with `Local__ApiPort`, `Local__EnginePort` and `Local__UiPort`;
 all must differ. `Local__PostgresVolume` selects a different persistent Docker
-volume. This AppHost is a local development launcher, not a Compose/deployment
+volume. This native profile is a local development launcher, not a deployment
 publisher. It does not install frontend dependencies or erase persistent data.
+The separate Compose profile below uses the same AppHost in publish mode.
+
+### Isolated local Docker Compose environments
+
+Requires .NET 10, Aspire CLI 13.6 on `PATH`, and Docker with Linux containers
+and Compose v2 (`up --wait`). Run from this source checkout or a descendant:
+
+```powershell
+dotnet run --project .\backend\src\Wf.Cli -- local up --env dev
+dotnet run --project .\backend\src\Wf.Cli -- local up --env ppe
+# Omitting --env selects ppe for both operations:
+dotnet run --project .\backend\src\Wf.Cli -- local down
+dotnet run --project .\backend\src\Wf.Cli -- local down --env dev
+```
+
+`up` publishes Compose through Aspire, builds managed Release API/engine/agent
+images, runs migrations and waits for healthy services. Each project has
+PostgreSQL 17, an API-only host, two leader-elected engines, one nonroot Linux
+agent and an anonymous Aspire dashboard. `kardia-dev` binds only `127.2.6.2`;
+`kardia-ppe` binds only `127.2.6.7`. API port 5000, HTTP/2 engine ports
+5001/5002 and dashboard port 18888 are isolated on those exact addresses.
+The SPA/gateway, edge HTTPS domains and nightly deployment checks are separate
+tasks; this profile does not yet serve the UI or bind port 80.
+
+Both environments are **trusted-local, login-free Development prototypes**,
+including the environment named `ppe`, not production authentication profiles.
+HTTP between containers is explicitly restricted to each environment's fixed
+Docker subnet and configured package/engine origins. No login/logout flow,
+Entra setup, machine certificate installation or public-network exposure is
+added; production authentication guards remain unchanged.
+
+Project-scoped volumes isolate PostgreSQL, blobs, control-plane local secrets
+and agent state. Owner-only `.wf\local\<env>\runtime.env` stores a stable
+database password, upload-signing key and agent UUID; preserve it with the
+volumes. Corrupt/unsafe state fails explicitly rather than silently generating
+replacement identities or keys. Operations on one environment are locked
+against overlap without blocking the other environment. `down` uses the saved
+published Compose file, removes only that project's containers/network, and
+never removes its volumes, images or private state. Repeating `up` rebuilds
+changed application code while retaining data; container tags identify the
+local environment, not a Git-derived workflow version. Workflow SemVer,
+immutable package hashes and run-version pinning retain their existing meaning.
+
+The control-plane build defaults to NuGet.org. `KARDIA_NUGET_SOURCE` can select
+an approved package mirror without disabling TLS verification. The real
+lifecycle acceptance test requires a normal Debug CLI build and explicit
+`WF_COMPOSE_LIFECYCLE=true`:
+
+```powershell
+dotnet build .\backend\src\Wf.Cli
+$env:WF_COMPOSE_LIFECYCLE = "true"
+dotnet test .\backend\tests\Wf.Integration.Tests --filter FullyQualifiedName~LocalComposeLifecycleTests
+```
+
+It refuses existing containers or volumes for either fixed project name, starts
+both real environments, verifies exact published bindings and leader separation,
+restarts PPE while dev remains healthy, and checks database/blob/agent state,
+keys and UUID persistence. Cleanup removes only its own project resources and
+allowlisted volumes, leaving private CLI state for subsequent use.
 
 For explicit trusted-LAN access, install `mkcert` and trust its root once on
 each intended client. Then:

@@ -147,6 +147,42 @@ public sealed class PackageCacheTests
     }
 
     [Theory]
+    [InlineData("http://wf-api:8080/package.zip", true)]
+    [InlineData("http://WF-API:8080/package.zip", true)]
+    [InlineData("http://wf-api:8081/package.zip", false)]
+    [InlineData("http://wf-api.example:8080/package.zip", false)]
+    [InlineData("http://another-api:8080/package.zip", false)]
+    public async Task Explicit_isolated_HTTP_origin_does_not_allow_other_hosts_or_ports(string uri, bool allowed)
+    {
+        await using var fixture = new CacheFixture(Valid());
+        using var cache = new PackageCache(fixture.Root, NullLogger<PackageCache>.Instance,
+            fixture.Handler, insecureOrigin: new("http://wf-api:8080"));
+        if (allowed)
+        {
+            using var package = await cache.GetAsync("1", new(uri), fixture.Sha, TestContext.Current.CancellationToken);
+            Assert.Equal(1, fixture.Handler.Count);
+        }
+        else
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                cache.GetAsync("1", new(uri), fixture.Sha, TestContext.Current.CancellationToken));
+            Assert.Equal(0, fixture.Handler.Count);
+        }
+    }
+
+    [Theory]
+    [InlineData("https://wf-api:8080")]
+    [InlineData("http://wf-api:8080/path")]
+    [InlineData("http://wf-api:8080/?query=value")]
+    public void Insecure_package_origin_must_be_an_exact_HTTP_origin(string uri)
+    {
+        var root = Path.GetFullPath(Path.Combine(".agent-artifacts", "package-tests", Guid.NewGuid().ToString("N")));
+        Assert.Throws<ArgumentException>(() =>
+            new PackageCache(root, NullLogger<PackageCache>.Instance, insecureOrigin: new(uri)));
+        Assert.False(Directory.Exists(root));
+    }
+
+    [Theory]
     [InlineData("abc")]
     [InlineData("../escape")]
     [InlineData("gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg")]
