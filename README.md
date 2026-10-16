@@ -51,6 +51,25 @@ adds the workflow/timestamp/UUID paging index without changing stored versions.
 The generated API client includes these contracts; the Versions tab remains a
 separate UI task.
 
+`GET /api/v1/workflows/{team}/{type}/{workflow}/diff?from=<uuid>&to=<uuid>`
+compares two explicit immutable versions of that exact workflow. Fresh Viewer
+authorization also permits retained source access, including inactive and
+soft-deleted versions. `manifest` contains ordinal-keyed `Added`, `Removed` and
+`Changed` entries with nullable `before`/`after` snapshots for nodes, variables,
+workflow policies (timeout/placement) and settings (SDK, metadata, stages).
+Version labels alone do not create manifest changes. `source` contains exact
+UTF-8 `workflow.cs` texts as `before`/`after`, its path and `changed`; clients
+compute editor hunks without a server-side quadratic line-diff algorithm.
+Unlike the safe Task Plan projection, this endpoint intentionally exposes
+authored source and literal manifest configuration; secret references are never
+resolved. Do not hardcode credentials in scripts. Source archives use stored
+content-addressed `sources/<sha256>` keys (not version-ID ZIP paths), with
+SHA-256/length verification, one fixed entry and a 1 MiB expanded text ceiling.
+Both versions must belong to the route workflow; no active-version fallback.
+Bad/duplicate queries return 400, missing pairs 404, denied scopes 403, corrupt
+data 500 and unavailable storage 503; errors never include partial source.
+Responses are never cached.
+
 SDK manifests now record optional declared task actions: the original SDK method,
 command executable, credential/query/fragment-free one-shot HTTP method/URL, or
 declared HTTP operation. Description never executes tasks or inspects captured

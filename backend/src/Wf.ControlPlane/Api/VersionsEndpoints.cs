@@ -19,6 +19,7 @@ public static class VersionsEndpoints
 
     public static IEndpointRouteBuilder MapVersionsEndpoints(this IEndpointRouteBuilder endpoints)
     {
+        endpoints.MapVersionDiff();
         endpoints.MapGet("/api/v1/workflows/{team}/{type}/{workflow}/versions", List).RequireAuthorization()
             .Produces<WorkflowVersionPage>().ProducesProblem(400).ProducesProblem(401).ProducesProblem(403)
             .ProducesProblem(404).ProducesProblem(500).ProducesProblem(503)

@@ -544,7 +544,7 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
         public string Api => client.BaseAddress!.AbsoluteUri;
 
         public static async Task<Server> Start(NpgsqlDataSource source, bool live = false,
-            Action<WebApplication>? configure = null)
+            Action<WebApplication>? configure = null, Action<IServiceCollection>? configureServices = null)
         {
             var rsa = RSA.Create(2048);
             var key = new RsaSecurityKey(rsa) { KeyId = "matrix-test" };
@@ -584,6 +584,7 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
                     AadIssuerValidator.GetAadIssuerValidator(Issuer, null, _ => manager).Validate;
                 options.TokenValidationParameters.ClockSkew = TimeSpan.Zero;
             });
+            configureServices?.Invoke(builder.Services);
             var app = builder.Build();
             app.UseAuthentication();
             app.UseAuthorization();

@@ -147,6 +147,103 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workflows/{team}/{type}/{workflow}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Fresh Viewer-authorized comparison of two exact immutable version UUIDs in the same workflow, including inactive and soft-deleted versions. Keyed node/variable changes, workflow policies and settings include before/after manifest declarations. Source contains exact retained workflow.cs texts for a client diff editor. Includes authored literal configuration/source, but never resolves secrets or returns storage capabilities. No active-version fallback. Both source archives are SHA-256/length verified and bounded to 1 MiB of UTF-8 per script. */
+        get: {
+            parameters: {
+                query: {
+                    from: string;
+                    to: string;
+                };
+                header?: never;
+                path: {
+                    team: string;
+                    type: string;
+                    workflow: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WorkflowVersionDiff"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workflows/{team}/{type}/{workflow}/versions": {
         parameters: {
             query?: never;
@@ -3022,6 +3119,20 @@ export interface components {
             level: string;
             text: string;
         };
+        ManifestChange: {
+            key: string;
+            kind: components["schemas"]["ManifestChangeKind"];
+            before: null | components["schemas"]["JsonElement"];
+            after: null | components["schemas"]["JsonElement"];
+        };
+        /** @enum {unknown} */
+        ManifestChangeKind: "Added" | "Removed" | "Changed";
+        ManifestChanges: {
+            nodes: components["schemas"]["ManifestChange"][];
+            variables: components["schemas"]["ManifestChange"][];
+            policies: components["schemas"]["ManifestChange"][];
+            settings: components["schemas"]["ManifestChange"][];
+        };
         MetricAttempt: {
             /** Format: int32 */
             attempt: number | string;
@@ -3495,6 +3606,12 @@ export interface components {
                 [key: string]: string;
             };
         };
+        WorkflowSourceDiff: {
+            path: string;
+            before: string;
+            after: string;
+            changed: boolean;
+        };
         WorkflowVariable: {
             key: string;
             type: components["schemas"]["VariableType"];
@@ -3508,6 +3625,17 @@ export interface components {
             versionId: string;
             version: string;
             variables: components["schemas"]["WorkflowVariable"][];
+        };
+        WorkflowVersionDiff: {
+            workflowId: string;
+            /** Format: uuid */
+            fromVersionId: string;
+            /** Format: uuid */
+            toVersionId: string;
+            fromVersion: string;
+            toVersion: string;
+            manifest: components["schemas"]["ManifestChanges"];
+            source: components["schemas"]["WorkflowSourceDiff"];
         };
         WorkflowVersionPage: {
             items: components["schemas"]["WorkflowVersionSummary"][];

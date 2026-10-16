@@ -99,4 +99,5 @@ public sealed record TaskPlanPlacement(TaskPlanSelector? Selector, PlacementAffi
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, UseStringEnumConverter = true)]
 [JsonSerializable(typeof(WorkflowVersionPlan))]
 [JsonSerializable(typeof(WorkflowVersionPage))]
+[JsonSerializable(typeof(Wf.ControlPlane.Versions.WorkflowVersionDiff))]
 public partial class VersionsJsonContext : JsonSerializerContext;
