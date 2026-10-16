@@ -26,7 +26,7 @@ export function TeamArea({ team }: { team: string }) {
         <Link to="/">Teams</Link>
       </nav>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold break-words">{team}</h1>
+        <h1 className="min-w-0 text-2xl font-semibold break-words">{team}</h1>
         <Button
           variant="outline"
           disabled={query.isFetching || presentation.isFetching}

@@ -196,6 +196,23 @@ and fail-closed authentication/permission guards. The additional authorization
 browser lane uses the actual JWT-authenticated Kestrel server and PostgreSQL role
 bindings, not development API authentication or API mocks. It checks Operator →
 Viewer → denied-scope action visibility and retained drafts in all three engines.
+The same lane provisions both team-Viewer and type-only-Viewer catalogue users.
+`e2e\catalog-isolation.spec.ts` uses signed fixture JWTs in MSAL's public cache,
+then the unmodified production session/token client: no development bypass,
+injected authorization headers or API response mocks. All three engines check
+permitted navigation and latest-run data, absent foreign teams, guessed foreign
+routes, real catalogue/run/event API denials, and desktop-light/mobile-dark axe
+and overflow limits. Long team identifiers may wrap; tables retain their own
+horizontal scrolling region instead of widening the page.
+
+Its backend fixture seeds real PostgreSQL registry grants and complete durable
+run snapshots, and starts a JWT-authenticated live API plus an isolated Vite
+server on ephemeral ports. The wrapper supplies `WF_CATALOG_ORIGIN` only to its
+child Playwright run; that run does not start or stop the normal schedule stack.
+Default `bun run test:e2e` excludes this fixture-only spec rather than running
+without its scoped identities. MSAL cache hydration is test credential
+provisioning, not verification of a live Entra sign-in flow.
+
 Run it from the repository root after installing the browser dependencies:
 
 ```powershell
@@ -204,7 +221,7 @@ $env:WF_FRONTEND_ROOT = (Resolve-Path frontend).Path
 dotnet test backend\tests\Wf.Integration.Tests --configuration Release --filter FullyQualifiedName~AuthorizationMatrixTests
 ```
 
-Without the explicit browser opt-in, the .NET-only suite skips that one browser
-case; the frontend CI lane always opts in. `.github\workflows\frontend.yml` runs
+Without the explicit browser opt-in, the .NET-only suite skips these browser
+fixtures; the frontend CI lane always opts in. `.github\workflows\frontend.yml` runs
 lint/build/units and the real PostgreSQL/browser lane on Linux; remote execution
 is not implied by local checks.

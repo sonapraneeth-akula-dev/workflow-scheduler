@@ -41,12 +41,16 @@ export function TypeWorkflows({ team, type }: { team: string; type: string }) {
       <nav aria-label="Breadcrumb" className="flex flex-wrap gap-2">
         <Link to="/">Teams</Link>
         <span aria-hidden="true">/</span>
-        <Link to="/t/$team" params={{ team }}>
+        <Link
+          to="/t/$team"
+          params={{ team }}
+          className="max-w-full min-w-0 break-words"
+        >
           {team}
         </Link>
       </nav>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold break-words">
+        <h1 className="min-w-0 text-2xl font-semibold break-words">
           {team} / {type}
         </h1>
         <Button
