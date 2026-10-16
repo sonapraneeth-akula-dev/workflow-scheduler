@@ -1,0 +1,187 @@
+import type { ReactNode } from "react"
+import { fireEvent, render, screen } from "@testing-library/react"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import type { VersionPlan } from "@/features/taskplan/api"
+import type { RunSnapshot } from "@/lib/live/runApi"
+import { layoutGraph } from "./layout"
+import { RunGraph } from "./RunGraph"
+
+vi.mock("./layout", async (original) => {
+  const module = await original<typeof import("./layout")>()
+  return { ...module, layoutGraph: vi.fn(module.layoutGraph) }
+})
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({
+    to,
+    params,
+    children,
+  }: {
+    to: string
+    params: Record<string, string>
+    children: ReactNode
+  }) => (
+    <a
+      href={Object.entries(params).reduce(
+        (path, [key, value]) =>
+          path.replace(`$${key}`, encodeURIComponent(value)),
+        to
+      )}
+    >
+      {children}
+    </a>
+  ),
+}))
+const versionId = "019ed132-2f44-7000-8000-000000000001"
+const workflowId = "team/type/workflow"
+const plan: VersionPlan = {
+  versionId,
+  workflowId,
+  version: "1.0.0",
+  runTimeout: "01:00:00",
+  stages: [],
+  placement: null,
+  nodes: [
+    {
+      key: "start",
+      dependencies: [],
+      tasks: [],
+      mode: "Series",
+      failure: "Hard",
+      maxParallel: null,
+      timeout: null,
+      placement: null,
+    },
+    {
+      key: "finish",
+      dependencies: [{ node: "start", when: "Always" }],
+      mode: "Series",
+      failure: "Hard",
+      maxParallel: null,
+      timeout: null,
+      placement: null,
+      tasks: [
+        {
+          key: "sdk",
+          action: { kind: "SdkFunction", declaration: "Example.Run" },
+          placement: null,
+          failure: "Hard",
+          secretReference: null,
+          requestTimeout: null,
+          policy: {
+            attemptTimeout: "00:01:00",
+            autoRetry: true,
+            retry: {
+              retries: 0,
+              on: [],
+              backoff: {
+                kind: "Fixed",
+                delay: "00:00:01",
+                maxDelay: "00:01:00",
+              },
+            },
+          },
+        },
+      ],
+    },
+  ],
+}
+const run: RunSnapshot = {
+  runId: "019ed132-2f44-7000-8000-000000000002",
+  versionId,
+  workflowId,
+  seriesId: null,
+  status: 1,
+  lastSeq: 1,
+  nodes: { start: 5, finish: 3 },
+  tasks: { "finish/sdk": 3 },
+  endedAt: null,
+  abort: null,
+}
+
+describe("live graph rendering", () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it("preserves layout, edges and node DOM identity across live frame batches", () => {
+    const { rerender, container } = render(<RunGraph plan={plan} run={run} />)
+    const node = screen.getByRole("button", { name: "finish: Running" })
+    const position = node.getAttribute("style")
+    const edge = container.querySelector("[data-graph-edge]")
+    const path = edge?.getAttribute("d")
+    for (let sequence = 2; sequence <= 101; sequence++)
+      rerender(
+        <RunGraph
+          plan={plan}
+          run={{
+            ...run,
+            lastSeq: sequence,
+            nodes: { ...run.nodes, finish: sequence % 2 ? 3 : 4 },
+          }}
+        />
+      )
+    expect(layoutGraph).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole("button", { name: "finish: Running" })).toBe(node)
+    expect(node).toHaveAttribute("style", position)
+    expect(container.querySelector("[data-graph-edge]")).toBe(edge)
+    expect(edge).toHaveAttribute("d", path)
+    expect(
+      screen.getByRole("region", { name: "Run dependency graph" })
+    ).toHaveAttribute("data-run-seq", "101")
+  })
+
+  it("lays out a changed immutable topology once, without retaining stale nodes", () => {
+    const { rerender } = render(<RunGraph plan={plan} run={run} />)
+    rerender(
+      <RunGraph
+        plan={{ ...plan, nodes: [plan.nodes[0]!] }}
+        run={{ ...run, nodes: { start: 5 }, tasks: {} }}
+      />
+    )
+    expect(layoutGraph).toHaveBeenCalledTimes(2)
+    expect(
+      screen.queryByRole("button", { name: /finish/ })
+    ).not.toBeInTheDocument()
+  })
+
+  it("selects a node and links the precise task to its historical pinned plan", () => {
+    render(<RunGraph plan={plan} run={run} />)
+    fireEvent.click(screen.getByRole("button", { name: "finish: Running" }))
+    const details = screen.getByRole("region", { name: "Selected node finish" })
+    expect(details).toHaveTextContent("Dependencies: start (Always)")
+    expect(
+      screen.getByRole("link", { name: "sdk: Task Plan" })
+    ).toHaveAttribute(
+      "href",
+      `/t/team/type/w/workflow/versions/${versionId}/tasks/finish%2Fsdk`
+    )
+    fireEvent.click(screen.getByRole("button", { name: "start: Succeeded" }))
+    expect(
+      screen.getByRole("region", { name: "Selected node start" })
+    ).toHaveTextContent("No declared tasks")
+  })
+
+  it.each([
+    { ...run, workflowId: "other/type/workflow" },
+    { ...run, versionId: run.runId },
+    { ...run, nodes: { start: 5 } },
+    { ...run, nodes: { start: 5, finish: 3, unknown: 0 } },
+    { ...run, nodes: { start: 5, finish: 99 } },
+  ])(
+    "rejects a mismatched authoritative graph instead of guessing state",
+    (snapshot) => {
+      expect(() => render(<RunGraph plan={plan} run={snapshot} />)).toThrow(
+        "do not match"
+      )
+    }
+  )
+
+  it("renders an explicitly empty workflow without fabricated graph nodes", () => {
+    render(
+      <RunGraph
+        plan={{ ...plan, nodes: [] }}
+        run={{ ...run, nodes: {}, tasks: {} }}
+      />
+    )
+    expect(screen.getByText("No declared nodes.")).toBeInTheDocument()
+    expect(screen.queryByRole("button")).not.toBeInTheDocument()
+  })
+})

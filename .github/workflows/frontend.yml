@@ -33,8 +33,15 @@ jobs:
           WF_PERMISSION_BROWSER: "true"
           WF_LIVE_BROWSER: "true"
           WF_LIVE_RESYNC_BROWSER: "true"
+          WF_GRAPH_BROWSER: "true"
           WF_FRONTEND_ROOT: ${{ github.workspace }}/frontend
       - run: bun run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-graph-performance
+          path: .agent-artifacts/run-graph-*
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

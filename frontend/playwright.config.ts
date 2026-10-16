@@ -1,20 +1,23 @@
 import { defineConfig, devices } from "@playwright/test"
 
 const catalogueOrigin = process.env.WF_CATALOG_ORIGIN
+const fixtureOrigin = catalogueOrigin ?? process.env.WF_GRAPH_ORIGIN
 
 export default defineConfig({
   testDir: "./e2e",
-  testIgnore: catalogueOrigin ? [] : ["**/catalog-isolation.spec.ts"],
+  testIgnore: fixtureOrigin
+    ? []
+    : ["**/catalog-isolation.spec.ts", "**/run-graph.spec.ts"],
   fullyParallel: false,
   workers: 1,
   timeout: 30_000,
   expect: { timeout: 10_000 },
-  globalTeardown: catalogueOrigin ? undefined : "./scripts/stop-test-stack.ts",
+  globalTeardown: fixtureOrigin ? undefined : "./scripts/stop-test-stack.ts",
   use: {
-    baseURL: catalogueOrigin ?? "http://127.0.0.1:4173",
+    baseURL: fixtureOrigin ?? "http://127.0.0.1:4173",
     trace: "retain-on-failure",
   },
-  webServer: catalogueOrigin
+  webServer: fixtureOrigin
     ? undefined
     : {
         command: "bun scripts/test-stack.ts",

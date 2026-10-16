@@ -87,6 +87,38 @@ publishes two real versions, triggers a pinned run, follows its historical link,
 checks safe response/UI contents, selected-task reload and light/dark mobile
 accessibility on Chromium, Firefox and WebKit.
 
+The run page renders the pinned DAG as cached ordered node positions and SVG
+dependency paths. Stable memoized edges and node buttons avoid layout recomputation
+on live updates; the production RunStore supplies one immutable update per animation
+frame. Selecting a node links its declared tasks to the same historical Task Plan.
+Unknown nodes, invalid states and mismatched pinned identities fail explicitly.
+
+`WF_GRAPH_BROWSER=true` enables the separate real signed-JWT/PostgreSQL/MessagePack
+Chrome performance fixture in `AuthorizationMatrixTests`. It builds the production
+SPA into a private directory, provisions MSAL through a separate test-only entry
+(never shipped in normal `dist`), and pans a 200-node/361-edge graph during 1,000
+ordered durable transitions. No API responses, run state or browser transport are
+mocked. Actual database receipts must sustain >= 100 events/s; page-specific Chrome
+`DrawFrame` events and actual panning callbacks must each measure >= 60 fps without
+rounding. Trace parsing rejects missing/ambiguous page owners, duplicate marks,
+insufficient frames and trace data loss; final DOM states must equal the real API,
+with unchanged geometry and no REST polling.
+
+This is an uncapped rendering-capacity benchmark: Chromium runs with
+`--disable-frame-rate-limit`, explicitly recorded in every report, so a 60 Hz
+display cannot impose a sub-60 timing ceiling on the capacity gate. It is not a
+claim about display refresh, tear-free delivery or every frame meeting 16.67 ms.
+Local Windows Chrome 145 measured 169.781 actual drawn fps and 170.005 panning
+callbacks/s at 123.641 committed events/s (p95 frame interval 9.399 ms, maximum
+40.903 ms). Earlier default-vsync measurements were 59.315 and 51.839 fps and
+did not pass.
+Static edge layer separation reduced measured paint work from 1,761 ms to 209 ms
+over comparable eight-second traces, but default-vsync smoothness remains a
+separate measurement, not silently waived. Chrome traces and environment/throughput/
+frame reports are retained under ignored `.agent-artifacts\run-graph-*`; CI uploads
+them even on success. The private preview/cache and backend fixture clean up after
+the run.
+
 Commit links require an explicit workflow-repository browser template, for example:
 
 ```text

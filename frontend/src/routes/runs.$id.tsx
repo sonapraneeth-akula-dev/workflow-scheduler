@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { z } from "zod"
 import { ReconnectingIndicator } from "@/components/ReconnectingIndicator"
+import { LiveRunGraph } from "@/features/graph/RunGraph"
 import { useRun } from "@/lib/live/useRun"
 
 export const Route = createFileRoute("/runs/$id")({
@@ -28,6 +29,7 @@ function RunDetail() {
             Task Plan for this run
           </Link>
           <p>Committed sequence: {run.lastSeq}</p>
+          <LiveRunGraph run={run} />
         </>
       ) : null}
     </>
