@@ -13,9 +13,6 @@ namespace Wf.ControlPlane.Tests;
 public sealed class ReportContentHeadersTests
 {
     [Theory]
-    [InlineData("html", "text/html; charset=utf-8", "html")]
-    [InlineData("svg", "image/svg+xml", "svg")]
-    [InlineData("image/svg+xml", "image/svg+xml", "svg")]
     [InlineData("png", "image/png", "png")]
     [InlineData("image/jpeg", "image/jpeg", "jpg")]
     [InlineData("pdf", "application/pdf", "pdf")]
@@ -33,6 +30,15 @@ public sealed class ReportContentHeadersTests
         Assert.DoesNotContain("allow-same-origin", ReportContentEndpoints.ContentPolicy);
         Assert.DoesNotContain("allow-top-navigation", ReportContentEndpoints.ContentPolicy);
     }
+
+    [Theory]
+    [InlineData("html", "text/html; charset=utf-8", "html")]
+    [InlineData("text/html", "text/html; charset=utf-8", "html")]
+    [InlineData("svg", "image/svg+xml", "svg")]
+    [InlineData("image/svg+xml", "image/svg+xml", "svg")]
+    public void ReportContentHeaders_executable_documents_download_without_becoming_top_level_documents(
+        string kind, string mime, string extension) =>
+        Assert.Equal((mime, extension, false), ReportContentEndpoints.ContentType(kind));
 
     [Theory]
     [InlineData("evil")]

@@ -9,4 +9,8 @@ export const rendererRegistry: ReadonlyMap<
   ["text", lazy(() => import("./text/TextReport"))],
   ["json", lazy(() => import("./json/JsonReport"))],
   ["image", lazy(() => import("./image/ImageReport"))],
+  ["html", lazy(() => import("./html/HtmlReport"))],
+  ["text/html", lazy(() => import("./html/HtmlReport"))],
+  ["svg", lazy(() => import("./html/HtmlReport"))],
+  ["image/svg+xml", lazy(() => import("./html/HtmlReport"))],
 ])

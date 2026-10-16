@@ -118,6 +118,14 @@ JSON children mount only when expanded, in batches of 100. Image headers must
 identify a supported raster format; SVG/HTML cannot enter the image path.
 Refresh failures hide previously displayed content. Renderer and decoding
 failures stay within the report pane.
+HTML/SVG use a separate opaque-origin, scripts-only sandbox iframe. An enforced
+CSP precedes untrusted markup, blocking API connections/external resources/forms;
+same-origin access, popups and top navigation remain disallowed. Direct raw
+HTML/SVG URLs download instead of executing as top-level pages: browser sandbox
+alone does not prohibit a top-level document from navigating itself. Normal
+authenticated fetch and inline rendering remain available. The adversarial
+`e2e/report-sandbox.spec.ts` checks actual scripts, API-blocked attempts, storage,
+parent DOM, clicked forms/navigation and exact direct-download bytes.
 Unknown kinds show a download link with the committed title and exact byte size.
 Downloads use owned octet-stream Blob URLs, sanitize only the filename (not the
 visible title), and revoke URLs on replacement/unmount; they do not navigate to

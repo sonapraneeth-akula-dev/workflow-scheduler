@@ -20,13 +20,13 @@ public sealed class ReportContentTests(ReportPublishDatabase database, BlobStore
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ReportContent_actual_PG_Kestrel_filesystem_or_Azure_streams_raw_bytes_with_direct_open_sandbox(bool azure)
+    public async Task ReportContent_actual_PG_Kestrel_filesystem_or_Azure_streams_raw_bytes_with_executable_document_download(bool azure)
     {
         await using var storage = await environment.CreateAsync(azure);
         await using var fixture = await ReportReadFixture.Start(database.DataSource, storage.Store);
         var attempt = await fixture.Seed();
         var payload = Encoding.UTF8.GetBytes("<script>top.location='https://evil.invalid';fetch('/api/v1/runs')</script>");
-        foreach (var kind in new[] { "html", "svg", "text", "unknown\r\nX-Injected: yes" })
+        foreach (var kind in new[] { "html", "text/html", "svg", "image/svg+xml", "text", "unknown\r\nX-Injected: yes" })
         {
             var id = Guid.CreateVersion7();
             var metadata = new ReportUploadMetadata(kind, "../../evil\"\r\nX-Injected: yes.html", ["<script>"], Hash(payload), payload.Length);
@@ -43,7 +43,7 @@ public sealed class ReportContentTests(ReportPublishDatabase database, BlobStore
             Assert.Equal("nosniff", Assert.Single(response.Headers.GetValues("X-Content-Type-Options")));
             Assert.True(response.Headers.CacheControl!.NoStore);
             Assert.Equal(ReportContentEndpoints.ContentType(kind).Mime, response.Content.Headers.ContentType!.ToString());
-            Assert.StartsWith(kind.StartsWith("unknown", StringComparison.Ordinal) ? "attachment;" : "inline;",
+            Assert.StartsWith(kind == "text" ? "inline;" : "attachment;",
                 response.Content.Headers.ContentDisposition!.ToString(), StringComparison.Ordinal);
             Assert.Contains(id.ToString("D"), response.Content.Headers.ContentDisposition!.FileName);
             Assert.DoesNotContain("evil", response.Content.Headers.ContentDisposition.ToString(), StringComparison.Ordinal);

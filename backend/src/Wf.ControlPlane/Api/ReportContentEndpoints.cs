@@ -42,7 +42,7 @@ public static class ReportContentEndpoints
             .Produces<byte[]>(200, "application/octet-stream")
             .ProducesProblem(400).Produces(401).ProducesProblem(403).ProducesProblem(503)
             .WithDescription("Viewer-scoped immutable report bytes, streamed and integrity checked. " +
-                "HTML/SVG and direct navigation use an opaque-origin CSP sandbox. Unknown kinds download. " +
+                "HTML/SVG download on raw navigation; the viewer embeds authenticated bytes in an opaque-origin sandbox. Unknown kinds download. " +
                 "An interrupted or corrupt stream is aborted, never a successfully completed partial response.")
             .AddOpenApiOperationTransformer((operation, _, _) =>
             {
@@ -107,8 +107,9 @@ public static class ReportContentEndpoints
 
     public static (string Mime, string Extension, bool Inline) ContentType(string kind) => kind switch
     {
-        "html" or "text/html" => ("text/html; charset=utf-8", "html", true),
-        "svg" or "image/svg+xml" => ("image/svg+xml", "svg", true),
+        // CSP sandbox cannot stop a top-level document from navigating itself.
+        "html" or "text/html" => ("text/html; charset=utf-8", "html", false),
+        "svg" or "image/svg+xml" => ("image/svg+xml", "svg", false),
         "png" or "image/png" => ("image/png", "png", true),
         "jpeg" or "jpg" or "image/jpeg" => ("image/jpeg", "jpg", true),
         "pdf" or "application/pdf" => ("application/pdf", "pdf", true),

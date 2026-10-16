@@ -14,10 +14,19 @@ beforeEach(() => vi.stubGlobal("Blob", NodeBlob))
 afterEach(() => vi.unstubAllGlobals())
 
 describe("lazy report registry", () => {
-  it.each(["markdown", "text", "json", "image"])("registers %s", (kind) => {
+  it.each([
+    "markdown",
+    "text",
+    "json",
+    "image",
+    "html",
+    "text/html",
+    "svg",
+    "image/svg+xml",
+  ])("registers %s", (kind) => {
     expect(rendererRegistry.get(kind)).toBeDefined()
   })
-  it.each(["html", "svg", "TEXT", "", "__proto__", "constructor"])(
+  it.each(["HTML", "Svg", "TEXT", "", "__proto__", "constructor"])(
     "does not inherit or reinterpret unknown kind %s",
     (kind) => {
       expect(rendererRegistry.get(kind)).toBeUndefined()

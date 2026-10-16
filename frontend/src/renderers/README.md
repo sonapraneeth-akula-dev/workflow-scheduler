@@ -59,6 +59,27 @@ renders it through the real dispatcher, without a backend change.
 - Revoke every owned Blob URL on replacement/unmount and ignore late async work.
   Surface decoding failures instead of showing an empty report.
 
-HTML and SVG require the dedicated sandbox renderer, not the Markdown or image
-path. Do not add raw HTML plugins, external image fetching or unsandboxed frames
-to extend the basic renderers.
+HTML (`html`, `text/html`) and SVG (`svg`, `image/svg+xml`) use the dedicated
+`html\HtmlReport.tsx`, never the Markdown or image path. Fatal UTF-8 decoding
+feeds `srcDoc` only inside `<iframe sandbox="allow-scripts">`. No same-origin,
+forms, popups or top-navigation permissions are granted. A CSP meta element
+precedes every untrusted byte, blocking connections, external resources, forms
+and base URLs; a report's later meta policy cannot relax the earlier policy.
+The frame uses no-referrer and a committed, accessible title. No report messages
+are interpreted by the parent.
+
+Raw HTML/SVG content endpoints deliberately return `Content-Disposition:
+attachment` while preserving exact bytes, MIME, `nosniff` and restrictive CSP.
+An actual browser probe showed why: a top-level CSP-sandboxed document can still
+navigate itself to an API URL. CSP sandbox alone is not a navigation firewall.
+Downloading direct URLs prevents that document from becoming an executable
+top-level Kardia page. Authenticated fetch ignores disposition; the normal
+inline viewer still embeds the fetched bytes safely.
+
+`e2e\report-sandbox.spec.ts` checks both kinds using retained filesystem bytes,
+actual PostgreSQL metadata and production HTTP. Inline scripts run but cannot
+read app cookies/storage/parent DOM, fetch/XHR the API, create popups, submit
+forms or navigate the top page, including real user clicks. Raw navigation
+downloads the exact original bytes rather than executing them. Browser request
+events can describe CSP-blocked attempts: the test verifies CSP failures and no
+network response, not a misleading assertion that no attempt was made.
