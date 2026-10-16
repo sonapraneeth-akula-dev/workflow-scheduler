@@ -241,6 +241,27 @@ case-sensitive, nonblank, at most 128 UTF-8 bytes, and combine with AND.
 Duplicate/unknown filters fail with 400. Results use stable `createdAt,id` order
 and `no-store`.
 
+`GET /api/v1/series/{id}/reports/compare?leftRunId=...&rightRunId=...&sourceKey=...&title=...`
+looks up the same exact source/title in two distinct actual runs of the stored
+series. Returns `{seriesId,left,right}`, with each side the same required,
+metadata-only report item above; fetch content separately. Fresh Viewer grants
+must cover the series and **both** runs, including retained historical ownership
+after workflow deletion. Missing/foreign/ungranted resources uniformly return
+403 `insufficient_scope_role`, without exposing either side's metadata.
+Series IDs use canonical lowercase nonempty UUIDs; run IDs require canonical
+RFC UUIDv7. All four query values are required exactly once; unknown/duplicate
+keys or invalid identities return 400 `invalid_report_compare_query`.
+Source/title matching is case-sensitive, preserves author whitespace, Unicode
+and historical stage/task keys without normalization, and is bounded to
+1025/512 UTF-8 bytes respectively. Neither value may be blank or contain NUL.
+If either match is absent, 404 `report_match_not_found` identifies neither side.
+If both exist but either run has multiple matches (even across attempts or
+kinds), 409 `report_match_ambiguous` requires an unambiguous source/title:
+no arbitrary, newest or cross-attempt selection. Missing takes precedence over
+ambiguity. Dependency failures return 503 `report_compare_unavailable`.
+Comparison is read-only, bounded to two matching metadata rows per run partition,
+and uses `no-store` with no content, pointer, capability or report metadata headers.
+
 The SQL `report_added` notification is consumed by the existing live listener.
 A separate immediate `ReportAdded` MessagePack message `{runId,reportId}` reaches
 only an authorized subscribed run scope, with fresh role checks on every send.
