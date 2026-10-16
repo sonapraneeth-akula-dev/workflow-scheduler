@@ -30,8 +30,8 @@ its migrations. Supply a disposable database when evaluating migrations.
 and the agent's persistent identity, results, log spool and package cache.
 The development upload-signing key persists in AppHost user secrets across
 restarts. Restarting the stack preserves its database, blobs and agent UUID.
-`Secrets:Provider=Local` and the local secrets directory are configured;
-protected-file secret resolution remains a separate implementation task.
+`Secrets:Provider=Local` and the protected local secrets directory are configured;
+Azure credentials or an interactive login are not required.
 
 Override ports with `Local__ApiPort`, `Local__EnginePort` and `Local__UiPort`;
 all must differ. `Local__PostgresVolume` selects a different persistent Docker
@@ -236,8 +236,27 @@ percent escapes, whitespace and traversal segments are rejected without echoing
 the input. Manifests still store exactly `{"Name":"reference"}`; literal string
 secret defaults and extra value fields fail shared WFV008 validation. A
 name-looking string inside `Name` cannot be distinguished from an intended
-reference; never put resolved values there. Resolution and value masking follow
-in their own agent tasks.
+reference; never put resolved values there.
+
+Agents resolve declared references at actual task start, not during describe,
+registration or dispatch. Default `Secrets:Provider=Local` uses a private
+`LocalApplicationData\wf-agent\secrets` directory; override with the absolute
+`Secrets:LocalDirectory`. Provision under the same OS account as the agent by
+piping a trusted UTF-8 producer into `wf-agent --set-secret secret://local/service/token`.
+Values must arrive through redirected stdin, never arguments or environment.
+Windows stores DPAPI CurrentUser ciphertext with private ACLs; Linux uses
+owner-only directories/files, **not encryption at rest**. Unsafe ownership,
+permissions, links and paths fail closed.
+
+Optional `Secrets:Provider=KeyVault` uses explicitly configured
+`Secrets:Vaults:<alias>:VaultUri` and managed identity only. Optional
+`ManagedIdentityClientId` selects a user-assigned identity; omission selects the
+system-assigned identity. No developer/browser/CLI credential fallback.
+`ctx.Secret(ctx.Var<SecretReference>("credential"))` accesses a declared resolved
+value. Missing or unavailable secrets become safe nonretryable `ValidationError`;
+resolved values never enter manifests, dispatches, journals or process arguments.
+Rebuild existing SDK packages: task-host private protocol 2 is required.
+Provisioning and provider details: [agent secrets](backend/src/Wf.Agent/Secrets/README.md).
 
 `Tasks.HttpOperation(...)` declares an opt-in long-running HTTP operation:
 submission URL, status/state mapping and retention, optional cancel URL,
@@ -1487,9 +1506,9 @@ forms are not detected. Lookahead includes the encoded values.
 `RedactJson` masks decoded string values and property names while
 keeping JSON valid; matching non-string scalars become strings. Key collisions
 fail explicitly rather than discard outputs. The completed-output/error path
-uses this masker before durable journaling when supplied resolved values.
-Secret resolution and broad stored-data masking verification remain dependent
-tasks; reference names alone do not provide resolved values to mask.
+uses this masker before durable journaling. Task-start resolution supplies actual
+resolved values to log/output/error masking; reference names are not values.
+Broad stored-data masking verification remains its separate task.
 
 ## Workflow project template
 
