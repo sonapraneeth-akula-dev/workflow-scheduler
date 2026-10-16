@@ -173,3 +173,40 @@ export async function deleteSchedule(current: ScheduleSnapshot): Promise<void> {
     throw new ApiError(result.response, result.error)
   }
 }
+
+export const seriesFiresSchema = z.object({
+  seriesId: z.uuid(),
+  items: z
+    .array(
+      z.object({
+        fireAt: z.iso.datetime({ offset: true }),
+        outcome: z.enum(["Started", "Skipped", "Missed", "CaughtUp"]),
+        runId: z.uuid().nullable(),
+        reason: z.string().nullable(),
+      })
+    )
+    .max(100),
+  nextCursor: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{11}$/)
+    .nullable(),
+})
+
+export async function getSeriesFires(
+  id: string,
+  cursor?: string,
+  signal?: AbortSignal
+) {
+  const result = await publicApi.GET("/api/v1/series/{id}/fires", {
+    params: { path: { id }, query: { cursor } },
+    signal,
+  })
+  if (!result.response.ok) {
+    throw new ApiError(result.response, result.error)
+  }
+  const page = seriesFiresSchema.parse(result.data)
+  if (page.seriesId !== id) {
+    throw new Error("The API returned fire history for a different series.")
+  }
+  return page
+}

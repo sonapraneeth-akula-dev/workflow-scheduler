@@ -5,6 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, resolve } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
+import { z } from "zod"
 import "../src/lib/json"
 
 const root = resolve(import.meta.dirname, "..", "..")
@@ -192,7 +193,10 @@ try {
   await ready(api + "/healthz/leader")
   run(
     process.execPath,
-    [resolve(root, "frontend", "scripts", "generate-api.ts"), "--check"],
+    [
+      resolve(root, "frontend", "scripts", "generate-api.ts"),
+      ...(process.argv.includes("--generate-api") ? [] : ["--check"]),
+    ],
     environment
   )
   const manifest: unknown = JSON.parse(
@@ -265,6 +269,29 @@ try {
       ],
     },
   })
+  const history = z.object({ id: z.uuid(), seriesId: z.uuid() }).parse(
+    await request("/api/v1/schedules", {
+      workflowId: "ui-tests/release/workflow",
+      name: "Retained history fixture",
+      timezone: "Etc/UTC",
+      interval: "01:00:00",
+    })
+  )
+  run("docker", [
+    "exec",
+    container,
+    "psql",
+    "-U",
+    "workflow",
+    "-d",
+    "workflow",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-c",
+    `INSERT INTO schedule_fires(schedule_id,fire_at,outcome,reason)
+     SELECT '${history.id}'::uuid,'2026-01-01'::timestamptz+n*interval '1 minute',1,'overlap'
+     FROM generate_series(0,59) n;`,
+  ])
   start(
     process.execPath,
     [
@@ -278,9 +305,17 @@ try {
     environment
   )
   await ready("http://127.0.0.1:4173")
-  await writeFile(stateFile, JSON.stringify({ directory: basename(storage) }), {
-    flag: "wx",
-  })
+  await writeFile(
+    stateFile,
+    JSON.stringify({
+      directory: basename(storage),
+      historyScheduleId: history.id,
+      historySeriesId: history.seriesId,
+    }),
+    {
+      flag: "wx",
+    }
+  )
   stateOwned = true
   console.log(
     `Schedule UI test stack ready: http://127.0.0.1:4173 (${container})`

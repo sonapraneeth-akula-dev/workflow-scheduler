@@ -1,0 +1,69 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { fireEvent, render, screen } from "@testing-library/react"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { getSeriesFires } from "@/lib/api/client"
+import { SeriesFiresTable } from "./SeriesFiresTable"
+
+vi.mock("@/lib/api/client", () => ({ getSeriesFires: vi.fn() }))
+const seriesId = "a77bb9c1-eebc-4145-a63b-296d62ee8747"
+const read = vi.mocked(getSeriesFires)
+
+function show() {
+  return render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <SeriesFiresTable seriesId={seriesId} />
+    </QueryClientProvider>
+  )
+}
+
+describe("series fire history states", () => {
+  beforeEach(() => vi.resetAllMocks())
+  it("announces loading and then a genuinely empty history", async () => {
+    read.mockResolvedValue({ seriesId, items: [], nextCursor: null })
+    show()
+    expect(
+      screen.getByRole("status", { name: "Loading fire history" })
+    ).toBeInTheDocument()
+    expect(await screen.findByText("No recorded fires.")).toBeInTheDocument()
+    expect(screen.queryByRole("table")).not.toBeInTheDocument()
+  })
+  it("surfaces failed reads rather than claiming an empty history", async () => {
+    read.mockRejectedValue(new Error("History access denied."))
+    show()
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "History access denied."
+    )
+    expect(screen.queryByText("No recorded fires.")).not.toBeInTheDocument()
+  })
+  it("retains loaded skips when loading older history fails, then allows refresh", async () => {
+    read
+      .mockResolvedValueOnce({
+        seriesId,
+        items: [
+          {
+            fireAt: "2026-10-15T12:00:00.000001Z",
+            outcome: "Skipped",
+            runId: null,
+            reason: "overlap",
+          },
+        ],
+        nextCursor: "AAAAAAAAAAA",
+      })
+      .mockRejectedValueOnce(new Error("Older history unavailable."))
+    show()
+    expect(await screen.findByRole("table")).toHaveTextContent("Skipped")
+    fireEvent.click(screen.getByRole("button", { name: "Load older fires" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Older history unavailable."
+    )
+    expect(screen.getByRole("table")).toHaveTextContent("overlap")
+    expect(read.mock.calls[1]?.[1]).toBe("AAAAAAAAAAA")
+    read.mockResolvedValue({ seriesId, items: [], nextCursor: null })
+    fireEvent.click(screen.getByRole("button", { name: "Refresh history" }))
+    expect(await screen.findByText("No recorded fires.")).toBeInTheDocument()
+  })
+})

@@ -601,6 +601,7 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
             {
                 app.MapRunsEndpoints();
                 app.MapSchedulesEndpoints();
+                app.MapSeriesFiresEndpoints();
             }
             if (userSchedules)
             {

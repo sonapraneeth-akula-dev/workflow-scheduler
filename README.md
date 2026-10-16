@@ -11,6 +11,16 @@ control plane. See `frontend\README.md` for local/Entra configuration, generated
 public/internal clients, actual PostgreSQL/browser tests and current hosting
 boundaries.
 
+Schedule details link to `/series/<uuid>` for durable scheduled-fire history.
+`GET /api/v1/series/{id}/fires` requires fresh Viewer access to the owning
+team/type, independently of the SPA client. Responses contain `seriesId`,
+`items` (`fireAt`, `outcome`, nullable `runId`/`reason`) and nullable
+`nextCursor`. Fires are newest first, including `Skipped`/`overlap` without a
+run and retained history after schedule removal. Pass the opaque cursor back
+as `?cursor=...&limit=50`; limits are 1-100. Invalid pagination returns 400,
+unknown or unauthorized series 403, and responses are never cached. This
+view lists fire history, not the separate full run-history/trends feature.
+
 ## Backend
 
 Requires the .NET 10 SDK. PostgreSQL integration tests require Docker with Linux

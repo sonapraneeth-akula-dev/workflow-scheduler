@@ -88,6 +88,7 @@ app.MapRegistryEndpoints();
 app.MapRegistrationEndpoints();
 app.MapRunsEndpoints();
 app.MapSchedulesEndpoints();
+app.MapSeriesFiresEndpoints();
 app.MapUserSchedulesEndpoints();
 app.MapWorkflowOpenApi();
 app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);

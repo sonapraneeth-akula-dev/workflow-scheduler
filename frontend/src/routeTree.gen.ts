@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SchedulesIdRouteImport } from './routes/schedules.$id'
 import { Route as SchedulesNewRouteImport } from './routes/schedules.new'
+import { Route as SeriesIdRouteImport } from './routes/series.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,35 +29,44 @@ const SchedulesNewRoute = SchedulesNewRouteImport.update({
   path: '/schedules/new',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SeriesIdRoute = SeriesIdRouteImport.update({
+  id: '/series/$id',
+  path: '/series/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/schedules/$id': typeof SchedulesIdRoute
   '/schedules/new': typeof SchedulesNewRoute
+  '/series/$id': typeof SeriesIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/schedules/$id': typeof SchedulesIdRoute
   '/schedules/new': typeof SchedulesNewRoute
+  '/series/$id': typeof SeriesIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/schedules/$id': typeof SchedulesIdRoute
   '/schedules/new': typeof SchedulesNewRoute
+  '/series/$id': typeof SeriesIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/schedules/$id' | '/schedules/new'
+  fullPaths: '/' | '/schedules/$id' | '/schedules/new' | '/series/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/schedules/$id' | '/schedules/new'
-  id: '__root__' | '/' | '/schedules/$id' | '/schedules/new'
+  to: '/' | '/schedules/$id' | '/schedules/new' | '/series/$id'
+  id: '__root__' | '/' | '/schedules/$id' | '/schedules/new' | '/series/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   SchedulesIdRoute: typeof SchedulesIdRoute
   SchedulesNewRoute: typeof SchedulesNewRoute
+  SeriesIdRoute: typeof SeriesIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +92,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SchedulesNewRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/series/$id': {
+      id: '/series/$id'
+      path: '/series/$id'
+      fullPath: '/series/$id'
+      preLoaderRoute: typeof SeriesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,6 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SchedulesIdRoute: SchedulesIdRoute,
   SchedulesNewRoute: SchedulesNewRoute,
+  SeriesIdRoute: SeriesIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

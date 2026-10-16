@@ -42,6 +42,14 @@ are read-only; richer source/commit badges and workflow catalogue entry points
 remain their own tasks. Current role enforcement is server-side; the shared
 permission-aware UI action layer remains task 10.1.2.1.3.
 
+Schedule details link to `/series/<uuid>`. The read-only, Viewer-scoped fire
+table shows exact recorded outcomes, reasons and associated run IDs, including
+skips/misses with no run and history retained after schedule deletion. UTC
+timestamps, explicit loading/empty/error states, refresh and cursor-based
+older-page loading are accessible in light/dark and narrow layouts. A failed
+older-page request preserves already loaded records. Full run history and
+trends remain separate tasks.
+
 Development authentication is opt-in and requires both a loopback hostname and
 the Vite development build. A production build rejects it even on localhost.
 No token is fabricated by the UI; the backend's own `--dev` handler supplies the
@@ -105,6 +113,13 @@ fixture creates its own PostgreSQL 17 container, migrates it, starts the actual
 through HTTP and starts Vite on 4173. All three ports must be free. No API mocks
 substitute for CRUD, stale edits or previews. `KARDIA_HOST_DLL` can select an
 isolated copy of the compiled host.
+
+After changing API routes, `bun scripts\test-stack.ts --generate-api` can
+bootstrap both generated clients against that isolated real host; stop the
+helper with Ctrl+C when ready. Normal browser runs always check contract drift.
+The history fixture seeds 60 retained skipped fires for paging; a separate
+browser case waits for the real hosted scheduler to start a run and skip its
+overlapping next fire without creating another run.
 
 The fixture checks live public/internal OpenAPI drift before starting Vite.
 Playwright's teardown explicitly signals the helper to stop both child processes,

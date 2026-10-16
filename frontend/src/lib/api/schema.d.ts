@@ -199,6 +199,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/series/{id}/fires": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number | string;
+                    cursor?: string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SeriesFiresPage"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/schedules/{id}": {
         parameters: {
             query?: never;
@@ -336,6 +394,20 @@ export interface components {
         ScheduleCatchUpPolicy: "None" | "Latest";
         /** @enum {unknown} */
         ScheduleOverlapPolicy: "Skip" | "Queue" | "Concurrent";
+        SeriesFireResponse: {
+            /** Format: date-time */
+            fireAt: string;
+            outcome: string;
+            /** Format: uuid */
+            runId: null | string;
+            reason: null | string;
+        };
+        SeriesFiresPage: {
+            /** Format: uuid */
+            seriesId: string;
+            items: components["schemas"]["SeriesFireResponse"][];
+            nextCursor: null | string;
+        };
         UserScheduleResponse: {
             /** Format: uuid */
             id: string;

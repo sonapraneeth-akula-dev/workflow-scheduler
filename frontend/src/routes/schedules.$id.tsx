@@ -94,6 +94,9 @@ function ScheduleDetail() {
         </Badge>
       </div>
       <p>{schedule.workflowId}</p>
+      <Link to="/series/$id" params={{ id: schedule.seriesId }}>
+        View series history
+      </Link>
       <p>
         Next fire:{" "}
         {schedule.nextFireAt
