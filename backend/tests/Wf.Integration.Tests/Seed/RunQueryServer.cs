@@ -16,6 +16,7 @@ using Microsoft.IdentityModel.Validators;
 using Npgsql;
 using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Auth;
+using Wf.ControlPlane.Live;
 
 namespace Wf.Testing.RunQueries;
 
@@ -26,7 +27,7 @@ public sealed class RunQueryServer(WebApplication app, HttpClient client, RSA rs
     private const string Audience = "562b0870-4522-43da-8587-41e9b788f309";
     private const string Issuer = $"https://login.microsoftonline.com/{Tenant}/v2.0";
 
-    public static async Task<RunQueryServer> Start(NpgsqlDataSource source, CancellationToken token, bool abort = false)
+    public static async Task<RunQueryServer> Start(NpgsqlDataSource source, CancellationToken token, bool abort = false, bool live = false)
     {
         ArgumentNullException.ThrowIfNull(source);
         var rsa = RSA.Create(2048);
@@ -40,7 +41,8 @@ public sealed class RunQueryServer(WebApplication app, HttpClient client, RSA rs
         builder.Services.AddSingleton(source);
         builder.Services.AddTeamAuthorization();
         builder.Services.AddWorkflowOpenApi();
-        if (abort) builder.Services.AddSingleton(TimeProvider.System);
+        if (abort || live) builder.Services.AddSingleton(TimeProvider.System);
+        if (live) builder.Services.AddWorkflowLive();
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunQueryJsonContext.Default);
@@ -64,6 +66,7 @@ public sealed class RunQueryServer(WebApplication app, HttpClient client, RSA rs
             app.UseAuthorization();
             app.MapRunQueryEndpoints();
             if (abort) app.MapRunAbortEndpoint();
+            if (live) app.MapHub<LiveHub>(LiveHub.Path);
             app.MapWorkflowOpenApi();
             await app.StartAsync(token);
             var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
@@ -92,6 +95,8 @@ public sealed class RunQueryServer(WebApplication app, HttpClient client, RSA rs
             DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow.AddMinutes(10),
             new SigningCredentials(key, SecurityAlgorithms.RsaSha256)));
     }
+
+    public Uri Origin => client.BaseAddress!;
 
     public async Task<HttpResponseMessage> Get(string path, string? jwt)
     {

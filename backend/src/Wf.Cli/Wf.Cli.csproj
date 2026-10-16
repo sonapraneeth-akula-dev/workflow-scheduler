@@ -6,6 +6,7 @@
     <ToolCommandName>wf</ToolCommandName>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
     <ProjectReference Include="..\Wf.Validation\Wf.Validation.csproj" />
   </ItemGroup>
 </Project>

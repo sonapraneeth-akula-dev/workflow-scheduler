@@ -8,6 +8,7 @@
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" />
     <ProjectReference Include="..\..\src\Wf.Sdk\Wf.Sdk.csproj" />
+    <ProjectReference Include="..\..\src\Wf.Cli\Wf.Cli.csproj" />
     <ProjectReference Include="..\..\src\Wf.Validation\Wf.Validation.csproj" />
     <ProjectReference Include="..\..\src\Wf.Engine.Core\Wf.Engine.Core.csproj" />
     <ProjectReference Include="..\..\src\Wf.Agent\Wf.Agent.csproj" />

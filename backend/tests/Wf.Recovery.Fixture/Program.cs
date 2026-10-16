@@ -13,6 +13,7 @@ var connectionString = Environment.GetEnvironmentVariable("WF_RECOVERY_DATABASE"
 var holder = Environment.GetEnvironmentVariable("WF_RECOVERY_HOLDER")
     ?? throw new InvalidOperationException("WF_RECOVERY_HOLDER is required.");
 var holdRunning = Environment.GetEnvironmentVariable("WF_RECOVERY_HOLD") == "true";
+var abortMode = Environment.GetEnvironmentVariable("WF_RECOVERY_ABORT") == "true";
 await using var source = NpgsqlDataSource.Create(connectionString);
 using var leadership = new LeaseManager(source, new(holder, new Uri("http://localhost:5300")),
     NullLogger<LeaseManager>.Instance);
@@ -32,7 +33,7 @@ while (true)
         await Task.Delay(25);
         continue;
     }
-    if (epoch != lease.Epoch)
+    if (epoch != lease.Epoch || abortMode)
     {
         active = recovery.RecoveredRuns.ToDictionary(pair => pair.Key, pair => pair.Value.State);
         epoch = lease.Epoch;
@@ -55,12 +56,21 @@ while (true)
                 else if (task == ExecutionStatus.Pending) change = TaskChange(ExecutionStatus.Ready);
                 else if (task == ExecutionStatus.Ready) change = TaskChange(ExecutionStatus.Dispatched);
                 else if (task == ExecutionStatus.Dispatched) change = TaskChange(ExecutionStatus.Running);
-                else if (task == ExecutionStatus.Running && !holdRunning) change = TaskChange(ExecutionStatus.Succeeded);
+                else if (task == ExecutionStatus.Running && !holdRunning && !abortMode) change = TaskChange(ExecutionStatus.Succeeded);
                 else if (task == ExecutionStatus.Succeeded && node == ExecutionStatus.Running) change = Node(ExecutionStatus.Succeeded);
                 else if (node == ExecutionStatus.Succeeded)
                     change = run.CreateEvent(EventEntity.Run, null, (int)RunStatus.Succeeded, DateTimeOffset.UtcNow);
                 RunEvent Node(ExecutionStatus status) => run.CreateEvent(EventEntity.Node, "node", (int)status, DateTimeOffset.UtcNow);
                 RunEvent TaskChange(ExecutionStatus status) => run.CreateEvent(EventEntity.Task, "node/task", (int)status, DateTimeOffset.UtcNow);
+            }
+            else if (abortMode && snapshot.Status == RunStatus.Aborting && !holdRunning)
+            {
+                if (snapshot.Tasks["node/task"] is ExecutionStatus.Running or ExecutionStatus.Dispatched)
+                    change = run.CreateEvent(EventEntity.Task, "node/task", (int)ExecutionStatus.Cancelled, DateTimeOffset.UtcNow);
+                else if (snapshot.Nodes["node"] == ExecutionStatus.Running)
+                    change = run.CreateEvent(EventEntity.Node, "node", (int)ExecutionStatus.Cancelled, DateTimeOffset.UtcNow);
+                else
+                    change = run.CreateEvent(EventEntity.Run, null, (int)RunStatus.Aborted, DateTimeOffset.UtcNow);
             }
             if (change is null) continue;
             await appender.AppendAsync(change);

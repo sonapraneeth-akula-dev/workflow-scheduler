@@ -318,7 +318,8 @@ are indistinguishable 403. Pending accepted triggers can be aborted before run
 materialization. Row locks serialize acceptance against terminal commits, while
 repeat reads avoid recovery's command-row lock; failed audit writes roll back
 acceptance and notification. Responses from authorized endpoint handling are
-never cached. CLI/UI confirmation surfaces remain their own tasks.
+never cached. The CLI command is documented below; browser confirmation remains
+its own task.
 
 Attempt/node/run deadlines and retry backoff use a `TimeProvider`; cleanup gets
 fresh cancellation tokens and its own deadlines. A function that ignores
@@ -1109,7 +1110,36 @@ Windows MSBuild currently rejects apostrophe/ampersand directory names
 cover Unicode and spaces. Hosted required-check behavior remains unverified
 until a permitted push/PR.
 
-## Validation CLI and packages
+## CLI and packages
+
+```powershell
+dotnet run --project backend\src\Wf.Cli -- abort $runId --reason "Stop deployment" --engine https://engine.example
+```
+
+`wf abort` requires an exact UUIDv7 and a nonblank 1-500-character reason.
+`--engine` or `WF_ENGINE_URL` supplies an HTTPS origin; HTTP is restricted to
+loopback. Supply the API bearer token through `WF_ACCESS_TOKEN`, not a command
+argument. A non-loopback target requires it; token acquisition/refresh is not
+implemented by this command. Loopback without a token works only when the
+server itself permits it, such as explicit local development mode.
+
+The official SignalR JSON/WebSocket client subscribes to the authorized run
+before sending one public abort request with source CLI. Output includes the
+engine's immutable accepted record and actual live run states, including
+Aborting/Aborted, rather than presenting a 202 response as completed
+cancellation. An existing first abort retains its original actor/source.
+There is no REST polling or automatic abort retry. Redirects are disabled;
+missing/oversized/malformed acceptance, live gaps/resync and transport loss fail
+explicitly without claiming that durable acceptance was undone.
+
+Exit codes: 0 only after observing Aborted; 1 for denied/rejected acceptance or
+another terminal state; 2 for usage/configuration/transport/contract failure;
+130 for Ctrl+C. Cancelling monitoring does not cancel an already accepted abort.
+Actual-process tests observe Aborting, hard-kill the owning leader while the
+controlled task remains running, then observe Aborted under the next leader,
+with one original command, audit and abort-bearing event. This proves
+lease/command/replay recovery through real PostgreSQL, not surviving arbitrary
+external task processes or undoing completed external side effects.
 
 ```powershell
 dotnet run --project backend\src\Wf.Cli -- validate C:\workflows\team\example --package C:\artifacts\example.zip
