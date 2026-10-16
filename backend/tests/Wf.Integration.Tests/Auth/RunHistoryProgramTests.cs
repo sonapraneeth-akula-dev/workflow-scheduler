@@ -11,7 +11,7 @@ namespace Wf.Integration.Tests.Auth;
 public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, ITestOutputHelper output) : IClassFixture<RegistrationHostDatabase>
 {
     [Fact]
-    public async Task RunHistory_actual_Program_OpenApi_exporter_handles_all_new_DTOs_without_optional_immutable_arrays()
+    public async Task RunHistory_and_RunNow_actual_Program_OpenApi_exporter_handles_all_new_DTOs_without_optional_immutable_arrays()
     {
         var token = TestContext.Current.CancellationToken;
         using var engine = new TcpListener(IPAddress.Loopback, 0);
@@ -63,6 +63,13 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             Assert.True(paths.GetProperty("/api/v1/runs/history").TryGetProperty("get", out _));
             Assert.True(paths.GetProperty("/api/v1/series/{id}/history").TryGetProperty("get", out _));
             Assert.True(paths.GetProperty("/api/v1/workflows/{team}/{type}/{workflow}/history").TryGetProperty("get", out _));
+            var runNow = paths.GetProperty("/api/v1/schedules/{id}/run-now").GetProperty("post");
+            Assert.Contains(runNow.GetProperty("parameters").EnumerateArray(), parameter =>
+                parameter.GetProperty("name").GetString() == "id" &&
+                parameter.GetProperty("in").GetString() == "path" &&
+                parameter.GetProperty("required").GetBoolean());
+            Assert.Equal("#/components/schemas/ScheduleRunNowResponse", runNow.GetProperty("responses").GetProperty("202")
+                .GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
             var schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
             Assert.True(schemas.TryGetProperty("RunHistoryPage", out _));
             Assert.True(schemas.GetProperty("RunQueryRow").GetProperty("properties").TryGetProperty("metadata", out _));

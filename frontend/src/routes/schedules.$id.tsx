@@ -25,6 +25,7 @@ import { ErrorNotice } from "@/components/ErrorNotice"
 import { usePermissions } from "@/lib/auth/usePermissions"
 import { ScheduleForm } from "@/features/schedules/ScheduleForm"
 import { OriginBadge } from "@/features/schedules/OriginBadge"
+import { RunNowButton } from "@/features/series/RunNowButton"
 import { formatFire } from "@/features/schedules/schedule-draft"
 import {
   deleteSchedule,
@@ -120,6 +121,11 @@ function ScheduleDetail() {
       <Link to="/series/$id" params={{ id: schedule.seriesId }}>
         View series history
       </Link>
+      <RunNowButton
+        scheduleId={id}
+        seriesId={schedule.seriesId}
+        disabled={isMutating || query.isFetching}
+      />
       <p>
         Next fire:{" "}
         {schedule.nextFireAt

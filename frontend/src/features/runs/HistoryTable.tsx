@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { accessDenied, runStatuses } from "@/features/catalog/api"
 import { TriggerBadge } from "./TriggerBadge"
+import { RunNowButton } from "@/features/series/RunNowButton"
 import {
   getHistory,
   historySearchSchema,
@@ -117,6 +118,9 @@ export function HistoryTable({
   const rows = accessDenied(query.error)
     ? undefined
     : query.data?.pages.flatMap((page) => page.items)
+  const scheduleId = query.error
+    ? undefined
+    : query.data?.pages.at(-1)?.currentScheduleId
   return (
     <section aria-label="Run history" className="min-w-0 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -129,6 +133,18 @@ export function HistoryTable({
           Refresh run history
         </Button>
       </div>
+      {scope.seriesId && scheduleId ? (
+        <RunNowButton
+          key={scheduleId}
+          scheduleId={scheduleId}
+          seriesId={scope.seriesId}
+          disabled={query.isFetching}
+        />
+      ) : scope.seriesId && scheduleId === null ? (
+        <p className="text-sm text-muted-foreground">
+          Run now unavailable: this series has no current schedule.
+        </p>
+      ) : null}
       <p className="text-sm text-muted-foreground">
         Times shown in UTC. Duration requires recorded start and end times.
         Variables show recorded names and types only; all values and defaults

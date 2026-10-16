@@ -7,16 +7,26 @@ using Npgsql;
 using Wf.Contracts.Registry;
 using Wf.Contracts.Runs;
 using Wf.ControlPlane.Auth;
+using Wf.ControlPlane.Engine.Recovery;
+using Wf.ControlPlane.Engine.Registry;
 
 namespace Wf.ControlPlane.Api;
+
+// The tolerant SDK response's optional Guid default cannot be exported by System.Text.Json's schema generator.
+public sealed record ScheduleRunNowResponse(Guid RunId);
 
 public static class SchedulesEndpoints
 {
     public static IEndpointRouteBuilder MapSchedulesEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapPost("/api/v1/schedules/{id:guid}/run-now", RunsEndpoints.Trigger).RequireAuthorization()
+        endpoints.MapPost("/api/v1/schedules/{id:guid}/run-now",
+            (Guid id, HttpContext context, ActiveVersionCache versions, NpgsqlDataSource source, CommandInbox inbox, TimeProvider time) =>
+                RunsEndpoints.Trigger(context, versions, source, inbox, time)).RequireAuthorization()
             .AddEndpointFilter(AuthorizeRunNow)
-            .AddEndpointFilter<IdempotencyFilter>();
+            .AddEndpointFilter<IdempotencyFilter>()
+            .Produces<ScheduleRunNowResponse>(202)
+            .ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404)
+            .ProducesProblem(409).ProducesProblem(413).ProducesProblem(415).ProducesProblem(503);
         return endpoints;
     }
 

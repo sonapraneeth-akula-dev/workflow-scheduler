@@ -11,6 +11,19 @@ vi.mock("./history", async (original) => ({
   ...(await original<typeof import("./history")>()),
   getHistory: vi.fn(),
 }))
+vi.mock("@/features/series/RunNowButton", () => ({
+  RunNowButton: ({
+    scheduleId,
+    seriesId,
+  }: {
+    scheduleId: string
+    seriesId: string
+  }) => (
+    <button data-schedule={scheduleId} data-series={seriesId}>
+      Run now
+    </button>
+  ),
+}))
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
     to,
@@ -71,6 +84,31 @@ function page(items: HistoryRow[] = [row], nextCursor: string | null = null) {
 }
 describe("historical table", () => {
   beforeEach(() => vi.clearAllMocks())
+  it("uses only the API's current schedule identity, including an empty filtered page", async () => {
+    vi.mocked(getHistory).mockResolvedValue({
+      ...page([]),
+      currentScheduleId: row.versionId,
+    })
+    show({ status: "Succeeded" })
+    expect(
+      await screen.findByRole("button", { name: "Run now" })
+    ).toHaveAttribute("data-schedule", row.versionId)
+    expect(screen.getByRole("button", { name: "Run now" })).toHaveAttribute(
+      "data-series",
+      row.seriesId
+    )
+    expect(screen.getByText("No matching history.")).toBeVisible()
+  })
+  it("does not guess a schedule for a deleted or legacy series", async () => {
+    vi.mocked(getHistory).mockResolvedValue(page([]))
+    show()
+    await screen.findByText(
+      "Run now unavailable: this series has no current schedule."
+    )
+    expect(
+      screen.queryByRole("button", { name: "Run now" })
+    ).not.toBeInTheDocument()
+  })
   it("renders exact committed abort, names/types only and immutable executed version links", async () => {
     vi.mocked(getHistory).mockResolvedValue(page())
     show()

@@ -50,6 +50,20 @@ refresh every 30 seconds and on window focus. Forms stay mounted during these
 checks, preserving unsaved drafts. Mutation endpoints remain authoritative,
 including after a role is revoked.
 
+Operator-only Run now is available on schedule details (including Code and
+paused schedules) and series history. Series history uses the API's authoritative
+nullable current schedule identity, including when filters return no rows;
+deleted/legacy unlinked series never guess an endpoint. The request sends no
+variable/version/series overrides and leaves the saved schedule, next fire and
+fire history unchanged. Unsaved schedule drafts remain mounted.
+
+Each deliberate run uses an idempotency key. Pending writes disable submission;
+there are no automatic retries. After a failed or lost response, Retry Run now
+reuses that key; only a successful acceptance permits a new key. HTTP 202 with a
+valid run ID is required. The Manual receipt links to the accepted run and
+explicitly distinguishes acceptance from asynchronous engine creation. Refresh
+run history to read the committed row in the same permanent series.
+
 Home lists permitted teams; `/t/<team>` shows type descriptions and latest-run
 status counts, and `/t/<team>/<type>` shows workflows with independent active
 and latest versions. Home to workflow list takes two clicks. Never-run workflows
