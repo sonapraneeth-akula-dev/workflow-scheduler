@@ -1,7 +1,7 @@
 # Decision: Separate agent reclaim, replacement start and task completion
 
 - **Date:** October 16, 2026
-- **Status:** Accepted; real wall-clock verification in progress
+- **Status:** Accepted; real wall-clock fixture verified
 - **Task:** 2.3.2.1.2; corresponding US-020 and US-021 timing criteria
 - **Decision authority:** Explicit user approval to proceed with the recommended policy and remove the conflicting acceptance blocker
 
@@ -59,13 +59,43 @@ agent killed mid-SDK delegate, followed by successful execution on another
 actual agent after virtual-clock reclaim expiry. Virtual-clock evidence
 establishes boundaries and behavior, not real elapsed-time performance.
 
-A separate real wall-clock acceptance test is being added: kill the executing
-agent, retain the actual heartbeat timestamp, keep an eligible second agent
-available, run the hosted sweeper and replacement handler, and record the
-replacement's actual execution start and successful completion. No test clock
-advance or early loss injection may substitute for the full reclaim interval.
-Task completion will be recorded after that verification, not merely because
-the contradictory requirement was removed.
+A separate real wall-clock acceptance test now kills the executing agent's
+complete process tree, retains the actual heartbeat timestamp, keeps an eligible
+second agent available with genuine heartbeats, and runs the production hosted
+sweeper and replacement handler. No test clock advance, manual classification
+or direct replacement call substitutes for the full reclaim interval.
+
+The durable `TaskStarted` event marks agent execution entry **before** package
+preparation and task-host startup. It is not presented as an exact SDK-body
+entry timestamp. For this short SDK fixture, successful execution is additionally
+required by the replacement-start deadline: completion is a conservative upper
+bound on when its task host and SDK body must have started. The test also checks
+completion against its separate fixture budget and persisted task/node/run
+deadlines. This stronger short-fixture check does not impose its duration on
+arbitrary production workloads.
+
+### Recorded wall-clock evidence
+
+Final worker verification on October 16, 2026 passed all 19 affected integration
+cases and 27 core/retry cases, with zero skips. The real-clock case runs once in
+that integration invocation; deterministic boundary and virtual-clock cases
+remain separate. The parent independently reran all 19 affected Release
+integrations, including the strengthened real-clock case, with zero skips.
+Values below are observations from the worker invocation, not an SLA estimate
+or cross-platform performance claim.
+
+| Event | UTC, October 16, 2026 | Measured interval |
+|---|---|---|
+| Last durable heartbeat | 03:26:31.198669 | Baseline |
+| Reclaim expiry | 03:27:01.198669 | Exactly 30 s after heartbeat |
+| Durable loss classification | 03:27:01.599815 | 30.401146 s after heartbeat |
+| Agent execution entry, before host startup | 03:27:01.850580 | 0.651911 s after expiry |
+| SDK fixture successfully completed | 03:27:03.279418 | 2.080749 s after expiry; conservative host/SDK-start upper bound |
+
+Agent entry to success was 1.428838 seconds. Total heartbeat to success was
+32.080749 seconds, explicitly **not** within the old 30-second total bound.
+The 30-second reclaim interval was preserved, and the post-expiry start bound
+passed without subtracting startup time.
 
 This decision resolves the agent-loss timing blocker. It does not waive
 functional correctness or claim host survival/re-adoption, checkpoint recovery,
