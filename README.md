@@ -70,6 +70,20 @@ Bad/duplicate queries return 400, missing pairs 404, denied scopes 403, corrupt
 data 500 and unavailable storage 503; errors never include partial source.
 Responses are never cached.
 
+`POST /api/v1/workflows/{team}/{type}/{workflow}/versions/{version}/clone`
+downloads an immutable-version scaffold without changing or registering either
+workflow. Send exactly `{"newName":"experiment","targetType":"team/type"}` with
+fresh Viewer access to the source type and Author access to the target type.
+The ZIP preserves authored task bodies and dependency directives, resets the
+new identity/type/version (`1.0.0`), and records
+`ClonedFrom = <source-workflow>@<immutable-version-UUID>` in metadata. It includes
+`workflow.cs`, an empty schedule plus schema, and runnable SDK tests.
+Historical/inactive/deleted source versions remain available; an existing
+target returns 409 and unsupported or ambiguous source syntax returns 400.
+Source reads verify stored hashes and bounds; the API never compiles or
+executes scripts. Review target metadata rules before publishing; the scaffold
+does not include registry configuration. PR creation remains deferred.
+
 SDK manifests now record optional declared task actions: the original SDK method,
 command executable, credential/query/fragment-free one-shot HTTP method/URL, or
 declared HTTP operation. Description never executes tasks or inspects captured
