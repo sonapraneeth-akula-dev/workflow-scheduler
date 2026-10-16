@@ -5,6 +5,7 @@ import { ReconnectingIndicator } from "@/components/ReconnectingIndicator"
 import { LiveRunGraph } from "@/features/graph/RunGraph"
 import { AbortDialog } from "@/features/runs/AbortDialog"
 import { Timeline } from "@/features/runs/Timeline"
+import { ReportIndex } from "@/features/reports/ReportIndex"
 import { useRun } from "@/lib/live/useRun"
 
 export const Route = createFileRoute("/runs/$id")({
@@ -61,6 +62,12 @@ function RunDetail() {
               >
                 Timeline
               </Tabs.Trigger>
+              <Tabs.Trigger
+                value="reports"
+                className="rounded border px-3 py-2 data-[state=active]:bg-muted"
+              >
+                Reports
+              </Tabs.Trigger>
             </Tabs.List>
             <Tabs.Content
               value="graph"
@@ -71,6 +78,9 @@ function RunDetail() {
             </Tabs.Content>
             <Tabs.Content value="timeline" className="min-w-0">
               <Timeline runId={run.runId} />
+            </Tabs.Content>
+            <Tabs.Content value="reports" className="min-w-0">
+              <ReportIndex key={run.runId} runId={run.runId} />
             </Tabs.Content>
           </Tabs.Root>
         </>

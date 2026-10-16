@@ -5,6 +5,8 @@ All notable frontend changes are documented here, using Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Live run Reports tab with stage/node/task grouping, exact kind/tag filters,
+  authorized metadata refresh and separate reconnect-safe ReportAdded handling.
 - Unknown report kinds download exact bytes as owned binary Blob URLs with
   committed title/size, safe filenames and replacement/unmount cleanup.
 - Renderer-only extension guide and a single-entry lazy registration check.

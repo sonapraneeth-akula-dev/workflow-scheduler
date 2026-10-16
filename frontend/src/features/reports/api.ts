@@ -20,7 +20,7 @@ const metadataText = (maxBytes: number) =>
 const reportSchema = z.object({
   id: idSchema,
   runId: idSchema,
-  sourceKey: z.string().min(1),
+  sourceKey: z.string().regex(/^[^/]+\/[^/]+$/),
   attempt: z.int().positive(),
   kind: metadataText(128),
   title: metadataText(512),

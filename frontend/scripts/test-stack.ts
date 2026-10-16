@@ -473,14 +473,12 @@ try {
       ],
     },
   })
-  const rendererRunId = z
-    .object({ runId: z.uuid() })
-    .parse(
-      await request("/api/v1/runs", {
-        workflowId: rendererWorkflow,
-        variables: {},
-      })
-    ).runId
+  const rendererRunId = z.object({ runId: z.uuid() }).parse(
+    await request("/api/v1/runs", {
+      workflowId: rendererWorkflow,
+      variables: {},
+    })
+  ).runId
   const reportSql = (statement: string) =>
     run("docker", [
       "exec",
@@ -526,6 +524,7 @@ try {
     stateFile,
     JSON.stringify({
       directory: basename(storage),
+      container,
       historyScheduleId: history.id,
       historySeriesId: history.seriesId,
       catchUpSeriesId: catchUp.seriesId,

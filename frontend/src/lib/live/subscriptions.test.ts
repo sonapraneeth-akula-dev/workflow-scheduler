@@ -2,7 +2,12 @@ import { createElement, StrictMode, type ReactNode } from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { LiveTransport } from "./connection"
-import { parseListDelta, parseRunDelta, resourceSchema } from "./messages"
+import {
+  parseListDelta,
+  parseReportAdded,
+  parseRunDelta,
+  resourceSchema,
+} from "./messages"
 import { LiveSubscriptions } from "./subscriptions"
 import { useLive } from "./useLive"
 
@@ -99,6 +104,57 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe("shared reference-counted live scopes", () => {
+  it("batches report notifications separately without fabricating lifecycle sequence or resync", async () => {
+    const { manager, transport } = setup()
+    const scope = manager.retain(target)
+    await vi.waitFor(() => expect(scope.getSnapshot().status).toBe("live"), {
+      interval: 1,
+    })
+    frame()
+    const before = scope.getSnapshot()
+    const listener = vi.fn()
+    scope.subscribe(listener)
+    for (let index = 0; index < 25; index++)
+      transport.emit("ReportAdded", { runId: run, reportId: other })
+    expect(before.reportVersion).toBe(0)
+    expect(listener).not.toHaveBeenCalled()
+    frame()
+    expect(listener).toHaveBeenCalledOnce()
+    expect(scope.getSnapshot().reportVersion).toBe(25)
+    expect(scope.getSnapshot().resyncVersion).toBe(0)
+    expect(scope.getSnapshot().delta).toBeNull()
+    await manager.reset()
+  })
+  it("ignores foreign-run report notifications and retains report refresh across reconnect", async () => {
+    const { manager, transport } = setup()
+    const scope = manager.retain(target)
+    await vi.waitFor(() => expect(scope.getSnapshot().status).toBe("live"), {
+      interval: 1,
+    })
+    transport.emit("ReportAdded", { runId: other, reportId: run })
+    expect(scope.getSnapshot().reportVersion).toBe(0)
+    transport.emit("ReportAdded", { runId: run, reportId: other })
+    transport.reconnecting?.()
+    transport.reconnected?.()
+    await vi.waitFor(() => expect(scope.getSnapshot().status).toBe("live"), {
+      interval: 1,
+    })
+    expect(scope.getSnapshot().reportVersion).toBe(1)
+    expect(scope.getSnapshot().resyncVersion).toBe(1)
+    await manager.reset()
+  })
+  it("surfaces malformed report messages instead of hiding protocol errors", async () => {
+    const { manager, transport } = setup()
+    const scope = manager.retain(target)
+    await vi.waitFor(() => expect(scope.getSnapshot().status).toBe("live"), {
+      interval: 1,
+    })
+    transport.emit("ReportAdded", { runId: run, reportId: "invalid" })
+    expect(scope.getSnapshot().status).toBe("error")
+    expect(scope.getSnapshot().error?.message).toContain("invalid live message")
+    expect(scope.getSnapshot().reportVersion).toBe(0)
+    await manager.reset()
+  })
   it("starts lazily and shares one canonical subscription for two views", async () => {
     const { manager, transport, factory } = setup()
     expect(factory).not.toHaveBeenCalled()
@@ -508,6 +564,14 @@ describe("React external live store integration", () => {
 })
 
 it("validates IDs, noncontiguous event batches, nullable abort records and summaries against generated contracts", () => {
+  expect(parseReportAdded({ runId: run, reportId: other })).toEqual({
+    runId: run,
+    reportId: other,
+  })
+  expect(() => parseReportAdded({ runId: run })).toThrow()
+  expect(() =>
+    parseReportAdded({ runId: "invalid", reportId: other })
+  ).toThrow()
   expect(() => resourceSchema.parse({ scope: "run", id: "invalid" })).toThrow()
   expect(() => resourceSchema.parse({ scope: "team", id: "x\n" })).toThrow()
   expect(() =>

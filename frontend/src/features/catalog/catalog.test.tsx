@@ -65,6 +65,7 @@ const live = {
   error: null,
   delta: null,
   resyncVersion: 0,
+  reportVersion: 0,
 } as const
 const retry = vi.fn()
 

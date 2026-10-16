@@ -38,6 +38,10 @@ const runDelta = z
       previous = change.seq
     }
   })
+const reportAdded = z.object({
+  runId: id,
+  reportId: id,
+})
 const summary = z.object({
   runId: id,
   workflowId: z.string().regex(/^[^/]+\/[^/]+\/[^/]+$/),
@@ -93,6 +97,10 @@ export type LiveDelta = RunDelta | ListDelta
 
 export function parseRunDelta(value: unknown) {
   return runDelta.parse(value) satisfies components["schemas"]["RunDelta"]
+}
+
+export function parseReportAdded(value: unknown) {
+  return reportAdded.parse(value)
 }
 
 export function parseListDelta(value: unknown) {

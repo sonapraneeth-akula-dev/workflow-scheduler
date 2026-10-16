@@ -126,6 +126,29 @@ Adding a renderer requires one lazy entry in `src\renderers\registry.ts`;
 `src\renderers\README.md` documents the component contract, extension test and
 untrusted-content rules. No backend kind enum or migration is required.
 
+The run's Reports tab groups the exact committed stage/node/task source and
+shows each report's title, kind, tags, attempt, byte size and publication time.
+Kind and tag filters use exact, case-sensitive AND matches over the authorized
+metadata index; changing filters needs no additional request. Empty runs and
+empty filtered results have distinct messages. Report links open the same
+authenticated viewer and therefore support unknown-kind downloads too.
+
+Reports and the mounted graph share one reference-counted run subscription.
+Separate MessagePack `ReportAdded` IDs advance only the report refresh version,
+never the run lifecycle sequence. Joined/reconnected/resynced scopes and report
+notifications restart even an in-flight stale index read, then refetch durable
+metadata. Run snapshots/events are not reloaded just because a report arrives.
+There is no timer polling. Denied or failed REST/live refreshes hide cached
+reports and expose explicit refresh/connection retry controls.
+
+`e2e/report-index.spec.ts` creates a separate real run per browser, seeds retained
+report rows/blobs, and measures a subsequent fixture blob write + PostgreSQL
+commit + actual notification/MessagePack + visible insertion at <=1 second.
+The browser fixture checks exact filters, all source grouping levels, one shared
+WebSocket, no periodic reads, real viewer navigation and two-theme accessibility.
+It does not represent SQL fixture insertion as SDK publishing; separate backend
+tests exercise the production publishing endpoint.
+
 `e2e/report-renderers.spec.ts` reads real HTTP content from immutable filesystem
 objects and PostgreSQL report/attempt rows in the isolated UI fixture. Fixture
 rows model retained published reports; this browser fixture does not claim to

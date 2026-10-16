@@ -56,33 +56,48 @@ export async function seedRendererReports(
       bytes: Buffer.from("<script>window.reportScriptRan=true</script>"),
     },
   ]
+  const items = []
+  for (const sample of samples)
+    items.push(await seedRendererReport(storage, runId, sql, sample))
+  return items
+}
+
+export async function seedRendererReport(
+  storage: string,
+  runId: string,
+  sql: (statement: string) => string,
+  sample: {
+    kind: string
+    title: string
+    bytes: Buffer
+    sourceKey?: string
+    tags?: string[]
+  }
+) {
   const directory = resolve(storage, "reports", runId)
   await mkdir(directory, { recursive: true })
   const quote = (value: string) => `'${value.replaceAll("'", "''")}'`
-  const rows: string[] = []
-  const items = []
-  for (const [index, sample] of samples.entries()) {
-    const timestamp = Date.now().toString(16).padStart(12, "0")
-    const id = `${timestamp.slice(0, 8)}-${timestamp.slice(8)}-7${randomUUID().slice(15)}`
-    await writeFile(resolve(directory, id), sample.bytes, { flag: "wx" })
-    const hash = createHash("sha256").update(sample.bytes).digest("hex")
-    rows.push(`INSERT INTO report_ids(id,run_day) VALUES('${id}',uuid_v7_run_day('${runId}'));
-      INSERT INTO reports(run_day,id,run_id,source_key,attempt,kind,title,tags,size_bytes,blob_uri,sha256,created_at)
-      VALUES(uuid_v7_run_day('${runId}'),'${id}','${runId}','$post/report-renderer',1,
-      ${quote(sample.kind)},${quote(sample.title)},ARRAY['renderer','review'],${sample.bytes.length},
-      'reports/${runId}/${id}',decode('${hash}','hex'),clock_timestamp()+interval '${index} milliseconds');`)
-    items.push({
-      id,
-      kind: sample.kind,
-      title: sample.title,
-      sizeBytes: sample.bytes.length,
-    })
-  }
+  const source = quote(sample.sourceKey ?? "$post/report-renderer")
+  const timestamp = Date.now().toString(16).padStart(12, "0")
+  const id = `${timestamp.slice(0, 8)}-${timestamp.slice(8)}-7${randomUUID().slice(15)}`
+  await writeFile(resolve(directory, id), sample.bytes, { flag: "wx" })
+  const hash = createHash("sha256").update(sample.bytes).digest("hex")
+  const tags = (sample.tags ?? ["renderer", "review"]).map(quote).join(",")
   sql(`BEGIN;
     INSERT INTO task_attempts(run_day,run_id,task_key,attempt,status,deadline_at,queued_at,started_at,ended_at)
-    VALUES(uuid_v7_run_day('${runId}'),'${runId}','$post/report-renderer',1,5,
-      clock_timestamp()+interval '1 hour',clock_timestamp(),clock_timestamp(),clock_timestamp());
-    ${rows.join("\n")}
+    VALUES(uuid_v7_run_day('${runId}'),'${runId}',${source},1,5,
+      clock_timestamp()+interval '1 hour',clock_timestamp(),clock_timestamp(),clock_timestamp())
+    ON CONFLICT DO NOTHING;
+    INSERT INTO report_ids(id,run_day) VALUES('${id}',uuid_v7_run_day('${runId}'));
+    INSERT INTO reports(run_day,id,run_id,source_key,attempt,kind,title,tags,size_bytes,blob_uri,sha256,created_at)
+    VALUES(uuid_v7_run_day('${runId}'),'${id}','${runId}',${source},1,
+      ${quote(sample.kind)},${quote(sample.title)},ARRAY[${tags}]::text[],${sample.bytes.length},
+      'reports/${runId}/${id}',decode('${hash}','hex'),clock_timestamp());
     COMMIT;`)
-  return items
+  return {
+    id,
+    kind: sample.kind,
+    title: sample.title,
+    sizeBytes: sample.bytes.length,
+  }
 }

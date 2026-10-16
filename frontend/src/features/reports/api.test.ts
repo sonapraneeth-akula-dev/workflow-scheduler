@@ -46,6 +46,8 @@ describe("trusted report metadata and content reads", () => {
     { ...item, sizeBytes: -1 },
     { ...item, sizeBytes: Number.MAX_SAFE_INTEGER + 1 },
     { ...item, attempt: 0 },
+    { ...item, sourceKey: "not-a-task" },
+    { ...item, sourceKey: "node/task/extra" },
     { ...item, kind: " " },
     { ...item, title: "\u03bb".repeat(257) },
     { ...item, tags: Array.from({ length: 33 }, () => "tag") },

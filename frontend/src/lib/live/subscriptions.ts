@@ -1,6 +1,7 @@
 import { createConnection, type LiveTransport } from "./connection"
 import {
   parseListDelta,
+  parseReportAdded,
   parseResync,
   parseRunDelta,
   parseSubscription,
@@ -19,6 +20,7 @@ export interface LiveSnapshot {
   readonly error: Error | null
   readonly delta: LiveDelta | null
   readonly resyncVersion: number
+  readonly reportVersion: number
 }
 
 export interface LiveScope {
@@ -64,6 +66,7 @@ export class LiveSubscriptions {
           delta: null,
           error: null,
           resyncVersion: 0,
+          reportVersion: 0,
         }
       : null
     return {
@@ -98,6 +101,7 @@ export class LiveSubscriptions {
           error: null,
           delta: null,
           resyncVersion: 0,
+          reportVersion: 0,
         },
         listeners: new Set(),
         runEvents: [],
@@ -243,6 +247,16 @@ export class LiveSubscriptions {
   }
 
   private attach(connection: LiveTransport): void {
+    connection.on("ReportAdded", (value) =>
+      this.receive(connection, () => {
+        const added = parseReportAdded(value)
+        const entry = this.entries.get(`run:${added.runId.toLowerCase()}`)
+        if (!entry || entry.blocked || entry.snapshot.status === "error") return
+        this.update(entry, {
+          reportVersion: entry.snapshot.reportVersion + 1,
+        })
+      })
+    )
     connection.on("RunDelta", (value) =>
       this.receive(connection, () => {
         const delta = parseRunDelta(value)

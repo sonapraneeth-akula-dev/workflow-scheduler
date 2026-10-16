@@ -55,6 +55,7 @@ function fixture(status: LiveSnapshot["status"] = "live") {
     delta: null,
     error: null,
     resyncVersion: 0,
+    reportVersion: 0,
   }
   const callbacks = new Set<() => void>()
   const release = vi.fn()
@@ -104,6 +105,16 @@ const ready = async (store: RunStore) =>
   waitFor(() => expect(store.getSnapshot().status).toBe("live"))
 
 describe("ordered authoritative run recovery", () => {
+  it("does not refetch run state or fabricate lifecycle changes for report notifications", async () => {
+    const f = fixture()
+    await ready(f.store)
+    const before = f.store.getSnapshot().run
+    f.emit({ reportVersion: 1 })
+    expect(f.store.getSnapshot().run).toBe(before)
+    expect(f.reads.snapshot).toHaveBeenCalledOnce()
+    expect(f.reads.events).not.toHaveBeenCalled()
+    f.stop()
+  })
   it("subscribes before reading the initial snapshot and waits for authorization acknowledgement", async () => {
     const f = fixture("connecting")
     expect(f.reads.snapshot).not.toHaveBeenCalled()
