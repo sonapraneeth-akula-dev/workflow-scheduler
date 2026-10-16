@@ -64,8 +64,8 @@ are team-scoped; type-only grants receive no hidden team-wide presentation.
 Defaults apply on the server before workflow paging and type status counts
 through `defaults=true`, without copying stored keys/values into URLs or
 applying manual-filter size limits to valid stored configuration. Explicit
-`meta.<key>` filters override corresponding defaults. Interactive search,
-URL filters/grouping remain separate tasks.
+`meta.<key>` filters override corresponding defaults. Workflow/series history
+and Runs search are available through their own links.
 
 Catalogue and scheduled-fire run IDs link to `/runs/<uuid>`. The run's Task Plan
 link opens `/t/<team>/<type>/w/<workflow>/versions/<version UUID>` using the pinned
@@ -145,16 +145,30 @@ registered workflows. Use a template only when it correctly identifies the
 workflow repository for that deployment; per-workflow repository mappings are
 not part of the current registration contract.
 
-Schedule details link to `/series/<uuid>`. The read-only, Viewer-scoped fire
-table shows exact recorded outcomes, reasons and associated run IDs, including
-skips/misses with no run and history retained after schedule deletion. UTC
+Schedule details link to `/series/<uuid>`; workflow list rows link to
+`/t/<team>/<type>/w/<workflow>/history`. Both use the Viewer-scoped unified
+history API and show durable runs alongside exact retained skipped/missed
+outcomes and reasons, including facts with no run and history retained after
+schedule/workflow deletion. Run status, duration, Manual/Scheduled/Catch-up
+trigger and executed version are recorded facts, not current manifest guesses.
+Version links open the historical Task Plan. Durations require both start and
+end; unknown legacy details remain explicit. Variable columns show only set
+schema-backed names/types, with Secret entries redacted; no values/defaults or
+secret references are returned.
+
+Committed abort details include original actor/name, exact time, reason and
+source; a legacy Aborted status without its event does not invent attribution.
+Typed URL filters restore status, exact aborted-by principal, outcome and
+ascending/descending creation order after copy/reload. Principal identities
+follow the backend's canonical lowercase nonempty GUID contract, without
+imposing run UUID version/variant bits. Status/aborted-by filters exclude
+fire-only facts. UTC
 timestamps, explicit loading/empty/error states, refresh and cursor-based
 older-page loading are accessible in light/dark and narrow layouts. A failed
-older-page request preserves already loaded records. A linked catch-up run
-has a Catch-up trigger badge; its original scheduled-fire outcome remains
-Missed. The badge uses the durable source marker and run reference, not a
-reclassification of missed fire history. Full run history and
-trends remain separate tasks.
+older-page request preserves already loaded records; revoked reads hide them.
+The catch-up run has a Catch-up badge while its retained source outcome remains
+Missed. Paging validates resource identity, filter matches and strict
+timestamp/UUID/kind ordering, including microsecond ties. Trends remain separate.
 
 The main navigation's Runs view (`/runs`) searches authorized durable run
 summaries by exact team, type, workflow, series, named status, created-time range
@@ -180,7 +194,7 @@ disables windowing for sequential keyboard/screen-reader access to every loaded
 record; it does not fetch additional pages. Refresh and Load more runs are
 explicit, without polling. Revoked access hides cached results. These summaries
 do not expose variables, task payloads or storage capabilities; the richer
-workflow/series history and abort controls are separate surfaces.
+workflow/series history is a separate surface; abort controls remain separate work.
 
 Development authentication is opt-in and requires both a loopback hostname and
 the Vite development build. A production build rejects it even on localhost.

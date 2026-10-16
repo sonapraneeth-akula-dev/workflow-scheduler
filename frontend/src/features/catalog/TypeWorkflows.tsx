@@ -137,6 +137,12 @@ export function TypeWorkflows({ team, type }: { team: string; type: string }) {
                       <p className="break-words text-muted-foreground">
                         {workflow.id}
                       </p>
+                      <Link
+                        to="/t/$team/$type/w/$wf/history"
+                        params={{ team, type, wf: workflow.name }}
+                      >
+                        Workflow history
+                      </Link>
                     </th>
                     <td className="p-3">
                       {workflow.activeVersion?.semVer ?? "No active version"}
