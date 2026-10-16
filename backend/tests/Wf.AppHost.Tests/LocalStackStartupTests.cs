@@ -1,18 +1,153 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Net.NetworkInformation;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
 using Npgsql;
+using Microsoft.Extensions.DependencyInjection;
 using Wf.AppHost;
 
 namespace Wf.AppHost.Tests;
 
 public sealed class LocalStackStartupTests(ITestOutputHelper output)
 {
+    [Fact]
+    public async Task Explicit_LAN_mkcert_TLS_is_trusted_from_a_separate_Linux_client_and_HTTP_remains_loopback()
+    {
+        Assert.SkipUnless(Environment.GetEnvironmentVariable("WF_APPHOST_LAN") == "true",
+            "Set WF_APPHOST_LAN=true with mkcert, Docker and a reachable LAN IPv4 address for the real TLS/client test.");
+        var address = Environment.GetEnvironmentVariable("WF_APPHOST_LAN_ADDRESS") ??
+            NetworkInterface.GetAllNetworkInterfaces().Where(network => network.OperationalStatus == OperationalStatus.Up &&
+                network.GetIPProperties().GatewayAddresses.Any(gateway =>
+                    gateway.Address.AddressFamily == AddressFamily.InterNetwork && !gateway.Address.Equals(IPAddress.Any)))
+                .SelectMany(network => network.GetIPProperties().UnicastAddresses)
+                .First(unicast => unicast.Address.AddressFamily == AddressFamily.InterNetwork &&
+                    !IPAddress.IsLoopback(unicast.Address)).Address.ToString();
+        var root = Path.Combine(Path.GetTempPath(), "wf-apphost-lan-" + Guid.NewGuid().ToString("N"));
+        var volume = "wf-apphost-lan-" + Guid.NewGuid().ToString("N");
+        string? linuxVolume = null;
+        var ca = Path.Combine(root, "ca");
+        var ports = FreePorts(3);
+        var lanPort = ports[1];
+        var key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
+        var password = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        deadline.CancelAfter(TimeSpan.FromMinutes(3));
+        var token = deadline.Token;
+        Directory.CreateDirectory(root);
+        try
+        {
+            var clock = Stopwatch.StartNew();
+            await using var builder = await DistributedApplicationTestingBuilder.CreateAsync(typeof(LocalStack),
+                new DistributedApplicationTestingBuilderOptions { EnableDashboard = true },
+                [
+                    "--lan", "--linux-agent", "--Local:LanAddress=" + address, "--Local:LanPort=" + lanPort,
+                    "--Local:LanCaRoot=" + ca, "--Local:DataRoot=" + root, "--Local:PostgresVolume=" + volume,
+                    "--Local:ApiPort=" + ports[0], "--Local:EnginePort=" + ports[1], "--Local:UiPort=" + ports[2],
+                    "--Parameters:storage-key=" + key, "--Parameters:postgres-password=" + password
+                ], token);
+            var caCertificate = Path.Combine(ca, "rootCA.pem");
+            var endpoint = $"https://{address}:{lanPort}";
+            var linux = Assert.Single(builder.Resources.OfType<ContainerResource>(), resource => resource.Name == "wf-agent-linux");
+            linuxVolume = Assert.Single(linux.Annotations.OfType<ContainerMountAnnotation>()).Source;
+            builder.CreateResourceBuilder(linux)
+                .WithEnvironment("Agent__Engines__0", endpoint)
+                .WithEnvironment("Agent__AllowInsecureTransport", "false")
+                .WithEnvironment("SSL_CERT_FILE", "/ca.pem")
+                .WithBindMount(caCertificate, "/ca.pem", isReadOnly: true);
+            await using var app = await builder.BuildAsync(token);
+            try
+            {
+                await app.StartAsync(token);
+                await app.ResourceNotifications.WaitForResourceHealthyAsync("wf-host", token);
+                await app.ResourceNotifications.WaitForResourceHealthyAsync("wf-ui", token);
+            }
+            catch (OperationCanceledException)
+            {
+                var logs = app.Services.GetRequiredService<ResourceLoggerService>();
+                foreach (var resource in new[] { "wf-migrations", "wf-host", "wf-agent-linux" })
+                    await foreach (var batch in logs.GetAllAsync(resource))
+                        foreach (var line in batch) output.WriteLine($"{resource}: {line.Content}");
+                throw;
+            }
+            using var client = new HttpClient();
+            using var readiness = await client.GetAsync(app.GetEndpoint("wf-host", "api") + "healthz", token);
+            Assert.Equal(HttpStatusCode.OK, readiness.StatusCode);
+            Assert.True(File.Exists(caCertificate));
+            var image = Environment.GetEnvironmentVariable("WF_LAN_CURL_IMAGE") ?? "curlimages/curl:8.12.1";
+            var common = new[]
+            {
+                "run", "--rm", "--mount", $"type=bind,source={caCertificate},target=/ca.pem,readonly",
+                image, "--noproxy", "*", "--cacert", "/ca.pem", "--connect-timeout", "10", "--max-time", "20"
+            };
+            var health = await Command("docker", [.. common, "--http2", "-fsS", "-o", "/dev/null", "-w", "%{http_code} %{http_version}", endpoint + "/healthz"]);
+            Assert.Equal("200 2", health);
+            var connectionString = await app.GetConnectionStringAsync("wf", token);
+            await using var database = NpgsqlDataSource.Create(connectionString!);
+            try
+            {
+                foreach (var directory in new[] { "local", "linux" })
+                {
+                    output.WriteLine("Waiting for actual agent: " + directory);
+                    await HealthyAgent(database, Guid.Parse(File.ReadAllText(Path.Combine(root, "agents", directory, "id"))), token);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                var container = (await Command("docker", ["ps", "-a", "--filter", "volume=" + linuxVolume, "--format", "{{.ID}}"])).Trim();
+                if (container.Length != 0) output.WriteLine(await Command("docker", ["logs", "--tail", "30", container]));
+                throw;
+            }
+            var inventory = await Command("docker", [.. common, "-fsS", "--http2", endpoint + "/api/v1/machines"]);
+            using var document = JsonDocument.Parse(inventory);
+            Assert.Equal(2, document.RootElement.GetProperty("items").GetArrayLength());
+            Assert.Contains(document.RootElement.GetProperty("items").EnumerateArray(), machine => machine.GetProperty("os").GetString() == "linux");
+            var wrongCA = Path.Combine(root, "wrongCA.pem");
+            using (var rsa = RSA.Create(2048))
+            {
+                var request = new System.Security.Cryptography.X509Certificates.CertificateRequest("CN=untrusted test CA",
+                    rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+                using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+                await File.WriteAllTextAsync(wrongCA, certificate.ExportCertificatePem(), token);
+            }
+            var rejected = await Assert.ThrowsAsync<InvalidOperationException>(() => Command("docker",
+                ["run", "--rm", "--mount", $"type=bind,source={wrongCA},target=/ca.pem,readonly", image,
+                    "--noproxy", "*", "--cacert", "/ca.pem", "--connect-timeout", "5", "-fsS", endpoint + "/healthz"]));
+            Assert.Contains("exited 60", rejected.Message);
+            var listeners = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners();
+            foreach (var port in ports)
+                Assert.All(listeners.Where(listener => listener.Port == port &&
+                    !(listener.Port == lanPort && listener.Address.Equals(IPAddress.Parse(address)))),
+                    listener => Assert.True(IPAddress.IsLoopback(listener.Address), listener.ToString()));
+            Assert.Contains(listeners, listener => listener.Port == lanPort && listener.Address.Equals(IPAddress.Parse(address)));
+            foreach (var port in ports)
+                Assert.Contains(listeners, listener => listener.Port == port && listener.Address.Equals(IPAddress.Loopback));
+            output.WriteLine($"Actual mkcert raw-IP HTTPS {endpoint}: separate Linux curl health=200, trusted HTTP/2 " +
+                $"inventory=200 and real Linux gRPC agent healthy over the trusted LAN TLS endpoint; wrong root rejected (curl 60). " +
+                $"Loopback API/engine/UI bindings verified in {clock.Elapsed.TotalSeconds:F1}s. " +
+                "Test CAROOT isolated; no machine trust changes and no root private key mounted into the client.");
+            await app.StopAsync(token);
+        }
+        finally
+        {
+            foreach (var ownedVolume in new[] { linuxVolume, volume }.OfType<string>())
+            {
+                var exists = await Command("docker", ["volume", "ls", "--filter", "name=^" + ownedVolume + "$", "--format", "{{.Name}}"]);
+                if (exists.Trim() == ownedVolume) await Command("docker", ["volume", "rm", ownedVolume]);
+            }
+            if (Directory.Exists(root))
+            {
+                foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+                    File.SetAttributes(file, File.GetAttributes(file) & ~FileAttributes.ReadOnly);
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     [Fact]
     public async Task Three_native_and_one_actual_Linux_agent_are_healthy_over_HTTP_and_retain_distinct_state_after_restart()
     {

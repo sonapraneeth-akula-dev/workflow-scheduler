@@ -65,6 +65,43 @@ all must differ. `Local__PostgresVolume` selects a different persistent Docker
 volume. This AppHost is a local development launcher, not a Compose/deployment
 publisher. It does not install frontend dependencies or erase persistent data.
 
+For explicit trusted-LAN access, install `mkcert` and trust its root once on
+each intended client. Then:
+
+```powershell
+mkcert -install
+dotnet run --project .\backend\src\Wf.AppHost -- --lan
+# Optional explicit interface when several default routes exist:
+dotnet run --project .\backend\src\Wf.AppHost -- --lan --Local:LanAddress=192.168.1.10
+```
+
+`--lan` adds `https://<raw-ip>:5001` for API and agent gRPC (HTTP/1.1 and HTTP/2);
+the existing plain HTTP API, engine and Vite listeners stay loopback-only.
+The same numeric engine/LAN port works because the bound addresses differ.
+The launcher selects the sole default-route IPv4 address or requires
+`Local__LanAddress`; it refuses nonlocal, wildcard, loopback and multicast
+addresses. `Local__LanPort` changes the HTTPS port.
+
+This is an explicit **trusted-network, login-free Development profile**:
+LAN clients receive the same full-access development identity as local clients.
+Do not enable it on public or untrusted networks. No production authentication
+rules, Entra configuration or login/logout screens are changed. The launcher
+does not open firewall rules, install trust automatically, expose Vite/dashboard
+to the LAN, or configure a domain/reverse proxy. Use the local Vite UI for now.
+
+The launcher invokes `mkcert` to issue an IP-SAN PEM certificate/key in
+`<Local:DataRoot>\tls`, never installing a root itself. `Local__LanCaRoot`
+selects an alternate mkcert CA directory without changing machine trust.
+Alternatively supply both `Local__LanCertificate` and `Local__LanKey` as existing
+PEM paths. The host rejects expired, not-yet-valid and wrong-IP certificates.
+Clients must trust the issuing `rootCA.pem` from `mkcert -CAROOT`; distribute
+**only that public root certificate**, never `rootCA-key.pem` or the server
+private key. LAN agents use `https://<raw-ip>:5001` with normal certificate
+verification. Standalone control-plane launches accept `--lan` with
+`Lan__Address`, `Lan__Certificate`, `Lan__Key`, optional `Lan__Port` and the
+explicit Development environment; `--dev` additionally selects login-free
+authentication. Other environments reject this local-only LAN listener.
+
 The actual startup/restart tests are opt-in:
 
 ```powershell
@@ -82,6 +119,14 @@ nonroot Linux storage permissions, isolated identities and persistent volume
 data across recreation. Run these AppHost tests with normal build output:
 Aspire's child project runner uses the projects' default Debug output, not a
 test-only `--artifacts-path` tree.
+
+Set `WF_APPHOST_LAN=true` (optionally `WF_APPHOST_LAN_ADDRESS`) to run the
+additional real LAN test. It requires mkcert and Docker, uses an isolated CA
+without modifying trust stores, and checks separate Linux curl HTTP/2 health
+and inventory requests, rejection of an untrusted root, a real Linux agent's
+trusted TLS/gRPC registration, and exact loopback-only plain HTTP bindings.
+Only the public root is mounted into clients. `WF_LAN_CURL_IMAGE` overrides
+the test's `curlimages/curl:8.12.1` client image.
 
 `GET /api/v1/machines` returns `{ items: [...] }`, ordered by immutable machine
 ID, with OS/architecture, hardware, slot/load metrics, pool, labels, heartbeat

@@ -13,7 +13,10 @@ public static class AgentResources
         for (var index = 0; index < arguments.Length; index++)
         {
             var argument = arguments[index];
-            if (argument == "--linux-agent") normalized.Add("--Local:LinuxAgent=true");
+            if (argument == "--lan") normalized.Add("--Local:Lan=true");
+            else if (argument.StartsWith("--lan=", StringComparison.Ordinal))
+                normalized.Add("--Local:Lan=" + argument["--lan=".Length..]);
+            else if (argument == "--linux-agent") normalized.Add("--Local:LinuxAgent=true");
             else if (argument.StartsWith("--linux-agent=", StringComparison.Ordinal))
                 normalized.Add("--Local:LinuxAgent=" + argument["--linux-agent=".Length..]);
             else if (argument == "--agents")

@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
@@ -85,10 +86,14 @@ public static class AuthExtensions
     }
 
     private sealed class DevelopmentAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options,
-        ILoggerFactory logger, UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+        ILoggerFactory logger, UrlEncoder encoder, IConfiguration configuration) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
     {
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {
+            if (Context.Connection.RemoteIpAddress is { } remote && !IPAddress.IsLoopback(remote) &&
+                !(configuration.GetValue("Lan:Enabled", false) && Request.IsHttps &&
+                  Context.Connection.LocalIpAddress?.ToString() == configuration["Lan:Address"]))
+                return Task.FromResult(AuthenticateResult.Fail("Development authentication is restricted to loopback or the explicit trusted LAN TLS listener."));
             var spa = Context.GetEndpoint()?.Metadata.GetMetadata<UserScheduleRoute>() is not null
                 ? Context.RequestServices.GetService<UserScheduleClient>() : null;
             var identity = new ClaimsIdentity(

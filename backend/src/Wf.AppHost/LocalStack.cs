@@ -23,6 +23,7 @@ public static class LocalStack
             throw new InvalidOperationException("Local:DataRoot cannot be empty.");
         var root = Path.GetFullPath(configuredRoot ??
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wf"));
+        var lan = LanResources.Read(builder.Configuration, root);
         var agents = AgentResources.ReadIdentities(builder.Configuration, root);
 
         IResourceBuilder<IResourceWithConnectionString> database;
@@ -53,6 +54,12 @@ public static class LocalStack
             .WithHttpEndpoint(port: enginePort, targetPort: enginePort, name: "engine", env: "Engine__Port", isProxied: false)
             .WithHttpHealthCheck("/healthz/leader", endpointName: "api")
             .WaitForCompletion(migrations);
+        if (lan is not null)
+            host.WithEnvironment("Lan__Enabled", "true")
+                .WithEnvironment("Lan__Address", lan.Address)
+                .WithEnvironment("Lan__Port", lan.Port.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                .WithEnvironment("Lan__Certificate", lan.Certificate)
+                .WithEnvironment("Lan__Key", lan.Key);
         AgentResources.Add(builder, host, root, agents);
         var frontend = Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", "..", "..", "frontend"));
         var ui = builder.AddExecutable("wf-ui", "bun", frontend)

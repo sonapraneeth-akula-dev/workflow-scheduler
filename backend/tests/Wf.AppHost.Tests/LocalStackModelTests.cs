@@ -1,4 +1,6 @@
 using System.Runtime.CompilerServices;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Microsoft.Extensions.Configuration;
@@ -27,6 +29,7 @@ public sealed class LocalStackModelTests : IDisposable
         Assert.Equal(Path.Combine(root, "blobs"), environment["Storage__Root"]);
         Assert.Equal("Local", environment["Secrets__Provider"]);
         Assert.Equal(Path.Combine(root, "secrets"), environment["Secrets__Root"]);
+        Assert.DoesNotContain("Lan__Enabled", environment.Keys);
         Assert.Contains("storage-key", environment["Storage__UploadHmacKey"]);
         Assert.Equal(["--dev"], configuration.Arguments.Select(argument => argument.Value));
         var migrations = Project(builder, "wf-migrations");
@@ -119,6 +122,7 @@ public sealed class LocalStackModelTests : IDisposable
     [InlineData("Local:Agents", "")]
     [InlineData("Local:Agents", "2147483648")]
     [InlineData("Local:LinuxAgent", "not-a-boolean")]
+    [InlineData("Local:Lan", "not-a-boolean")]
     [InlineData("Local:EnginePort", "0")]
     [InlineData("Local:EnginePort", "-1")]
     [InlineData("Local:ApiPort", "65536")]
@@ -160,7 +164,71 @@ public sealed class LocalStackModelTests : IDisposable
         Assert.Equal(["--Local:Agents=2", "--Local:LinuxAgent=false"],
             AgentResources.NormalizeArguments(["--agents=2", "--linux-agent=false"]));
         Assert.Throws<ArgumentException>(() => AgentResources.NormalizeArguments(["--agents"]));
+        Assert.Equal(["--Local:Lan=true", "--Local:Lan=false", "--Local:Agents=3"],
+            AgentResources.NormalizeArguments(["--lan", "--lan=false", "--agents=3"]));
     }
+
+    [Theory]
+    [InlineData("Local:LanAddress", "127.0.0.1")]
+    [InlineData("Local:LanAddress", "0.0.0.0")]
+    [InlineData("Local:LanAddress", "224.1.2.3")]
+    [InlineData("Local:LanAddress", "::1")]
+    [InlineData("Local:LanAddress", "localhost")]
+    [InlineData("Local:LanAddress", "10.1")]
+    public void LocalStack_invalid_LAN_address_cannot_create_resources_or_identity(string key, string value)
+    {
+        var builder = Builder(("Local:Lan", "true"), (key, value));
+        Assert.Throws<InvalidOperationException>(() => LocalStack.Configure(builder));
+        Assert.Empty(builder.Resources);
+        Assert.False(Directory.Exists(root));
+    }
+
+    [Fact]
+    public async Task LocalStack_explicit_LAN_adds_only_certificate_configuration_without_exposing_HTTP_or_UI()
+    {
+        Directory.CreateDirectory(root);
+        var certificate = Path.Combine(root, "certificate.pem");
+        var key = Path.Combine(root, "private.pem");
+        File.WriteAllText(certificate, "model fixture; real certificate validation is in LanListenerTests");
+        File.WriteAllText(key, "model fixture");
+        var address = LocalAddress();
+        var builder = Builder(("Local:Lan", "true"), ("Local:LanAddress", address),
+            ("Local:LanCertificate", certificate), ("Local:LanKey", key), ("ConnectionStrings:wf", "Host=127.0.0.1"));
+        LocalStack.Configure(builder);
+        await using var app = builder.Build();
+        var host = Project(builder, "wf-host");
+        var environment = (await Configuration(host)).EnvironmentVariables.ToDictionary();
+        Assert.Equal("true", environment["Lan__Enabled"]);
+        Assert.Equal(address, environment["Lan__Address"]);
+        Assert.Equal("5001", environment["Lan__Port"]);
+        Assert.Equal(certificate, environment["Lan__Certificate"]);
+        Assert.Equal(key, environment["Lan__Key"]);
+        Assert.Equal(["api", "engine"], host.Annotations.OfType<EndpointAnnotation>().Select(endpoint => endpoint.Name).Order());
+        Assert.DoesNotContain("ASPNETCORE_URLS", environment.Keys);
+        Assert.DoesNotContain("Lan__Enabled", (await Configuration(Project(builder, "wf-migrations")))
+            .EnvironmentVariables.Select(variable => variable.Key));
+        var ui = Assert.IsType<ExecutableResource>(Assert.Single(builder.Resources, resource => resource.Name == "wf-ui"));
+        Assert.Contains((await Configuration(ui)).Arguments, argument => argument.Value == "127.0.0.1");
+    }
+
+    [Theory]
+    [InlineData("Local:LanPort", "0")]
+    [InlineData("Local:LanPort", "65536")]
+    [InlineData("Local:LanPort", "not-a-port")]
+    [InlineData("Local:LanCertificate", "")]
+    [InlineData("Local:LanKey", "not-an-existing-key.pem")]
+    public void LocalStack_invalid_LAN_port_or_certificate_pair_cannot_create_resources(string key, string value)
+    {
+        var builder = Builder(("Local:Lan", "true"), ("Local:LanAddress", LocalAddress()), (key, value));
+        Assert.Throws<InvalidOperationException>(() => LocalStack.Configure(builder));
+        Assert.Empty(builder.Resources);
+        Assert.False(Directory.Exists(root));
+    }
+
+    private static string LocalAddress() =>
+        NetworkInterface.GetAllNetworkInterfaces().SelectMany(network => network.GetIPProperties().UnicastAddresses)
+            .Select(unicast => unicast.Address).First(ip => ip.AddressFamily == AddressFamily.InterNetwork &&
+                !System.Net.IPAddress.IsLoopback(ip)).ToString();
 
     [Fact]
     public async Task LocalStack_three_native_and_one_Linux_agent_have_isolated_persistent_identities_labels_and_work_directories()

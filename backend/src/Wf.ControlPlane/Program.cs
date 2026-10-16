@@ -23,9 +23,13 @@ if (args.Count(argument => argument == "--migrate") > 1)
     throw new ArgumentException("--migrate cannot be repeated.", nameof(args));
 if (args.Count(argument => argument == "--dev") > 1)
     throw new ArgumentException("--dev cannot be repeated.", nameof(args));
+if (args.Count(argument => argument == "--lan") > 1)
+    throw new ArgumentException("--lan cannot be repeated.", nameof(args));
 var migrate = args.Contains("--migrate", StringComparer.Ordinal);
 var developmentAuth = args.Contains("--dev", StringComparer.Ordinal);
-var builder = WebApplication.CreateBuilder(args.Where(argument => argument is not ("--migrate" or "--dev")).ToArray());
+var builder = WebApplication.CreateBuilder(args.Where(argument => argument is not ("--migrate" or "--dev" or "--lan")).ToArray());
+if (args.Contains("--lan", StringComparer.Ordinal)) builder.Configuration["Lan:Enabled"] = "true";
+using var lan = LanListener.Read(builder.Configuration, builder.Environment);
 // Upload paths and live query strings carry bearer capabilities; suppress raw framework request/route logs.
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 var port = builder.Configuration.GetValue("Engine:Port", 5000);
@@ -37,6 +41,7 @@ builder.WebHost.ConfigureKestrel(options =>
 {
     options.Listen(IPAddress.Loopback, port, listen => listen.Protocols = HttpProtocols.Http2);
     options.Listen(IPAddress.Loopback, apiPort, listen => listen.Protocols = HttpProtocols.Http1);
+    lan?.Configure(options);
 });
 builder.Services.AddGrpc(options => options.MaxReceiveMessageSize = 1024 * 1024);
 var connectionString = builder.Configuration.GetConnectionString("Workflow")
@@ -78,7 +83,7 @@ builder.Services.AddWorkflowRegistrations(builder.Configuration);
 builder.Services.AddSingleton<ActiveVersionCache>();
 builder.Services.AddHostedService<ActiveVersionCache>(services => services.GetRequiredService<ActiveVersionCache>());
 builder.Services.AddSingleton(new LeaseOptions(Guid.NewGuid().ToString("N"),
-    new Uri(builder.Configuration["Engine:PublicEndpoint"] ?? $"http://localhost:{port}", UriKind.Absolute)));
+    new Uri(builder.Configuration["Engine:PublicEndpoint"] ?? lan?.Endpoint.AbsoluteUri ?? $"http://localhost:{port}", UriKind.Absolute)));
 builder.Services.AddSingleton<LeaseManager>();
 builder.Services.AddHostedService<LeaseManager>(services => services.GetRequiredService<LeaseManager>());
 builder.Services.Configure<HostOptions>(options => options.ServicesStopConcurrently = false);
@@ -106,6 +111,9 @@ builder.Services.AddHostedService<AgentLossSweeper>(services => services.GetRequ
 builder.Services.AddSingleton<AgentLossHandler>();
 builder.Services.AddHostedService<AgentLossHandler>(services => services.GetRequiredService<AgentLossHandler>());
 var app = builder.Build();
+if (lan is not null)
+    app.Logger.LogWarning("Trusted local LAN profile: {Endpoint}. Development authentication grants LAN clients full access; use only on a trusted network.",
+        lan.Endpoint);
 app.UseReportResponseHeaders();
 app.UseAuthentication();
 app.UseAuthorization();
