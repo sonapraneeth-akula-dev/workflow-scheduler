@@ -5,7 +5,9 @@ const timelineOrigin = process.env.WF_TIMELINE_ORIGIN
 const reportOrigin = process.env.WF_REPORT_ORIGIN
 const activationOrigin = process.env.WF_ACTIVATION_ORIGIN
 const rerunOrigin = process.env.WF_RERUN_ORIGIN
+const rerunExecutionOrigin = process.env.WF_RERUN_EXECUTION_ORIGIN
 const fixtureOrigin =
+  rerunExecutionOrigin ??
   rerunOrigin ??
   activationOrigin ??
   catalogueOrigin ??
@@ -16,6 +18,7 @@ const fixtureOrigin =
 export default defineConfig({
   testDir: "./e2e",
   testIgnore: [
+    ...(!rerunExecutionOrigin ? ["**/rerun-execution.spec.ts"] : []),
     ...(!rerunOrigin ? ["**/rerun.spec.ts"] : []),
     ...(!activationOrigin ? ["**/version-activation.spec.ts"] : []),
     ...(!fixtureOrigin

@@ -14,14 +14,18 @@ using Wf.AppHost;
 
 namespace Wf.AppHost.Tests;
 
-public sealed class LocalStackScenarioTests(ITestOutputHelper output)
+public sealed partial class LocalStackScenarioTests(ITestOutputHelper output)
 {
     [Fact]
     [Trait("Category", "LocalStackScenario")]
-    public async Task Scenario_A_executes_through_real_AppHost_HTTP_registration_dispatch_and_agent_task_hosts()
+    public Task Scenario_A_executes_through_real_AppHost_HTTP_registration_dispatch_and_agent_task_hosts() =>
+        ExecuteScenario(rerun: false);
+
+    private async Task ExecuteScenario(bool rerun)
     {
-        Assert.SkipUnless(Environment.GetEnvironmentVariable("WF_APPHOST_SCENARIO") == "true",
-            "Set WF_APPHOST_SCENARIO=true and WF_TEST_POSTGRES to run the full local-stack acceptance test.");
+        var optIn = rerun ? "WF_APPHOST_RERUN" : "WF_APPHOST_SCENARIO";
+        Assert.SkipUnless(Environment.GetEnvironmentVariable(optIn) == "true",
+            $"Set {optIn}=true and WF_TEST_POSTGRES to run the full local-stack acceptance test.");
         var adminConnection = new NpgsqlConnectionStringBuilder(
             Environment.GetEnvironmentVariable("WF_TEST_POSTGRES") ??
             throw new InvalidOperationException("WF_TEST_POSTGRES must identify a PostgreSQL administrator database."))
@@ -40,7 +44,8 @@ public sealed class LocalStackScenarioTests(ITestOutputHelper output)
             var token = deadline.Token;
             var team = "scenario-" + id;
             var workflow = team + "/release-validation/scenario-a";
-            var source = await CompileAndPackage(root, team, workflow, token);
+            var source = await CompileAndPackage(root, team, workflow, token,
+                workflowSource: rerun ? RerunWorkflow(root, workflow) : null);
             var connection = new NpgsqlConnectionStringBuilder(adminConnection.ConnectionString) { Database = databaseName };
             var ports = FreePorts();
             using var startupDeadline = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -102,10 +107,13 @@ public sealed class LocalStackScenarioTests(ITestOutputHelper output)
                     while (true)
                     {
                         snapshot = await Get(client, "/api/v1/runs/" + runId, runDeadline.Token);
+                        if (rerun && snapshot.GetProperty("nodes").GetProperty("deploy-eu").GetInt32() == 5 &&
+                            !File.Exists(Path.Combine(root, "release-us")))
+                            await File.WriteAllTextAsync(Path.Combine(root, "release-us"), "EU committed", runDeadline.Token);
                         var status = snapshot.GetProperty("status").GetInt32();
                         if (status >= 3)
                         {
-                            Assert.True(status == 3, "Run did not succeed: " + snapshot);
+                            Assert.True(status == (rerun ? 4 : 3), "Unexpected terminal run: " + snapshot);
                             break;
                         }
                         await Task.Delay(100, runDeadline.Token);
@@ -117,9 +125,15 @@ public sealed class LocalStackScenarioTests(ITestOutputHelper output)
                     throw;
                 }
                 Assert.Equal(workflow, snapshot.GetProperty("workflowId").GetString());
-                Assert.All(snapshot.GetProperty("tasks").EnumerateObject(), task => Assert.Equal(5, task.Value.GetInt32()));
-                await AssertExecution(client, root, runId, agentId, token);
-                output.WriteLine($"Scenario A {runId}: full lifecycle, series command/function, diamond inputs and three parallel smoke tasks succeeded.");
+                if (rerun)
+                    await AssertRerunExecution(client, root, runId, agentId, snapshot,
+                        connection.ConnectionString, app.GetEndpoint("wf-ui"), token);
+                else
+                {
+                    Assert.All(snapshot.GetProperty("tasks").EnumerateObject(), task => Assert.Equal(5, task.Value.GetInt32()));
+                    await AssertExecution(client, root, runId, agentId, token);
+                    output.WriteLine($"Scenario A {runId}: full lifecycle, series command/function, diamond inputs and three parallel smoke tasks succeeded.");
+                }
             }
             catch
             {
