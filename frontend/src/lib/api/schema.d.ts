@@ -2601,6 +2601,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Global Admin audit trail. Exact actor/targetKind/targetId filters combine with AND. from is inclusive and to exclusive (RFC3339 with offset, microsecond precision). Newest first, stable timestamp/ID keyset bound to filters and limit (1-100, default 50). IDs are decimal strings to preserve Int64 precision. Summaries are committed audit metadata, not workflow variables or storage capabilities. */
+        get: {
+            parameters: {
+                query?: {
+                    actor?: string;
+                    targetKind?: string;
+                    targetId?: string;
+                    from?: string;
+                    to?: string;
+                    limit?: number;
+                    cursor?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AuditPage"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{id}/metrics": {
         parameters: {
             query?: never;
@@ -3717,6 +3806,22 @@ export interface components {
             sha256: string;
             /** Format: date-time */
             createdAt: string;
+        };
+        AuditPage: {
+            items: components["schemas"]["AuditRow"][];
+            nextCursor: null | string;
+        };
+        AuditRow: {
+            id: string;
+            /** Format: date-time */
+            at: string;
+            actor: string;
+            actorKind: string;
+            action: string;
+            targetKind: string;
+            targetId: string;
+            teamId: null | string;
+            summary: components["schemas"]["JsonElement"];
         };
         /** @enum {unknown} */
         BackoffKind: "Fixed" | "Exponential";

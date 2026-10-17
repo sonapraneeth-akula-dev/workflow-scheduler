@@ -107,12 +107,13 @@ public sealed class RunEventsResyncTests
     }
 
     [Fact]
-    public void Snapshot_contract_exposes_only_identity_state_sequence_and_abort()
+    public void Snapshot_contract_exposes_only_identity_state_sequence_abort_and_committed_lineage()
     {
         var response = new RunSnapshotResponse(Guid.CreateVersion7(), "team/type/workflow", Guid.CreateVersion7(),
-            null, 0, 0, ImmutableDictionary<string, int>.Empty, ImmutableDictionary<string, int>.Empty, null, null);
+            null, 0, 0, ImmutableDictionary<string, int>.Empty, ImmutableDictionary<string, int>.Empty, null, null,
+            null, ImmutableDictionary<string, Guid>.Empty);
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(response, RunEventsJsonContext.Default.RunSnapshotResponse));
-        Assert.Equal(new[] { "abort", "endedAt", "lastSeq", "nodes", "runId", "seriesId", "status", "tasks", "versionId", "workflowId" },
+        Assert.Equal(new[] { "abort", "endedAt", "lastSeq", "nodes", "parentRunId", "reusedNodes", "runId", "seriesId", "status", "tasks", "versionId", "workflowId" },
             json.RootElement.EnumerateObject().Select(property => property.Name).Order());
     }
 

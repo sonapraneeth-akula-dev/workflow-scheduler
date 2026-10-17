@@ -832,6 +832,20 @@ starts at the next occurrence after now instead of catching up an intentional
 pause. Semantic no-ops retain ETag/cursor/audit state. Mutations, sanitized audit
 attribution and scheduler notifications commit atomically.
 
+`GET /api/v1/audit` and `/admin/audit` expose the retained audit trail to the
+existing global `Admin` role; a team-scoped Admin or Viewer cannot read it.
+Exact `actor`, `targetKind` and `targetId` filters combine with AND.
+`from` is inclusive and `to` exclusive, using RFC3339 timestamps with an explicit
+offset and at most six fractional digits. The page's date controls use UTC.
+Records sort newest first by timestamp and ID; `limit` is 1-100 (default 50),
+and `nextCursor` must retain the original filters and limit. Audit IDs are
+decimal strings to preserve Int64 precision in browsers. Responses are
+`no-store`; current authorization is checked on every read and failed refreshes
+hide previously cached records. The page shows committed actor, action, target,
+time and JSON summary, including existing before/after metadata, without
+joining workflow variables or storage capabilities. This read surface does
+not imply the separate all-mutating-endpoint audit-coverage task is complete.
+
 Authenticated OpenAPI 3.1 documents use `Microsoft.AspNetCore.OpenApi`:
 `/openapi/v1.json` includes public reads and `run-now`, never UI-only mutations;
 `/openapi/ui.json` contains only the SPA schedule-management routes. Request

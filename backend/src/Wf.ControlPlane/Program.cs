@@ -73,6 +73,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, ReservationQueueJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Machines.MachineJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunHistoryJsonContext.Default);
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, AuditJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, MetricsJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunTimelineJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, ReportIndexJsonContext.Default);
@@ -153,6 +154,7 @@ app.MapRunEventsEndpoints();
 app.MapRunQueryEndpoints();
 Wf.ControlPlane.Api.Machines.MachineEndpoints.MapMachineEndpoints(app);
 app.MapRunHistoryEndpoints();
+app.MapAuditEndpoints();
 app.MapMetricsEndpoints();
 app.MapRunTimelineEndpoints();
 app.MapTaskLogsEndpoints();

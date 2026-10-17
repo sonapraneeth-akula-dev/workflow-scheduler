@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminAuditRouteImport } from './routes/admin.audit'
 import { Route as RunsIndexRouteImport } from './routes/runs/index'
 import { Route as RunsIdRouteImport } from './routes/runs.$id'
 import { Route as SchedulesIdRouteImport } from './routes/schedules.$id'
@@ -28,6 +29,11 @@ import { Route as TTeamTypeWWfVersionsVTasksTaskKeyRouteImport } from './routes/
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminAuditRoute = AdminAuditRouteImport.update({
+  id: '/admin/audit',
+  path: '/admin/audit',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RunsIndexRoute = RunsIndexRouteImport.update({
@@ -105,6 +111,7 @@ const TTeamTypeWWfVersionsVTasksTaskKeyRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin/audit': typeof AdminAuditRoute
   '/runs/$id': typeof RunsIdRoute
   '/schedules/$id': typeof SchedulesIdRoute
   '/schedules/new': typeof SchedulesNewRoute
@@ -122,6 +129,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin/audit': typeof AdminAuditRoute
   '/runs/$id': typeof RunsIdRoute
   '/schedules/$id': typeof SchedulesIdRoute
   '/schedules/new': typeof SchedulesNewRoute
@@ -139,6 +147,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin/audit': typeof AdminAuditRoute
   '/runs/$id': typeof RunsIdRoute
   '/schedules/$id': typeof SchedulesIdRoute
   '/schedules/new': typeof SchedulesNewRoute
@@ -158,6 +167,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin/audit'
     | '/runs/$id'
     | '/schedules/$id'
     | '/schedules/new'
@@ -175,6 +185,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/admin/audit'
     | '/runs/$id'
     | '/schedules/$id'
     | '/schedules/new'
@@ -191,6 +202,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/admin/audit'
     | '/runs/$id'
     | '/schedules/$id'
     | '/schedules/new'
@@ -209,6 +221,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminAuditRoute: typeof AdminAuditRoute
   RunsIdRoute: typeof RunsIdRoute
   SchedulesIdRoute: typeof SchedulesIdRoute
   SchedulesNewRoute: typeof SchedulesNewRoute
@@ -229,6 +242,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/audit': {
+      id: '/admin/audit'
+      path: '/admin/audit'
+      fullPath: '/admin/audit'
+      preLoaderRoute: typeof AdminAuditRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/runs/': {
@@ -350,6 +370,7 @@ const TTeamTypeWWfVersionsRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminAuditRoute: AdminAuditRoute,
   RunsIdRoute: RunsIdRoute,
   SchedulesIdRoute: SchedulesIdRoute,
   SchedulesNewRoute: SchedulesNewRoute,

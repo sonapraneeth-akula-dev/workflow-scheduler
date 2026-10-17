@@ -6,7 +6,9 @@ const reportOrigin = process.env.WF_REPORT_ORIGIN
 const activationOrigin = process.env.WF_ACTIVATION_ORIGIN
 const rerunOrigin = process.env.WF_RERUN_ORIGIN
 const rerunExecutionOrigin = process.env.WF_RERUN_EXECUTION_ORIGIN
+const auditOrigin = process.env.WF_AUDIT_ORIGIN
 const fixtureOrigin =
+  auditOrigin ??
   rerunExecutionOrigin ??
   rerunOrigin ??
   activationOrigin ??
@@ -18,6 +20,7 @@ const fixtureOrigin =
 export default defineConfig({
   testDir: "./e2e",
   testIgnore: [
+    ...(!auditOrigin ? ["**/audit.spec.ts"] : []),
     ...(!rerunExecutionOrigin ? ["**/rerun-execution.spec.ts"] : []),
     ...(!rerunOrigin ? ["**/rerun.spec.ts"] : []),
     ...(!activationOrigin ? ["**/version-activation.spec.ts"] : []),
