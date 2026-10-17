@@ -52,6 +52,8 @@ services:
     build:
       context: "${KARDIA_REPOSITORY_ROOT:?Use wf local up}"
       dockerfile: infra/local/gateway.Dockerfile
+      args:
+        PREVIOUS_GATEWAY_IMAGE: "${KARDIA_PREVIOUS_GATEWAY_IMAGE:-caddy:2.11.6-alpine}"
     depends_on:
       wf-api:
         condition: service_healthy

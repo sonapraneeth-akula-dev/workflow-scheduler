@@ -5,6 +5,20 @@ on:
 permissions:
   contents: read
 jobs:
+  gateway-assets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bunx playwright install --with-deps chromium firefox webkit
+      - run: bun run scripts/gateway-assets-acceptance.ts
   schedule-ui:
     runs-on: ubuntu-latest
     timeout-minutes: 20

@@ -116,6 +116,24 @@ Caddy preserves `/api` and `/hubs` paths, blocks gateway `/metrics*`,
 `index.html`, and caches versioned assets immutably. Security headers protect
 ordinary pages; report content retains the API's enforced sandbox policy and
 same-origin iframe support rather than inheriting `X-Frame-Options: DENY`.
+Successful `/assets/*` responses, including ranges and conditional reads, use
+`Cache-Control: public, max-age=31536000, immutable`; missing chunks return 404,
+never SPA HTML or an immutable error. The current index and SPA deep links use
+`no-cache, no-store`.
+
+Before rebuilding, `up` inspects that environment's existing gateway image and
+pins its exact image ID to `kardia-gateway-previous:<env>` under the environment
+lock. The build receives that pinned image through
+`KARDIA_PREVIOUS_GATEWAY_IMAGE`; first install uses the pinned Caddy base only
+when the image is genuinely absent. Docker/inspection/pinning errors fail
+explicitly. The new image keeps the preceding image's current `/srv` privately
+under `/opt/kardia/previous`; Caddy serves missing current hashed assets from
+that prior release, without exposing its index. Only one prior release is
+retained, not an accumulating history. An already-open tab can therefore fetch
+its original lazy JS/CSS after the next deployment. The build remains clean:
+it does not retain arbitrary files in Vite's output directory, and dev/ppe
+asset histories stay separate.
+
 The gateway proxies HTTP/2 agent gRPC to the first
 healthy engine. One-second `/healthz/leader` checks exclude the standby until
 it acquires the database lease and finishes recovery. The Linux agent has
@@ -168,6 +186,23 @@ deep-link reload, login-free session, MessagePack WebSocket and a real
 published HTML report iframe through Caddy.
 Only owned PPE containers, network, volumes and temporary workflow files are
 removed.
+
+The independent asset-deployment acceptance needs Docker, the frontend's frozen
+dependencies and all three Playwright browsers, but no Aspire, backend services
+or existing Compose project:
+
+```powershell
+Set-Location .\frontend
+bun run scripts\gateway-assets-acceptance.ts
+```
+
+It builds the production gateway image, keeps old Vite-built lazy-route tabs
+open in Chromium/Firefox/WebKit, replaces the gateway on an ephemeral loopback
+port and verifies original JS bytes and CSS after deployment. First install,
+actual cache/HEAD/range/304 headers, SPA deep links, missing-asset 404s and
+one-release history bounds are checked. All test images, containers and private
+fixture files are removed. The separate `gateway-assets` Frontend CI job runs
+the same acceptance without touching the fixed dev/ppe projects.
 
 `.github/workflows/nightly-compose.yml` runs the full Scenario A on Ubuntu
 nightly at 08:45 UTC and on manual dispatch. It pins .NET 10.0.402 and Aspire

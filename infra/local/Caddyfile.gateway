@@ -55,12 +55,29 @@
 			health_timeout 2s
 		}
 	}
+	handle /assets/* {
+		header Cache-Control no-store
+		header Cache-Control "public, max-age=31536000, immutable" {
+			match status 200 206 304
+		}
+		@current file {
+			root /srv
+			try_files {path}
+		}
+		handle @current {
+			root * /srv
+			file_server
+		}
+		handle {
+			root * /opt/kardia/previous
+			file_server
+		}
+	}
 	handle {
 		root * /srv
 		route {
 			try_files {path} /index.html
-			header /assets/* Cache-Control "public, max-age=31536000, immutable"
-			header /index.html Cache-Control "no-store"
+			header /index.html Cache-Control "no-cache, no-store"
 			file_server
 		}
 	}

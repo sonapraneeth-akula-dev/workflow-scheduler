@@ -10,6 +10,7 @@ public sealed class LocalCommandTests : IDisposable
     private readonly string root = Path.Combine(Repository, ".agent-artifacts", "compose-cli-validation", "cases",
         Guid.NewGuid().ToString("N") + " checkout ' #");
     private readonly List<ProcessStartInfo> calls = [];
+    private string? gatewayImageId;
     private string State(string env = "ppe") => Path.Combine(root, ".wf", "local", env);
     private string Runtime(string env = "ppe") => Path.Combine(State(env), "runtime.env");
     private string Compose(string env = "ppe") => Path.Combine(State(env), "publish", "docker-compose.yaml");
@@ -34,7 +35,7 @@ public sealed class LocalCommandTests : IDisposable
         var result = await Run(option is null ? ["up"] : ["up", "--env", option], cwd: nested);
         Assert.Equal(0, result.Exit);
         Assert.Empty(result.Error);
-        Assert.Equal(3, calls.Count);
+        Assert.Equal(4, calls.Count);
         Assert.Equal("aspire", calls[0].FileName);
         Assert.Equal(
             ["publish", "--apphost", Path.Combine(root, "backend", "src", "Wf.AppHost", "Wf.AppHost.csproj"),
@@ -42,7 +43,10 @@ public sealed class LocalCommandTests : IDisposable
              "--", "--Local:Compose=true", "--Local:ComposeEnvironment=" + env],
             calls[0].ArgumentList);
         AssertCompose(calls[1], env, ["config", "--quiet"]);
-        AssertCompose(calls[2], env, ["up", "-d", "--build", "--wait", "--wait-timeout", "180"]);
+        Assert.Equal(["image", "inspect", "--format", "{{.Id}}", "kardia-gateway:" + env], calls[2].ArgumentList);
+        AssertCompose(calls[3], env, ["up", "-d", "--build", "--wait", "--wait-timeout", "180"]);
+        Assert.Equal("caddy:2.11.6-alpine", calls[3].Environment["KARDIA_PREVIOUS_GATEWAY_IMAGE"]);
+        Assert.All(calls.Take(3), call => Assert.False(call.Environment.ContainsKey("KARDIA_PREVIOUS_GATEWAY_IMAGE")));
         var stable = ReadKeys(env);
         foreach (var call in calls)
         {
@@ -68,6 +72,137 @@ public sealed class LocalCommandTests : IDisposable
         Assert.Contains("http://" + bind + ":18888", result.Output);
         Assert.DoesNotContain("Gateway setup follows in a later task.", result.Output);
         Assert.DoesNotContain("login", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("dev")]
+    [InlineData("ppe")]
+    public async Task Up_pins_current_gateway_by_id_before_each_rebuild(string env)
+    {
+        foreach (var digit in new[] { 'a', 'b' })
+        {
+            gatewayImageId = "sha256:" + new string(digit, 64);
+            calls.Clear();
+            var result = await Run(["up", "--env", env]);
+            Assert.Equal(0, result.Exit);
+            Assert.Empty(result.Error);
+            Assert.Equal(5, calls.Count);
+            AssertCompose(calls[1], env, ["config", "--quiet"]);
+            Assert.Equal(["image", "inspect", "--format", "{{.Id}}", "kardia-gateway:" + env], calls[2].ArgumentList);
+            Assert.Equal("docker", calls[3].FileName);
+            Assert.Equal(["image", "tag", gatewayImageId, "kardia-gateway-previous:" + env], calls[3].ArgumentList);
+            AssertCompose(calls[4], env, ["up", "-d", "--build", "--wait", "--wait-timeout", "180"]);
+            Assert.Equal("kardia-gateway-previous:" + env, calls[4].Environment["KARDIA_PREVIOUS_GATEWAY_IMAGE"]);
+            Assert.All(calls.Take(4), call => Assert.False(call.Environment.ContainsKey("KARDIA_PREVIOUS_GATEWAY_IMAGE")));
+        }
+    }
+
+    [Theory]
+    [InlineData(1, "", "Cannot connect to the Docker daemon.")]
+    [InlineData(1, "", "permission denied while trying to connect to the Docker daemon socket")]
+    [InlineData(1, "", "Error response from daemon: input/output error")]
+    [InlineData(1, "", "Error response from daemon: No such image: kardia-gateway:dev")]
+    [InlineData(1, "", "Error response from daemon: No such image: kardia-gateway:PPE")]
+    [InlineData(1, "", "Error response from daemon: No such image: kardia-gateway:ppe\nstorage failure")]
+    [InlineData(1, "unexpected", "Error response from daemon: No such image: kardia-gateway:ppe")]
+    [InlineData(37, "", "Error response from daemon: No such image: kardia-gateway:ppe")]
+    [InlineData(1, "", "")]
+    [InlineData(125, "", "Docker inspection failed")]
+    [InlineData(0, "", "")]
+    [InlineData(0, "[]", "")]
+    [InlineData(0, "<no value>", "")]
+    [InlineData(0, "sha256:abc", "")]
+    [InlineData(0, "sha256:gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg", "")]
+    [InlineData(0, "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "")]
+    [InlineData(0, "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nextra", "")]
+    public async Task Invalid_or_failed_image_inspection_stops_before_tag_or_build(int exit, string stdout, string stderr)
+    {
+        var result = await Run(["up"], runner: async (start, output, error, token) =>
+        {
+            if (start.ArgumentList is ["image", "inspect", ..])
+            {
+                calls.Add(start);
+                await output.WriteLineAsync(stdout);
+                await error.WriteLineAsync(stderr);
+                return exit;
+            }
+            return await Fake(start, output, error, token);
+        });
+        Assert.Equal(2, result.Exit);
+        Assert.Equal(3, calls.Count);
+        Assert.Contains("Docker gateway image inspection", result.Error);
+        if (exit != 0) Assert.Contains(exit.ToString(), result.Error);
+        else Assert.Contains("invalid image ID", result.Error);
+        if (stderr.Length > 0) Assert.Contains(stderr, result.Error);
+        if (exit != 0 && stdout.Length > 0) Assert.Contains(stdout, result.Output);
+        Assert.DoesNotContain("is ready", result.Output);
+        Assert.True(File.Exists(Runtime()));
+    }
+
+    [Theory]
+    [InlineData("Error response from daemon: No such image: kardia-gateway:ppe")]
+    [InlineData("Error: No such image: kardia-gateway:ppe")]
+    public async Task Only_exact_missing_image_diagnostic_uses_first_install_fallback(string diagnostic)
+    {
+        var result = await Run(["up"], runner: async (start, output, error, token) =>
+        {
+            if (start.ArgumentList is ["image", "inspect", ..])
+            {
+                calls.Add(start);
+                await output.WriteLineAsync("");
+                await error.WriteLineAsync(diagnostic);
+                return 1;
+            }
+            return await Fake(start, output, error, token);
+        });
+        Assert.Equal(0, result.Exit);
+        Assert.Empty(result.Error);
+        Assert.Equal(4, calls.Count);
+        Assert.Equal("caddy:2.11.6-alpine", calls[^1].Environment["KARDIA_PREVIOUS_GATEWAY_IMAGE"]);
+        Assert.DoesNotContain(calls, call => call.ArgumentList is ["image", "tag", ..]);
+    }
+
+    [Fact]
+    public async Task Failed_image_pin_stops_before_build_with_diagnostics()
+    {
+        gatewayImageId = "sha256:" + new string('a', 64);
+        var result = await Run(["up"], runner: async (start, output, error, token) =>
+        {
+            var exit = await Fake(start, output, error, token);
+            if (start.ArgumentList is not ["image", "tag", ..]) return exit;
+            await error.WriteLineAsync("image storage unavailable");
+            return 37;
+        });
+        Assert.Equal(2, result.Exit);
+        Assert.Equal(4, calls.Count);
+        Assert.Contains("Docker gateway image pin", result.Error);
+        Assert.Contains("37", result.Error);
+        Assert.Contains("image storage unavailable", result.Error);
+        Assert.DoesNotContain("is ready", result.Output);
+    }
+
+    [Fact]
+    public async Task Previous_gateway_selection_never_leaks_to_other_children_or_environments()
+    {
+        var inherited = Environment.GetEnvironmentVariable("KARDIA_PREVIOUS_GATEWAY_IMAGE");
+        try
+        {
+            Environment.SetEnvironmentVariable("KARDIA_PREVIOUS_GATEWAY_IMAGE", "untrusted-host-image:latest");
+            gatewayImageId = "sha256:" + new string('a', 64);
+            Assert.Equal(0, (await Run(["up", "--env", "dev"])).Exit);
+            Assert.Equal("kardia-gateway-previous:dev", calls[^1].Environment["KARDIA_PREVIOUS_GATEWAY_IMAGE"]);
+            Assert.All(calls.Take(calls.Count - 1), call => Assert.False(call.Environment.ContainsKey("KARDIA_PREVIOUS_GATEWAY_IMAGE")));
+            calls.Clear();
+            gatewayImageId = null;
+            Assert.Equal(0, (await Run(["up", "--env", "ppe"])).Exit);
+            Assert.Equal("caddy:2.11.6-alpine", calls[^1].Environment["KARDIA_PREVIOUS_GATEWAY_IMAGE"]);
+            Assert.All(calls.Take(calls.Count - 1), call => Assert.False(call.Environment.ContainsKey("KARDIA_PREVIOUS_GATEWAY_IMAGE")));
+            calls.Clear();
+            Assert.Equal(0, (await Run(["down", "--env", "dev"])).Exit);
+            Assert.False(Assert.Single(calls).Environment.ContainsKey("KARDIA_PREVIOUS_GATEWAY_IMAGE"));
+            Assert.Equal("untrusted-host-image:latest", Environment.GetEnvironmentVariable("KARDIA_PREVIOUS_GATEWAY_IMAGE"));
+        }
+        finally { Environment.SetEnvironmentVariable("KARDIA_PREVIOUS_GATEWAY_IMAGE", inherited); }
     }
 
     [Theory]
@@ -269,14 +404,15 @@ public sealed class LocalCommandTests : IDisposable
     [Theory]
     [InlineData(0, "Aspire publish")]
     [InlineData(1, "Docker Compose config")]
-    [InlineData(2, "Docker Compose up")]
+    [InlineData(2, "Docker gateway image inspection")]
+    [InlineData(3, "Docker Compose up")]
     public async Task Failed_stage_stops_sequence_and_never_reports_ready(int failedCall, string stage)
     {
-        var result = await Run(["up"], runner: (start, token) =>
+        var result = await Run(["up"], runner: async (start, output, error, token) =>
         {
             var index = calls.Count;
-            Fake(start, token);
-            return Task.FromResult(index == failedCall ? 37 : 0);
+            var exit = await Fake(start, output, error, token);
+            return index == failedCall ? 37 : exit;
         });
         Assert.Equal(2, result.Exit);
         Assert.Equal(failedCall + 1, calls.Count);
@@ -289,13 +425,13 @@ public sealed class LocalCommandTests : IDisposable
     [Fact]
     public async Task Missing_executable_and_failed_down_are_actionable_not_success()
     {
-        var missing = await Run(["up"], runner: (_, _) => throw new System.ComponentModel.Win32Exception(2));
+        var missing = await Run(["up"], runner: (_, _, _, _) => throw new System.ComponentModel.Win32Exception(2));
         Assert.Equal(2, missing.Exit);
         Assert.Contains("Aspire publish", missing.Error);
         Assert.DoesNotContain("is ready", missing.Output);
         Assert.Equal(0, (await Run(["up"])).Exit);
         var original = await File.ReadAllBytesAsync(Runtime(), Token);
-        var down = await Run(["down"], runner: (_, _) => Task.FromResult(23));
+        var down = await Run(["down"], runner: (_, _, _, _) => Task.FromResult(23));
         Assert.Equal(2, down.Exit);
         Assert.Contains("Docker Compose down", down.Error);
         Assert.Contains("23", down.Error);
@@ -310,7 +446,7 @@ public sealed class LocalCommandTests : IDisposable
     {
         Assert.Equal(0, (await Run(["up"])).Exit);
         calls.Clear();
-        var result = await Run(["up"], runner: (start, _) =>
+        var result = await Run(["up"], runner: (start, _, _, _) =>
         {
             calls.Add(start);
             if (empty) File.WriteAllText(Compose(), "");
@@ -331,9 +467,9 @@ public sealed class LocalCommandTests : IDisposable
         await File.WriteAllTextAsync(Compose(), "services: { saved: {} }", Token);
         var original = await File.ReadAllBytesAsync(Runtime(), Token);
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(Token);
-        var failed = await Run(["up"], runner: async (start, token) =>
+        var failed = await Run(["up"], runner: async (start, output, error, token) =>
         {
-            await Fake(start, token);
+            await Fake(start, output, error, token);
             if (cancelled)
             {
                 cancellation.Cancel();
@@ -364,22 +500,27 @@ public sealed class LocalCommandTests : IDisposable
     }
 
     [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(2)]
-    public async Task Cancellation_stops_sequence_preserves_state_and_reports_scoped_down(int cancelledCall)
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(3, false)]
+    [InlineData(2, true)]
+    [InlineData(3, true)]
+    [InlineData(4, true)]
+    public async Task Cancellation_stops_sequence_preserves_state_and_reports_scoped_down(int cancelledCall, bool existingImage)
     {
+        gatewayImageId = existingImage ? "sha256:" + new string('a', 64) : null;
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(Token);
-        var result = await Run(["up", "--env", "dev"], runner: async (start, token) =>
+        var result = await Run(["up", "--env", "dev"], runner: async (start, output, error, token) =>
         {
             var index = calls.Count;
-            await Fake(start, token);
+            var exit = await Fake(start, output, error, token);
             if (index == cancelledCall)
             {
                 cancellation.Cancel();
                 token.ThrowIfCancellationRequested();
             }
-            return 0;
+            return exit;
         }, token: cancellation.Token);
         Assert.Equal(130, result.Exit);
         Assert.Equal(cancelledCall + 1, calls.Count);
@@ -395,15 +536,15 @@ public sealed class LocalCommandTests : IDisposable
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var first = Run(["up"], runner: async (start, token) =>
+        var first = Run(["up"], runner: async (start, output, error, token) =>
         {
-            await Fake(start, token);
+            var exit = await Fake(start, output, error, token);
             if (start.FileName == "aspire")
             {
                 entered.SetResult();
                 await release.Task.WaitAsync(token);
             }
-            return 0;
+            return exit;
         });
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(20), Token);
         try
@@ -486,7 +627,7 @@ public sealed class LocalCommandTests : IDisposable
     }
 
     private async Task<(int Exit, string Output, string Error)> Run(string[] arguments, string? cwd = null,
-        Func<ProcessStartInfo, CancellationToken, Task<int>>? runner = null, CancellationToken? token = null)
+        Func<ProcessStartInfo, TextWriter, TextWriter, CancellationToken, Task<int>>? runner = null, CancellationToken? token = null)
     {
         using var output = new StringWriter();
         using var error = new StringWriter();
@@ -494,7 +635,7 @@ public sealed class LocalCommandTests : IDisposable
         return (exit, output.ToString(), error.ToString());
     }
 
-    private Task<int> Fake(ProcessStartInfo start, CancellationToken token)
+    private async Task<int> Fake(ProcessStartInfo start, TextWriter output, TextWriter error, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
         calls.Add(start);
@@ -503,7 +644,17 @@ public sealed class LocalCommandTests : IDisposable
             var publish = start.ArgumentList[start.ArgumentList.IndexOf("--output-path") + 1];
             File.WriteAllText(Path.Combine(publish, "docker-compose.yaml"), "services: {}");
         }
-        return Task.FromResult(0);
+        if (start.ArgumentList is ["image", "inspect", ..])
+        {
+            if (gatewayImageId is not null)
+            {
+                await output.WriteLineAsync(gatewayImageId);
+                return 0;
+            }
+            await error.WriteLineAsync("Error response from daemon: No such image: " + start.ArgumentList[^1]);
+            return 1;
+        }
+        return 0;
     }
 
     private Dictionary<string, string> ReadKeys(string env = "ppe") => File.ReadAllLines(Runtime(env))

@@ -25,7 +25,7 @@ public static class LocalCommand
         RunAsync(arguments, output, error, Directory.GetCurrentDirectory(), null, cancellationToken);
 
     internal static async Task<int> RunAsync(IReadOnlyList<string> arguments, TextWriter output, TextWriter error,
-        string workingDirectory, Func<ProcessStartInfo, CancellationToken, Task<int>>? runner,
+        string workingDirectory, Func<ProcessStartInfo, TextWriter, TextWriter, CancellationToken, Task<int>>? runner,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(arguments);
@@ -73,7 +73,8 @@ public static class LocalCommand
             var secrets = await ReadRuntime(runtime, cancellationToken);
             var bind = environment == "dev" ? "127.2.6.2" : "127.2.6.7";
             var project = "kardia-" + environment;
-            runner ??= (start, token) => RunProcessAsync(start, output, error, secrets.Values.ToArray(), token);
+            runner ??= (start, childOutput, childError, token) =>
+                RunProcessAsync(start, childOutput, childError, secrets.Values.ToArray(), token);
 
             ProcessStartInfo Start(string executable, IEnumerable<string> args)
             {
@@ -87,15 +88,19 @@ public static class LocalCommand
                 start.Environment["KARDIA_BIND_IP"] = bind;
                 start.Environment["KARDIA_SUBNET"] = environment == "dev" ? "172.30.62.0/24" : "172.30.67.0/24";
                 start.Environment["KARDIA_REPOSITORY_ROOT"] = repo;
+                start.Environment.Remove("KARDIA_PREVIOUS_GATEWAY_IMAGE");
                 // Environment wins over Compose's env-file; never inherit conflicting host credentials.
                 foreach (var (key, value) in secrets) start.Environment[key] = value;
                 return start;
             }
 
-            async Task Execute(string executable, IEnumerable<string> args)
+            async Task Execute(string executable, IEnumerable<string> args, string? previousGatewayImage = null)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var exit = await runner(Start(executable, args), cancellationToken);
+                var start = Start(executable, args);
+                if (previousGatewayImage is not null)
+                    start.Environment["KARDIA_PREVIOUS_GATEWAY_IMAGE"] = previousGatewayImage;
+                var exit = await runner(start, output, error, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
                 if (exit != 0) throw new LocalFailure($"Process exited with code {exit}. Check {executable} installation and the stage diagnostics.");
             }
@@ -138,8 +143,39 @@ public static class LocalCommand
             {
                 stage = "Docker Compose config";
                 await Execute("docker", [.. prefix, "config", "--quiet"]);
+                stage = "Docker gateway image inspection";
+                var gateway = "kardia-gateway:" + environment;
+                using var inspectionOutput = new StringWriter();
+                using var inspectionError = new StringWriter();
+                cancellationToken.ThrowIfCancellationRequested();
+                var inspectionExit = await runner(Start("docker", ["image", "inspect", "--format", "{{.Id}}", gateway]),
+                    inspectionOutput, inspectionError, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                var imageId = inspectionOutput.ToString().Trim();
+                var diagnostic = inspectionError.ToString().Trim();
+                var absent = inspectionExit == 1 && imageId.Length == 0 &&
+                    (diagnostic.Equals("Error response from daemon: No such image: " + gateway, StringComparison.Ordinal) ||
+                     diagnostic.Equals("Error: No such image: " + gateway, StringComparison.Ordinal));
+                var previousGateway = "caddy:2.11.6-alpine";
+                if (!absent)
+                {
+                    await error.WriteAsync(inspectionError.ToString());
+                    if (inspectionExit != 0)
+                    {
+                        await output.WriteAsync(inspectionOutput.ToString());
+                        throw new LocalFailure($"docker image inspect exited with code {inspectionExit}; the previous gateway was not selected.");
+                    }
+                    if (imageId.Length != 71 || !imageId.StartsWith("sha256:", StringComparison.Ordinal) ||
+                        !imageId[7..].All(char.IsAsciiHexDigitLower))
+                        throw new LocalFailure("docker image inspect returned an invalid image ID; refusing to rebuild without the previous gateway.");
+                    // BuildKit cannot use a local image ID in FROM. Pin its ID under an environment-scoped tag;
+                    // operation.lock keeps another wf local invocation from retagging it until this build finishes.
+                    previousGateway = "kardia-gateway-previous:" + environment;
+                    stage = "Docker gateway image pin";
+                    await Execute("docker", ["image", "tag", imageId, previousGateway]);
+                }
                 stage = "Docker Compose up";
-                await Execute("docker", [.. prefix, "up", "-d", "--build", "--wait", "--wait-timeout", "180"]);
+                await Execute("docker", [.. prefix, "up", "-d", "--build", "--wait", "--wait-timeout", "180"], previousGateway);
                 await output.WriteLineAsync($"Local {environment} is ready: project {project}, bind {bind}.");
                 await output.WriteLineAsync($"Gateway: http://{bind}; API: http://{bind}:5000; dashboard: http://{bind}:18888.");
             }
