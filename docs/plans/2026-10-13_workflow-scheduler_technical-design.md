@@ -867,8 +867,69 @@ after revocation; missing and foreign IDs share 404. App-only, Agent and Registr
 identities cannot manage personal subscriptions. Create/delete and safe audit
 records commit atomically; no resolved secret values enter responses or audit.
 All responses are no-store with explicit sanitized failures. Migration 0038 adds
-the durable outbox schema only; terminal production, dispatch, delivery security
-and channel integrations remain tasks 14.1.1.1.2/.3. No new login/logout flow.
+the durable outbox schema; 0039 enqueues completion notifications atomically.
+No new login/logout flow.
+
+**Terminal outbox and webhook dispatch**: the 0039 row trigger runs in the
+terminal transaction, including ordinary RunStore and grouped commits. Grouped
+status publication precedes the terminal snapshot, so enqueue waits for terminal
+status plus `ended_at`. Existing completed history is not backfilled; future run
+partitions inherit the trigger. Workflow/schedule/type matching uses exact owning
+type, workflow ID and retained series ID. One row per subscription/run survives
+exact replay; outbox failure rolls back terminal events, snapshot and projections.
+CloudEvents structured JSON uses `specversion=1.0`, `source=urn:kardia:runs`, run
+UUID as `id`, workflow ID as `subject`, UTC terminal `time` and
+`datacontenttype=application/json`. Type is `io.kardia.run.completed` for success,
+otherwise `io.kardia.run.failed`. Data contains only run/workflow/version/series
+IDs, terminal status and UTC end time: never variables, outputs, metadata, abort
+reasons, destinations or secrets. The dispatcher rejects oversized, foreign or
+expanded persisted payloads rather than forwarding extra fields.
+
+Delivery is opt-in on engine hosts, default `Notifications:Enabled=false`.
+Rows remain durable while disabled; configure approved destinations before enabling.
+Each `Notifications:Webhooks:N` entry requires exact `TypeScope`, `Target`,
+`SecretRef`, `Addresses` (1-8 canonical literal IPs) and `SigningKeyBase64`
+(32-128 decoded bytes). Supply keys through external secret-backed configuration,
+for example `Notifications__Webhooks__0__SigningKeyBase64` in the engine process
+environment; never commit them to source, put them in a subscription, or reuse an
+upload/agent authentication key. Reference names match this operator-managed
+configuration; this is not an implementation of agent DPAPI or Key Vault lookup.
+At most 64 distinct destinations are accepted. HTTPS certificate and hostname
+verification remain enabled; loopback HTTP requires loopback pins. The client
+connects only to approved IPs while preserving the original HTTP/TLS hostname,
+without DNS re-resolution, proxies, redirects, cookies or ambient credentials.
+Metadata, link-local, multicast and wildcard addresses are rejected; private
+unicast addresses require explicit operator pins. Address/key changes require
+engine configuration update and restart. Unapproved type/URL/reference tuples
+fail permanently without sending. This is a durable subscription to an
+operator-approved type-scoped sink, not an indefinitely retained bearer token:
+no JWT, group claims or user membership snapshot is stored or replayed.
+Role revocation blocks interactive create/list; stop existing institutional-sink
+delivery by unsubscribing or removing its approved destination.
+
+The hosted dispatcher locks subscription before outbox with `SKIP LOCKED`, matching
+unsubscribe's cascade order and allowing independent instances without concurrent
+duplicate sends. One claim holds a transaction through a bounded 10-second HTTP
+attempt; stop/cancellation rolls it back. Success is HTTP 2xx. HTTP 5xx, 408, 429,
+transport failure and timeout retry after 1, 2, 4, 8, 16, 32 and 60 seconds, with
+eight total attempts. Other responses, including redirects, fail permanently.
+Only bounded reason codes/status numbers persist and are logged, never remote
+bodies, credential URLs or resolved keys. Email/Teams rows remain queued for
+task 14.1.1.1.3.
+
+Webhook wire profile: POST `application/cloudevents+json` with
+`X-Kardia-Timestamp` (canonical Unix seconds) and
+`X-Kardia-Signature: sha256=<lowercase hex HMAC-SHA256>`. Sign ASCII
+`timestamp + "."` followed by the **exact transmitted UTF-8 body bytes**.
+Receivers must require one of each header, enforce a short timestamp tolerance
+(for example five minutes), verify the HMAC in constant time, then deduplicate
+`source + id`. This timestamp/HMAC profile is Kardia-specific, not a CloudEvents
+signature standard. Delivery is **at least once**, not exactly once: remote
+success followed by database/commit failure or cancellation can resend identical
+event bytes/ID with a fresh signature timestamp. Removing a subscription cascades
+queued rows and waits for an already-running bounded attempt; it cannot retract a
+request already received. Eight exhausted attempts remain explicitly failed for
+operator inspection; no automatic replay API is claimed.
 
 **Dashboard reads (FR-047)**: `scope` is `workflow`, `schedule`, `node` or `machine`.
 Workflow and node IDs are canonical unpadded base64url UTF8 of `team/type/workflow`

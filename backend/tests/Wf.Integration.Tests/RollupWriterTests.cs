@@ -455,6 +455,7 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
 
 public sealed class RollupDatabase : AgentDatabase
 {
+    public string ConnectionString => DatabaseConnectionString;
     protected override IReadOnlyList<string> Migrations => Migrator.LoadScripts().Select(script => script.Name).ToArray();
     public NpgsqlDataSource SingleConnection() => NpgsqlDataSource.Create(
         new NpgsqlConnectionStringBuilder(DatabaseConnectionString) { MaxPoolSize = 1 }.ConnectionString);

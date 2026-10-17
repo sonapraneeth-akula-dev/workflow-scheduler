@@ -8,6 +8,7 @@ using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Events;
 using Wf.ControlPlane.Engine.Leadership;
+using Wf.ControlPlane.Engine.Notifications;
 using Wf.ControlPlane.Engine.Recovery;
 using Wf.ControlPlane.Engine.Registry;
 using Wf.ControlPlane.Engine.Scheduler;
@@ -87,6 +88,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.AddWorkflowOpenApi();
 builder.Services.AddWorkflowLive();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton(_ => NotificationOptions.Read(builder.Configuration));
+if (engineEnabled) builder.Services.AddHostedService<NotificationDispatcher>();
 builder.Services.AddWorkflowDrain(builder.Configuration, engineEnabled);
 builder.Services.AddWorkflowRegistrations(builder.Configuration);
 builder.Services.AddSingleton<ActiveVersionCache>();
