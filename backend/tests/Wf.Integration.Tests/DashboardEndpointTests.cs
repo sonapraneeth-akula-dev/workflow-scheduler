@@ -8,7 +8,7 @@ using Wf.Integration.Tests.Execution;
 
 namespace Wf.Integration.Tests;
 
-public sealed class DashboardEndpointTests(RollupDatabase database) : IClassFixture<RollupDatabase>
+public sealed partial class DashboardEndpointTests(RollupDatabase database, ITestOutputHelper output) : IClassFixture<RollupDatabase>
 {
     private CancellationToken Token => TestContext.Current.CancellationToken;
     private static readonly DateTimeOffset Today = new(2026, 10, 17, 0, 0, 0, TimeSpan.Zero);
@@ -35,6 +35,7 @@ public sealed class DashboardEndpointTests(RollupDatabase database) : IClassFixt
                 started_at,ended_at,resource_max_cpu_percent,resource_peak_ram_bytes)
             VALUES(uuid_v7_run_day($1),$1,'alpha/task',2,5,now()+interval '1 day',$2,now(),now()+interval '500 seconds',900,900*1048576)
             """, latest, Guid.NewGuid());
+        await Refresh(scope);
         await using var api = await MetricsApiServer.Start(database.DataSource, Token, timeProvider: new Clock());
         foreach (var (kind, id) in new[]
         {
@@ -74,6 +75,7 @@ public sealed class DashboardEndpointTests(RollupDatabase database) : IClassFixt
             INSERT INTO node_runs(run_day,run_id,node_key,status)
                 VALUES(uuid_v7_run_day($1),$1,'skipped',10)
             """, zero);
+        await Refresh(scope);
         await using var api = await MetricsApiServer.Start(database.DataSource, Token, timeProvider: new Clock());
         var response = await Read(api, scope, "workflow", DashboardQuery.Encode(scope.Workflow));
         var measured = Assert.Single(response.Rankings.Slowest);
@@ -150,16 +152,16 @@ public sealed class DashboardEndpointTests(RollupDatabase database) : IClassFixt
         var empty = await Read(api, scope, "workflow", DashboardQuery.Encode(scope.Workflow));
         Assert.Empty(empty.Rankings.Slowest);
         Assert.Empty(empty.Rankings.FailureRate);
-        await Execute("ALTER TABLE node_runs RENAME COLUMN ended_at TO unavailable_dashboard_end");
+        await Execute("ALTER TABLE dashboard_rollups RENAME COLUMN durations_ms TO unavailable_dashboard_durations");
         try
         {
             using var unavailable = await api.Get(Path("workflow", DashboardQuery.Encode(scope.Workflow)), api.Jwt(scope.Group), Token);
             await Problem(unavailable, 503, "dashboard_unavailable");
             var body = await unavailable.Content.ReadAsStringAsync(Token);
-            Assert.DoesNotContain("unavailable_dashboard_end", body);
+            Assert.DoesNotContain("unavailable_dashboard_durations", body);
             Assert.DoesNotContain("Npgsql", body);
         }
-        finally { await Execute("ALTER TABLE node_runs RENAME COLUMN unavailable_dashboard_end TO ended_at"); }
+        finally { await Execute("ALTER TABLE dashboard_rollups RENAME COLUMN unavailable_dashboard_durations TO durations_ms"); }
         using var encoded = await api.Get(Path("%77orkflow", DashboardQuery.Encode(scope.Workflow)), api.Jwt(scope.Group), Token);
         await Problem(encoded, 400, "invalid_dashboard_query");
     }
@@ -215,12 +217,18 @@ public sealed class DashboardEndpointTests(RollupDatabase database) : IClassFixt
             new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.TimestampTz, Value = duration is null ? DBNull.Value : at.AddSeconds(duration.Value) },
             nodeStatus, scope.Machine, new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Double, Value = (object?)cpu ?? DBNull.Value },
             new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Numeric, Value = ram is null ? DBNull.Value : ram * 1048576 });
+        await Execute("SELECT refresh_daily_rollups(uuid_v7_run_day($1),$2)", id, scope.Workflow);
         return id;
     }
 
-    private async Task<DashboardResponse> Read(MetricsApiServer api, Scope scope, string kind, string id)
+    private Task Refresh(Scope scope) => Execute("""
+        SELECT refresh_daily_rollups(run_day,workflow_id)
+        FROM runs WHERE workflow_id=$1 GROUP BY run_day,workflow_id ORDER BY run_day
+        """, scope.Workflow);
+
+    private async Task<DashboardResponse> Read(MetricsApiServer api, Scope scope, string kind, string id, string suffix = "")
     {
-        using var response = await api.Get(Path(kind, id), api.Jwt(scope.Group), Token);
+        using var response = await api.Get(Path(kind, id) + suffix, api.Jwt(scope.Group), Token);
         var body = await response.Content.ReadAsStringAsync(Token);
         Assert.True(response.StatusCode == HttpStatusCode.OK, body);
         Assert.True(response.Headers.CacheControl!.NoStore);

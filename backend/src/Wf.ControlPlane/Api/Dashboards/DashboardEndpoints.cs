@@ -193,56 +193,51 @@ public static class DashboardEndpoints
         }
     }
 
-    private static async Task<List<DashboardRow>> Query(NpgsqlDataSource source, DashboardQuery filter, List<string> types,
-        string? workflow, Guid? series, CancellationToken token)
+    private static NpgsqlCommand CreateQuery(NpgsqlConnection connection, DashboardQuery filter, List<string> types,
+        string? workflow, Guid? series)
     {
-        await using var query = source.CreateCommand();
+        var query = connection.CreateCommand();
         query.Parameters.AddWithValue(filter.Window.From);
         query.Parameters.AddWithValue(filter.Window.To);
         query.Parameters.AddWithValue(types.ToArray());
-        var predicates = new List<string>
+        var predicates = new List<string> { "r.day>=$1 AND r.day<$2" };
+        if (workflow is not null)
         {
-            "r.run_day>=$1 AND r.run_day<$2 AND r.status BETWEEN 3 AND 6",
-            "r.workflow_id ~ '^[^/]+/[^/]+/[^/]+$'",
-            "split_part(r.workflow_id,'/',1)||'/'||split_part(r.workflow_id,'/',2)=ANY($3)"
-        };
-        if (workflow is not null) predicates.Add("r.workflow_id=" + P(workflow, NpgsqlDbType.Text));
-        if (series is not null) predicates.Add("r.series_id=" + P(series.Value, NpgsqlDbType.Uuid));
-        var machine = filter.Scope == "machine";
-        var node = filter.NodeKey is null ? "" : " AND n.node_key=" + P(filter.NodeKey, NpgsqlDbType.Text);
-        var agent = machine ? P(filter.ResourceId!.Value, NpgsqlDbType.Uuid) : "";
-        query.CommandText = """
-            WITH completed AS MATERIALIZED (SELECT r.run_day,r.id,r.workflow_id FROM runs r WHERE
-            """ + " " + string.Join(" AND ", predicates) + "), " + (machine ? """
-            observations AS (
-                SELECT r.workflow_id,split_part(a.task_key,'/',1) AS node_key,r.id,a.status,
-                    a.started_at,a.ended_at,a.resource_max_cpu_percent AS cpu,
-                    a.resource_peak_ram_bytes/1048576::numeric AS ram
-                FROM completed r JOIN task_attempts a ON a.run_day=r.run_day AND a.run_id=r.id
-                WHERE a.run_day>=$1 AND a.run_day<$2 AND a.status BETWEEN 5 AND 11 AND a.agent_id=
-            """ + agent + ")" : """
-            resources AS (
-                SELECT a.run_day,a.run_id,split_part(a.task_key,'/',1) AS node_key,
-                    max(a.resource_max_cpu_percent) AS cpu,max(a.resource_peak_ram_bytes)/1048576::numeric AS ram
-                FROM task_attempts a JOIN completed r ON r.run_day=a.run_day AND r.id=a.run_id
-                WHERE a.run_day>=$1 AND a.run_day<$2 GROUP BY a.run_day,a.run_id,split_part(a.task_key,'/',1)
-            ), observations AS (
-                SELECT r.workflow_id,n.node_key,r.id,n.status,n.started_at,n.ended_at,a.cpu,a.ram
-                FROM completed r JOIN node_runs n ON n.run_day=r.run_day AND n.run_id=r.id
-                LEFT JOIN resources a ON a.run_day=n.run_day AND a.run_id=n.run_id AND a.node_key=n.node_key
-                WHERE n.run_day>=$1 AND n.run_day<$2 AND n.status BETWEEN 5 AND 11
-            """ + node + ")") + """
-            , measured AS (
-                SELECT *,CASE WHEN started_at IS NOT NULL AND ended_at IS NOT NULL
-                    THEN greatest(0,extract(epoch FROM ended_at-started_at)*1000)::float8 END AS duration_ms
-                FROM observations
+            predicates.Add("r.workflow_id=" + P(workflow, NpgsqlDbType.Text));
+        }
+        else
+        {
+            predicates.Add("r.workflow_id ~ '^[^/]+/[^/]+/[^/]+$'");
+            predicates.Add("split_part(r.workflow_id,'/',1)||'/'||split_part(r.workflow_id,'/',2)=ANY($3)");
+        }
+        var scope = series is not null ? "schedule" : filter.Scope == "machine" ? "machine" : "workflow";
+        predicates.Add("r.scope=" + P(scope, NpgsqlDbType.Text));
+        predicates.Add("r.scope_id=" + P(series ?? (filter.Scope == "machine" ? filter.ResourceId!.Value : Guid.Empty), NpgsqlDbType.Uuid));
+        if (filter.NodeKey is not null) predicates.Add("r.node_key=" + P(filter.NodeKey, NpgsqlDbType.Text));
+        query.CommandText = "WITH selected AS MATERIALIZED (SELECT * FROM dashboard_rollups r WHERE " +
+            string.Join(" AND ", predicates) + """
+            ), aggregate AS (
+                SELECT workflow_id,node_key,sum(observations)::bigint AS observations,sum(failures)::bigint AS failures,
+                    sum(soft_failures)::bigint AS soft_failures,sum(duration_count)::bigint AS duration_count,
+                    max(cpu_max_pct) AS cpu,max(ram_peak_mb) AS ram,max(latest_run_id::text COLLATE "C")::uuid AS latest_run_id
+                FROM selected GROUP BY workflow_id,node_key
             )
-            SELECT workflow_id,node_key,count(*),count(*) FILTER (WHERE status IN (7,8,9)),
-                count(*) FILTER (WHERE status=6),count(duration_ms),
-                percentile_cont(ARRAY[0.5,0.95]) WITHIN GROUP (ORDER BY duration_ms),max(cpu),max(ram),
-                max(id::text COLLATE "C")::uuid
-            FROM measured GROUP BY workflow_id,node_key
+            SELECT m.workflow_id,m.node_key,m.observations,m.failures,m.soft_failures,m.duration_count,
+                (SELECT percentile_cont(ARRAY[0.5,0.95]) WITHIN GROUP (ORDER BY duration_ms)
+                    FROM selected s CROSS JOIN LATERAL unnest(s.durations_ms) d(duration_ms)
+                    WHERE s.workflow_id=m.workflow_id AND s.node_key=m.node_key),
+                m.cpu,m.ram,m.latest_run_id FROM aggregate m
             """;
+        return query;
+
+        string P(object value, NpgsqlDbType type) => RunQueryEndpoints.Parameter(query, value, type);
+    }
+
+    private static async Task<List<DashboardRow>> Query(NpgsqlDataSource source, DashboardQuery filter, List<string> types,
+        string? workflow, Guid? series, CancellationToken token)
+    {
+        await using var connection = await source.OpenConnectionAsync(token);
+        await using var query = CreateQuery(connection, filter, types, workflow, series);
         var rows = new List<DashboardRow>();
         await using (var reader = await query.ExecuteReaderAsync(token))
         {
@@ -267,8 +262,6 @@ public static class DashboardEndpoints
             }
         }
         return rows;
-
-        string P(object value, NpgsqlDbType type) => RunQueryEndpoints.Parameter(query, value, type);
     }
 
     private static IResult Denied() => Results.Problem(TeamAuthorizationExtensions.Forbidden());

@@ -750,6 +750,9 @@ Conventions:
 | daily_rollups | day, workflow_id, node_key | date, text, text | N | PK | trends/dashboards (FR-024/047); UUIDv7 UTC creation day, empty node key = workflow total |
 | | runs, failures, soft_failures, duration_count | bigint | N | | refreshed atomically in each run terminal transaction; ordered bucket locks, idempotent exact source aggregation; retained terminal history backfilled by 0036 |
 | | p50_ms, p95_ms, cpu_max_pct, ram_peak_mb | double precision (RAM numeric) | Y | | exact interpolated duration quantiles, never averaged across days; null when unobserved; resource maxima include failed/retried attempts; RAM in MiB |
+| dashboard_rollups | scope, scope_id, workflow_id, node_key, day | text, uuid, text, text, date | N | PK; idx(day, workflow_id) | workflow (zero UUID), schedule (retained series UUID), machine (agent UUID); node scope selects the workflow projection |
+| | observations, failures, soft_failures, duration_count, durations_ms | bigint, double precision[] | N | | 0037 backfills retained terminal history; same ordered bucket lock and terminal transaction as daily_rollups; exact observed source durations, never averaged daily quantiles or approximate sketches |
+| | cpu_max_pct, ram_peak_mb, latest_run_id | double precision, numeric, uuid | Y,Y,N | | scope-specific resource maxima and latest contributing run; null unknown telemetry, measured zero preserved; counts and duration arrays constrained independently |
 | audit_log ⧉ | id, ts | bigint identity, timestamptz | N | PK(ts, id) | 13 monthly partitions (≥ 1 year) |
 | | actor, actor_kind, action, target_kind, target_id, team_id, summary | | N/N/N/N/N/Y/N | idx(target_kind, target_id, ts), idx(actor, ts) | |
 | subscriptions | id, principal_id, scope_kind, scope_id, events, channel, target, secret_ref | | N (secret_ref Y) | PK(id); idx(scope_kind, scope_id) | FR-028 |
@@ -859,8 +862,15 @@ node durations or other agents' measurements. Failure fraction counts hard failu
 timeout and cancellation; soft failures remain separate. Skipped/reused observations
 count without invented duration. Unknown CPU/RAM/duration remain null and are
 excluded from the corresponding ranking; real zero is retained, CPU may exceed
-100%, and RAM is MiB. Existing daily rollups already persist CPU/RAM maxima; source
-rows supply exact cross-day quantiles and scope-specific schedule/machine facts.
+100%, and RAM is MiB. Durable `dashboard_rollups` preserve scope-specific daily
+counts, resource maxima, latest contributing IDs and arrays of observed source
+durations. Migration 0037 backfills retained history and extends the existing
+terminal refresh function in place: both projections commit or roll back with
+the terminal events/snapshot, on normal and group-commit paths. Dashboard reads
+sum counts separately from unnested durations, then use PostgreSQL's native
+interpolation over the selected source durations for exact cross-day quantiles.
+No raw run/node/attempt scan supplies rankings, no daily quantiles are averaged,
+and no request cache or per-request planner setting is required.
 Fresh existing Viewer grants apply on every request, including deleted-schedule
 history. Machine analytics filter to currently granted workflow types and disclose
 no global machine inventory metadata; inventory itself remains global Admin-only.

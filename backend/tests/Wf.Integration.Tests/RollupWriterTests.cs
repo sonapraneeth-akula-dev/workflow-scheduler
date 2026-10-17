@@ -55,6 +55,14 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
         Assert.Null(skipped.Cpu);
         Assert.Null(skipped.Ram);
         Assert.Equal(3, rows.Count);
+        var dashboard = Assert.Single(await DashboardRows(workflow), row => row.Node == "alpha");
+        Assert.Equal((5L, 3L, 1L), (dashboard.Observations, dashboard.Failures, dashboard.Soft));
+        Assert.Equal([5000d, 10000d, 20000d, 50000d], dashboard.Durations.Order());
+        Assert.Equal(120, dashboard.Cpu);
+        Assert.Equal(64, dashboard.Ram);
+        Assert.Contains(dashboard.Latest, ids);
+        var dashboardSkipped = Assert.Single(await DashboardRows(workflow), row => row.Node == "skipped");
+        Assert.Empty(dashboardSkipped.Durations);
     }
 
     [Theory]
@@ -79,6 +87,10 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
         Assert.Equal(6000, node.P50);
         Assert.Null(total.Cpu);
         Assert.Null(total.Ram);
+        var dashboard = Assert.Single(await DashboardRows(workflow));
+        Assert.Equal((1L, status == RunStatus.Succeeded ? 0L : 1L), (dashboard.Observations, dashboard.Failures));
+        Assert.Equal([6000d], dashboard.Durations);
+        Assert.Equal(run.Snapshot.RunId, dashboard.Latest);
     }
 
     [Fact]
@@ -96,6 +108,9 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
         Assert.Equal((24L, 8L, 24L), (row.Runs, row.Failures, row.Durations));
         Assert.Equal(12500, row.P50!.Value, 6);
         Assert.Equal(22850, row.P95!.Value, 6);
+        var dashboard = Assert.Single(await DashboardRows(workflow));
+        Assert.Equal((24L, 8L), (dashboard.Observations, dashboard.Failures));
+        Assert.Equal(Enumerable.Range(1, 24).Select(value => value * 500d), dashboard.Durations.Order());
     }
 
     [Fact]
@@ -114,6 +129,9 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
         Assert.Equal(20000, total.P50);
         Assert.Equal(29000, total.P95);
         Assert.Equal(10000, Assert.Single(rows, row => row.Node == "alpha").P50);
+        var dashboard = Assert.Single(await DashboardRows(workflow));
+        Assert.Equal((2L, 1L), (dashboard.Observations, dashboard.Failures));
+        Assert.Equal([5000d, 15000d], dashboard.Durations.Order());
         await using var query = database.DataSource.CreateCommand("""
             SELECT r.started_at,r.ended_at,n.started_at,n.ended_at,r.last_seq=r.snapshot_seq
             FROM runs r JOIN node_runs n ON n.run_day=r.run_day AND n.run_id=r.id
@@ -130,9 +148,11 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Rollup_failure_rolls_back_terminal_events_snapshots_and_projections_before_acknowledgement(bool grouped)
+    [InlineData(false, "daily_rollups")]
+    [InlineData(true, "daily_rollups")]
+    [InlineData(false, "dashboard_rollups")]
+    [InlineData(true, "dashboard_rollups")]
+    public async Task Rollup_failure_rolls_back_terminal_events_snapshots_and_projections_before_acknowledgement(bool grouped, string table)
     {
         var workflow = Workflow();
         var run = await Create(workflow);
@@ -144,7 +164,7 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
         await using (var install = database.DataSource.CreateCommand($"""
             CREATE FUNCTION {name}() RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN RAISE EXCEPTION 'injected rollup failure'; END $$;
-            CREATE TRIGGER {name} BEFORE INSERT OR UPDATE ON daily_rollups FOR EACH ROW
+            CREATE TRIGGER {name} BEFORE INSERT OR UPDATE ON {table} FOR EACH ROW
                 WHEN (NEW.workflow_id='{workflow}') EXECUTE FUNCTION {name}();
             """))
             await install.ExecuteNonQueryAsync(Token);
@@ -160,11 +180,12 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
             Assert.Equal(before.Status, saved.Status);
             Assert.Equal(before.EndedAt, saved.EndedAt);
             Assert.Empty(await Rows(workflow));
+            Assert.Empty(await DashboardRows(workflow));
         }
         finally
         {
             await using var cleanup = database.DataSource.CreateCommand($"""
-                DROP TRIGGER {name} ON daily_rollups; DROP FUNCTION {name}();
+                DROP TRIGGER {name} ON {table}; DROP FUNCTION {name}();
                 """);
             await cleanup.ExecuteNonQueryAsync(Token);
         }
@@ -175,6 +196,7 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
         }
         else await store.AppendAsync(run, changes[^1], Token);
         Assert.Equal(1, Assert.Single(await Rows(workflow), row => row.Node == "").Runs);
+        Assert.Equal(1, Assert.Single(await DashboardRows(workflow)).Observations);
     }
 
     [Fact]
@@ -207,10 +229,32 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
             Assert.Equal((2L, 1L, 2L), (prior.Runs, prior.Failures, prior.Durations));
             Assert.Equal(20000, prior.P50);
             Assert.Equal(29000, prior.P95);
+            await using (var caller = await previous.OpenConnectionAsync(Token))
+            {
+                await using var refresh = new NpgsqlCommand("SELECT refresh_daily_rollups($1,$2)", caller);
+                refresh.Parameters.AddWithValue(DateOnly.FromDateTime(Epoch.Date));
+                refresh.Parameters.AddWithValue(workflow);
+                await refresh.PrepareAsync(Token);
+                await using (var upgrade = previous.CreateCommand(await File.ReadAllTextAsync(
+                    Path.Combine(AppContext.BaseDirectory, "Migrations", "0037_dashboard_rollups.sql"), Token)))
+                    await upgrade.ExecuteNonQueryAsync(Token);
+                var dashboards = await DashboardRows(workflow, previous);
+                Assert.Equal(4, dashboards.Count);
+                var historical = Assert.Single(dashboards,
+                    row => row.Node == "alpha" && row.Day == DateOnly.FromDateTime(Epoch.AddDays(-1).Date));
+                Assert.Equal((2L, 1L), (historical.Observations, historical.Failures));
+                Assert.Equal([5000d, 15000d], historical.Durations.Order());
+                await Seed(previous, workflow, Epoch, 4, 7, 100);
+                await refresh.ExecuteNonQueryAsync(Token);
+                var updated = Assert.Single(await DashboardRows(workflow, previous),
+                    row => row.Node == "alpha" && row.Day == DateOnly.FromDateTime(Epoch.Date));
+                Assert.Equal((2L, 1L), (updated.Observations, updated.Failures));
+                Assert.Equal([40000d, 50000d], updated.Durations.Order());
+            }
             await using var query = previous.CreateCommand("SELECT count(*),sum(last_seq) FROM runs");
             await using var reader = await query.ExecuteReaderAsync(Token);
             Assert.True(await reader.ReadAsync(Token));
-            Assert.Equal(4, reader.GetInt64(0));
+            Assert.Equal(5, reader.GetInt64(0));
             Assert.Equal(0, reader.GetDecimal(1));
         }
         finally
@@ -249,6 +293,29 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
         await Refresh([id]);
         await using var invalid = database.DataSource.CreateCommand(
             $"UPDATE daily_rollups SET {mutation} WHERE workflow_id=$1 AND node_key=''");
+        invalid.Parameters.AddWithValue(workflow);
+        var error = await Assert.ThrowsAsync<PostgresException>(() => invalid.ExecuteNonQueryAsync(Token));
+        Assert.Equal(PostgresErrorCodes.CheckViolation, error.SqlState);
+    }
+
+    [Theory]
+    [InlineData("failures=observations+1")]
+    [InlineData("soft_failures=observations")]
+    [InlineData("duration_count=observations+1")]
+    [InlineData("durations_ms='{}'::float8[]")]
+    [InlineData("durations_ms=ARRAY[NULL::float8]")]
+    [InlineData("durations_ms=ARRAY['NaN'::float8]")]
+    [InlineData("durations_ms=ARRAY['Infinity'::float8]")]
+    [InlineData("durations_ms=ARRAY[-1::float8]")]
+    [InlineData("cpu_max_pct='NaN'::float8")]
+    [InlineData("ram_peak_mb=-1")]
+    public async Task Dashboard_projection_rejects_invalid_counts_arrays_and_nonfinite_measurements(string mutation)
+    {
+        var workflow = Workflow();
+        var id = await Seed(database.DataSource, workflow, Epoch, 4, 7, 10);
+        await Refresh([id]);
+        await using var invalid = database.DataSource.CreateCommand(
+            $"UPDATE dashboard_rollups SET {mutation} WHERE workflow_id=$1 AND node_key='alpha'");
         invalid.Parameters.AddWithValue(workflow);
         var error = await Assert.ThrowsAsync<PostgresException>(() => invalid.ExecuteNonQueryAsync(Token));
         Assert.Equal(PostgresErrorCodes.CheckViolation, error.SqlState);
@@ -365,11 +432,32 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
                 reader.IsDBNull(9) ? null : reader.GetDecimal(9)));
         return rows;
     }
+
+    private sealed record DashboardProjectionRow(DateOnly Day, string Node, long Observations, long Failures, long Soft,
+        double[] Durations, double? Cpu, decimal? Ram, Guid Latest);
+
+    private async Task<List<DashboardProjectionRow>> DashboardRows(string workflow, NpgsqlDataSource? source = null)
+    {
+        await using var query = (source ?? database.DataSource).CreateCommand("""
+            SELECT day,node_key,observations,failures,soft_failures,durations_ms,cpu_max_pct,ram_peak_mb,latest_run_id
+            FROM dashboard_rollups WHERE scope='workflow' AND workflow_id=$1 ORDER BY day,node_key
+            """);
+        query.Parameters.AddWithValue(workflow);
+        await using var reader = await query.ExecuteReaderAsync(Token);
+        var rows = new List<DashboardProjectionRow>();
+        while (await reader.ReadAsync(Token))
+            rows.Add(new(reader.GetFieldValue<DateOnly>(0), reader.GetString(1), reader.GetInt64(2), reader.GetInt64(3),
+                reader.GetInt64(4), reader.GetFieldValue<double[]>(5), reader.IsDBNull(6) ? null : reader.GetDouble(6),
+                reader.IsDBNull(7) ? null : reader.GetDecimal(7), reader.GetGuid(8)));
+        return rows;
+    }
 }
 
 public sealed class RollupDatabase : AgentDatabase
 {
     protected override IReadOnlyList<string> Migrations => Migrator.LoadScripts().Select(script => script.Name).ToArray();
+    public NpgsqlDataSource SingleConnection() => NpgsqlDataSource.Create(
+        new NpgsqlConnectionStringBuilder(DatabaseConnectionString) { MaxPoolSize = 1 }.ConnectionString);
     public NpgsqlDataSource ForSchema(string schema) => NpgsqlDataSource.Create(
         new NpgsqlConnectionStringBuilder(DatabaseConnectionString) { SearchPath = schema }.ConnectionString);
 }
