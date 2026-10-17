@@ -3004,7 +3004,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description One row per committed dispatched attempt, including reserved lifecycle-stage keys. Manifest task declaration order, then increasing attempt; absent manifest uses snapshot task enumeration. Timings reuse validated recorded metrics, not live clocks. Agent identity belongs to the exact durable dispatch attempt; missing legacy attribution is null. Never-started/skipped/reused work has no invented attempts. Fresh Run Viewer authorization; no query parameters, variables, errors, outputs or machine capabilities. */
+        /** @description One row per committed dispatched attempt, including reserved lifecycle-stage keys. Manifest task declaration order, then increasing attempt; absent manifest uses snapshot task enumeration. Timings reuse validated recorded metrics, not live clocks. Agent identity belongs to the exact durable dispatch attempt; missing legacy attribution is null. Never-started/skipped/reused work has no invented attempts. ResumedFrom is the verified seed's saved UTC time recorded before that attempt's dispatch delivery, not the task's latest checkpoint; missing historical or non-resumed attribution is null. Fresh Run Viewer authorization; no query parameters, variables, errors, outputs or machine capabilities. */
         get: {
             parameters: {
                 query?: never;
@@ -5729,6 +5729,8 @@ export interface components {
             terminalStatus: null | string;
             failureCategory: null | string;
             agentId: null | string;
+            /** Format: date-time */
+            resumedFrom: null | string;
         };
         RunTimelineResponse: {
             /** Format: uuid */

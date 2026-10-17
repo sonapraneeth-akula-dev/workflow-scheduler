@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Wf.Contracts;
@@ -125,6 +126,10 @@ public sealed partial class CheckpointApplierTests(HostedExecutionDatabase datab
         var next = await fixture.Runtime.AddAgent();
         await fixture.Runtime.LoseAndReplace(fixture.Runtime.Session);
         var replacement = Assert.Single(await fixture.Runtime.Pending(next)).Command;
+        var resume = await fixture.Applier.LoadForDispatchAsync(replacement, next, Token);
+        Assert.Equal(CheckpointProtocol.Validate(first).SavedAt, resume!.Reference.SavedAt.ToDateTimeOffset());
+        Assert.Equal(resume.ToByteString(),
+            (await fixture.Applier.LoadForDispatchAsync(replacement, next, Token))!.ToByteString());
         fixture.Runtime.Clock.Now = fixture.Runtime.Clock.Now.AddSeconds(5);
         var stale = await fixture.Upload("""{"position":99}""", 99);
         await fixture.Accept(stale);
@@ -135,6 +140,9 @@ public sealed partial class CheckpointApplierTests(HostedExecutionDatabase datab
         Assert.Equal(2L, await fixture.Runtime.Scalar("SELECT sequence FROM task_checkpoints WHERE run_id=$1"));
         Assert.Equal((short)2, await fixture.Runtime.Scalar("SELECT attempt FROM task_checkpoints WHERE run_id=$1"));
         Assert.Equal(second.BlobKey, await fixture.Runtime.Scalar("SELECT blob_uri FROM task_checkpoints WHERE run_id=$1"));
+        Assert.Null(await fixture.Applier.LoadForDispatchAsync(replacement, next, Token));
+        Assert.Equal(CheckpointProtocol.Validate(first).SavedAt, new DateTimeOffset(Assert.IsType<DateTime>(
+            await fixture.Runtime.Scalar("SELECT resumed_from_checkpoint_at FROM task_attempts WHERE run_id=$1 AND attempt=2"))));
     }
 
     [Fact]
@@ -150,6 +158,40 @@ public sealed partial class CheckpointApplierTests(HostedExecutionDatabase datab
         var after = await fixture.Upload("""{"late":true}""", 2);
         await Assert.ThrowsAsync<ArgumentException>(() => fixture.Accept(after));
         Assert.Equal(1L, await fixture.Runtime.Scalar("SELECT sequence FROM task_checkpoints WHERE run_id=$1"));
+    }
+
+    [Theory]
+    [InlineData("session")]
+    [InlineData("epoch")]
+    [InlineData("terminal")]
+    [InlineData("conflict")]
+    public async Task Resume_attribution_rejects_stale_or_conflicting_delivery_without_changing_the_record(string mode)
+    {
+        await using var fixture = await Fixture.Create(database);
+        var saved = await fixture.Upload("{}");
+        await fixture.Accept(saved);
+        var next = await fixture.Runtime.AddAgent();
+        await fixture.Runtime.LoseAndReplace(fixture.Runtime.Session);
+        var command = Assert.Single(await fixture.Runtime.Pending(next)).Command;
+        if (mode == "session") next = next with { SessionId = Guid.NewGuid() };
+        if (mode == "epoch") command.ReservationEpoch++;
+        if (mode == "terminal")
+            await fixture.Runtime.Execute("UPDATE task_attempts SET status=6 WHERE run_id=$1 AND attempt=2", fixture.Runtime.RunId);
+        if (mode == "conflict")
+            await fixture.Runtime.Execute("""
+                UPDATE task_attempts SET resumed_from_checkpoint_at=$2 WHERE run_id=$1 AND attempt=2
+                """, fixture.Runtime.RunId, CheckpointProtocol.Validate(saved).SavedAt.AddSeconds(-1));
+        if (mode is "session" or "epoch")
+            await Assert.ThrowsAsync<ArgumentException>(() => fixture.Applier.LoadForDispatchAsync(command, next, Token));
+        else
+            await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Applier.LoadForDispatchAsync(command, next, Token));
+        var recorded = await fixture.Runtime.Scalar(
+            "SELECT resumed_from_checkpoint_at FROM task_attempts WHERE run_id=$1 AND attempt=2");
+        if (mode == "conflict")
+            Assert.Equal(CheckpointProtocol.Validate(saved).SavedAt.AddSeconds(-1),
+                new DateTimeOffset(Assert.IsType<DateTime>(recorded)));
+        else
+            Assert.Equal(DBNull.Value, recorded);
     }
 
     [Fact]

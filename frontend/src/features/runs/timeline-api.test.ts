@@ -20,6 +20,7 @@ const row = {
   terminalStatus: "Failed",
   failureCategory: "TaskError",
   agentId: "agent-original",
+  resumedFrom: null,
 }
 function respond(attempts: unknown[] = [row], identity = runId) {
   get.mockResolvedValue({
@@ -49,6 +50,7 @@ describe("committed timeline boundary", () => {
         ...row,
         attempt: 2,
         agentId: "agent-retry",
+        resumedFrom: row.startedAt,
         terminalStatus: "Succeeded",
         failureCategory: null,
       },
@@ -95,6 +97,10 @@ describe("committed timeline boundary", () => {
     { terminalStatus: null },
     { failureCategory: "Unknown" },
     { agentId: "" },
+    { resumedFrom: "invalid" },
+    { resumedFrom: row.startedAt },
+    { attempt: 2, resumedFrom: "1969-12-31T23:59:59Z" },
+    { attempt: 2, resumedFrom: "2026-10-16T10:00:00+02:00" },
     { terminalStatus: "Succeeded", failureCategory: "TaskError" },
   ])(
     "rejects malformed or inconsistent attempt evidence: %j",
@@ -128,6 +134,8 @@ describe("committed timeline boundary", () => {
   it("strips unrelated private values and fails explicitly on missing required arrays or denied reads", async () => {
     respond([{ ...row, variables: { secret: "private" }, outputs: "private" }])
     expect(JSON.stringify(await getTimeline(runId))).not.toContain("private")
+    respond([{ ...row, resumedFrom: undefined }])
+    await expect(getTimeline(runId)).rejects.toThrow()
     get.mockResolvedValue({
       response: new Response(),
       data: { runId, lastSeq: 0, status: "Queued" },

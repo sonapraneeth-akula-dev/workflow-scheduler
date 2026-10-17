@@ -155,6 +155,8 @@ public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IC
             saved = PendingCheckpoint(first.Outbox)!;
             Assert.Equal((ulong)CheckpointProtocol.MaximumBytes, saved.SizeBytes);
             Assert.Equal(1UL, saved.CheckpointSequence);
+            Assert.Equal(DBNull.Value, await Scalar(
+                "SELECT resumed_from_checkpoint_at FROM task_attempts WHERE run_id=$1 AND attempt=1", attempt.RunId));
             Assert.True(File.Exists(Path.Combine([host.Root, .. saved.BlobKey.Split('/')])));
             Assert.Single(first.Commands.Inflight);
             Assert.False(File.Exists(marker));
@@ -205,6 +207,8 @@ public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IC
         Assert.Equal(CheckpointProtocol.MaximumBytes - 2, outputs.GetProperty("loadedLength").GetInt32());
         Assert.Equal(saved.SavedAt.ToDateTimeOffset(), DateTimeOffset.Parse(outputs.GetProperty("resumedFrom").GetString()!,
             System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal(saved.SavedAt.ToDateTimeOffset(), new DateTimeOffset(Assert.IsType<DateTime>(await Scalar(
+            "SELECT resumed_from_checkpoint_at FROM task_attempts WHERE run_id=$1 AND attempt=2", attempt.RunId))));
         Assert.Equal("continued", outputs.GetProperty("loadedAfterSave").GetString());
         Assert.Equal("2", await File.ReadAllTextAsync(marker, Token));
         await Until(() => Task.FromResult(next.Commands.Inflight.Count == 0), next.Work);

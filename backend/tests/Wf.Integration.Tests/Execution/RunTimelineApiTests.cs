@@ -1,6 +1,8 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Net;
+using System.Security.Cryptography;
+using Google.Protobuf;
 using System.Text.Json;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -9,6 +11,7 @@ using Wf.Contracts;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
+using Wf.Contracts.Checkpoints;
 using Wf.Contracts.Registry;
 using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Auth;
@@ -17,6 +20,8 @@ using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Recovery;
 using Wf.ControlPlane.Engine.Sweeper;
+using Wf.ControlPlane.Engine.Checkpoints;
+using Wf.ControlPlane.Storage;
 using Wf.ControlPlane.Registry;
 using Wf.Engine.Core;
 using Wf.Engine.Core.Placement;
@@ -66,7 +71,12 @@ public sealed class RunTimelineApiTests(RunTimelineDatabase database, ITestOutpu
             await store.AppendAsync(run, EventEntity.Node, "node", (int)status, clock.GetUtcNow(), Token);
         await store.AppendAsync(run, EventEntity.Task, "node/task", (int)ExecutionStatus.Ready, clock.GetUtcNow(), Token);
         clock.Advance(2);
-        await dispatcher.DispatchAsync(run, new(run.Snapshot.RunId, "node", "task", 1, Sha), Command(run, 1, clock), Token);
+        var firstDispatch = Command(run, 1, clock);
+        await dispatcher.DispatchAsync(run, new(run.Snapshot.RunId, "node", "task", 1, Sha), firstDispatch, Token);
+        firstDispatch = Assert.Single(await store.PendingAsync(first, Token)).Command;
+        using var blobs = new FileSystemBlobStore(System.IO.Path.Combine(ArtifactRoot(), "checkpoint-" + Guid.NewGuid().ToString("N")),
+            RandomNumberGenerator.GetBytes(32));
+        var checkpoints = new CheckpointApplier(database.DataSource, store, blobs, NullLogger<CheckpointApplier>.Instance);
         await using var api = await MetricsApiServer.Start(database.DataSource, Token, browser: true);
         var jwt = api.Jwt(group);
         var dispatched = Assert.Single((await Read(api, run.Snapshot.RunId, jwt)).Attempts);
@@ -74,6 +84,7 @@ public sealed class RunTimelineApiTests(RunTimelineDatabase database, ITestOutpu
         Assert.Null(dispatched.StartedAt);
         Assert.Null(dispatched.EndedAt);
         Assert.Equal(0, dispatched.DurationMs);
+        Assert.Null(dispatched.ResumedFrom);
         clock.Advance(3);
         await store.AcceptAsync(first, new AgentMessage { TaskStarted = new()
             { Task = Command(run, 1, clock).Task, At = Timestamp.FromDateTimeOffset(clock.GetUtcNow()) } }, Token);
@@ -81,6 +92,17 @@ public sealed class RunTimelineApiTests(RunTimelineDatabase database, ITestOutpu
         Assert.NotNull(Assert.Single(active.Attempts).StartedAt);
         Assert.Equal(0, active.Attempts[0].DurationMs);
         Assert.Equal(JsonSerializer.Serialize(active), JsonSerializer.Serialize(await Read(api, run.Snapshot.RunId, jwt)));
+        var state = "{}"u8.ToArray();
+        var digest = Convert.ToHexStringLower(SHA256.HashData(state));
+        var checkpoint = new CheckpointSaved
+        {
+            Task = firstDispatch.Task.Clone(), ReservationEpoch = firstDispatch.ReservationEpoch,
+            CheckpointSequence = 1, SavedAt = Timestamp.FromDateTimeOffset(clock.GetUtcNow()), SizeBytes = (ulong)state.Length,
+            Sha256 = digest, BlobKey = CheckpointProtocol.Key(run.Snapshot.RunId, "node/task", 1, digest)
+        };
+        await blobs.UploadAsync(new(BlobKind.Checkpoints, digest, state.Length, checkpoint.BlobKey),
+            new MemoryStream(state, writable: false), Token);
+        await checkpoints.AcceptAsync(first, checkpoint, Token);
         clock.Advance(4);
         Assert.Single(await sweeper.ReconcileAsync(first, [], Token));
         var lostAt = clock.GetUtcNow();
@@ -89,6 +111,9 @@ public sealed class RunTimelineApiTests(RunTimelineDatabase database, ITestOutpu
         Assert.NotEqual(first.AgentId, second.AgentId);
         Assert.Equal(AgentLossDisposition.Replaced,
             await dispatcher.ReplaceLostAsync(run.Snapshot.RunId, "node/task", 1, Token));
+        var replacement = Assert.Single(await store.PendingAsync(second, Token)).Command;
+        Assert.Equal(checkpoint.SavedAt,
+            (await checkpoints.LoadForDispatchAsync(replacement, second, Token))!.Reference.SavedAt);
         clock.Advance(2);
         await store.AcceptAsync(second, new AgentMessage { TaskStarted = new()
             { Task = Command(run, 2, clock).Task, At = Timestamp.FromDateTimeOffset(clock.GetUtcNow()) } }, Token);
@@ -116,6 +141,8 @@ public sealed class RunTimelineApiTests(RunTimelineDatabase database, ITestOutpu
         Assert.Equal(3000, response.Attempts[1].DurationMs);
         Assert.Equal("Succeeded", response.Attempts[1].TerminalStatus);
         Assert.Null(response.Attempts[1].FailureCategory);
+        Assert.Null(response.Attempts[0].ResumedFrom);
+        Assert.Equal(checkpoint.SavedAt.ToDateTimeOffset(), response.Attempts[1].ResumedFrom);
         var metrics = RunMetricsResponse.From((await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot).Tasks["node/task"];
         Assert.Equal(metrics.Attempts.Sum(a => a.DurationMs), response.Attempts.Sum(a => a.DurationMs));
         using var plan = await api.Get($"/api/v1/workflows/{definition.Name}/versions/{version:D}", jwt, Token);
@@ -390,9 +417,12 @@ public sealed class RunTimelineApiTests(RunTimelineDatabase database, ITestOutpu
             response.GetProperty("required").EnumerateArray().Select(p => p.GetString()).Order());
         Assert.Equal("array", response.GetProperty("properties").GetProperty("attempts").GetProperty("type").GetString());
         var attempt = schemas.GetProperty("RunTimelineAttempt");
-        Assert.Equal(12, attempt.GetProperty("properties").EnumerateObject().Count());
+        Assert.Equal(13, attempt.GetProperty("properties").EnumerateObject().Count());
         Assert.Contains(attempt.GetProperty("properties").GetProperty("agentId").GetProperty("type").EnumerateArray(),
             option => option.GetString() == "null");
+        Assert.Contains(attempt.GetProperty("properties").GetProperty("resumedFrom").GetProperty("type").EnumerateArray(),
+            option => option.GetString() == "null");
+        Assert.Contains(attempt.GetProperty("required").EnumerateArray(), value => value.GetString() == "resumedFrom");
     }
 
     private async Task<RunTimelineResponse> Read(MetricsApiServer api, Guid id, string jwt)

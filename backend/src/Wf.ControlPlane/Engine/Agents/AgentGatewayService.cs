@@ -175,7 +175,7 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                                     if (checkpointUploads is not null && command.Grants.All(grant => grant.Kind != "checkpoints"))
                                         command.Grants.Add(checkpointUploads.Create(command, session));
                                     if (checkpoints is not null)
-                                        command.Checkpoint = await checkpoints.LoadAsync(command.Task, token);
+                                        command.Checkpoint = await checkpoints.LoadForDispatchAsync(command, session, token);
                                     await responseStream.WriteAsync(new ControlMessage
                                     {
                                         Sequence = checked((ulong)Interlocked.Increment(ref sequence)),

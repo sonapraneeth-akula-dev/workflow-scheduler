@@ -211,6 +211,7 @@ export const Timeline = memo(function Timeline({ runId }: { runId: string }) {
                           "Task / node",
                           "Attempt",
                           "Agent",
+                          "Resumed from checkpoint (UTC)",
                           "Queued (UTC)",
                           "Dispatched (UTC)",
                           "Started (UTC)",
@@ -238,6 +239,9 @@ export const Timeline = memo(function Timeline({ runId }: { runId: string }) {
                           <td className="p-3">{row.attempt}</td>
                           <td className="p-3">
                             <code>{row.agentId ?? "Not recorded"}</code>
+                          </td>
+                          <td className="p-3">
+                            <Time at={row.resumedFrom} />
                           </td>
                           <td className="p-3">
                             <Time at={row.queuedAt} />

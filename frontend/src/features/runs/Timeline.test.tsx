@@ -28,6 +28,7 @@ const timeline: RunTimeline = {
       terminalStatus: "Failed",
       failureCategory: "TaskError",
       agentId: "original-agent",
+      resumedFrom: null,
     },
     {
       nodeKey: "work",
@@ -42,6 +43,7 @@ const timeline: RunTimeline = {
       terminalStatus: null,
       failureCategory: null,
       agentId: null,
+      resumedFrom: "2026-10-16T08:00:03.123456Z",
     },
   ],
 }
@@ -68,6 +70,14 @@ describe("run attempt timeline", () => {
     expect(table).toHaveTextContent("original-agent")
     expect(table).toHaveTextContent("Not recorded")
     expect(table).toHaveTextContent("TaskError")
+    expect(
+      screen.getByRole("columnheader", {
+        name: "Resumed from checkpoint (UTC)",
+      })
+    ).toBeVisible()
+    expect(
+      container.querySelector('time[datetime="2026-10-16T08:00:03.123456Z"]')
+    ).toHaveTextContent("2026-10-16T08:00:03.123456Z")
     expect(table).toHaveTextContent("0 ms recorded; not completed")
     expect(container.querySelectorAll("[data-timeline-queue]")).toHaveLength(2)
     expect(

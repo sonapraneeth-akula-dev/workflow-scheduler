@@ -43,6 +43,12 @@ const attemptSchema = z.object({
     ])
     .nullable(),
   agentId: z.string().min(1).nullable(),
+  resumedFrom: timestamp
+    .nullable()
+    .refine(
+      (value) => value === null || /(?:Z|\+00:00)$/.test(value),
+      "Checkpoint resume time must be UTC."
+    ),
 })
 const responseSchema = z.object({
   runId: z.uuid(),
@@ -101,6 +107,8 @@ export async function getTimeline(
       return (
         row.taskKey.slice(0, row.taskKey.indexOf("/")) !== row.nodeKey ||
         row.attempt <= previous ||
+        (row.resumedFrom !== null &&
+          (row.attempt < 2 || instantTicks(row.resumedFrom) < 0n)) ||
         (row.endedAt === null) !== (row.terminalStatus === null) ||
         (row.failureCategory !== null &&
           !["SoftFailed", "Failed", "TimedOut", "Cancelled"].includes(

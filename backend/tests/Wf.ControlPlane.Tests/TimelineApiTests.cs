@@ -47,7 +47,9 @@ public sealed class TimelineApiTests
             [("node/task", 4)] = "original-agent", [("node/task", 9)] = "replacement-agent",
             [("node/task", 10)] = "not-an-attempt"
         };
-        var response = RunTimelineResponse.From(run.Snapshot, agents);
+        var resumedAt = Epoch.AddSeconds(4);
+        var response = RunTimelineResponse.From(run.Snapshot, agents, resumedFrom:
+            new Dictionary<(string, int), DateTimeOffset?> { [("node/task", 9)] = resumedAt });
         Assert.Equal(new[] { 4, 9 }, response.Attempts.Select(a => a.Attempt));
         Assert.Equal(new[] { "original-agent", "replacement-agent" }, response.Attempts.Select(a => a.AgentId));
         Assert.All(response.Attempts, a => { Assert.Equal("node", a.NodeKey); Assert.Equal("node/task", a.TaskKey); });
@@ -61,6 +63,8 @@ public sealed class TimelineApiTests
         Assert.Equal("ResourceLimit", response.Attempts[0].FailureCategory);
         Assert.Equal("Succeeded", response.Attempts[1].TerminalStatus);
         Assert.Null(response.Attempts[1].FailureCategory);
+        Assert.Null(response.Attempts[0].ResumedFrom);
+        Assert.Equal(resumedAt, response.Attempts[1].ResumedFrom);
 
         void Emit(ExecutionStatus status, int seconds, int? attempt = null) =>
             run.Apply(run.CreateEvent(EventEntity.Task, "node/task", (int)status, Epoch.AddSeconds(seconds)) with
@@ -97,6 +101,7 @@ public sealed class TimelineApiTests
         var attempt = Assert.Single(RunTimelineResponse.From(run.Snapshot,
             new Dictionary<(string, int), string?>()).Attempts);
         Assert.Null(attempt.AgentId);
+        Assert.Null(attempt.ResumedFrom);
         Assert.Equal(started ? Epoch.AddSeconds(1) : (DateTimeOffset?)null, attempt.StartedAt);
         Assert.Null(attempt.EndedAt);
         Assert.Null(attempt.TerminalStatus);
@@ -145,7 +150,7 @@ public sealed class TimelineApiTests
         Assert.Equal(new[] { "attempts", "lastSeq", "runId", "status" },
             json.RootElement.EnumerateObject().Select(p => p.Name).Order());
         Assert.Equal(new[] { "agentId", "attempt", "dispatchedAt", "durationMs", "endedAt", "failureCategory",
-            "nodeKey", "queueWaitMs", "queuedAt", "startedAt", "taskKey", "terminalStatus" },
+            "nodeKey", "queueWaitMs", "queuedAt", "resumedFrom", "startedAt", "taskKey", "terminalStatus" },
             json.RootElement.GetProperty("attempts")[0].EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
         Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("attempts")[0].GetProperty("agentId").ValueKind);
         foreach (var secret in new[] { "never-expose", "variables", "metadata", "outputs", "error", "capabilities" })

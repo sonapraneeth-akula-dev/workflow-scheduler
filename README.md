@@ -1576,8 +1576,19 @@ that named real task delegate with a cloned seed, `TryLoad<T>()`, and
 the default mock or supply synthetic outputs. This resume-branch test mode uses
 virtual workflow deadlines and is intended for immediate restore-path assertions,
 not arbitrary asynchronous work. Saves remain unsupported: the dry-run has no
-durable publisher and never claims to upload or acknowledge state. The attempt UI
-remains a separate checkpoint task.
+durable publisher and never claims to upload or acknowledge state.
+
+The run's **Timeline** tab includes **Resumed from checkpoint (UTC)** for each
+attempt, using its exact original seed time and a semantic `<time>` element.
+Non-resumed and historical attempts without attribution show **Not recorded**;
+no timestamp is guessed from the task's latest checkpoint. Migration 0044 adds a
+nullable attempt column without rewriting historical rows. The gateway records
+the verified seed's saved time under the existing leadership, assigned-session
+and physical-reservation fences before delivering that dispatch. Exact replays
+retain it; a conflicting timestamp fails explicitly. Later saves, retries and
+gateway/API reconstruction cannot replace the earlier attempt's attribution.
+The existing fresh-Viewer, no-store timeline API exposes only nullable
+`resumedFrom`, not checkpoint contents, blob keys or capabilities.
 
 The internal blob-only `PUT /api/v1/checkpoint-uploads` requires a purpose-scoped
 header capability for the exact attempt, assigned agent session and reservation

@@ -23,6 +23,7 @@ const row = {
   terminalStatus: "Failed" as const,
   failureCategory: "TaskError" as const,
   agentId: null,
+  resumedFrom: null,
 }
 const timeline: RunTimeline = {
   runId,

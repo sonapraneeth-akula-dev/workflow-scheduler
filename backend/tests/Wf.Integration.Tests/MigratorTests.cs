@@ -49,7 +49,8 @@ public sealed class MigratorTests(MigrationDatabase database) : IClassFixture<Mi
             await using var absent = scope.DataSource.CreateCommand("SELECT to_regclass('task_checkpoints')::text");
             Assert.Equal(DBNull.Value, await absent.ExecuteScalarAsync(TestContext.Current.CancellationToken));
         }
-        Assert.Equal([checkpoint.Name], Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance));
+        Assert.Equal(scripts.Where(script => string.CompareOrdinal(script.Name, "0043") >= 0).Select(script => script.Name),
+            Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance));
         Assert.Empty(Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance));
         Assert.Equal(before, await row.ExecuteScalarAsync(TestContext.Current.CancellationToken));
         await using var family = scope.DataSource.CreateCommand("""
@@ -85,6 +86,74 @@ public sealed class MigratorTests(MigrationDatabase database) : IClassFixture<Mi
         await reader.DisposeAsync();
         Assert.NotEqual(id, await CapacityMigrationsTests.SeedAgent(scope.DataSource));
         Assert.Empty(Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Resume_attribution_upgrade_preserves_historical_attempts_and_nulls_and_retries_atomically(bool failFirst)
+    {
+        await using var scope = await Scope();
+        var token = TestContext.Current.CancellationToken;
+        var scripts = Migrator.LoadScripts();
+        var previous = scripts.Where(script => string.CompareOrdinal(script.Name, "0044") < 0).ToArray();
+        Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance, previous);
+        var id = Guid.CreateVersion7(new DateTimeOffset(2020, 1, 15, 0, 0, 0, TimeSpan.Zero));
+        await using (var partitions = scope.DataSource.CreateCommand("SELECT ensure_run_partitions(uuid_v7_run_day($1))"))
+        {
+            partitions.Parameters.AddWithValue(id);
+            await partitions.ExecuteNonQueryAsync(token);
+        }
+        await using (var run = scope.DataSource.CreateCommand("""
+            INSERT INTO runs(run_day,id,workflow_id,version_id,trigger,triggered_by,variables,metadata,status,created_at,deadline_at)
+            VALUES(uuid_v7_run_day($1),$1,'team/type/legacy',$1,0,'legacy','{}','{}',0,now(),now()+interval '1 hour')
+            """))
+        {
+            run.Parameters.AddWithValue(id);
+            await run.ExecuteNonQueryAsync(token);
+        }
+        await using (var attempt = scope.DataSource.CreateCommand("""
+            INSERT INTO task_attempts(run_day,run_id,task_key,attempt,status,deadline_at)
+            VALUES(uuid_v7_run_day($1),$1,'work/task',2,6,now()+interval '1 hour')
+            """))
+        {
+            attempt.Parameters.AddWithValue(id);
+            await attempt.ExecuteNonQueryAsync(token);
+        }
+        string before;
+        await using (var original = scope.DataSource.CreateCommand("SELECT xmin::text FROM task_attempts_202001 WHERE run_id=$1"))
+        {
+            original.Parameters.AddWithValue(id);
+            before = (string)(await original.ExecuteScalarAsync(token))!;
+        }
+        var migration = Assert.Single(scripts, script => script.Name == "0044_attempt_checkpoint_resume.sql");
+        if (failFirst)
+        {
+            var broken = new SqlScript(migration.Name, migration.Contents.Replace("COMMIT;", "SELECT 1/0; COMMIT;", StringComparison.Ordinal));
+            Assert.Throws<InvalidOperationException>(() => Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance, [.. previous, broken]));
+            await using var absent = scope.DataSource.CreateCommand("""
+                SELECT count(*) FROM information_schema.columns
+                WHERE table_schema=current_schema() AND table_name='task_attempts' AND column_name='resumed_from_checkpoint_at'
+                """);
+            Assert.Equal(0L, await absent.ExecuteScalarAsync(token));
+        }
+        Assert.Equal([migration.Name], Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance));
+        Assert.Empty(Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance));
+        await using (var preserved = scope.DataSource.CreateCommand("""
+            SELECT xmin::text,resumed_from_checkpoint_at FROM task_attempts_202001 WHERE run_id=$1
+            """))
+        {
+            preserved.Parameters.AddWithValue(id);
+            await using var reader = await preserved.ExecuteReaderAsync(token);
+            Assert.True(await reader.ReadAsync(token));
+            Assert.Equal(before, reader.GetString(0));
+            Assert.True(reader.IsDBNull(1));
+        }
+        await using var inherited = scope.DataSource.CreateCommand("""
+            SELECT count(*) FROM information_schema.columns
+            WHERE table_schema=current_schema() AND table_name='task_attempts_202001' AND column_name='resumed_from_checkpoint_at'
+            """);
+        Assert.Equal(1L, await inherited.ExecuteScalarAsync(token));
     }
 
     [Fact]

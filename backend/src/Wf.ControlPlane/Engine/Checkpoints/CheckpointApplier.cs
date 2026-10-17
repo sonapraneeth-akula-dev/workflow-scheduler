@@ -25,7 +25,8 @@ public sealed class CheckpointApplier(NpgsqlDataSource source, RunStore runs, IB
         await using var transaction = await connection.BeginTransactionAsync(token);
         await runs.FenceAsync(connection, transaction, lease, token);
         await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock($1)", token, ReservationManager.AllocationLock);
-        var assignment = await LockAssignment(connection, session, checkpoint, token);
+        var assignment = await LockAssignment(connection, session, checkpoint.RunId, checkpoint.TaskKey,
+            checkpoint.Attempt, checkpoint.ReservationEpoch, token);
         if (assignment is null) return;
         var (attemptStatus, runStatus) = assignment.Value;
         DateTimeOffset? previousAt = null;
@@ -102,7 +103,11 @@ public sealed class CheckpointApplier(NpgsqlDataSource source, RunStore runs, IB
         await runs.FenceAsync(connection, transaction, lease, token);
         await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock($1)", token, ReservationManager.AllocationLock);
         (short Attempt, RunStatus Run)? assignment;
-        try { assignment = await LockAssignment(connection, session, checkpoint, token); }
+        try
+        {
+            assignment = await LockAssignment(connection, session, checkpoint.RunId, checkpoint.TaskKey,
+                checkpoint.Attempt, checkpoint.ReservationEpoch, token);
+        }
         catch (ArgumentException error)
         { throw new UnauthorizedAccessException("Checkpoint upload does not match the current assignment.", error); }
         if (assignment is not { } active || active.Run is not (RunStatus.Running or RunStatus.Aborting) ||
@@ -146,8 +151,40 @@ public sealed class CheckpointApplier(NpgsqlDataSource source, RunStore runs, IB
         return seed;
     }
 
+    public async Task<CheckpointSeed?> LoadForDispatchAsync(Wf.Contracts.Agent.V1.Dispatch dispatch,
+        AgentSession session, CancellationToken token = default)
+    {
+        var seed = await LoadAsync(dispatch.Task, token);
+        if (seed is null) return null;
+        var runId = Guid.Parse(dispatch.Task.RunId);
+        var taskKey = $"{dispatch.Task.NodeKey}/{dispatch.Task.TaskKey}";
+        var attempt = checked((short)dispatch.Task.Attempt);
+        var lease = runs.CaptureLease();
+        await using var connection = await source.OpenConnectionAsync(token);
+        await using var transaction = await connection.BeginTransactionAsync(token);
+        await runs.FenceAsync(connection, transaction, lease, token);
+        await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock($1)", token, ReservationManager.AllocationLock);
+        var assignment = await LockAssignment(connection, session, runId, taskKey, attempt, dispatch.ReservationEpoch, token);
+        if (assignment is not { } current || current.Run is not (RunStatus.Running or RunStatus.Aborting) ||
+            current.Attempt is not (2 or 3))
+            throw new InvalidDataException("Checkpoint resume dispatch is no longer current.");
+        await using var record = new NpgsqlCommand("""
+            UPDATE task_attempts SET resumed_from_checkpoint_at=$4
+            WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 AND attempt=$3
+                AND (resumed_from_checkpoint_at IS NULL OR resumed_from_checkpoint_at=$4)
+            """, connection);
+        record.Parameters.AddWithValue(runId);
+        record.Parameters.AddWithValue(taskKey);
+        record.Parameters.AddWithValue(attempt);
+        record.Parameters.AddWithValue(seed.Reference.SavedAt.ToDateTimeOffset());
+        if (await record.ExecuteNonQueryAsync(token) != 1)
+            throw new InvalidDataException("Attempt checkpoint resume attribution conflicts with its original seed.");
+        await transaction.CommitAsync(token);
+        return seed;
+    }
+
     private async Task<(short Attempt, RunStatus Run)?> LockAssignment(NpgsqlConnection connection,
-        AgentSession session, CheckpointReference checkpoint, CancellationToken token)
+        AgentSession session, Guid runId, string taskKey, short attempt, ulong reservationEpoch, CancellationToken token)
     {
         await using (var assignment = new NpgsqlCommand("""
             SELECT g.session_id,g.reservation_epoch,a.reservation_epoch,a.dispatch_payload,a.status,r.status,
@@ -160,20 +197,20 @@ public sealed class CheckpointApplier(NpgsqlDataSource source, RunStore runs, IB
             FOR UPDATE OF g,r,a
             """, connection))
         {
-            assignment.Parameters.AddWithValue(checkpoint.RunId);
-            assignment.Parameters.AddWithValue(checkpoint.TaskKey);
-            assignment.Parameters.AddWithValue(checkpoint.Attempt);
+            assignment.Parameters.AddWithValue(runId);
+            assignment.Parameters.AddWithValue(taskKey);
+            assignment.Parameters.AddWithValue(attempt);
             assignment.Parameters.AddWithValue(session.AgentId);
             assignment.Parameters.AddWithValue(runs.UtcNow);
             await using var row = await assignment.ExecuteReaderAsync(token);
             if (!await row.ReadAsync(token) || row.GetGuid(0) != session.SessionId || row.IsDBNull(3) ||
-                Wf.Contracts.Agent.V1.Dispatch.Parser.ParseFrom(row.GetFieldValue<byte[]>(3)).ReservationEpoch != checkpoint.ReservationEpoch)
+                Wf.Contracts.Agent.V1.Dispatch.Parser.ParseFrom(row.GetFieldValue<byte[]>(3)).ReservationEpoch != reservationEpoch)
                 throw new ArgumentException("Checkpoint does not match its assigned agent session and dispatch.");
-            if (row.GetInt64(1) != (long)checkpoint.ReservationEpoch ||
-                row.GetInt64(2) != (long)checkpoint.ReservationEpoch || !row.GetBoolean(6) || !row.GetBoolean(7))
+            if (row.GetInt64(1) != (long)reservationEpoch ||
+                row.GetInt64(2) != (long)reservationEpoch || !row.GetBoolean(6) || !row.GetBoolean(7))
             {
                 logger.LogWarning("Discarded stale checkpoint for run {RunId}, task {TaskKey}, attempt {Attempt}.",
-                    checkpoint.RunId, checkpoint.TaskKey, checkpoint.Attempt);
+                    runId, taskKey, attempt);
                 return null;
             }
             return (row.GetInt16(4), (RunStatus)row.GetInt16(5));

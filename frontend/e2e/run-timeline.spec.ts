@@ -51,6 +51,7 @@ test("actual retried run timeline separates queue/execution and retains accessib
           taskKey: z.string(),
           attempt: z.number(),
           agentId: z.string().nullable(),
+          resumedFrom: z.string().nullable(),
           queuedAt: z.string(),
           dispatchedAt: z.string(),
           startedAt: z.string().nullable(),
@@ -82,6 +83,11 @@ test("actual retried run timeline separates queue/execution and retains accessib
     retries.set(row.taskKey, (retries.get(row.taskKey) ?? 0) + 1)
   expect([...retries.values()].some((count) => count >= 2)).toBe(true)
   expect(actual.attempts.every((row) => row.agentId !== null)).toBe(true)
+  expect(actual.attempts.some((row) => row.resumedFrom !== null)).toBe(true)
+  expect(actual.attempts[0]?.resumedFrom).toBeNull()
+  await expect(
+    table.getByRole("columnheader", { name: "Resumed from checkpoint (UTC)" })
+  ).toBeVisible()
   await expect(table.getByRole("row")).toHaveCount(actual.attempts.length + 1)
   for (const [index, attempt] of actual.attempts.entries()) {
     const row = table.getByRole("row").nth(index + 1)
@@ -90,6 +96,13 @@ test("actual retried run timeline separates queue/execution and retains accessib
       String(attempt.attempt)
     )
     await expect(row.getByRole("cell").nth(1)).toHaveText(attempt.agentId!)
+    await expect(row.getByRole("cell").nth(2)).toHaveText(
+      attempt.resumedFrom ?? "Not recorded"
+    )
+    if (attempt.resumedFrom)
+      await expect(
+        row.locator(`time[datetime="${attempt.resumedFrom}"]`)
+      ).toBeVisible()
     await expect(row).toContainText(attempt.queuedAt)
     await expect(row).toContainText(attempt.dispatchedAt)
     if (attempt.startedAt) await expect(row).toContainText(attempt.startedAt)

@@ -22,6 +22,8 @@ public static class RunTimelineEndpoints
                 "Manifest task declaration order, then increasing attempt; absent manifest uses snapshot task enumeration. " +
                 "Timings reuse validated recorded metrics, not live clocks. Agent identity belongs to the exact durable " +
                 "dispatch attempt; missing legacy attribution is null. Never-started/skipped/reused work has no invented attempts. " +
+                "ResumedFrom is the verified seed's saved UTC time recorded before that attempt's dispatch delivery, " +
+                "not the task's latest checkpoint; missing historical or non-resumed attribution is null. " +
                 "Fresh Run Viewer authorization; no query parameters, variables, errors, outputs or machine capabilities.");
         return endpoints;
     }
@@ -51,9 +53,9 @@ public static class RunTimelineEndpoints
             await using var connection = await source.OpenConnectionAsync(token);
             await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
             var snapshot = await CommittedRunRead.Load(connection, store, runId, token);
-            var agents = await Agents(connection, runId, token);
+            var (agents, resumedFrom) = await Attribution(connection, runId, token);
             var order = await TaskOrder(connection, runId, token);
-            var response = RunTimelineResponse.From(snapshot, agents, order);
+            var response = RunTimelineResponse.From(snapshot, agents, order, resumedFrom);
             await transaction.CommitAsync(token);
             return Results.Json(response, RunTimelineJsonContext.Default.RunTimelineResponse);
         }
@@ -63,20 +65,26 @@ public static class RunTimelineEndpoints
         { return Problem(500, "Committed run data is inconsistent", "run_data_inconsistent"); }
     }
 
-    private static async Task<Dictionary<(string TaskKey, int Attempt), string?>> Agents(
+    private static async Task<(Dictionary<(string TaskKey, int Attempt), string?> Agents,
+        Dictionary<(string TaskKey, int Attempt), DateTimeOffset?> ResumedFrom)> Attribution(
         NpgsqlConnection connection, Guid id, CancellationToken token)
     {
         await using var command = new NpgsqlCommand("""
-            SELECT task_key,attempt,agent_id FROM task_attempts
+            SELECT task_key,attempt,agent_id,resumed_from_checkpoint_at FROM task_attempts
             WHERE run_day=uuid_v7_run_day($1) AND run_id=$1
             """, connection);
         command.Parameters.AddWithValue(id);
         var agents = new Dictionary<(string, int), string?>();
+        var resumedFrom = new Dictionary<(string, int), DateTimeOffset?>();
         await using var reader = await command.ExecuteReaderAsync(token);
         while (await reader.ReadAsync(token))
-            agents.Add((reader.GetString(0), reader.GetInt16(1)),
+        {
+            var key = (reader.GetString(0), reader.GetInt16(1));
+            agents.Add(key,
                 reader.IsDBNull(2) ? null : reader.GetGuid(2).ToString("D"));
-        return agents;
+            resumedFrom.Add(key, reader.IsDBNull(3) ? null : reader.GetFieldValue<DateTimeOffset>(3));
+        }
+        return (agents, resumedFrom);
     }
 
     private static async Task<IReadOnlyList<string>?> TaskOrder(NpgsqlConnection connection, Guid id,
