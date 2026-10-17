@@ -10,6 +10,7 @@ public static class OpenApiSetup
     {
         services.AddOpenApi("v1", options =>
         {
+            options.OpenApiVersion = OpenApiSpecVersion.OpenApi3_1;
             options.ShouldInclude = description => description.GroupName is null or "v1";
             options.AddSchemaTransformer((schema, context, _) =>
             {
@@ -28,7 +29,11 @@ public static class OpenApiSetup
                     document.AddComponent(type.Name, await context.GetOrCreateSchemaAsync(type, null, token));
             });
         });
-        services.AddOpenApi("ui", options => options.ShouldInclude = description => description.GroupName == "ui");
+        services.AddOpenApi("ui", options =>
+        {
+            options.OpenApiVersion = OpenApiSpecVersion.OpenApi3_1;
+            options.ShouldInclude = description => description.GroupName == "ui";
+        });
         return services;
     }
 

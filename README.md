@@ -852,6 +852,15 @@ Authenticated OpenAPI 3.1 documents use `Microsoft.AspNetCore.OpenApi`:
 types for those routes live in the control-plane assembly, not the SDK or CLI.
 Public and internal TypeScript clients are generated from those live documents;
 the frontend's strict drift check rejects stale generated contracts.
+Both documents explicitly pin OpenAPI 3.1 rather than inheriting a future
+framework default. With the host running, use `bun run api:generate` from
+`frontend` to update both clients, then `bun run api:check` to compare them
+without writing files. `KARDIA_API_URL` defaults to `http://127.0.0.1:5001`;
+`KARDIA_API_TOKEN` supplies a bearer token outside login-free development.
+The Frontend workflow runs this check against an isolated actual control-plane
+host, not a checked-in document, and fails if either generated client drifts.
+The generator's process tests also prove nonzero exit on changed API/file
+contracts, missing files or unavailable documents, without overwriting clients.
 
 `dotnet run --project backend\tests\Wf.Benchmarks -c Release -- --trigger-api-bench`
 starts an isolated real API/PostgreSQL benchmark: 50 warmups, then 500 fresh-key

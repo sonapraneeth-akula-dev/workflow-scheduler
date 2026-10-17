@@ -42,7 +42,7 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
         try
         {
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
-            deadline.CancelAfter(TimeSpan.FromSeconds(45));
+            deadline.CancelAfter(TimeSpan.FromSeconds(90));
             using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false })
                 { BaseAddress = new($"http://127.0.0.1:{apiPort}"), Timeout = TimeSpan.FromSeconds(10) };
             while (true)
@@ -59,7 +59,29 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             using var exported = await client.GetAsync("/openapi/v1.json", deadline.Token);
             Assert.True(exported.StatusCode == HttpStatusCode.OK, await exported.Content.ReadAsStringAsync(deadline.Token));
             using var document = JsonDocument.Parse(await exported.Content.ReadAsStringAsync(deadline.Token));
+            Assert.StartsWith("3.1.", document.RootElement.GetProperty("openapi").GetString());
             var paths = document.RootElement.GetProperty("paths");
+            foreach (var path in new[] { "/api/v1/runs", "/api/v1/runs/{id}/reports", "/api/v1/audit" })
+                Assert.True(paths.GetProperty(path).TryGetProperty("get", out _), $"Public read missing: {path}");
+            Assert.True(paths.GetProperty("/api/v1/schedules/{id}").TryGetProperty("get", out _));
+            Assert.True(paths.GetProperty("/api/v1/series/{id}/fires").TryGetProperty("get", out _));
+            Assert.False(paths.GetProperty("/api/v1/schedules/{id}").TryGetProperty("put", out _));
+            Assert.False(paths.GetProperty("/api/v1/schedules/{id}").TryGetProperty("delete", out _));
+            foreach (var path in new[] { "/api/v1/schedules", "/api/v1/schedules/preview",
+                "/api/v1/schedules/{id}/pause", "/api/v1/schedules/{id}/resume" })
+                Assert.False(paths.TryGetProperty(path, out _), $"UI mutation leaked into public OpenAPI: {path}");
+            using var uiResponse = await client.GetAsync("/openapi/ui.json", deadline.Token);
+            Assert.Equal(HttpStatusCode.OK, uiResponse.StatusCode);
+            using var ui = JsonDocument.Parse(await uiResponse.Content.ReadAsStringAsync(deadline.Token));
+            Assert.StartsWith("3.1.", ui.RootElement.GetProperty("openapi").GetString());
+            var internalPaths = ui.RootElement.GetProperty("paths");
+            foreach (var (path, method) in new[] { ("/api/v1/schedules", "post"), ("/api/v1/schedules/{id}", "put"),
+                ("/api/v1/schedules/{id}", "delete"), ("/api/v1/schedules/preview", "post"),
+                ("/api/v1/schedules/{id}/pause", "post"), ("/api/v1/schedules/{id}/resume", "post") })
+                Assert.True(internalPaths.GetProperty(path).TryGetProperty(method, out _), $"UI operation missing: {method} {path}");
+            Assert.False(internalPaths.GetProperty("/api/v1/schedules/{id}").TryGetProperty("get", out _));
+            foreach (var path in new[] { "/api/v1/runs", "/api/v1/runs/{id}/reports", "/api/v1/audit" })
+                Assert.False(internalPaths.TryGetProperty(path, out _), $"Public read leaked into UI-only document: {path}");
             var readiness = paths.GetProperty("/healthz/ready").GetProperty("get").GetProperty("responses");
             Assert.True(readiness.TryGetProperty("200", out _));
             Assert.True(readiness.TryGetProperty("503", out _));
