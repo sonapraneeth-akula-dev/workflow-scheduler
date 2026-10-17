@@ -647,6 +647,24 @@ never cached; malformed identities/queries return 400, denied scopes 403,
 inconsistent persisted data 500 and unavailable storage 503. Legacy metrics-free
 snapshots rebuild from retained original history instead of fabricated zeros.
 
+Migration `0036_daily_rollups.sql` backfills retained terminal runs and adds
+transactional daily workflow/node summaries. Buckets use the immutable UUIDv7
+UTC creation day; `node_key=''` denotes the workflow total. Both normal and
+group-commit terminal writes refresh their affected buckets before acknowledging;
+group commits first project committed timestamps and node states. Ordered
+transaction-scoped bucket locks prevent lost concurrent updates. Replays
+recompute exact source counts and interpolated p50/p95, never add counts twice or
+average percentiles. Failed rollups roll back the terminal transaction.
+
+Failures include failed, aborted and timed-out runs; node hard failures include
+failed, timed-out and cancelled nodes. Soft failures are counted separately
+(one affected run, or one affected node). Skipped/reused/nonstarted nodes count
+as occurrences but contribute no duration without a recorded start and end;
+`duration_count` exposes that distinction. Clock-skewed measured intervals clamp
+to zero. CPU/RAM retain maxima across every attempt, including failed retries;
+RAM uses MiB. Missing duration/resource observations remain null, not fabricated
+zeros. Series trends and dashboard APIs/UI remain separate work items.
+
 Secret variables accept `secret://<store>/<name>` through the existing
 `SecretReference` contract and `.Secret("token", "secret://local/deploy-token")`.
 `SecretReference.Parse` requires a qualified reference; `Store` and `SecretName`

@@ -747,8 +747,9 @@ Conventions:
 | parity_results ⧉ | run_day, run_id, node_key | | N | PK | |
 | | total, matched, parity_pct | bigint, bigint, numeric(6,3) | N | | |
 | | categories, noise_paths, samples_uri | jsonb, jsonb, text | N,Y,N | | |
-| daily_rollups | day, workflow_id, node_key | date, text, text | N | PK | trends/dashboards (FR-024/047) |
-| | runs, failures, soft_failures, p50_ms, p95_ms, cpu_max_pct, ram_peak_mb | | N | | incremental, refreshed every 5 min |
+| daily_rollups | day, workflow_id, node_key | date, text, text | N | PK | trends/dashboards (FR-024/047); UUIDv7 UTC creation day, empty node key = workflow total |
+| | runs, failures, soft_failures, duration_count | bigint | N | | refreshed atomically in each run terminal transaction; ordered bucket locks, idempotent exact source aggregation; retained terminal history backfilled by 0036 |
+| | p50_ms, p95_ms, cpu_max_pct, ram_peak_mb | double precision (RAM numeric) | Y | | exact interpolated duration quantiles, never averaged across days; null when unobserved; resource maxima include failed/retried attempts; RAM in MiB |
 | audit_log ⧉ | id, ts | bigint identity, timestamptz | N | PK(ts, id) | 13 monthly partitions (≥ 1 year) |
 | | actor, actor_kind, action, target_kind, target_id, team_id, summary | | N/N/N/N/N/Y/N | idx(target_kind, target_id, ts), idx(actor, ts) | |
 | subscriptions | id, principal_id, scope_kind, scope_id, events, channel, target, secret_ref | | N (secret_ref Y) | PK(id); idx(scope_kind, scope_id) | FR-028 |

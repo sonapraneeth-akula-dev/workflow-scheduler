@@ -6,6 +6,7 @@ using Wf.Contracts;
 using Wf.Contracts.Events;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Leadership;
+using Wf.ControlPlane.Engine.Maintenance;
 
 namespace Wf.ControlPlane.Engine.Events;
 
@@ -190,6 +191,18 @@ public sealed class GroupCommitAppender : IAsyncDisposable
             replay.Parameters.AddWithValue(entries.Select(entry => entry.Payload).ToArray());
             if (inserted != 0 || (long)(await replay.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) ?? 0L) != entries.Length)
                 throw new InvalidOperationException("Group commit rejected missing, terminal, stale or noncontiguous run events; the entire batch was rolled back.");
+        }
+        if (inserted == entries.Length)
+        {
+            var terminal = RollupWriter.TerminalRunIds(entries.Select(entry => entry.Event));
+            foreach (var id in terminal)
+            {
+                var run = await RunStore.LoadAsync(connection, id, false,
+                    message => logger.LogWarning("{RunStateError}", message), cancellationToken).ConfigureAwait(false);
+                await RunStore.ProjectTerminalAsync(connection, run, cancellationToken).ConfigureAwait(false);
+            }
+            if (terminal.Length != 0)
+                await RollupWriter.RefreshAsync(connection, terminal, cancellationToken).ConfigureAwait(false);
         }
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return new(Interlocked.Increment(ref batchId), entries.Length, Stopwatch.GetElapsedTime(started));

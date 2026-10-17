@@ -12,6 +12,7 @@ using Wf.Contracts.Runs;
 using Wf.Contracts.Outputs;
 using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Leadership;
+using Wf.ControlPlane.Engine.Maintenance;
 using Wf.ControlPlane.Engine.Reservations;
 using Wf.Engine.Core;
 using Wf.Engine.Core.StateMachine;
@@ -74,8 +75,12 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
         return await LoadAsync(connection, runId, false, cancellationToken);
     }
 
-    internal async Task<RunState> LoadAsync(NpgsqlConnection connection, Guid runId, bool forUpdate,
-        CancellationToken cancellationToken)
+    internal Task<RunState> LoadAsync(NpgsqlConnection connection, Guid runId, bool forUpdate,
+        CancellationToken cancellationToken) =>
+        LoadAsync(connection, runId, forUpdate, message => logger.LogWarning("{RunStateError}", message), cancellationToken);
+
+    internal static async Task<RunState> LoadAsync(NpgsqlConnection connection, Guid runId, bool forUpdate,
+        Action<string> log, CancellationToken cancellationToken)
     {
         if (forUpdate)
         {
@@ -108,7 +113,7 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
         while (await reader.ReadAsync(cancellationToken))
             events.Add(JsonSerializer.Deserialize(reader.GetFieldValue<byte[]>(0), RunStoreJson.Default.RunEvent)
                 ?? throw new InvalidDataException("Persisted run event is null."));
-        return RunState.Restore(snapshot, events, message => logger.LogWarning("{RunStateError}", message));
+        return RunState.Restore(snapshot, events, log);
     }
 
     internal async Task<Dictionary<Guid, RunState>> LoadManyAsync(NpgsqlConnection connection, Guid[] ids,
@@ -242,6 +247,19 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
                     ? ExecutionStatus.Running : ExecutionStatus.Dispatched)), attempt.QueuedAt,
                 (object?)(short?)attempt.FailureCategory ?? DBNull.Value);
         }
+        if (change.Entity == EventEntity.Run && TransitionTable.IsTerminal((RunStatus)change.State))
+            await RollupWriter.RefreshAsync(connection, [change.RunId], cancellationToken);
+    }
+
+    internal static async Task ProjectTerminalAsync(NpgsqlConnection connection, RunState run, CancellationToken token)
+    {
+        await WriteSnapshotAsync(connection, run, token);
+        foreach (var (key, metric) in run.Snapshot.Metrics!.Nodes)
+            await ExecuteAsync(connection, """
+                UPDATE node_runs SET status=$3,started_at=$4,ended_at=$5
+                WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND node_key=$2
+                """, token, run.Snapshot.RunId, key, (short)run.Snapshot.Nodes[key],
+                (object?)metric.StartedAt ?? DBNull.Value, (object?)metric.EndedAt ?? DBNull.Value);
     }
 
     private static async Task WriteSnapshotAsync(NpgsqlConnection connection, RunState run, CancellationToken cancellationToken)
