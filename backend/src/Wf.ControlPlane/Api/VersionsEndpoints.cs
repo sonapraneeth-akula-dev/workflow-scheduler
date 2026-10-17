@@ -21,6 +21,7 @@ public static class VersionsEndpoints
     {
         endpoints.MapVersionDiff();
         endpoints.MapVersionClone();
+        endpoints.MapVersionActivation();
         endpoints.MapGet("/api/v1/workflows/{team}/{type}/{workflow}/versions", List).RequireAuthorization()
             .Produces<WorkflowVersionPage>().ProducesProblem(400).ProducesProblem(401).ProducesProblem(403)
             .ProducesProblem(404).ProducesProblem(500).ProducesProblem(503)

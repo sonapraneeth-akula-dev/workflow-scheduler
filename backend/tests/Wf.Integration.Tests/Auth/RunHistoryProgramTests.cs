@@ -66,6 +66,14 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             Assert.True(paths.GetProperty("/api/v1/runs/history").TryGetProperty("get", out _));
             Assert.True(paths.GetProperty("/api/v1/series/{id}/history").TryGetProperty("get", out _));
             Assert.True(paths.GetProperty("/api/v1/workflows/{team}/{type}/{workflow}/history").TryGetProperty("get", out _));
+            var activation = paths.GetProperty("/api/v1/workflows/{team}/{type}/{workflow}/versions/{version}/activate")
+                .GetProperty("post");
+            Assert.False(activation.TryGetProperty("requestBody", out _));
+            Assert.Equal("#/components/schemas/WorkflowVersionActivation",
+                activation.GetProperty("responses").GetProperty("200").GetProperty("content")
+                    .GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
+            Assert.True(activation.GetProperty("responses").TryGetProperty("403", out _));
+            Assert.True(activation.GetProperty("responses").TryGetProperty("409", out _));
             var runNow = paths.GetProperty("/api/v1/schedules/{id}/run-now").GetProperty("post");
             Assert.Contains(runNow.GetProperty("parameters").EnumerateArray(), parameter =>
                 parameter.GetProperty("name").GetString() == "id" &&

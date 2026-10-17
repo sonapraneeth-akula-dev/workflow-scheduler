@@ -13,6 +13,24 @@ namespace Wf.ControlPlane.Tests;
 
 public sealed class VersionsTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void VersionActivation_source_generated_response_exposes_only_workflow_and_exact_active_latest_UUIDs(bool hasLatest)
+    {
+        var active = Guid.CreateVersion7();
+        Guid? latest = hasLatest ? Guid.CreateVersion7() : null;
+        var response = new WorkflowVersionActivation("team/type/workflow", active, latest);
+        var utf8 = JsonSerializer.SerializeToUtf8Bytes(response, VersionsJsonContext.Default.WorkflowVersionActivation);
+        using var json = JsonDocument.Parse(utf8);
+        Assert.Equal(["activeVersionId", "latestVersionId", "workflowId"],
+            json.RootElement.EnumerateObject().Select(property => property.Name).Order());
+        Assert.Equal(active, json.RootElement.GetProperty("activeVersionId").GetGuid());
+        Assert.Equal(latest, hasLatest ? json.RootElement.GetProperty("latestVersionId").GetGuid() : null);
+        if (!hasLatest) Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("latestVersionId").ValueKind);
+        Assert.Equal(response, JsonSerializer.Deserialize(utf8, VersionsJsonContext.Default.WorkflowVersionActivation));
+    }
+
     [Fact]
     public void Versions_defaults_and_source_generated_provenance_are_explicit_and_safe()
     {

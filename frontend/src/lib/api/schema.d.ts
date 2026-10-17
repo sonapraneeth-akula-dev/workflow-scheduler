@@ -366,6 +366,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workflows/{team}/{type}/{workflow}/versions/{version}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Fresh owning-type Admin authorization activates one exact immutable version UUID. No body or query parameters. Atomically updates only the active workflow-version pointer, audits before/after UUIDs and notifies registry listeners. Latest registration baseline, pinned runs, schedule configs and fire cursors remain unchanged. Incompatible unpinned schedule variables conflict; pinned schedules keep their selected versions. Repeating the active UUID is a no-op. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team: string;
+                    type: string;
+                    workflow: string;
+                    version: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WorkflowVersionActivation"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workflows/{team}/{type}/{workflow}/versions": {
         parameters: {
             query?: never;
@@ -4239,6 +4343,13 @@ export interface components {
             versionId: string;
             version: string;
             variables: components["schemas"]["WorkflowVariable"][];
+        };
+        WorkflowVersionActivation: {
+            workflowId: string;
+            /** Format: uuid */
+            activeVersionId: string;
+            /** Format: uuid */
+            latestVersionId: null | string;
         };
         WorkflowVersionDiff: {
             workflowId: string;

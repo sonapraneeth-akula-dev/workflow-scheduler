@@ -417,6 +417,22 @@ adds the workflow/timestamp/UUID paging index without changing stored versions.
 The generated API client includes these contracts; the Versions tab remains a
 separate UI task.
 
+`POST /api/v1/workflows/{team}/{type}/{workflow}/versions/{version}/activate`
+requires current owning-team/type Admin access (or global Admin), an actor UUID,
+and no body or query. It returns `workflowId`, `activeVersionId` and
+`latestVersionId` with `no-store`. A registry transaction serializes with
+registration, validates the target's exact ownership, updates only the active
+pointer, writes a before/after `workflow.activate` audit and notifies listeners.
+New runs see the version within five seconds; existing runs keep their immutable
+pins. Repeating the active UUID changes no rows or audit history. Missing or
+foreign versions return 404; deleted workflows and incompatible variables in
+retained unpinned schedules return 409. Pinned schedules keep their target.
+Schedule configs, fire cursors and series IDs never roll back through this API;
+revert source and re-register to roll back code-defined schedules. The latest
+registration baseline stays unchanged: identical re-registration preserves an
+Admin rollback, while a newly registered version must exceed that latest
+baseline before automatically becoming active.
+
 `GET /api/v1/workflows/{team}/{type}/{workflow}/diff?from=<uuid>&to=<uuid>`
 compares two explicit immutable versions of that exact workflow. Fresh Viewer
 authorization also permits retained source access, including inactive and

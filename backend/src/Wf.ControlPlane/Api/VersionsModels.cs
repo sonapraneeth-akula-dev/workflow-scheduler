@@ -38,6 +38,7 @@ public sealed record WorkflowVersionSummary(Guid VersionId, string WorkflowId, s
 public sealed record WorkflowVersionPage(WorkflowVersionSummary[] Items, string? NextCursor,
     Guid? ActiveVersionId, Guid? LatestVersionId);
 public sealed record WorkflowVersionPosition(DateTimeOffset At, Guid Id);
+public sealed record WorkflowVersionActivation(string WorkflowId, Guid ActiveVersionId, Guid? LatestVersionId);
 
 public sealed record WorkflowVersionsQuery(string WorkflowId, int Limit, WorkflowVersionPosition? After)
 {
@@ -101,5 +102,6 @@ public sealed record TaskPlanPlacement(TaskPlanSelector? Selector, PlacementAffi
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, UseStringEnumConverter = true)]
 [JsonSerializable(typeof(WorkflowVersionPlan))]
 [JsonSerializable(typeof(WorkflowVersionPage))]
+[JsonSerializable(typeof(WorkflowVersionActivation))]
 [JsonSerializable(typeof(Wf.ControlPlane.Versions.WorkflowVersionDiff))]
 public partial class VersionsJsonContext : JsonSerializerContext;
