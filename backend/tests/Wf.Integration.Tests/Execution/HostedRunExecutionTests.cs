@@ -217,7 +217,7 @@ public sealed partial class HostedRunExecutionTests(HostedExecutionDatabase data
         Assert.Equal(RunStatus.Succeeded, (await runtime.Load()).Snapshot.Status);
     }
 
-    private sealed class Runtime : IAsyncDisposable
+    internal sealed class Runtime : IAsyncDisposable
     {
         private readonly NpgsqlDataSource source;
         private readonly AgentRegistry agents;
@@ -251,7 +251,7 @@ public sealed partial class HostedRunExecutionTests(HostedExecutionDatabase data
         }
 
         public static async Task<Runtime> Create(HostedExecutionDatabase database, Action<WorkflowBuilder> configure,
-            RunPlacement? placement = null, int maxTasks = 4, string? agentName = null)
+            RunPlacement? placement = null, int maxTasks = 4, string? agentName = null, Guid? agentId = null)
         {
             var runtime = new Runtime(database.DataSource);
             var team = "hosted-" + Guid.NewGuid().ToString("N");
@@ -278,7 +278,7 @@ public sealed partial class HostedRunExecutionTests(HostedExecutionDatabase data
                 """, version, definition.Name, ManifestWriter.Write(definition));
             runtime.Session = await runtime.agents.RegisterAsync(new()
             {
-                Id = Guid.NewGuid().ToString("D"), Name = agentName ?? team, Os = "windows", Arch = "x64", Cores = 4,
+                Id = (agentId ?? Guid.NewGuid()).ToString("D"), Name = agentName ?? team, Os = "windows", Arch = "x64", Cores = 4,
                 RamMb = 16384, MaxTasks = checked((uint)maxTasks), Pool = team, Version = "1.0.0", ProtocolVersion = 1
             }, runtime.Token);
             var run = new RunState(Guid.CreateVersion7(), definition.Nodes, definition.Metadata, Assert.Fail, runtime.Clock.Now);
@@ -299,12 +299,18 @@ public sealed partial class HostedRunExecutionTests(HostedExecutionDatabase data
             await service.TickAsync(Token);
         }
 
-        public Task<AgentSession> AddAgent(string suffix = "other", Guid? id = null) => agents.RegisterAsync(new()
+        public Task<AgentSession> AddAgent(string suffix = "other", Guid? id = null, string os = "windows",
+            string? pool = null, string? name = null, Dictionary<string, string>? labels = null, int maxTasks = 4)
         {
-            Id = (id ?? Guid.NewGuid()).ToString("D"), Name = Workflow.Split('/')[0] + "-" + suffix, Os = "windows",
-            Arch = "x64", Cores = 4, RamMb = 16384, MaxTasks = 4, Pool = Workflow.Split('/')[0],
-            Version = "1.0.0", ProtocolVersion = 1
-        }, Token);
+            var hello = new Hello
+            {
+                Id = (id ?? Guid.NewGuid()).ToString("D"), Name = name ?? Workflow.Split('/')[0] + "-" + suffix + "-" + Guid.NewGuid().ToString("N"), Os = os,
+                Arch = "x64", Cores = 4, RamMb = 16384, MaxTasks = checked((uint)maxTasks), Pool = pool ?? Workflow.Split('/')[0],
+                Version = "1.0.0", ProtocolVersion = 1
+            };
+            if (labels is not null) hello.Labels.Add(labels);
+            return agents.RegisterAsync(hello, Token);
+        }
 
         public Task<IReadOnlyList<(long Id, DispatchCommand Command)>> Pending(AgentSession session) =>
             Store.PendingAsync(session, Token);
@@ -325,16 +331,16 @@ public sealed partial class HostedRunExecutionTests(HostedExecutionDatabase data
             (await Store.PendingAsync(Session, Token)).Select(item => item.Command).ToArray();
 
         public async Task Complete(DispatchCommand command, TaskOutcome outcome = TaskOutcome.Succeeded,
-            string? category = null, bool nonRetryable = false)
+            string? category = null, bool nonRetryable = false, AgentSession? session = null)
         {
             Clock.Now = Clock.Now.AddMilliseconds(1);
-            await Store.AcceptAsync(Session, new()
+            await Store.AcceptAsync(session ?? Session, new()
             {
                 TaskStarted = new() { Task = command.Task.Clone(), At = Timestamp.FromDateTimeOffset(Clock.Now),
                     ReservationEpoch = command.ReservationEpoch }
             }, Token);
             Clock.Now = Clock.Now.AddMilliseconds(1);
-            await Store.AcceptAsync(Session, new()
+            await Store.AcceptAsync(session ?? Session, new()
             {
                 TaskCompleted = new()
                 {
@@ -381,7 +387,7 @@ public sealed partial class HostedRunExecutionTests(HostedExecutionDatabase data
         }
     }
 
-    private sealed class Clock : TimeProvider
+    internal sealed class Clock : TimeProvider
     {
         public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow.AddSeconds(1);
         public override DateTimeOffset GetUtcNow() => Now;

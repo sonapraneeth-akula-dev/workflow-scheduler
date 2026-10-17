@@ -133,31 +133,55 @@ public sealed class PlacementEngine
         ArgumentNullException.ThrowIfNull(decision);
         if (decision.Owner != owner || decision.Revision != Snapshot.Revision || decision.Agent is not { } agent)
             throw new InvalidOperationException("Placement decision is stale, foreign or has no eligible agent.");
-        var request = decision.Request;
-        var nodePins = Snapshot.NodePins;
-        var runPins = Snapshot.RunPins;
+        Snapshot = Committed(Snapshot, decision.Request, agent.Id);
+    }
+
+    public void RestoreRun(Guid runId, IEnumerable<(PlacementRequest Request, Guid AgentId)> attempts)
+    {
+        if (runId == Guid.Empty) throw new ArgumentException("Run ID must not be empty.", nameof(runId));
+        ArgumentNullException.ThrowIfNull(attempts);
+        var restored = PlacementSnapshot.Empty;
+        foreach (var (request, agentId) in attempts)
+        {
+            Validate(request);
+            if (request.RunId != runId || agentId == Guid.Empty)
+                throw new ArgumentException("Committed placements must belong to the restored run and identify an agent.", nameof(attempts));
+            restored = Committed(restored, request, agentId);
+        }
+        var prefix = $"{runId:D}/";
+        Snapshot = new(checked(Snapshot.Revision + 1),
+            Snapshot.RunPins.Remove(runId).SetItems(restored.RunPins),
+            Snapshot.NodePins.RemoveRange(Snapshot.NodePins.Keys.Where(key => key.StartsWith(prefix, StringComparison.Ordinal)))
+                .SetItems(restored.NodePins),
+            Snapshot.LastAgentId ?? restored.LastAgentId);
+    }
+
+    private static PlacementSnapshot Committed(PlacementSnapshot snapshot, PlacementRequest request, Guid agentId)
+    {
+        var nodePins = snapshot.NodePins;
+        var runPins = snapshot.RunPins;
         var key = NodeKey(request.RunId, request.NodeKey);
         var kind = request.Policy?.Affinity?.Kind ?? AffinityKind.None;
         if (request.RePlacement)
         {
             if (kind == AffinityKind.Run && runPins.GetValueOrDefault(request.RunId) == request.PreviousAgentId)
             {
-                runPins = runPins.SetItem(request.RunId, agent.Id);
+                runPins = runPins.SetItem(request.RunId, agentId);
                 var prefix = $"{request.RunId:D}/";
                 foreach (var (node, pinned) in nodePins)
                     if (node.StartsWith(prefix, StringComparison.Ordinal) && pinned == request.PreviousAgentId)
-                        nodePins = nodePins.SetItem(node, agent.Id);
+                        nodePins = nodePins.SetItem(node, agentId);
             }
             if (kind == AffinityKind.SameMachineAs)
             {
                 var target = NodeKey(request.RunId, request.Policy!.Affinity!.NodeKey!);
-                if (nodePins.GetValueOrDefault(target) == request.PreviousAgentId) nodePins = nodePins.SetItem(target, agent.Id);
+                if (nodePins.GetValueOrDefault(target) == request.PreviousAgentId) nodePins = nodePins.SetItem(target, agentId);
             }
-            if (nodePins.GetValueOrDefault(key) == request.PreviousAgentId) nodePins = nodePins.SetItem(key, agent.Id);
+            if (nodePins.GetValueOrDefault(key) == request.PreviousAgentId) nodePins = nodePins.SetItem(key, agentId);
         }
-        if (!nodePins.ContainsKey(key)) nodePins = nodePins.Add(key, agent.Id);
-        if (kind == AffinityKind.Run && !runPins.ContainsKey(request.RunId)) runPins = runPins.Add(request.RunId, agent.Id);
-        Snapshot = new(checked(Snapshot.Revision + 1), runPins, nodePins, agent.Id);
+        if (!nodePins.ContainsKey(key)) nodePins = nodePins.Add(key, agentId);
+        if (kind == AffinityKind.Run && !runPins.ContainsKey(request.RunId)) runPins = runPins.Add(request.RunId, agentId);
+        return new(checked(snapshot.Revision + 1), runPins, nodePins, agentId);
     }
 
     public void ForgetRun(Guid runId)

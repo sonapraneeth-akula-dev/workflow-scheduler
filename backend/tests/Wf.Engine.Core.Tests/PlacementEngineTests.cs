@@ -289,6 +289,55 @@ public sealed class PlacementEngineTests
         Assert.Equal(before, engine.Snapshot);
     }
 
+    [Theory]
+    [InlineData(AffinityKind.None)]
+    [InlineData(AffinityKind.Node)]
+    [InlineData(AffinityKind.Run)]
+    [InlineData(AffinityKind.SameMachineAs)]
+    public void Committed_history_restores_each_affinity_and_its_moved_pin_without_rechecking_old_capacity(AffinityKind kind)
+    {
+        var seed = Request() with
+        {
+            NodeKey = kind == AffinityKind.SameMachineAs ? "reference" : "node",
+            Policy = kind == AffinityKind.Run ? new(Affinity: new(AffinityKind.Run)) : null
+        };
+        var replacement = AffinityRequest(kind) with
+            { Attempt = 2, RePlacement = true, PreviousAgentId = Agent(1).Id };
+        var engine = new PlacementEngine();
+        engine.RestoreRun(Run, [(seed, Agent(1).Id), (replacement, Agent(2).Id)]);
+        Assert.Equal(Agent(2).Id, engine.Snapshot.LastAgentId);
+        Assert.Equal(Agent(2).Id, engine.Snapshot.NodePins[$"{Run:D}/node"]);
+        if (kind == AffinityKind.Run) Assert.Equal(Agent(2).Id, engine.Snapshot.RunPins[Run]);
+        if (kind == AffinityKind.SameMachineAs)
+            Assert.Equal(Agent(2).Id, engine.Snapshot.NodePins[$"{Run:D}/reference"]);
+        var decision = engine.Propose(AffinityRequest(kind),
+            [Agent(2), Agent(3) with { WarmRuns = ImmutableHashSet.Create(Run) }]);
+        Assert.Equal(Agent(kind == AffinityKind.None ? 3 : 2).Id, decision.Agent!.Id);
+    }
+
+    [Fact]
+    public void Committed_history_is_run_scoped_atomic_and_invalidates_pre_restore_proposals()
+    {
+        var engine = Seed(AffinityKind.Run);
+        var other = Request() with { RunId = Guid.NewGuid(), Policy = new(Affinity: new(AffinityKind.Run)) };
+        engine.Apply(engine.Propose(other, [Agent(3)]));
+        var pending = engine.Propose(Request(), [Agent(1)]);
+        var before = engine.Snapshot;
+        Assert.Throws<ArgumentException>(() => engine.RestoreRun(Run,
+            [(Request(), Agent(2).Id), (other, Agent(3).Id)]));
+        Assert.Equal(before, engine.Snapshot);
+        Assert.Throws<ArgumentException>(() => engine.RestoreRun(Run, [(Request(), Guid.Empty)]));
+        Assert.Throws<ArgumentException>(() => engine.RestoreRun(Guid.Empty, []));
+        Assert.Throws<ArgumentNullException>(() => engine.RestoreRun(Run, null!));
+        engine.RestoreRun(Run, [(Request(), Agent(2).Id)]);
+        Assert.Equal(Agent(2).Id, engine.Snapshot.NodePins[$"{Run:D}/node"]);
+        Assert.Equal(Agent(3).Id, engine.Snapshot.NodePins[$"{other.RunId:D}/node"]);
+        Assert.Equal(Agent(3).Id, engine.Snapshot.RunPins[other.RunId]);
+        Assert.Equal(Agent(3).Id, engine.Snapshot.LastAgentId);
+        Assert.False(engine.Snapshot.RunPins.ContainsKey(Run));
+        Assert.Throws<InvalidOperationException>(() => engine.Apply(pending));
+    }
+
     [Fact]
     public void Stale_and_foreign_decisions_are_rejected_and_run_cleanup_is_isolated()
     {

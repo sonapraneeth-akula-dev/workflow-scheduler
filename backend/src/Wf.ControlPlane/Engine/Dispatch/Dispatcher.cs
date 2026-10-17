@@ -257,6 +257,39 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
     private async Task<PlacementDecision> ChooseAsync(NpgsqlConnection connection, RunState run, PlacementRequest request,
         CancellationToken cancellationToken)
     {
+        var prefix = $"{request.RunId:D}/";
+        if (run.Snapshot.Metrics!.Tasks.Values.Any(task => !task.Attempts.IsEmpty) &&
+            !placement.Snapshot.NodePins.Keys.Any(key => key.StartsWith(prefix, StringComparison.Ordinal)))
+        {
+            var committed = new List<(PlacementRequest Request, Guid AgentId)>();
+            await using (var command = new NpgsqlCommand("""
+                SELECT a.placement_request::text,a.agent_id,a.task_key,a.attempt,e.seq FROM task_attempts a
+                LEFT JOIN (
+                    SELECT entity_key,attempt,min(seq) AS seq FROM run_events
+                    WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND kind=2 AND attempt IS NOT NULL
+                    GROUP BY entity_key,attempt
+                ) e ON e.entity_key=a.task_key AND e.attempt=a.attempt
+                WHERE a.run_day=uuid_v7_run_day($1) AND a.run_id=$1 AND a.placement_request IS NOT NULL
+                ORDER BY e.seq
+                """, connection))
+            {
+                command.Parameters.AddWithValue(request.RunId);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    var recorded = JsonSerializer.Deserialize(reader.GetString(0), DispatchJson.Default.PlacementRequest)
+                        ?? throw new InvalidDataException("A committed placement request is null.");
+                    if (reader.IsDBNull(4) || recorded.RunId != request.RunId ||
+                        $"{recorded.NodeKey}/{recorded.TaskKey}" != reader.GetString(2) ||
+                        recorded.Attempt != reader.GetInt16(3))
+                        throw new InvalidDataException("A committed placement does not match its durable dispatch identity.");
+                    committed.Add((recorded, reader.GetGuid(1)));
+                }
+            }
+            if (committed.Count != run.Snapshot.Metrics.Tasks.Values.Sum(task => task.Attempts.Length))
+                throw new InvalidDataException("The committed placement history is incomplete.");
+            placement.RestoreRun(request.RunId, committed);
+        }
         var capacity = agents.DispatchableAgents().Select(agent => agent.Capacity(timeProvider.GetUtcNow())).ToDictionary(agent => agent.Id);
         var activeAgents = new HashSet<Guid>();
         {

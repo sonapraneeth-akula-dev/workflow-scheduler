@@ -1507,8 +1507,12 @@ dispatcher must include committed dispatches not yet reflected in heartbeats.
 Warm-package sets describe the bounded host pool, not every downloaded package.
 Node references use the first committed placement; platform re-placement moves
 affected pins without spending an author's retries, while `NoAutoRetry` blocks
-platform placement. Snapshots restore pins and rotation; `ForgetRun` releases
-terminal-run state. No eligible capacity leaves a task `Ready` with a durable,
+platform placement. Snapshots restore pins and rotation; a reconstructed dispatcher
+replays persisted attempt placements in dispatch-event sequence before its first
+new decision for an existing run. This preserves node/run/SameMachineAs pins,
+including moved pins, without rechecking historical capacity. Missing or mismatched
+recovery identities fail explicitly before another dispatch; new runs do not read
+placement history. `ForgetRun` releases terminal-run state. No eligible capacity leaves a task `Ready` with a durable,
 live `WaitingForMachine` reason. The original queue time survives retries of the
 planner and recovery; at ten minutes, placement fails with category `Placement`
 and the task's hard/soft failure policy applies.
