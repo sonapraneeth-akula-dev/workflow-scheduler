@@ -9,6 +9,7 @@ const fixture = z
     version: z.uuid(),
     operatorToken: z.string().min(1),
     viewerToken: z.string().min(1),
+    placementMachine: z.string().min(1),
   })
   .parse(JSON.parse(process.env.WF_RERUN_FIXTURE ?? "{}"))
 
@@ -80,6 +81,19 @@ test("Operator confirms immutable source; dropped real acceptance retries one ke
   await expect(trigger).toBeFocused()
   expect(submissions).toEqual([])
   await trigger.click()
+  await dialog
+    .getByRole("checkbox", { name: "Change placement for rerun" })
+    .check()
+  await expect(
+    dialog.getByRole("checkbox", { name: "Run on a single machine" })
+  ).toBeChecked()
+  await expect(
+    dialog.getByRole("option", { name: fixture.placementMachine, exact: true })
+  ).toHaveCount(1)
+  await dialog
+    .getByLabel("Machine", { exact: true })
+    .selectOption(fixture.placementMachine)
+  await accessible(page)
   let release!: () => void
   let arrived!: () => void
   const hold = new Promise<void>((resolve) => {
@@ -93,6 +107,10 @@ test("Operator confirms immutable source; dropped real acceptance retries one ke
     `**${action}`,
     async (route) => {
       const response = await route.fetch()
+      expect(route.request().postDataJSON().placement).toEqual({
+        singleMachine: true,
+        machine: fixture.placementMachine,
+      })
       expect(response.status()).toBe(202)
       accepted = z
         .object({ runId: z.uuid() })
@@ -156,6 +174,9 @@ test("Operator confirms immutable source; dropped real acceptance retries one ke
   await accessible(page)
   await dialog.getByRole("link").click()
   await expect(page).toHaveURL(new RegExp(`/runs/${accepted}$`))
+  await expect(page.getByLabel("Run placement override")).toContainText(
+    fixture.placementMachine
+  )
   const lineage = page.getByRole("region", { name: "Run lineage" })
   await expect(lineage).toContainText("did not execute new attempts")
   await expect(
@@ -185,6 +206,46 @@ test("Operator confirms immutable source; dropped real acceptance retries one ke
   await trigger.click()
   await accessible(page)
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+})
+test("manual trigger picker submits a named single-machine override through the real API", async ({
+  page,
+}) => {
+  await login(page, fixture.operatorToken)
+  const [team, kind, workflow] = fixture.workflowId.split("/")
+  await page.goto(
+    `/t/${team}/${kind}/w/${workflow}/versions/${fixture.version}`
+  )
+  await page.getByRole("button", { name: "Trigger run", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog).toContainText(fixture.version)
+  await dialog
+    .getByRole("checkbox", { name: "Run on a single machine" })
+    .check()
+  await expect(
+    dialog.getByRole("option", { name: fixture.placementMachine, exact: true })
+  ).toHaveCount(1)
+  await dialog
+    .getByLabel("Machine", { exact: true })
+    .selectOption(fixture.placementMachine)
+  await accessible(page)
+  const response = page.waitForResponse(
+    (reply) =>
+      new URL(reply.url()).pathname === "/api/v1/runs" &&
+      reply.request().method() === "POST"
+  )
+  await dialog.getByRole("button", { name: "Accept run", exact: true }).click()
+  const accepted = await response
+  expect(accepted.status()).toBe(202)
+  expect(accepted.request().postDataJSON().placement).toEqual({
+    singleMachine: true,
+    machine: fixture.placementMachine,
+  })
+  const receipt = z.object({ runId: z.uuid() }).parse(await accepted.json())
+  await dialog.getByRole("link", { name: receipt.runId, exact: true }).click()
+  await expect(page.getByLabel("Run placement override")).toContainText(
+    fixture.placementMachine
+  )
+  await accessible(page)
 })
 test("Viewer has no rerun action and direct typed API returns actual 403", async ({
   page,

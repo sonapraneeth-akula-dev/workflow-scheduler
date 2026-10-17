@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Wf.Contracts;
+using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
 using Wf.ControlPlane.Live;
 
@@ -86,10 +87,17 @@ public sealed class LiveHubTests
     public void MessagePack_and_OpenAPI_JSON_use_identical_camel_case_maps_and_ISO_timestamps_without_secrets()
     {
         var run = Guid.CreateVersion7();
+        var agent = Guid.CreateVersion7();
         var at = DateTimeOffset.UtcNow;
         var abort = new AbortRecord("oid", "operator", at, "stop", AbortSource.UI);
         var delta = new RunDelta(run.ToString("D"),
-            [LiveEvent.From(new(run, 42, at, EventEntity.Run, null, (int)RunStatus.Aborted, abort))]);
+            [
+                LiveEvent.From(new(run, 42, at, EventEntity.Run, null, (int)RunStatus.Aborted, abort)),
+                LiveEvent.From(new(run, 43, at, EventEntity.Task, "work", (int)ExecutionStatus.Ready)
+                    { WaitingReason = "WaitingForMachine" }),
+                LiveEvent.From(new(run, 44, at, EventEntity.Task, "work", (int)ExecutionStatus.Dispatched)
+                    { AgentId = agent })
+            ]);
         var bytes = MessagePackSerializer.Serialize(delta, cancellationToken: TestContext.Current.CancellationToken);
         using var packed = JsonDocument.Parse(MessagePackSerializer.ConvertToJson(bytes,
             cancellationToken: TestContext.Current.CancellationToken));
@@ -98,6 +106,8 @@ public sealed class LiveHubTests
         Assert.Equal(at.ToString("O"), packed.RootElement.GetProperty("events")[0].GetProperty("at").GetString());
         Assert.Equal(42, packed.RootElement.GetProperty("events")[0].GetProperty("seq").GetInt64());
         Assert.Equal("UI", packed.RootElement.GetProperty("events")[0].GetProperty("abort").GetProperty("source").GetString());
+        Assert.Equal("WaitingForMachine", packed.RootElement.GetProperty("events")[1].GetProperty("waitingReason").GetString());
+        Assert.Equal(agent.ToString("D"), packed.RootElement.GetProperty("events")[2].GetProperty("agentId").GetString());
         Assert.DoesNotContain("variables", packed.RootElement.GetRawText());
         var problem = new LiveSubscriptionProblem(403, "Forbidden", "denied", "insufficient_scope_role");
         var problemBytes = MessagePackSerializer.Serialize(problem, cancellationToken: TestContext.Current.CancellationToken);

@@ -1,14 +1,22 @@
 import { z } from "zod"
 import { ApiError, publicApi } from "@/lib/api/client"
 import type { components } from "@/lib/api/schema"
-import { runIdSchema } from "@/lib/live/runApi"
+import {
+  runIdSchema,
+  runPlacementSchema,
+  type RunPlacement,
+} from "@/lib/live/runApi"
 
-export async function rerunRun(parentRunId: string, key: string) {
+export async function rerunRun(
+  parentRunId: string,
+  key: string,
+  placement?: RunPlacement
+) {
   const id = runIdSchema.parse(parentRunId)
   z.uuid().parse(key)
   const result = await publicApi.POST("/api/v1/runs/{id}/rerun", {
     params: { path: { id } },
-    body: {},
+    body: placement ? { placement: runPlacementSchema.parse(placement) } : {},
     headers: { "Idempotency-Key": key },
   })
   if (!result.response.ok) throw new ApiError(result.response, result.error)

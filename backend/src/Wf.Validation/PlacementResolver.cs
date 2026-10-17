@@ -59,7 +59,8 @@ public static class PlacementResolver
             node.Tasks.Select(task => new TaskDefinition(task.Key, task.Failure, task.Policy,
                 ResolvePolicy(task.Placement, $"{node.Key}/{task.Key}"), task.HttpOperation, task.Action)).ToImmutableArray(),
             node.Mode, node.MaxParallel, node.Failure, node.Inputs, node.Timeout,
-            ResolvePolicy(node.Placement, node.Key), node.WhenUnavailable)).ToImmutableArray();
+            node.Placement?.Selector?.Count is not null ? ResolvePolicy(node.Placement, node.Key) : node.Placement,
+            node.WhenUnavailable)).ToImmutableArray();
 
         PlacementPolicy? ResolvePolicy(PlacementPolicy? policy, string key)
         {

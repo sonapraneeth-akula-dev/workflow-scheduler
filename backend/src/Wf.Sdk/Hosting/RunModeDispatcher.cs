@@ -25,6 +25,8 @@ public static class RunModeDispatcher
         var selected = false;
         string? target = null;
         string? socket = null;
+        var singleMachine = false;
+        string? machine = null;
         var variables = new List<string>();
         for (var index = 0; index < args.Length; index++)
         {
@@ -37,6 +39,12 @@ public static class RunModeDispatcher
                 case "--engine":
                     Select(Mode.Engine);
                     target = Value();
+                    break;
+                case "--single-machine" when !singleMachine:
+                    singleMachine = true;
+                    break;
+                case "--machine" when machine is null:
+                    machine = Value();
                     break;
                 case "--describe":
                     Select(Mode.Describe);
@@ -65,6 +73,9 @@ public static class RunModeDispatcher
         }
         if (mode != Mode.TaskHost && socket is not null)
             throw new ArgumentException("--socket requires --task-host.", nameof(args));
+        if (singleMachine && mode != Mode.Engine || machine is not null &&
+            (!singleMachine || machine.Length > 200 || machine.Any(char.IsControl)))
+            throw new ArgumentException("--single-machine requires --engine; --machine requires --single-machine and a valid machine name.", nameof(args));
         if (mode is Mode.Describe or Mode.TaskHost && variables.Count > 0)
             throw new ArgumentException("--var is not accepted in --describe or --task-host mode.", nameof(args));
         output ??= Console.Out;
@@ -89,7 +100,8 @@ public static class RunModeDispatcher
                     if (mode == Mode.Local)
                         return (await new LocalEngine(workflow, values, output).RunAsync(stopping.Token).ConfigureAwait(false)).ExitCode;
                     _ = VariableBinder.Bind(workflow.Variables, values);
-                    return await SubmitAsync(workflow, target!, values, output, httpClient, stopping.Token).ConfigureAwait(false);
+                    return await SubmitAsync(workflow, target!, values, singleMachine ? new(true, machine) : null,
+                        output, httpClient, stopping.Token).ConfigureAwait(false);
             }
         }
         finally { Console.CancelKeyPress -= cancel; }
@@ -103,7 +115,7 @@ public static class RunModeDispatcher
     }
 
     private static async Task<int> SubmitAsync(WorkflowDefinition workflow, string endpoint,
-        ImmutableDictionary<string, JsonElement> variables, TextWriter output, HttpClient? httpClient,
+        ImmutableDictionary<string, JsonElement> variables, RunPlacement? placement, TextWriter output, HttpClient? httpClient,
         CancellationToken cancellationToken)
     {
         if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var origin) || origin.Scheme is not ("https" or "http") ||
@@ -114,7 +126,8 @@ public static class RunModeDispatcher
         var client = httpClient ?? owned!;
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(origin, "/api/v1/runs"))
         {
-            Content = JsonContent.Create(new TriggerRunRequest(workflow.Name, workflow.Version) { Variables = variables },
+            Content = JsonContent.Create(new TriggerRunRequest(workflow.Name, workflow.Version)
+                { Variables = variables, Placement = placement },
                 RunJsonContext.Default.TriggerRunRequest)
         };
         request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("D"));

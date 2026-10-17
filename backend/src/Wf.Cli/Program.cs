@@ -24,6 +24,7 @@ public static class Program
             {
                 Console.WriteLine(ValidateCommand.Usage);
                 Console.WriteLine(AbortCommand.Usage);
+                Console.WriteLine(RunCommand.Usage);
                 Console.WriteLine(PublishCommand.Usage);
                 Console.WriteLine(CloneCommand.Usage);
                 Console.WriteLine(LocalCommand.Usage);
@@ -31,6 +32,8 @@ public static class Program
             }
             if (args.Length > 0 && args[0] == "abort")
                 return await AbortCommand.RunAsync(args[1..], Console.Out, Console.Error, cancellation.Token);
+            if (args.Length > 0 && args[0] == "run")
+                return await RunCommand.RunAsync(args[1..], Console.Out, Console.Error, cancellation.Token);
             if (args.Length > 0 && args[0] == "publish")
                 return await PublishCommand.RunAsync(args[1..], Console.Out, Console.Error, cancellation.Token);
             if (args.Length > 0 && args[0] == "clone")
@@ -41,6 +44,7 @@ public static class Program
             {
                 Console.Error.WriteLine(ValidateCommand.Usage);
                 Console.Error.WriteLine(AbortCommand.Usage);
+                Console.Error.WriteLine(RunCommand.Usage);
                 Console.Error.WriteLine(PublishCommand.Usage);
                 Console.Error.WriteLine(CloneCommand.Usage);
                 Console.Error.WriteLine(LocalCommand.Usage);

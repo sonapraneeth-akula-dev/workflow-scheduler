@@ -232,12 +232,23 @@ export class RunStore {
       const field = event.entity === 1 ? "nodes" : "tasks"
       if (event.key === null || !Object.hasOwn(run[field], event.key))
         throw new Error("A run event names an unknown graph entity.")
+      const taskWaitReasons = { ...run.taskWaitReasons }
+      if (event.entity === 2) {
+        if (event.waitingReason)
+          taskWaitReasons[event.key] = event.waitingReason
+        else delete taskWaitReasons[event.key]
+      }
       this.state = {
         ...this.state,
         run: {
           ...run,
           lastSeq: event.seq,
           [field]: { ...run[field], [event.key]: event.state },
+          taskWaitReasons,
+          placementAgentId:
+            run.placement?.singleMachine && event.agentId
+              ? event.agentId
+              : run.placementAgentId,
         },
       }
     }

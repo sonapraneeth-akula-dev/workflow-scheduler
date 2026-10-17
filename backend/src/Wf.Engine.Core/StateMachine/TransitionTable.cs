@@ -18,8 +18,8 @@ public static class TransitionTable
         new Dictionary<ExecutionStatus, ExecutionStatus[]>
         {
             [ExecutionStatus.Pending] = [ExecutionStatus.Ready, ExecutionStatus.Skipped, ExecutionStatus.Cancelled, ExecutionStatus.Reused],
-            [ExecutionStatus.Ready] = [ExecutionStatus.Dispatched, ExecutionStatus.Failed, ExecutionStatus.Skipped, ExecutionStatus.Cancelled, ExecutionStatus.TimedOut],
-            [ExecutionStatus.Dispatched] = [ExecutionStatus.Running, ExecutionStatus.Retrying, ExecutionStatus.Failed, ExecutionStatus.TimedOut, ExecutionStatus.Cancelled],
+            [ExecutionStatus.Ready] = [ExecutionStatus.Dispatched, ExecutionStatus.Failed, ExecutionStatus.SoftFailed, ExecutionStatus.Skipped, ExecutionStatus.Cancelled, ExecutionStatus.TimedOut],
+            [ExecutionStatus.Dispatched] = [ExecutionStatus.Running, ExecutionStatus.Retrying, ExecutionStatus.Failed, ExecutionStatus.SoftFailed, ExecutionStatus.TimedOut, ExecutionStatus.Cancelled],
             [ExecutionStatus.Running] = [ExecutionStatus.Succeeded, ExecutionStatus.SoftFailed, ExecutionStatus.Failed, ExecutionStatus.TimedOut, ExecutionStatus.Cancelled, ExecutionStatus.Retrying],
             [ExecutionStatus.Retrying] = [ExecutionStatus.Dispatched, ExecutionStatus.Failed, ExecutionStatus.TimedOut, ExecutionStatus.Cancelled, ExecutionStatus.Skipped]
         }.SelectMany(pair => pair.Value.Select(next => (pair.Key, next))).ToFrozenSet();

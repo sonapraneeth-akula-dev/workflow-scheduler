@@ -9,6 +9,7 @@ using Wf.Contracts;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
+using Wf.Contracts.Runs;
 using Wf.ControlPlane.Data;
 using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Dispatch;
@@ -26,7 +27,7 @@ using DispatchCommand = Wf.Contracts.Agent.V1.Dispatch;
 
 namespace Wf.Integration.Tests.Execution;
 
-public sealed class HostedRunExecutionTests(HostedExecutionDatabase database) : IClassFixture<HostedExecutionDatabase>
+public sealed partial class HostedRunExecutionTests(HostedExecutionDatabase database) : IClassFixture<HostedExecutionDatabase>
 {
     private CancellationToken Token => TestContext.Current.CancellationToken;
 
@@ -249,7 +250,8 @@ public sealed class HostedRunExecutionTests(HostedExecutionDatabase database) : 
                 NullLogger<RunExecutionService>.Instance);
         }
 
-        public static async Task<Runtime> Create(HostedExecutionDatabase database, Action<WorkflowBuilder> configure)
+        public static async Task<Runtime> Create(HostedExecutionDatabase database, Action<WorkflowBuilder> configure,
+            RunPlacement? placement = null, int maxTasks = 4, string? agentName = null)
         {
             var runtime = new Runtime(database.DataSource);
             var team = "hosted-" + Guid.NewGuid().ToString("N");
@@ -276,16 +278,48 @@ public sealed class HostedRunExecutionTests(HostedExecutionDatabase database) : 
                 """, version, definition.Name, ManifestWriter.Write(definition));
             runtime.Session = await runtime.agents.RegisterAsync(new()
             {
-                Id = Guid.NewGuid().ToString("D"), Name = team, Os = "windows", Arch = "x64", Cores = 4,
-                RamMb = 16384, MaxTasks = 4, Pool = team, Version = "1.0.0", ProtocolVersion = 1
+                Id = Guid.NewGuid().ToString("D"), Name = agentName ?? team, Os = "windows", Arch = "x64", Cores = 4,
+                RamMb = 16384, MaxTasks = checked((uint)maxTasks), Pool = team, Version = "1.0.0", ProtocolVersion = 1
             }, runtime.Token);
             var run = new RunState(Guid.CreateVersion7(), definition.Nodes, definition.Metadata, Assert.Fail, runtime.Clock.Now);
+            run = RunState.Restore(run.Snapshot with { Placement = placement }, [], Assert.Fail);
             runtime.RunId = run.Snapshot.RunId;
             await runtime.Store.CreateAsync(run, definition.Name, version, DateTimeOffset.UtcNow.Add(definition.RunTimeout), runtime.Token);
             return runtime;
         }
 
         public Task Tick() => executor.TickAsync(Token);
+        public async Task FreshTick()
+        {
+            using var rebuilt = new Dispatcher(source, Store, agents, new PlacementEngine(), Clock);
+            using var service = new RunExecutionService(source, recovery, rebuilt, new(source, Store, Clock), Clock,
+                new(new Uri("http://localhost:5000")),
+                services.GetRequiredKeyedService<BlobUploadGrants>(PackageDownloadEndpoints.Grants),
+                NullLogger<RunExecutionService>.Instance);
+            await service.TickAsync(Token);
+        }
+
+        public Task<AgentSession> AddAgent(string suffix = "other", Guid? id = null) => agents.RegisterAsync(new()
+        {
+            Id = (id ?? Guid.NewGuid()).ToString("D"), Name = Workflow.Split('/')[0] + "-" + suffix, Os = "windows",
+            Arch = "x64", Cores = 4, RamMb = 16384, MaxTasks = 4, Pool = Workflow.Split('/')[0],
+            Version = "1.0.0", ProtocolVersion = 1
+        }, Token);
+
+        public Task<IReadOnlyList<(long Id, DispatchCommand Command)>> Pending(AgentSession session) =>
+            Store.PendingAsync(session, Token);
+
+        public async Task LoseAndReplace(AgentSession session)
+        {
+            Clock.Now = Clock.Now.AddMilliseconds(1);
+            using var sweeper = new Wf.ControlPlane.Engine.Sweeper.AgentLossSweeper(source, agents, Clock,
+                NullLogger<Wf.ControlPlane.Engine.Sweeper.AgentLossSweeper>.Instance);
+            var lost = await sweeper.ReconcileAsync(session, [], Token);
+            await Execute("UPDATE agents SET status=2 WHERE id=$1", session.AgentId);
+            using var rebuilt = new Dispatcher(source, Store, agents, new PlacementEngine(), Clock);
+            foreach (var attempt in lost)
+                await rebuilt.ReplaceLostAsync(attempt.RunId, attempt.TaskKey, attempt.Attempt, Token);
+        }
         public Task<RunState> Load() => Store.LoadAsync(RunId, Token);
         public async Task<IReadOnlyList<DispatchCommand>> Pending() =>
             (await Store.PendingAsync(Session, Token)).Select(item => item.Command).ToArray();

@@ -15,17 +15,25 @@ import {
 } from "@/components/ui/alert-dialog"
 import { ApiError } from "@/lib/api/client"
 import { usePermissions } from "@/lib/auth/usePermissions"
-import type { RunSnapshot } from "@/lib/live/runApi"
+import type { RunPlacement, RunSnapshot } from "@/lib/live/runApi"
 import { rerunRun } from "./rerun-api"
+import { PlacementFields } from "./PlacementFields"
 
 export function RerunDialog({
   runId,
   versionId,
   status,
   live,
-}: Pick<RunSnapshot, "runId" | "versionId" | "status"> & { live: boolean }) {
+  placement: originalPlacement,
+}: Pick<RunSnapshot, "runId" | "versionId" | "status" | "placement"> & {
+  live: boolean
+}) {
   const [open, setOpen] = useState(false)
-  const attempt = useRef<string>(undefined)
+  const attempt = useRef<{ key: string; placement?: RunPlacement }>(undefined)
+  const [changePlacement, setChangePlacement] = useState(false)
+  const [placement, setPlacement] = useState<RunPlacement>(
+    originalPlacement ?? { singleMachine: false }
+  )
   const pending = useRef(false)
   const controls = useRef<HTMLElement>(null)
   const permissions = usePermissions({ scope: "run", id: runId })
@@ -34,11 +42,13 @@ export function RerunDialog({
   const client = useQueryClient()
   const mutation = useMutation({
     retry: false,
-    mutationFn: (key: string) => {
+    mutationFn: (submission: { key: string; placement?: RunPlacement }) => {
       if (!canRerun) throw new Error("Current Operator permission is required.")
       if (!eligible)
         throw new Error("A confirmed terminal source run is required.")
-      return rerunRun(runId, key)
+      return submission.placement
+        ? rerunRun(runId, submission.key, submission.placement)
+        : rerunRun(runId, submission.key)
     },
     onSuccess: async () => {
       await Promise.all([
@@ -58,7 +68,10 @@ export function RerunDialog({
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!eligible || !canRerun || pending.current || mutation.isSuccess) return
-    attempt.current ??= crypto.randomUUID()
+    attempt.current ??= {
+      key: crypto.randomUUID(),
+      ...(changePlacement ? { placement } : {}),
+    }
     pending.current = true
     mutation.mutate(attempt.current)
   }
@@ -106,6 +119,30 @@ export function RerunDialog({
             </AlertDialogHeader>
             <p className="break-all">Source run: {runId}</p>
             <p className="break-all">Pinned version: {versionId}</p>
+            <p>
+              Original placement:{" "}
+              {originalPlacement?.singleMachine
+                ? `single machine (${originalPlacement.machine ?? "auto-picked"})`
+                : "workflow defaults"}
+              . Unchanged unless overridden below.
+            </p>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={changePlacement}
+                disabled={!canRerun || !eligible || !mutation.isIdle}
+                onChange={(event) => setChangePlacement(event.target.checked)}
+              />
+              Change placement for rerun
+            </label>
+            {changePlacement ? (
+              <PlacementFields
+                value={placement}
+                onChange={setPlacement}
+                source={{ runId }}
+                disabled={!canRerun || !eligible || !mutation.isIdle}
+              />
+            ) : null}
             {!eligible ? (
               <p role="status">Waiting for confirmed terminal run state.</p>
             ) : null}

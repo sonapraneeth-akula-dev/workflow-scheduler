@@ -46,8 +46,8 @@ public sealed class TransitionTableTests
             var expected = from switch
             {
                 ExecutionStatus.Pending => new[] { ExecutionStatus.Ready, ExecutionStatus.Skipped, ExecutionStatus.Cancelled, ExecutionStatus.Reused },
-                ExecutionStatus.Ready => [ExecutionStatus.Dispatched, ExecutionStatus.Failed, ExecutionStatus.Skipped, ExecutionStatus.Cancelled, ExecutionStatus.TimedOut],
-                ExecutionStatus.Dispatched => [ExecutionStatus.Running, ExecutionStatus.Retrying, ExecutionStatus.Failed, ExecutionStatus.TimedOut, ExecutionStatus.Cancelled],
+                ExecutionStatus.Ready => [ExecutionStatus.Dispatched, ExecutionStatus.Failed, ExecutionStatus.SoftFailed, ExecutionStatus.Skipped, ExecutionStatus.Cancelled, ExecutionStatus.TimedOut],
+                ExecutionStatus.Dispatched => [ExecutionStatus.Running, ExecutionStatus.Retrying, ExecutionStatus.Failed, ExecutionStatus.SoftFailed, ExecutionStatus.TimedOut, ExecutionStatus.Cancelled],
                 ExecutionStatus.Running => [ExecutionStatus.Succeeded, ExecutionStatus.SoftFailed, ExecutionStatus.Failed, ExecutionStatus.TimedOut, ExecutionStatus.Cancelled, ExecutionStatus.Retrying],
                 ExecutionStatus.Retrying => [ExecutionStatus.Dispatched, ExecutionStatus.Failed, ExecutionStatus.TimedOut, ExecutionStatus.Cancelled, ExecutionStatus.Skipped],
                 _ => []

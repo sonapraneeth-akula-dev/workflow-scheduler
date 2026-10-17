@@ -244,6 +244,12 @@ export function RunGraph({
             <ul className="mt-3 flex flex-col gap-2">
               {node.tasks.map((task) => (
                 <li key={task.key}>
+                  {run.taskWaitReasons?.[`${node.key}/${task.key}`] ? (
+                    <span role="status">
+                      WaitingForMachine: no eligible machine has available
+                      capacity.{" "}
+                    </span>
+                  ) : null}
                   <Link
                     to="/t/$team/$type/w/$wf/versions/$v/tasks/$taskKey"
                     params={{

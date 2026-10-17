@@ -1508,8 +1508,26 @@ Warm-package sets describe the bounded host pool, not every downloaded package.
 Node references use the first committed placement; platform re-placement moves
 affected pins without spending an author's retries, while `NoAutoRetry` blocks
 platform placement. Snapshots restore pins and rotation; `ForgetRun` releases
-terminal-run state. Placement timeout and API single-machine overrides follow
-in their own backlog task.
+terminal-run state. No eligible capacity leaves a task `Ready` with a durable,
+live `WaitingForMachine` reason. The original queue time survives retries of the
+planner and recovery; at ten minutes, placement fails with category `Placement`
+and the task's hard/soft failure policy applies.
+
+Manual trigger and re-run accept `placement: { singleMachine: true, machine:
+"optional-exact-name" }`. This does not edit the workflow. Trigger validation
+requires one healthy, non-draining, unreserved machine satisfying every effective
+task selector and node reservation; errors identify conflicting nodes, including
+reservations for more than one machine. UI pickers use authenticated
+`POST /api/v1/runs/placement-options` or
+`POST /api/v1/runs/{id}/placement-options` with the same version and effective
+variables; acceptance and dispatch recheck eligibility. Full capacity queues
+tasks rather than spreading them. `runs.placement`, snapshots and dispatch events
+preserve the override and selected worker across recovery, and the run shows its
+override and current waits. An unnamed lost worker moves the run cohort together
+only after old active attempts are classified lost/drained; named-worker loss
+fails `Placement` instead of silently using another worker. Re-run without
+`placement` keeps the source override; `singleMachine: false` explicitly removes
+it. Existing authorization remains unchanged; no login/logout flow is added.
 
 `Wf.ControlPlane.Engine.Reservations.ReservationManager.ReserveAsync` allocates
 an exact number of matching machines exclusively to an existing run/node.
@@ -2145,6 +2163,22 @@ cover Unicode and spaces. Hosted required-check behavior remains unverified
 until a permitted push/PR.
 
 ## CLI and packages
+
+`wf run` submits a manual run without local task execution or waiting for run
+completion. `--version` pins an exact UUID or SemVer; omission uses the active
+version. `--var key=JSON` supplies typed JSON values. Single-machine submission
+also works in compiled workflows with `--engine <origin> --single-machine
+[--machine <name>]`.
+
+```powershell
+dotnet run --project backend\src\Wf.Cli -- run team/type/workflow --single-machine --machine worker --engine http://localhost:5001 --var 'count=3'
+```
+
+`--engine` or `WF_ENGINE_URL` and noninteractive `WF_ACCESS_TOKEN` use the same
+origin/token restrictions as `wf abort` below. Redirects and automatic submission
+retries are disabled. Exit 0 prints the accepted UUIDv7, not execution success;
+1 means rejection, 2 means usage/transport/contract failure, and 130 means
+cancellation. An uncertain transport outcome may already have been accepted.
 
 ```powershell
 dotnet run --project backend\src\Wf.Cli -- abort $runId --reason "Stop deployment" --engine https://engine.example

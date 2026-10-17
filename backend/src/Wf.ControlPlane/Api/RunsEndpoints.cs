@@ -28,6 +28,11 @@ public static class RunsEndpoints
         endpoints.MapRerunEndpoint();
         endpoints.MapTaskOutputsEndpoints();
         endpoints.MapReservationQueueEndpoints();
+        endpoints.MapPost("/api/v1/runs/placement-options", PlacementOptions).RequireAuthorization()
+            .Accepts<TriggerRunRequest>("application/json").Produces<PlacementOptionsResponse>()
+            .ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404)
+            .ProducesProblem(413).ProducesProblem(415).ProducesProblem(503)
+            .AddEndpointFilter(AuthorizeRequest);
         endpoints.MapPost("/api/v1/runs", Trigger).RequireAuthorization()
             .Accepts<TriggerRunRequest>("application/json").Produces<TriggerRunResponse>(202)
             .ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404)
@@ -51,6 +56,7 @@ public static class RunsEndpoints
     private static async ValueTask<object?> AuthorizeRequest(EndpointFilterInvocationContext invocation, EndpointFilterDelegate next)
     {
         var context = invocation.HttpContext;
+        context.Response.Headers.CacheControl = "no-store";
         if (!context.Request.HasJsonContentType())
             return Results.Problem(statusCode: 415, title: "A JSON request content type is required");
         if (context.Request.ContentLength > MaximumRequestBytes) return TooLarge();
@@ -66,6 +72,8 @@ public static class RunsEndpoints
         catch (BadHttpRequestException error) when (error.StatusCode == 413) { return TooLarge(); }
         if (request is null) return Invalid("$", "Supply a run request.");
         if (request.Variables is null) return Invalid("$.variables", "Supply a JSON object of variable values, or omit variables.");
+        if (PlacementOverrideValidator.Invalid(request.Placement) is { } invalidPlacement)
+            return Invalid("$.placement", invalidPlacement);
         if (!WorkflowIdentity.TryGetTypeScope(request.WorkflowId, out var typeScope))
             return Invalid("$.workflowId", "Use an exact team/type/name identity, with at most 128 Unicode characters per segment.");
         var allowed = await context.RequestServices.GetRequiredService<IAuthorizationService>().AuthorizeAsync(context.User,
@@ -79,8 +87,16 @@ public static class RunsEndpoints
         return await next(invocation);
     }
 
-    internal static async Task<IResult> Trigger(HttpContext context,
-        ActiveVersionCache versions, NpgsqlDataSource source, CommandInbox inbox, TimeProvider time)
+    internal static Task<IResult> Trigger(HttpContext context,
+        ActiveVersionCache versions, NpgsqlDataSource source, CommandInbox inbox, TimeProvider time) =>
+        Accept(context, versions, source, inbox, time, false);
+
+    private static Task<IResult> PlacementOptions(HttpContext context,
+        ActiveVersionCache versions, NpgsqlDataSource source, CommandInbox inbox, TimeProvider time) =>
+        Accept(context, versions, source, inbox, time, true);
+
+    private static async Task<IResult> Accept(HttpContext context,
+        ActiveVersionCache versions, NpgsqlDataSource source, CommandInbox inbox, TimeProvider time, bool optionsOnly)
     {
         var authorized = context.Features.Get<AuthorizedRunRequest>()
             ?? throw new InvalidOperationException("A run request must be authorized before acceptance.");
@@ -114,6 +130,10 @@ public static class RunsEndpoints
         var selectorTransaction = context.Features.Get<NpgsqlTransaction>();
         await using (var connection = selectorTransaction is null ? await source.OpenConnectionAsync(context.RequestAborted) : null)
         {
+            if (optionsOnly)
+                return await PlacementOverrideValidator.OptionsAsync(
+                    selectorTransaction?.Connection ?? connection!, selectorTransaction, manifest,
+                    VariableBinder.Bind(manifest.Variables, variables.Values), time.GetUtcNow(), context.RequestAborted);
             var selectors = await MachineSelectorInventory.ValidateAsync(
                 selectorTransaction?.Connection ?? connection ?? throw new InvalidOperationException("A trigger transaction has no connection."),
                 selectorTransaction, manifest,
@@ -121,11 +141,19 @@ public static class RunsEndpoints
             if (!selectors.IsEmpty)
                 return Results.Problem(statusCode: 400, title: "Run selector validation failed",
                     extensions: new Dictionary<string, object?> { ["errors"] = selectors });
+            var placementErrors = await PlacementOverrideValidator.ValidateAsync(
+                selectorTransaction?.Connection ?? connection!, selectorTransaction, manifest,
+                VariableBinder.Bind(manifest.Variables, variables.Values), request.Placement, time.GetUtcNow(),
+                context.RequestAborted);
+            if (!placementErrors.IsEmpty)
+                return Results.Problem(statusCode: 400, title: "Run placement validation failed",
+                    extensions: new Dictionary<string, object?> { ["errors"] = placementErrors });
         }
         var now = time.GetUtcNow();
         var runId = Guid.CreateVersion7(now);
         var run = new RunState(runId, manifest.Nodes, manifest.Metadata, _ => { }, variables.Values);
-        var command = new TriggerRunCommand(run.Snapshot, request.WorkflowId, versionId, now.Add(manifest.RunTimeout), authorized.SeriesId);
+        var command = new TriggerRunCommand(run.Snapshot with { Placement = request.Placement }, request.WorkflowId,
+            versionId, now.Add(manifest.RunTimeout), authorized.SeriesId);
         if (context.Features.Get<NpgsqlTransaction>() is { } transaction)
             await inbox.TriggerAsync(command, actor.ToString("D"), transaction, context.RequestAborted);
         else

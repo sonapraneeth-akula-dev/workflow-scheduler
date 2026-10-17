@@ -4,6 +4,8 @@ using System.Text.Json.Serialization;
 using Npgsql;
 using Wf.Contracts;
 using Wf.Contracts.Definition;
+using Wf.Contracts.Runs;
+using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.Engine.Core.Placement;
@@ -76,16 +78,23 @@ public sealed class ReservationManager(NpgsqlDataSource dataSource, RunStore run
         string nodeKey, int count, PlacementSelector selector, string json, TimeSpan lifetime, WhenUnavailable? policy,
         CancellationToken cancellationToken)
     {
+        RunPlacement? singleMachine = null;
         await using (var owner = new NpgsqlCommand("""
-            SELECT 1 FROM runs r JOIN node_runs n ON n.run_day=r.run_day AND n.run_id=r.id
+            SELECT r.placement FROM runs r JOIN node_runs n ON n.run_day=r.run_day AND n.run_id=r.id
             WHERE r.run_day=uuid_v7_run_day($1) AND r.id=$1 AND n.node_key=$2
                 AND r.status IN (0,1) AND n.status BETWEEN 0 AND 4 FOR UPDATE OF r,n
             """, connection))
         {
             owner.Parameters.AddWithValue(runId);
             owner.Parameters.AddWithValue(nodeKey);
-            if (await owner.ExecuteScalarAsync(cancellationToken) is null)
+            var persistedPlacement = await owner.ExecuteScalarAsync(cancellationToken);
+            if (persistedPlacement is null)
                 throw new InvalidOperationException("Only an existing nonterminal run and node can reserve machines.");
+            if (persistedPlacement is string jsonPlacement)
+                singleMachine = JsonSerializer.Deserialize(jsonPlacement, RunJsonContext.Default.RunPlacement)
+                    ?? throw new InvalidDataException("A persisted placement override is null.");
+            else if (persistedPlacement is not DBNull)
+                throw new InvalidDataException("A persisted placement override is invalid.");
         }
         var now = timeProvider.GetUtcNow();
         var existing = new List<MachineReservation>();
@@ -163,6 +172,13 @@ public sealed class ReservationManager(NpgsqlDataSource dataSource, RunStore run
                     0, reader.GetInt32(4), reader.GetInt32(5), Labels: labels);
                 if (PlacementFilter.Matches(selector, agent)) candidates.Add(agent);
             }
+        }
+        if (singleMachine?.SingleMachine == true)
+        {
+            var run = await runs.LoadAsync(connection, runId, true, cancellationToken);
+            var nodes = await RunExecutionService.PlacementNodesAsync(connection, run, cancellationToken);
+            candidates.RemoveAll(agent => run.Snapshot.PlacementAgentId is { } pin && agent.Id != pin ||
+                !PlacementOverrideValidator.Matches(agent, singleMachine, nodes));
         }
         var selected = candidates.OrderBy(agent => agent.Id).Take(count).ToArray();
         var disposition = ReservationQueue.Decide(policy ?? WhenUnavailable.Reject, position, selected.Length == count);

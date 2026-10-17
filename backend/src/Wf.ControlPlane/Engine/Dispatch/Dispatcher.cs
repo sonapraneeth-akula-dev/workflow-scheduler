@@ -9,6 +9,7 @@ using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
 using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Reservations;
+using Wf.ControlPlane.Api;
 using Wf.Engine.Core;
 using Wf.Engine.Core.Placement;
 using Wf.Engine.Core.Retries;
@@ -53,7 +54,7 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
         PlacementRequest request, DispatchCommand command, ExecutionPolicy policy, short platformRetries,
         short authorRetries, CancellationToken cancellationToken)
     {
-        var decision = await ChooseAsync(connection, request, cancellationToken);
+        var decision = await ChooseAsync(connection, run, request, cancellationToken);
         if (decision.Agent is not null)
             await SaveDispatchAsync(connection, run, request, command, decision.Agent.Id, policy,
                 platformRetries, authorRetries, cancellationToken);
@@ -98,7 +99,7 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
                 !durable.Snapshot.Tasks.TryGetValue(key, out var state) || state != ExecutionStatus.Ready ||
                 durable.Snapshot.Status != RunStatus.Running)
                 throw new InvalidOperationException("Only a committed Ready task in a running run can be dispatched.");
-            var decision = await ChooseAsync(connection, request, cancellationToken);
+            var decision = await ChooseAsync(connection, durable, request, cancellationToken);
             if (decision.Agent is null) return decision;
             var dispatch = command.Clone();
             var change = await SaveDispatchAsync(connection, durable, request, dispatch, decision.Agent.Id, executionPolicy, 0, 0, cancellationToken);
@@ -179,6 +180,8 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
                 : !policy.AutoRetry ? "Automatic re-placement is disabled by NoAutoRetry."
                 : platformRetries >= RetryPolicyEvaluator.PlatformRetryBudget ? "The two platform retries are exhausted."
                 : attempt == short.MaxValue ? "The attempt identity range is exhausted." : null;
+            var placementFailure = run.Snapshot.Placement is { SingleMachine: true, Machine: not null };
+            if (placementFailure) failure = "The named single-machine worker was lost.";
             if (failure is null)
             {
                 var retry = RetryPolicyEvaluator.Evaluate(policy!, new(FailureCategory.AgentLost, authorRetries,
@@ -188,9 +191,10 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             if (failure is not null)
             {
                 await RunStore.AppendAsync(connection, run,
-                    run.CreateEvent(EventEntity.Task, taskKey, (int)ExecutionStatus.Failed, now) with
+                    run.CreateEvent(EventEntity.Task, taskKey,
+                        (int)(placementFailure ? await PlacementOutcome() : ExecutionStatus.Failed), now) with
                         { Attempt = attempt, AttemptEndedAt = lostAt, AttemptStatus = ExecutionStatus.Failed,
-                            FailureCategory = FailureCategory.AgentLost }, cancellationToken);
+                            FailureCategory = placementFailure ? FailureCategory.Placement : FailureCategory.AgentLost }, cancellationToken);
                 await RunStore.ExecuteAsync(connection, """
                     UPDATE task_attempts SET error=$4,replacement_processed_at=$5
                     WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 AND attempt=$3
@@ -200,8 +204,23 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             }
             var request = previous! with { Attempt = attempt + 1, RePlacement = true,
                 PreviousAgentId = previousAgent, AutoRetry = true };
-            var decision = await ChooseAsync(connection, request, cancellationToken);
-            if (decision.Agent is null) return AgentLossDisposition.WaitingForMachine;
+            var decision = await ChooseAsync(connection, run, request, cancellationToken);
+            if (decision.Agent is null)
+            {
+                if (now < lostAt.AddMinutes(10)) return AgentLossDisposition.WaitingForMachine;
+                await RunStore.AppendAsync(connection, run,
+                    run.CreateEvent(EventEntity.Task, taskKey, (int)await PlacementOutcome(), now) with
+                    {
+                        Attempt = attempt, AttemptEndedAt = lostAt, AttemptStatus = ExecutionStatus.Failed,
+                        FailureCategory = FailureCategory.Placement
+                    }, cancellationToken);
+                await RunStore.ExecuteAsync(connection, """
+                    UPDATE task_attempts SET replacement_processed_at=$4
+                    WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 AND attempt=$3
+                    """, cancellationToken, runId, taskKey, attempt, now);
+                await transaction.CommitAsync(cancellationToken);
+                return AgentLossDisposition.Failed;
+            }
             var dispatch = original!.Clone();
             dispatch.Task.Attempt = checked((uint)request.Attempt);
             var deadline = now + TimeSpan.FromTicks(Math.Min(policy!.AttemptTimeout.Ticks,
@@ -223,61 +242,87 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             placement.Apply(decision);
             agents.NotifyDispatch(decision.Agent.Id);
             return AgentLossDisposition.Replaced;
+
+            async Task<ExecutionStatus> PlacementOutcome()
+            {
+                var nodes = await RunExecutionService.PlacementNodesAsync(connection, run, cancellationToken);
+                var key = taskKey.Split('/');
+                return nodes.Single(node => node.Key == key[0]).Tasks.Single(task => task.Key == key[1]).Failure == FailurePolicy.Soft
+                    ? ExecutionStatus.SoftFailed : ExecutionStatus.Failed;
+            }
         }
         finally { gate.Release(); }
     }
 
-    private async Task<PlacementDecision> ChooseAsync(NpgsqlConnection connection, PlacementRequest request,
+    private async Task<PlacementDecision> ChooseAsync(NpgsqlConnection connection, RunState run, PlacementRequest request,
         CancellationToken cancellationToken)
     {
         var capacity = agents.DispatchableAgents().Select(agent => agent.Capacity(timeProvider.GetUtcNow())).ToDictionary(agent => agent.Id);
-        await using var batch = new NpgsqlBatch(connection);
-        var metadata = new NpgsqlBatchCommand("SELECT id,labels,pool,status,last_heartbeat_at FROM agents WHERE id=ANY($1)");
-        metadata.Parameters.AddWithValue(capacity.Keys.ToArray());
-        batch.BatchCommands.Add(metadata);
-        batch.BatchCommands.Add(new NpgsqlBatchCommand("""
-            SELECT agent_id,run_id,node_key,epoch,expires_at,release_requested_at IS NULL
-            FROM reservations WHERE released_at IS NULL
-            """));
-        batch.BatchCommands.Add(new NpgsqlBatchCommand("""
-            SELECT agent_id,count(*),sum(required_ram_mb) FROM task_attempts WHERE status IN (2,3) GROUP BY agent_id
-            """));
-        await using var reader = await batch.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        var activeAgents = new HashSet<Guid>();
         {
-            var id = reader.GetGuid(0);
-            capacity[id] = capacity[id] with
+            await using var batch = new NpgsqlBatch(connection);
+            var metadata = new NpgsqlBatchCommand("SELECT id,labels,pool,status,last_heartbeat_at FROM agents WHERE id=ANY($1)");
+            metadata.Parameters.AddWithValue(capacity.Keys.ToArray());
+            batch.BatchCommands.Add(metadata);
+            batch.BatchCommands.Add(new NpgsqlBatchCommand("""
+                SELECT agent_id,run_id,node_key,epoch,expires_at,release_requested_at IS NULL
+                FROM reservations WHERE released_at IS NULL
+                """));
+            batch.BatchCommands.Add(new NpgsqlBatchCommand("""
+                SELECT agent_id,count(*),sum(required_ram_mb),bool_or(run_id=$1)
+                FROM task_attempts WHERE status IN (2,3) GROUP BY agent_id
+                """));
+            batch.BatchCommands[^1].Parameters.AddWithValue(request.RunId);
+            await using var reader = await batch.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
             {
-                Labels = AgentRegistry.ParseLabels(reader.GetFieldValue<string[]>(1)), Pool = reader.GetString(2),
-                Healthy = reader.GetInt16(3) == 0 &&
-                    reader.GetFieldValue<DateTimeOffset>(4) > timeProvider.GetUtcNow() - AgentRegistry.HeartbeatTimeout
-            };
+                var id = reader.GetGuid(0);
+                capacity[id] = capacity[id] with
+                {
+                    Labels = AgentRegistry.ParseLabels(reader.GetFieldValue<string[]>(1)), Pool = reader.GetString(2),
+                    Healthy = reader.GetInt16(3) == 0 &&
+                        reader.GetFieldValue<DateTimeOffset>(4) > timeProvider.GetUtcNow() - AgentRegistry.HeartbeatTimeout
+                };
+            }
+            var owned = new HashSet<Guid>();
+            await reader.NextResultAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var id = reader.GetGuid(0);
+                var runId = reader.GetGuid(1);
+                var node = reader.GetString(2);
+                if (runId == request.RunId && node == request.NodeKey) owned.Add(id);
+                if (capacity.TryGetValue(id, out var agent))
+                    capacity[id] = agent with
+                    {
+                        ReservedForRun = runId, ReservedForNode = node, ReservationEpoch = reader.GetInt64(3),
+                        Healthy = agent.Healthy && reader.GetFieldValue<DateTimeOffset>(4) > timeProvider.GetUtcNow() &&
+                            reader.GetBoolean(5)
+                    };
+            }
+            if (owned.Count > 0) capacity = capacity.Where(pair => owned.Contains(pair.Key)).ToDictionary();
+            await reader.NextResultAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (!reader.IsDBNull(0) && reader.GetBoolean(3)) activeAgents.Add(reader.GetGuid(0));
+                if (!reader.IsDBNull(0) && capacity.TryGetValue(reader.GetGuid(0), out var agent))
+                    capacity[agent.Id] = agent with
+                    {
+                        SlotsUsed = Math.Min(agent.MaxTasks, Math.Max(agent.SlotsUsed, checked((int)reader.GetInt64(1)))),
+                        AvailableRamMb = (long)Math.Max(0m, agent.AvailableRamMb - reader.GetFieldValue<decimal>(2))
+                    };
+            }
         }
-        var owned = new HashSet<Guid>();
-        await reader.NextResultAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        if (run.Snapshot.Placement is { SingleMachine: true } single)
         {
-            var id = reader.GetGuid(0);
-            var runId = reader.GetGuid(1);
-            var node = reader.GetString(2);
-            if (runId == request.RunId && node == request.NodeKey) owned.Add(id);
-            if (capacity.TryGetValue(id, out var agent))
-                capacity[id] = agent with
-                {
-                    ReservedForRun = runId, ReservedForNode = node, ReservationEpoch = reader.GetInt64(3),
-                    Healthy = agent.Healthy && reader.GetFieldValue<DateTimeOffset>(4) > timeProvider.GetUtcNow() &&
-                        reader.GetBoolean(5)
-                };
+            var nodes = await RunExecutionService.PlacementNodesAsync(connection, run, cancellationToken);
+            var pin = run.Snapshot.PlacementAgentId;
+            if (request.RePlacement && pin == request.PreviousAgentId && activeAgents.Count == 0) pin = null;
+            capacity = capacity.Where(pair => (pin is null || pair.Key == pin) &&
+                PlacementOverrideValidator.Matches(pair.Value, single, nodes)).ToDictionary();
+            // The durable run pin replaces per-process affinity state, including after leader recovery.
+            request = request with { Policy = new(Affinity: new(AffinityKind.None)) };
         }
-        if (owned.Count > 0) capacity = capacity.Where(pair => owned.Contains(pair.Key)).ToDictionary();
-        await reader.NextResultAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-            if (!reader.IsDBNull(0) && capacity.TryGetValue(reader.GetGuid(0), out var agent))
-                capacity[agent.Id] = agent with
-                {
-                    SlotsUsed = Math.Min(agent.MaxTasks, Math.Max(agent.SlotsUsed, checked((int)reader.GetInt64(1)))),
-                    AvailableRamMb = (long)Math.Max(0m, agent.AvailableRamMb - reader.GetFieldValue<decimal>(2))
-                };
         return placement.Propose(request, capacity.Values.ToArray());
     }
 
@@ -293,7 +338,7 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
         }
         var key = $"{request.NodeKey}/{request.TaskKey}";
         var change = run.CreateEvent(EventEntity.Task, key, (int)ExecutionStatus.Dispatched, timeProvider.GetUtcNow()) with
-            { Attempt = request.Attempt };
+            { Attempt = request.Attempt, AgentId = agentId };
         await RunStore.AppendAsync(connection, run, change, cancellationToken);
         var metric = run.Snapshot.Metrics!.Tasks[key].Attempts[^1];
         await RunStore.ExecuteAsync(connection, """

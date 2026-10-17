@@ -20,4 +20,8 @@ public sealed record RunEvent(Guid RunId, long Sequence, DateTimeOffset At, Even
     public FailureCategory? FailureCategory { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? FailureReason { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? WaitingReason { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? AgentId { get; init; }
 }

@@ -31,6 +31,22 @@ function RunDetail() {
       {run ? (
         <>
           <p className="break-words">{run.workflowId}</p>
+          {run.placement?.singleMachine ? (
+            <p
+              className="w-fit rounded border px-2 py-1 text-sm"
+              aria-label="Run placement override"
+            >
+              Single machine: {run.placement.machine ?? "auto-picked"}
+              {run.placementAgentId
+                ? ` (${run.placementAgentId})`
+                : " (waiting for first dispatch)"}
+            </p>
+          ) : null}
+          {Object.entries(run.taskWaitReasons ?? {}).map(([task, reason]) => (
+            <p key={task} role="status" className="break-all">
+              {task}: {reason} - waiting for eligible machine capacity.
+            </p>
+          ))}
           <QueuedBanner
             key={run.runId}
             runId={run.runId}
@@ -48,6 +64,7 @@ function RunDetail() {
             runId={run.runId}
             versionId={run.versionId}
             status={run.status}
+            placement={run.placement}
             live={live.status === "live"}
           />
           <RunLineage run={run} />

@@ -83,7 +83,7 @@ public static class SelectorValidator
         (selector.Os is not null || selector.Pool is not null || !selector.Labels.IsEmpty ||
             !selector.Machines.IsEmpty || !selector.MachineIds.IsEmpty || selector.Count is not null);
 
-    private static ImmutableArray<NodeDefinition> EffectiveNodes(WorkflowManifest manifest)
+    public static ImmutableArray<NodeDefinition> EffectiveNodes(WorkflowManifest manifest)
     {
         ArgumentNullException.ThrowIfNull(manifest);
         return manifest.Nodes.Select(node =>
@@ -93,7 +93,7 @@ public static class SelectorValidator
                 node.Tasks.Select(task => new TaskDefinition(task.Key, task.Failure, task.Policy,
                     PlacementPolicy.Inherit(placement, task.Placement), task.HttpOperation, task.Action)).ToImmutableArray(),
                 node.Mode, node.MaxParallel, node.Failure, node.Inputs, node.Timeout,
-                whenUnavailable: node.WhenUnavailable);
+                node.Placement?.Selector?.Count is not null ? node.Placement : null, node.WhenUnavailable);
         }).ToImmutableArray();
     }
 }

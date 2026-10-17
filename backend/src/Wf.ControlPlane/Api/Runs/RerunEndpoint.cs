@@ -25,7 +25,13 @@ public static class RerunEndpoint
 {
     private const long MaximumRequestBytes = 64 * 1024;
 
-    internal static void MapRerunEndpoint(this IEndpointRouteBuilder endpoints) =>
+    internal static void MapRerunEndpoint(this IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapPost("/api/v1/runs/{id}/placement-options", PlacementOptions).RequireAuthorization()
+            .Accepts<RerunRunRequest>("application/json").Produces<PlacementOptionsResponse>()
+            .ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404)
+            .ProducesProblem(409).ProducesProblem(413).ProducesProblem(415).ProducesProblem(500).ProducesProblem(503)
+            .AddEndpointFilter(Authorize);
         endpoints.MapPost("/api/v1/runs/{id}/rerun", Accept).RequireAuthorization()
             .Accepts<RerunRunRequest>("application/json").Produces<TriggerRunResponse>(202)
             .ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404)
@@ -48,6 +54,7 @@ public static class RerunEndpoint
             })
             .AddEndpointFilter(Authorize)
             .AddEndpointFilter<IdempotencyFilter>();
+    }
 
     private static async ValueTask<object?> Authorize(EndpointFilterInvocationContext invocation, EndpointFilterDelegate next)
     {
@@ -56,7 +63,8 @@ public static class RerunEndpoint
         if (context.Request.RouteValues["id"] is not string id ||
             !Guid.TryParseExact(id, "D", out var parent) || parent.Version != 7 || parent.ToString("D") != id ||
             context.Request.QueryString.HasValue ||
-            context.Features.Get<IHttpRequestFeature>()?.RawTarget?.Split('?')[0] != $"/api/v1/runs/{id}/rerun")
+            context.Features.Get<IHttpRequestFeature>()?.RawTarget?.Split('?')[0] is not { } path ||
+            path != $"/api/v1/runs/{id}/rerun" && path != $"/api/v1/runs/{id}/placement-options")
             return Invalid("$.id", "Use one exact canonical UUIDv7 run identity with no query parameters.");
         if (!(await context.RequestServices.GetRequiredService<IAuthorizationService>().AuthorizeAsync(context.User,
             new TeamResource(TeamResourceKind.Run, id, context.RequestAborted),
@@ -74,9 +82,11 @@ public static class RerunEndpoint
         {
             request = await context.Request.ReadFromJsonAsync(RunJsonContext.Default.RerunRunRequest, context.RequestAborted);
         }
-        catch (JsonException) { return Invalid("$", "Supply an object with only optional fromNodes."); }
+        catch (JsonException) { return Invalid("$", "Supply an object with only optional fromNodes and placement."); }
         catch (BadHttpRequestException error) when (error.StatusCode == 413) { return TooLarge(); }
         if (request is null) return Invalid("$", "Supply a rerun request object.");
+        if (PlacementOverrideValidator.Invalid(request.Placement) is { } invalidPlacement)
+            return Invalid("$.placement", invalidPlacement);
         if (request.FromNodes is { } nodes)
         {
             if (nodes.IsDefaultOrEmpty || nodes.Length > 10_000 ||
@@ -87,12 +97,18 @@ public static class RerunEndpoint
         }
         context.Features.Set(new AuthorizedRerun(parent, request, actor));
         context.Features.Set(new IdempotentRunRequest(actor, JsonSerializer.SerializeToElement(
-            new RerunFingerprint(parent, request.FromNodes), RunJsonContext.Default.RerunFingerprint)));
+            new RerunFingerprint(parent, request.FromNodes, request.Placement), RunJsonContext.Default.RerunFingerprint)));
         return await next(invocation);
     }
 
-    private static async Task<IResult> Accept(HttpContext context, string id, NpgsqlDataSource source, CommandInbox inbox,
-        TimeProvider time, ILoggerFactory logs)
+    private static Task<IResult> Accept(HttpContext context, string id, NpgsqlDataSource source, CommandInbox inbox,
+        TimeProvider time, ILoggerFactory logs) => Handle(context, id, source, inbox, time, logs, false);
+
+    private static Task<IResult> PlacementOptions(HttpContext context, string id, NpgsqlDataSource source, CommandInbox inbox,
+        TimeProvider time, ILoggerFactory logs) => Handle(context, id, source, inbox, time, logs, true);
+
+    private static async Task<IResult> Handle(HttpContext context, string id, NpgsqlDataSource source, CommandInbox inbox,
+        TimeProvider time, ILoggerFactory logs, bool optionsOnly)
     {
         var authorized = context.Features.Get<AuthorizedRerun>()
             ?? throw new InvalidOperationException("Rerun acceptance requires authorization.");
@@ -151,13 +167,23 @@ public static class RerunEndpoint
             var plan = RerunPlanner.Plan(runId, new(version, snapshot, outputs), selected.Manifest.Nodes,
                 authorized.Request.FromNodes is { } fromNodes ? fromNodes : null);
             var variables = VariableBinder.Bind(selected.Manifest.Variables, snapshot.Variables);
+            if (optionsOnly)
+                return await PlacementOverrideValidator.OptionsAsync(connection, transaction, selected.Manifest,
+                    variables, now, token);
             var selectors = await MachineSelectorInventory.ValidateAsync(connection, transaction,
                 selected.Manifest with { Nodes = selected.Manifest.Nodes.Where(node =>
                     plan.Snapshot.Nodes[node.Key] == ExecutionStatus.Pending).ToImmutableArray() }, variables, token);
             if (!selectors.IsEmpty)
                 return Results.Problem(statusCode: 400, title: "Run selector validation failed",
                     extensions: new Dictionary<string, object?> { ["errors"] = selectors });
-            var command = new TriggerRunCommand(plan.Snapshot, workflow, version, now.Add(selected.Manifest.RunTimeout),
+            var placement = authorized.Request.Placement ?? snapshot.Placement;
+            var placementErrors = await PlacementOverrideValidator.ValidateAsync(connection, transaction,
+                selected.Manifest, variables, placement, now, token);
+            if (!placementErrors.IsEmpty)
+                return Results.Problem(statusCode: 400, title: "Run placement validation failed",
+                    extensions: new Dictionary<string, object?> { ["errors"] = placementErrors });
+            var command = new TriggerRunCommand(plan.Snapshot with { Placement = placement, PlacementAgentId = null },
+                workflow, version, now.Add(selected.Manifest.RunTimeout),
                 series, plan.ParentRunId, plan.ReusedNodes);
             await inbox.RerunAsync(command, authorized.Actor.ToString("D"), transaction, token);
             await using (var audit = new NpgsqlCommand("""

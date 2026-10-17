@@ -107,6 +107,27 @@ const ready = async (store: RunStore) =>
   waitFor(() => expect(store.getSnapshot().status).toBe("live"))
 
 describe("ordered authoritative run recovery", () => {
+  it("hydrates durable placement waits, applies a same-state Ready reason and clears it on the pinned dispatch", async () => {
+    const f = fixture("connecting")
+    f.reads.snapshot.mockResolvedValueOnce({
+      ...snapshot,
+      placement: { singleMachine: true },
+      taskWaitReasons: {},
+      tasks: { "build/task": 1 },
+    })
+    f.emit({ status: "live" })
+    await ready(f.store)
+    f.emitEvents({ ...change(1), state: 1, waitingReason: "WaitingForMachine" })
+    expect(f.store.getSnapshot().run?.taskWaitReasons).toEqual({
+      "build/task": "WaitingForMachine",
+    })
+    const agentId = "019ed132-2f44-7000-8000-000000000003"
+    f.emitEvents({ ...change(2), state: 2, agentId })
+    expect(f.store.getSnapshot().run?.taskWaitReasons).toEqual({})
+    expect(f.store.getSnapshot().run?.placementAgentId).toBe(agentId)
+    f.stop()
+  })
+
   it("preserves immutable parent and reused-source identities through live deltas and reconnect tails", async () => {
     const parent = "019ed132-2f44-7000-8000-000000000003"
     const f = fixture("connecting")

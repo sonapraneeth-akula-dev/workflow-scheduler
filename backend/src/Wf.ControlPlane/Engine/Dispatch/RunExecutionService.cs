@@ -220,10 +220,17 @@ public sealed class RunExecutionService(NpgsqlDataSource source, RunRecovery rec
                     throw new InvalidDataException("A dispatchable task has no durable queue timestamp.");
                 if (decision.Agent is null && queuedAt <= now.AddMinutes(-10))
                 {
-                    await Emit(EventEntity.Task, key, (int)ExecutionStatus.Failed, FailureCategory.Placement);
+                    await Emit(EventEntity.Task, key,
+                        (int)(task.Failure == FailurePolicy.Soft ? ExecutionStatus.SoftFailed : ExecutionStatus.Failed),
+                        FailureCategory.Placement);
                     return null;
                 }
                 if (decision.Agent is not null) return decision;
+                if (run.Snapshot.Tasks[key] == ExecutionStatus.Ready &&
+                    !run.Snapshot.TaskWaitReasons.ContainsKey(key))
+                    await RunStore.AppendAsync(connection, run,
+                        new RunEvent(run.Snapshot.RunId, checked(run.Snapshot.LastSequence + 1), now,
+                            EventEntity.Task, key, (int)ExecutionStatus.Ready) { WaitingReason = "WaitingForMachine" }, token);
                 if (node.Mode == NodeExecutionMode.Series) break;
             }
         }
@@ -325,10 +332,13 @@ public sealed class RunExecutionService(NpgsqlDataSource source, RunRecovery rec
                 .ToHashSet(StringComparer.Ordinal).SetEquals(run.Snapshot.Tasks.Keys))
             throw new InvalidDataException("The immutable workflow definition does not match its run.");
         var variables = VariableBinder.Bind(manifest.Variables, run.Snapshot.Variables);
-        return new(manifest, PlacementResolver.Resolve(manifest.Nodes, variables),
+        return new(manifest, PlacementResolver.Resolve(SelectorValidator.EffectiveNodes(manifest), variables),
             new(BlobKind.Packages, Convert.ToHexString(reader.GetFieldValue<byte[]>(4)), reader.GetInt64(5)),
             reader.GetFieldValue<DateTimeOffset>(1));
     }
+
+    internal static async Task<ImmutableArray<NodeDefinition>> PlacementNodesAsync(NpgsqlConnection connection,
+        RunState run, CancellationToken token) => (await ReadAsync(connection, run, token)).Nodes;
 
     private static async Task<StoredAttempt> LastAttemptAsync(NpgsqlConnection connection, Guid runId, string key, CancellationToken token)
     {

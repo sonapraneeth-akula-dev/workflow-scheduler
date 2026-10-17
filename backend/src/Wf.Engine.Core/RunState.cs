@@ -3,6 +3,7 @@ using System.Text.Json;
 using Wf.Contracts;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
+using Wf.Contracts.Runs;
 using Wf.Engine.Core.Metrics;
 using Wf.Engine.Core.StateMachine;
 
@@ -15,6 +16,10 @@ public sealed record RunSnapshot(Guid RunId, RunStatus Status, long LastSequence
 {
     public RunMetrics? Metrics { get; init; }
     public string? FailureReason { get; init; }
+    public RunPlacement? Placement { get; init; }
+    public Guid? PlacementAgentId { get; init; }
+    public ImmutableDictionary<string, string> TaskWaitReasons { get; init; } =
+        ImmutableDictionary<string, string>.Empty;
 }
 
 public sealed class RunState
@@ -50,6 +55,14 @@ public sealed class RunState
         ArgumentNullException.ThrowIfNull(snapshot.Nodes);
         ArgumentNullException.ThrowIfNull(snapshot.Tasks);
         ArgumentNullException.ThrowIfNull(snapshot.Variables);
+        ArgumentNullException.ThrowIfNull(snapshot.TaskWaitReasons);
+        if (snapshot.Placement is { } placement &&
+            (placement.Machine is { } machine && (!placement.SingleMachine || string.IsNullOrWhiteSpace(machine) ||
+                machine.Length > 200 || machine.Any(char.IsControl))) ||
+            snapshot.PlacementAgentId is { } pinned && (pinned == Guid.Empty || snapshot.Placement?.SingleMachine != true) ||
+            snapshot.TaskWaitReasons.Any(pair => pair.Value != "WaitingForMachine" ||
+                !snapshot.Tasks.TryGetValue(pair.Key, out var state) || state != ExecutionStatus.Ready))
+            throw new ArgumentException("Run snapshot contains invalid placement data.", nameof(snapshot));
         if (snapshot.FailureReason is { } failureReason &&
             (snapshot.Status != RunStatus.Failed || string.IsNullOrWhiteSpace(failureReason) || failureReason.Length > 500))
             throw new ArgumentException("A failure reason requires a failed run and 1-500 nonblank characters.", nameof(snapshot));
@@ -121,7 +134,13 @@ public sealed class RunState
             EventEntity.Node => Snapshot with
                 { Nodes = Snapshot.Nodes.SetItem(@event.Key!, (ExecutionStatus)@event.State), LastSequence = @event.Sequence },
             EventEntity.Task => Snapshot with
-                { Tasks = Snapshot.Tasks.SetItem(@event.Key!, (ExecutionStatus)@event.State), LastSequence = @event.Sequence },
+            {
+                Tasks = Snapshot.Tasks.SetItem(@event.Key!, (ExecutionStatus)@event.State), LastSequence = @event.Sequence,
+                TaskWaitReasons = @event.WaitingReason is { } reason
+                    ? Snapshot.TaskWaitReasons.SetItem(@event.Key!, reason) : Snapshot.TaskWaitReasons.Remove(@event.Key!),
+                PlacementAgentId = Snapshot.Placement?.SingleMachine == true && @event.AgentId is { } agent
+                    ? agent : Snapshot.PlacementAgentId
+            },
             _ => throw new ArgumentOutOfRangeException(nameof(@event))
         };
         Snapshot = Snapshot with { Metrics = metrics };
@@ -134,6 +153,11 @@ public sealed class RunState
             Reject($"Run '{Snapshot.RunId}' expected event sequence {Snapshot.LastSequence + 1} for the same run.");
         if (@event.At.Offset != TimeSpan.Zero)
             Reject("Event timestamps must use UTC.");
+        if (@event.WaitingReason is not null && (@event.WaitingReason != "WaitingForMachine" ||
+                @event.Entity != EventEntity.Task || (ExecutionStatus)@event.State != ExecutionStatus.Ready) ||
+            @event.AgentId is { } agent && (agent == Guid.Empty || @event.Entity != EventEntity.Task ||
+                (ExecutionStatus)@event.State != ExecutionStatus.Dispatched))
+            Reject("Placement metadata requires a waiting Ready task or a dispatched task with a nonempty agent ID.");
         if (@event.FailureReason is { } reason &&
             (string.IsNullOrWhiteSpace(reason) || reason.Length > 500 ||
              @event.Entity != EventEntity.Run || (RunStatus)@event.State != RunStatus.Failed))
@@ -188,7 +212,10 @@ public sealed class RunState
                 var entities = @event.Entity == EventEntity.Node ? Snapshot.Nodes : Snapshot.Tasks;
                 if (@event.Key is null || !entities.ContainsKey(@event.Key))
                     Reject($"Unknown {@event.Entity} key '{@event.Key}'.");
-                TransitionTable.Require(entities[@event.Key!], (ExecutionStatus)@event.State, log);
+                if (!(@event.Entity == EventEntity.Task && @event.WaitingReason is not null &&
+                    entities[@event.Key!] == ExecutionStatus.Ready &&
+                    !Snapshot.TaskWaitReasons.ContainsKey(@event.Key!)))
+                    TransitionTable.Require(entities[@event.Key!], (ExecutionStatus)@event.State, log);
                 break;
             default:
                 Reject($"Unknown event entity '{@event.Entity}'.");

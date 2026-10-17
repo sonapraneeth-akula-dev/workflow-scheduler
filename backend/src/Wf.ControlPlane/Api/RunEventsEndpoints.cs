@@ -208,7 +208,11 @@ public static class RunEventsEndpoints
             (int)restored.Status, restored.LastSequence,
             restored.Nodes.ToDictionary(pair => pair.Key, pair => (int)pair.Value),
             restored.Tasks.ToDictionary(pair => pair.Key, pair => (int)pair.Value), abort,
-            restored.EndedAt?.ToString("O", CultureInfo.InvariantCulture), header.ParentRunId, reused),
+            restored.EndedAt?.ToString("O", CultureInfo.InvariantCulture), header.ParentRunId, reused)
+            {
+                Placement = restored.Placement, PlacementAgentId = restored.PlacementAgentId,
+                TaskWaitReasons = restored.TaskWaitReasons
+            },
             RunEventsJsonContext.Default.RunSnapshotResponse);
     }
 

@@ -24,6 +24,24 @@ export const runIdSchema = z
     /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
   )
 
+export const runPlacementSchema = z
+  .object({
+    singleMachine: z.boolean(),
+    machine: z
+      .string()
+      .min(1)
+      .max(200)
+      .regex(/^[^\p{Cc}]+$/u)
+      .refine((value) => value.trim().length > 0)
+      .nullable()
+      .optional(),
+  })
+  .refine(
+    (value) => value.singleMachine || !value.machine,
+    "A named machine requires single-machine placement."
+  )
+export type RunPlacement = z.infer<typeof runPlacementSchema>
+
 const runSnapshotSchema = z
   .object({
     runId: z.uuid(),
@@ -38,6 +56,11 @@ const runSnapshotSchema = z
     endedAt: z.iso.datetime({ offset: true }).nullable(),
     parentRunId: runIdSchema.nullable(),
     reusedNodes: z.record(z.string().min(1), runIdSchema),
+    placement: runPlacementSchema.nullable().optional(),
+    placementAgentId: z.uuid().nullable().optional(),
+    taskWaitReasons: z
+      .record(z.string(), z.literal("WaitingForMachine"))
+      .optional(),
   })
   .superRefine((snapshot, context) => {
     if (
@@ -63,6 +86,16 @@ const runSnapshotSchema = z
       )
     )
       context.addIssue({ code: "custom", message: "Invalid run lineage." })
+    if (
+      Object.keys(snapshot.taskWaitReasons ?? {}).some(
+        (key) => snapshot.tasks[key] !== 1
+      ) ||
+      (snapshot.placementAgentId && !snapshot.placement?.singleMachine)
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Invalid run placement state.",
+      })
   })
 const runEventsSchema = z.object({
   runId: z.uuid(),

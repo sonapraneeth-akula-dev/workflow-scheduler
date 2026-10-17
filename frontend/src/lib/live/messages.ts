@@ -17,6 +17,8 @@ export const liveEventSchema = z.object({
   key: z.string().min(1).nullable(),
   state: z.int().nonnegative(),
   abort: liveAbortSchema.nullable(),
+  waitingReason: z.literal("WaitingForMachine").nullable().optional(),
+  agentId: z.uuid().nullable().optional(),
 })
 
 const runDelta = z

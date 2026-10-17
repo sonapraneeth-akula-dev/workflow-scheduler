@@ -101,7 +101,8 @@ public static class RunMetricsRecorder
     {
         var status = (ExecutionStatus)change.State;
         if (status == ExecutionStatus.Ready)
-            return metric with { QueuedAt = change.At, WaitingSince = change.At };
+            return change.WaitingReason is not null && metric.WaitingSince is not null ? metric :
+                metric with { QueuedAt = change.At, WaitingSince = change.At };
         if (status == ExecutionStatus.Dispatched)
         {
             var queuedAt = metric.WaitingSince ?? change.At;

@@ -23,12 +23,15 @@ public sealed record LiveEvent(
     [property: Key("entity")] int Entity,
     [property: Key("key")] string? Key,
     [property: Key("state")] int State,
-    [property: Key("abort")] LiveAbort? Abort)
+    [property: Key("abort")] LiveAbort? Abort,
+    [property: Key("waitingReason")] string? WaitingReason = null,
+    [property: Key("agentId")] Guid? AgentId = null)
 {
     public static LiveEvent From(RunEvent change) => new(change.Sequence,
         change.At.ToString("O", CultureInfo.InvariantCulture), (int)change.Entity, change.Key, change.State,
         change.Abort is not { } abort ? null : new(abort.By, abort.ByName,
-            abort.At.ToString("O", CultureInfo.InvariantCulture), abort.Reason, abort.Source.ToString()));
+            abort.At.ToString("O", CultureInfo.InvariantCulture), abort.Reason, abort.Source.ToString()),
+        change.WaitingReason, change.AgentId);
 }
 
 [MessagePackObject]

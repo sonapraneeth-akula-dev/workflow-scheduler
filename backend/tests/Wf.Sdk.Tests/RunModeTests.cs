@@ -9,6 +9,34 @@ public sealed class RunModeTests
 {
     private CancellationToken Token => TestContext.Current.CancellationToken;
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("worker")]
+    public async Task Single_machine_engine_submission_preserves_override_without_local_execution(string? machine)
+    {
+        using var client = new HttpClient(new Handler(async (request, token) =>
+        {
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
+            var placement = body.RootElement.GetProperty("placement");
+            Assert.True(placement.GetProperty("singleMachine").GetBoolean());
+            Assert.Equal(machine, placement.GetProperty("machine").GetString());
+            return Accepted(Guid.CreateVersion7());
+        }));
+        using var output = new StringWriter();
+        string[] arguments = ["--engine", "http://localhost", "--single-machine", "--var", "amount=7"];
+        if (machine is not null) arguments = [.. arguments, "--machine", machine];
+        Assert.Equal(0, await RunModeDispatcher.RunAsync(CreateWorkflow(), arguments, output, client, Token));
+    }
+
+    [Theory]
+    [InlineData("--single-machine")]
+    [InlineData("--machine worker")]
+    [InlineData("--describe --single-machine")]
+    [InlineData("--engine http://localhost --single-machine --single-machine")]
+    public async Task Single_machine_options_reject_ambiguous_or_nonengine_modes(string arguments) =>
+        await Assert.ThrowsAsync<ArgumentException>(() => RunModeDispatcher.RunAsync(CreateWorkflow(),
+            arguments.Split(' '), cancellationToken: Token));
+
     [Fact]
     public async Task Describe_writes_exact_manifest_without_binding_required_values_or_executing_tasks()
     {

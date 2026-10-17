@@ -4,6 +4,8 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Manifest;
+using Wf.Contracts.Runs;
+using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Leadership;
 using Wf.ControlPlane.Engine.Recovery;
@@ -23,7 +25,14 @@ public sealed partial class RegistrationTests
             "WF_FRONTEND_ROOT must identify the repository frontend directory.");
         await using var server = await Server.Start(database.DataSource, live: true);
         var viewer = Guid.NewGuid();
-        var seed = await SeedRerun(server, viewerGroup: viewer);
+        var seed = await SeedRerun(server, viewerGroup: viewer, placement: new(true));
+        var machine = "browser-" + Guid.NewGuid().ToString("N");
+        using var registry = new AgentRegistry(database.DataSource, server.Clock);
+        await registry.RegisterAsync(new()
+        {
+            Id = Guid.NewGuid().ToString("D"), Name = machine, Os = "windows", Arch = "x64", Cores = 4,
+            RamMb = 8192, MaxTasks = 4, Pool = "default", Version = "1", ProtocolVersion = 1
+        }, TestContext.Current.CancellationToken);
         var manifest = seed.Request.Manifest!.Value.Deserialize(WorkflowManifestJsonContext.Default.WorkflowManifest)!;
         using var newer = await server.Post(seed.Request with
         {
@@ -44,6 +53,7 @@ public sealed partial class RegistrationTests
         start.Environment["WF_RERUN_FIXTURE"] = JsonSerializer.Serialize(new
         {
             workflowId = seed.Request.WorkflowId, source = seed.Snapshot.RunId, version = seed.Version,
+            placementMachine = machine,
             operatorToken = RerunOperator(server, seed.Group),
             viewerToken = server.Token("", "user", "api.read", groups: [viewer])
         });
@@ -86,6 +96,7 @@ public sealed partial class RegistrationTests
             {
                 var state = await store.LoadAsync(child, TestContext.Current.CancellationToken);
                 Assert.Equal("ppe", state.Snapshot.Variables["environment"].GetString());
+                Assert.Equal(new(true, machine), state.Snapshot.Placement);
                 Assert.Equal("rerun-original", state.Snapshot.Metadata.Values["area"]);
                 Assert.Equal(seed.Version, await Value("SELECT version_id FROM runs WHERE id=$1", child));
                 Assert.Equal(0L, await Value("SELECT count(*) FROM task_attempts WHERE run_id=$1", child));

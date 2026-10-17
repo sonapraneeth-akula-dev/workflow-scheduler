@@ -352,7 +352,8 @@ public sealed partial class RegistrationTests
         Assert.Empty(server.Failures);
     }
 
-    private async Task<RerunSeed> SeedRerun(Server server, bool terminal = true, Guid? viewerGroup = null)
+    private async Task<RerunSeed> SeedRerun(Server server, bool terminal = true, Guid? viewerGroup = null,
+        RunPlacement? placement = null)
     {
         var request = await Request(server);
         var workflow = Workflow.Define(request.WorkflowId!, "1.0.0", w => w.Type("release").Metadata("area", "rerun-original")
@@ -390,6 +391,7 @@ public sealed partial class RegistrationTests
             ? await new LocalEngine(workflow, variables, TextWriter.Null).RunAsync(TestContext.Current.CancellationToken)
                 .WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken) : null;
         var state = new RunState(result?.Snapshot.RunId ?? Guid.CreateVersion7(), workflow.Nodes, workflow.Metadata, Assert.Fail, variables);
+        state = RunState.Restore(state.Snapshot with { Placement = placement }, [], Assert.Fail);
         var store = new RunStore(database.DataSource, NullLogger<RunStore>.Instance);
         await store.CreateAsync(state, request.WorkflowId!, version, DateTimeOffset.UtcNow.AddHours(1), TestContext.Current.CancellationToken);
         if (result is not null)

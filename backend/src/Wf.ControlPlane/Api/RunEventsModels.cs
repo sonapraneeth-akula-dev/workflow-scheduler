@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json.Serialization;
 using Wf.ControlPlane.Live;
+using Wf.Contracts.Runs;
 
 namespace Wf.ControlPlane.Api;
 
@@ -8,7 +9,12 @@ public sealed record RunEventsPage(Guid RunId, long LastSeq, LiveEvent[] Events)
 
 public sealed record RunSnapshotResponse(Guid RunId, string WorkflowId, Guid VersionId, Guid? SeriesId,
     int Status, long LastSeq, IReadOnlyDictionary<string, int> Nodes, IReadOnlyDictionary<string, int> Tasks,
-    LiveAbort? Abort, string? EndedAt, Guid? ParentRunId, IReadOnlyDictionary<string, Guid> ReusedNodes);
+    LiveAbort? Abort, string? EndedAt, Guid? ParentRunId, IReadOnlyDictionary<string, Guid> ReusedNodes)
+{
+    public RunPlacement? Placement { get; init; }
+    public Guid? PlacementAgentId { get; init; }
+    public IReadOnlyDictionary<string, string> TaskWaitReasons { get; init; } = new Dictionary<string, string>();
+}
 
 public static class RunEventsQuery
 {

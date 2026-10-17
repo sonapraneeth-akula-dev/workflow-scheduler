@@ -4,6 +4,8 @@ import { Link } from "@tanstack/react-router"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { VariablesForm } from "@/components/VariablesForm"
 import { Button } from "@/components/ui/button"
+import type { RunPlacement } from "@/lib/live/runApi"
+import { PlacementFields } from "./PlacementFields"
 import { usePermissions } from "@/lib/auth/usePermissions"
 import { ApiError } from "@/lib/api/client"
 import {
@@ -123,6 +125,7 @@ function TriggerForm({
   canTrigger: boolean
 }) {
   const [draft, setDraft] = useState(() => variablesDraft(schema.variables))
+  const [placement, setPlacement] = useState<RunPlacement>()
   const [attempt, setAttempt] = useState<{
     request: TriggerRequest
     key: string
@@ -133,6 +136,7 @@ function TriggerForm({
     workflowId: schema.workflowId,
     version: schema.versionId,
     variables: validation.variables,
+    ...(placement ? { placement } : {}),
   }
   const tooLarge = triggerRequestBytes(request) > maximumTriggerBytes
   const mutation = useMutation({
@@ -209,6 +213,16 @@ function TriggerForm({
           setDraft(next)
           mutation.reset()
         }}
+      />
+      <PlacementFields
+        value={placement}
+        onChange={(value) => {
+          setPlacement(value)
+          mutation.reset()
+        }}
+        source={request}
+        disabled={!canTrigger || frozen}
+        valid={errors.size === 0}
       />
       {tooLarge ? (
         <p role="alert">

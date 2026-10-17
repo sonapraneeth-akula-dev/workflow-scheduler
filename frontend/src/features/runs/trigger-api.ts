@@ -3,6 +3,7 @@ import { ApiError, publicApi } from "@/lib/api/client"
 import type { components } from "@/lib/api/schema"
 import { jsonObjectSchema, parseJson } from "@/lib/json"
 import { triggerSchema } from "./variables"
+import { runPlacementSchema } from "@/lib/live/runApi"
 
 export async function getTriggerSchema(
   workflowId: string,
@@ -39,6 +40,7 @@ const requestSchema = z.object({
   workflowId: z.string().min(1),
   version: z.uuid(),
   variables: jsonObjectSchema,
+  placement: runPlacementSchema.optional(),
 })
 export type TriggerRequest = z.infer<typeof requestSchema>
 export const maximumTriggerBytes = 1_048_576

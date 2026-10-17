@@ -79,8 +79,11 @@ public sealed class RunEventsResyncTests(AuthorizationDatabase database) : IClas
         Assert.DoesNotContain("secret-sentinel", snapshot.GetRawText());
         Assert.Equal(JsonValueKind.Null, snapshot.GetProperty("parentRunId").ValueKind);
         Assert.Empty(snapshot.GetProperty("reusedNodes").EnumerateObject());
-        Assert.Equal(new[] { "abort", "endedAt", "lastSeq", "nodes", "parentRunId", "reusedNodes", "runId", "seriesId", "status", "tasks", "versionId", "workflowId" },
-            snapshot.EnumerateObject().Select(property => property.Name).Order());
+        Assert.Equal(JsonValueKind.Null, snapshot.GetProperty("placement").ValueKind);
+        Assert.Equal(JsonValueKind.Null, snapshot.GetProperty("placementAgentId").ValueKind);
+        Assert.Empty(snapshot.GetProperty("taskWaitReasons").EnumerateObject());
+        Assert.Equal(new[] { "abort", "endedAt", "lastSeq", "nodes", "parentRunId", "placement", "placementAgentId", "reusedNodes", "runId", "seriesId", "status", "taskWaitReasons", "tasks", "versionId", "workflowId" }.Order(StringComparer.Ordinal),
+            snapshot.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal));
         using var empty = await server.Get(Events(seed.Id, 5), server.Jwt(seed.Group));
         var emptyPage = await Json(empty);
         Assert.Equal(5, emptyPage.GetProperty("lastSeq").GetInt64());
