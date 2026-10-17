@@ -1,9 +1,24 @@
-import { useState, type FormEvent } from "react"
-import { useInfiniteQuery } from "@tanstack/react-query"
+import { useRef, useState, type FormEvent } from "react"
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { Button } from "@/components/ui/button"
-import { getVersions } from "./api"
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { ApiError } from "@/lib/api/client"
+import { usePermissions } from "@/lib/auth/usePermissions"
+import { activateVersion, getVersions } from "./api"
 import { VersionComparison } from "./VersionComparison"
 import { CloneDialog } from "./CloneDialog"
 
@@ -18,6 +33,38 @@ export function VersionsTab({
   const [from, setFrom] = useState<string>()
   const [to, setTo] = useState<string>()
   const [comparison, setComparison] = useState<{ from: string; to: string }>()
+  const [activation, setActivation] = useState<{
+    versionId: string
+    version: string
+  }>()
+  const activationTrigger = useRef<HTMLButtonElement>(null)
+  const refreshTrigger = useRef<HTMLButtonElement>(null)
+  const activationPending = useRef(false)
+  const client = useQueryClient()
+  const permissions = usePermissions({ scope: "type", id: `${team}/${type}` })
+  const canActivate = permissions.can("Admin")
+  const activate = useMutation({
+    retry: false,
+    mutationFn: (versionId: string) => {
+      if (!canActivate) throw new Error("Current Admin permission is required.")
+      return activateVersion(workflowId, versionId)
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({
+          queryKey: ["workflow-versions", workflowId],
+        }),
+        client.invalidateQueries({ queryKey: ["catalog", "team", team] }),
+      ])
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.status === 403)
+        await client.invalidateQueries({ queryKey: ["permissions"] })
+    },
+    onSettled: () => {
+      activationPending.current = false
+    },
+  })
   const query = useInfiniteQuery({
     queryKey: ["workflow-versions", workflowId],
     initialPageParam: null as string | null,
@@ -49,6 +96,7 @@ export function VersionsTab({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Heading className="text-2xl font-semibold">Versions</Heading>
         <Button
+          ref={refreshTrigger}
           variant="outline"
           disabled={query.isFetching}
           onClick={() => void query.refetch()}
@@ -66,6 +114,7 @@ export function VersionsTab({
       </p>
       {query.isPending ? <p role="status">Loading version history...</p> : null}
       {query.error ? <ErrorNotice error={query.error} /> : null}
+      {permissions.error ? <ErrorNotice error={permissions.error} /> : null}
       {duplicate ? (
         <ErrorNotice
           error={
@@ -155,6 +204,7 @@ export function VersionsTab({
                         "Commit / SDK",
                         "Change note",
                         "Scaffold",
+                        ...(canActivate ? ["Activation"] : []),
                       ].map((title) => (
                         <th key={title} scope="col" className="p-3">
                           {title}
@@ -213,6 +263,28 @@ export function VersionsTab({
                             <span>Pinned version above</span>
                           )}
                         </td>
+                        {canActivate ? (
+                          <td className="p-3">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={
+                                activate.isPending ||
+                                latestPage?.activeVersionId ===
+                                  version.versionId
+                              }
+                              aria-label={`Activate version ${version.version} (${version.versionId})`}
+                              onClick={(event) => {
+                                if (activationPending.current) return
+                                activationTrigger.current = event.currentTarget
+                                activate.reset()
+                                setActivation(version)
+                              }}
+                            >
+                              Activate
+                            </Button>
+                          </td>
+                        ) : null}
                       </tr>
                     ))}
                   </tbody>
@@ -240,6 +312,70 @@ export function VersionsTab({
           ) : null}
         </>
       ) : null}
+      <AlertDialog
+        open={activation !== undefined}
+        onOpenChange={(open) => {
+          if (!open && !activationPending.current) setActivation(undefined)
+        }}
+      >
+        <AlertDialogContent
+          className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            const trigger = activationTrigger.current
+            if (trigger?.isConnected && !trigger.disabled) trigger.focus()
+            else refreshTrigger.current?.focus()
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>Activate workflow version?</AlertDialogTitle>
+            <AlertDialogDescription>
+              New unpinned runs and schedules will use this version after the
+              active cache refreshes. Existing runs and pinned schedules keep
+              their versions. Latest registration, schedule configurations and
+              fire times stay unchanged. Revert code-defined configuration
+              through source control, not this action.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <p className="break-all">{workflowId}</p>
+          <p className="break-all">
+            Version {activation?.version} ({activation?.versionId})
+          </p>
+          {!canActivate ? (
+            <p role="status">
+              Current Admin permission is required. Checking or unavailable.
+            </p>
+          ) : null}
+          {permissions.error ? <ErrorNotice error={permissions.error} /> : null}
+          {activate.error ? <ErrorNotice error={activate.error} /> : null}
+          {activate.isSuccess ? (
+            <p role="status">Version activated. Existing runs remain pinned.</p>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={activate.isPending}>
+              {activate.isSuccess ? "Close" : "Cancel"}
+            </AlertDialogCancel>
+            <Button
+              disabled={
+                !canActivate || activate.isPending || activate.isSuccess
+              }
+              onClick={() => {
+                if (
+                  activation &&
+                  !activationPending.current &&
+                  !activate.isSuccess &&
+                  canActivate
+                ) {
+                  activationPending.current = true
+                  activate.mutate(activation.versionId)
+                }
+              }}
+            >
+              {activate.isPending ? "Activating..." : "Confirm activation"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   )
 }

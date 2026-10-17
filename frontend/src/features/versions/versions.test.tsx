@@ -3,7 +3,7 @@ import type { ReactNode } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { ApiError } from "@/lib/api/client"
+import { ApiError, getPermissions } from "@/lib/api/client"
 import { ReportRenderer } from "@/renderers/ReportRenderer"
 import { getVersionDiff, getVersions, type VersionDiff } from "./api"
 import { VersionsTab } from "./VersionsTab"
@@ -12,6 +12,10 @@ vi.mock("./api", async (original) => ({
   ...(await original<typeof import("./api")>()),
   getVersions: vi.fn(),
   getVersionDiff: vi.fn(),
+}))
+vi.mock("@/lib/api/client", async (original) => ({
+  ...(await original<typeof import("@/lib/api/client")>()),
+  getPermissions: vi.fn(),
 }))
 vi.mock("@/renderers/ReportRenderer", () => ({
   ReportRenderer: vi.fn(({ title }: { title: string }) => (
@@ -117,6 +121,14 @@ describe("version history, comparison and read-only states", () => {
   beforeEach(() => {
     vi.resetAllMocks()
     vi.stubGlobal("Blob", NodeBlob)
+    vi.mocked(getPermissions).mockImplementation(async ({ scope, id }) => ({
+      scope,
+      id,
+      viewer: true,
+      author: false,
+      operator: false,
+      admin: false,
+    }))
     vi.mocked(getVersions).mockResolvedValue(page)
     vi.mocked(getVersionDiff).mockResolvedValue(diff)
   })

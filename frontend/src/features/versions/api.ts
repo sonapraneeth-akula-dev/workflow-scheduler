@@ -204,6 +204,28 @@ function path(identity: string) {
   return { team, type, workflow }
 }
 
+export async function activateVersion(identity: string, version: string) {
+  versionId.parse(version)
+  const result = await publicApi.POST(
+    "/api/v1/workflows/{team}/{type}/{workflow}/versions/{version}/activate",
+    { params: { path: { ...path(identity), version } }, redirect: "error" }
+  )
+  if (!result.response.ok) throw new ApiError(result.response, result.error)
+  const activation = z
+    .object({
+      workflowId,
+      activeVersionId: versionId,
+      latestVersionId: versionId.nullable(),
+    })
+    .parse(result.data)
+  if (
+    activation.workflowId !== identity ||
+    activation.activeVersionId !== version
+  )
+    throw new Error("The API activated a different workflow version.")
+  return activation
+}
+
 export async function getVersions(
   identity: string,
   cursor: string | null,

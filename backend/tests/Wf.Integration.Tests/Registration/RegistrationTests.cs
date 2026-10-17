@@ -30,6 +30,7 @@ using Wf.ControlPlane.Data;
 using Wf.ControlPlane.Engine.Recovery;
 using Wf.ControlPlane.Engine.Registry;
 using Wf.ControlPlane.Registration;
+using Wf.ControlPlane.Registry;
 using Wf.ControlPlane.Storage;
 using Wf.Integration.Tests.Agents;
 using Wf.Sdk;
@@ -540,6 +541,7 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
         private const string Issuer = $"https://login.microsoftonline.com/{Tenant}/v2.0";
         public static readonly Guid Actor = Guid.Parse("44cd65e3-f210-4201-b5a8-74321260704a");
         public string Root => root;
+        public string Api => client.BaseAddress!.AbsoluteUri;
         public Clock Clock => clock;
         public IBlobStore Blobs => app.Services.GetRequiredService<IBlobStore>();
         public ActiveVersionCache Versions => app.Services.GetRequiredService<ActiveVersionCache>();
@@ -609,6 +611,9 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
                 app.MapSchedulesEndpoints();
                 app.MapSeriesFiresEndpoints();
                 app.MapVersionsEndpoints();
+                app.MapPermissionsEndpoints();
+                app.MapRegistryEndpoints();
+                app.MapCatalogEndpoints();
             }
             if (userSchedules)
             {

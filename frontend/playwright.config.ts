@@ -3,7 +3,9 @@ import { defineConfig, devices } from "@playwright/test"
 const catalogueOrigin = process.env.WF_CATALOG_ORIGIN
 const timelineOrigin = process.env.WF_TIMELINE_ORIGIN
 const reportOrigin = process.env.WF_REPORT_ORIGIN
+const activationOrigin = process.env.WF_ACTIVATION_ORIGIN
 const fixtureOrigin =
+  activationOrigin ??
   catalogueOrigin ??
   process.env.WF_GRAPH_ORIGIN ??
   timelineOrigin ??
@@ -12,6 +14,7 @@ const fixtureOrigin =
 export default defineConfig({
   testDir: "./e2e",
   testIgnore: [
+    ...(!activationOrigin ? ["**/version-activation.spec.ts"] : []),
     ...(!fixtureOrigin
       ? ["**/catalog-isolation.spec.ts", "**/run-graph*.spec.ts"]
       : []),
