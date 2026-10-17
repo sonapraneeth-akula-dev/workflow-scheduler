@@ -17,7 +17,9 @@ using Npgsql;
 using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Auth;
 using Wf.ControlPlane.Engine.Dispatch;
+using Wf.ControlPlane.Engine.Registry;
 using Wf.ControlPlane.Live;
+using Wf.ControlPlane.Registry;
 
 namespace Wf.Integration.Tests.Execution;
 
@@ -46,6 +48,9 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
         if (browser)
         {
             builder.Services.AddWorkflowLive();
+            builder.Configuration["AzureAd:SpaClientId"] = "60d24b19-f65a-4ed4-96cc-9174bfcacabc";
+            builder.Services.AddUserSchedules(builder.Configuration);
+            builder.Services.AddSingleton<ActiveVersionCache>();
         }
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
@@ -60,6 +65,7 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
                 options.SerializerOptions.TypeInfoResolverChain.Insert(0, VersionsJsonContext.Default);
                 options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunHistoryJsonContext.Default);
                 options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunQueryJsonContext.Default);
+                options.SerializerOptions.TypeInfoResolverChain.Insert(0, UserScheduleJson.Default);
             }
         });
         var metadata = new OpenIdConnectConfiguration { Issuer = Issuer };
@@ -90,6 +96,9 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
                 app.MapPermissionsEndpoints();
                 app.MapRunHistoryEndpoints();
                 app.MapRunQueryEndpoints();
+                app.MapRegistryEndpoints();
+                app.MapCatalogEndpoints();
+                app.MapUserSchedulesEndpoints();
                 app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
             }
             app.MapWorkflowOpenApi();

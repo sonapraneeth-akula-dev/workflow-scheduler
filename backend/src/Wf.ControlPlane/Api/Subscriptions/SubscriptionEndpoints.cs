@@ -139,6 +139,7 @@ public static class SubscriptionEndpoints
         var owner = await Resolve(source, scope, context.RequestAborted);
         if (owner is null || !await Allowed(context, authorization, owner.Type)) return Denied();
         var now = time.GetUtcNow();
+        now = now.AddTicks(-(now.Ticks % 10));
         var id = Guid.CreateVersion7(now);
         await using var connection = await source.OpenConnectionAsync(context.RequestAborted);
         await using var transaction = await connection.BeginTransactionAsync(context.RequestAborted);

@@ -27,7 +27,7 @@ const variable = z.object({
 export type Variable = z.infer<typeof variable>
 export type VariablesDraft = Readonly<Record<string, string | undefined>>
 
-function secretName(value: string): boolean {
+export function secretName(value: string): boolean {
   if (!value || value.length > 273) return false
   let name = value
   if (value.startsWith("secret://")) {

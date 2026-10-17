@@ -10,7 +10,9 @@ const auditOrigin = process.env.WF_AUDIT_ORIGIN
 const machineOrigin = process.env.WF_MACHINE_ORIGIN
 const trendsOrigin = process.env.WF_TRENDS_ORIGIN
 const dashboardOrigin = process.env.WF_DASHBOARD_ORIGIN
+const subscriptionOrigin = process.env.WF_SUBSCRIPTION_ORIGIN
 const fixtureOrigin =
+  subscriptionOrigin ??
   dashboardOrigin ??
   trendsOrigin ??
   machineOrigin ??
@@ -26,6 +28,7 @@ const fixtureOrigin =
 export default defineConfig({
   testDir: "./e2e",
   testIgnore: [
+    ...(!subscriptionOrigin ? ["**/subscriptions.spec.ts"] : []),
     ...(!dashboardOrigin ? ["**/dashboards.spec.ts"] : []),
     ...(!trendsOrigin ? ["**/series-trends.spec.ts"] : []),
     ...(!machineOrigin ? ["**/machines.spec.ts"] : []),

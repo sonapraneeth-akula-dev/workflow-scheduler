@@ -60,6 +60,7 @@ public sealed class PublicApiContractTests
         {
             Assert.Contains(operation, publicOperations);
             Assert.DoesNotContain(operation, uiOperations);
+            Assert.Contains(operation, observedPublic);
         }
     }
 

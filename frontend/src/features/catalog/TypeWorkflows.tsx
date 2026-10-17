@@ -12,6 +12,7 @@ import {
   usePresentation,
 } from "./usePresentation"
 import { PresentationFilters } from "./PresentationFilters"
+import { SubscribeMenu } from "@/features/subscriptions/SubscribeMenu"
 
 export function TypeWorkflows({ team, type }: { team: string; type: string }) {
   const live = useCatalogLive(team, type)
@@ -73,6 +74,7 @@ export function TypeWorkflows({ team, type }: { team: string; type: string }) {
       <Link to="/runs" search={{ team, type }}>
         Search runs in this type
       </Link>
+      <SubscribeMenu scope="type" scopeId={`${team}/${type}`} />
       <PresentationFilters config={config} />
       {live.snapshot?.error ? (
         <Button variant="outline" onClick={live.retry}>

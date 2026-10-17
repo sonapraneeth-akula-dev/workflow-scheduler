@@ -3,6 +3,7 @@ import { HistoryFilters, HistoryTable } from "@/features/runs/HistoryTable"
 import { historySearchSchema } from "@/features/runs/history"
 import { TriggerDialog } from "@/features/runs/TriggerDialog"
 import { encodeDashboardId } from "@/features/dashboards/api"
+import { SubscribeMenu } from "@/features/subscriptions/SubscribeMenu"
 
 export const Route = createFileRoute("/t/$team/$type/w/$wf/history")({
   validateSearch: historySearchSchema,
@@ -28,6 +29,7 @@ function WorkflowHistory() {
         Workflow dashboard
       </Link>
       <TriggerDialog workflowId={workflowId} />
+      <SubscribeMenu scope="workflow" scopeId={workflowId} />
       <HistoryFilters
         key={JSON.stringify(search)}
         search={search}

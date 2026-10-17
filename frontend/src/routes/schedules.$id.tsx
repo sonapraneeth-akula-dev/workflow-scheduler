@@ -26,6 +26,7 @@ import { usePermissions } from "@/lib/auth/usePermissions"
 import { ScheduleForm } from "@/features/schedules/ScheduleForm"
 import { OriginBadge } from "@/features/schedules/OriginBadge"
 import { RunNowButton } from "@/features/series/RunNowButton"
+import { SubscribeMenu } from "@/features/subscriptions/SubscribeMenu"
 import { formatFire } from "@/features/schedules/schedule-draft"
 import {
   deleteSchedule,
@@ -116,7 +117,7 @@ function ScheduleDetail() {
           {schedule.paused ? "Paused" : "Active"}
         </Badge>
       </div>
-      <p>{schedule.workflowId}</p>
+      <p className="break-all">{schedule.workflowId}</p>
       <OriginBadge schedule={schedule} />
       <Link to="/series/$id" params={{ id: schedule.seriesId }}>
         View series history
@@ -128,6 +129,11 @@ function ScheduleDetail() {
         scheduleId={id}
         seriesId={schedule.seriesId}
         disabled={isMutating || query.isFetching}
+      />
+      <SubscribeMenu
+        scope="schedule"
+        scopeId={id}
+        seriesId={schedule.seriesId}
       />
       <p>
         Next fire:{" "}

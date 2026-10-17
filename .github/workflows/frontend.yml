@@ -68,6 +68,11 @@ jobs:
         env:
           WF_DASHBOARD_BROWSER: "true"
           WF_FRONTEND_ROOT: ${{ github.workspace }}/frontend
+      - name: Check accessible personal subscriptions against the actual API and PostgreSQL
+        run: dotnet test ../backend/tests/Wf.Integration.Tests --configuration Release --filter 'FullyQualifiedName~Subscriptions_browser_real_Postgres'
+        env:
+          WF_SUBSCRIPTION_BROWSER: "true"
+          WF_FRONTEND_ROOT: ${{ github.workspace }}/frontend
       - uses: actions/upload-artifact@v4
         if: always()
         with:

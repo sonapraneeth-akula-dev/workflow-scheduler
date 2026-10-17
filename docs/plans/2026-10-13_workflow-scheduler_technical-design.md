@@ -870,6 +870,23 @@ All responses are no-store with explicit sanitized failures. Migration 0038 adds
 the durable outbox schema; 0039 enqueues completion notifications atomically.
 No new login/logout flow.
 
+**Subscribe controls**: workflow history/version pages, type catalogue and
+schedule details share an inline, keyboard-accessible Subscribe panel. The
+existing Viewer role is sufficient; neither Operator nor Admin is needed.
+Email accepts a mailbox, Teams a configured destination reference, and webhook
+an HTTPS URL plus signing reference. Users choose all terminal outcomes or
+failures/timeouts/aborts only. No resolved secrets or private Teams URLs belong
+in these fields. Saving creates a durable subscription, not a test delivery.
+The panel shows only the signed-in user's exact-scope subscriptions, with
+bounded descending keyset pagination, explicit refresh, failure states and
+unsubscribe. Current access/list revalidation hides cached destinations and
+create controls; query enablement uses stable grants, not a transient fetching
+flag. Previously loaded owner IDs remain available for unsubscribe after a
+denied read or revocation, without exposing their cached destinations. Existing
+session transitions cancel and clear personal query caches. Resource changes
+reset draft/receipt state; in-scope failures preserve the draft. No automatic
+mutation retries or new authentication flow are introduced.
+
 **Terminal outbox and notification dispatch**: the 0039 row trigger runs in the
 terminal transaction, including ordinary RunStore and grouped commits. Grouped
 status publication precedes the terminal snapshot, so enqueue waits for terminal

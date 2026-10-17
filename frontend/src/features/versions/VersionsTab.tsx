@@ -21,6 +21,7 @@ import { usePermissions } from "@/lib/auth/usePermissions"
 import { activateVersion, getVersions } from "./api"
 import { VersionComparison } from "./VersionComparison"
 import { CloneDialog } from "./CloneDialog"
+import { SubscribeMenu } from "@/features/subscriptions/SubscribeMenu"
 
 export function VersionsTab({
   workflowId,
@@ -105,6 +106,7 @@ export function VersionsTab({
         </Button>
       </div>
       <p className="break-words">{workflowId}</p>
+      <SubscribeMenu scope="workflow" scopeId={workflowId} />
       {pinnedVersionId ? (
         <CloneDialog workflowId={workflowId} versionId={pinnedVersionId} />
       ) : null}

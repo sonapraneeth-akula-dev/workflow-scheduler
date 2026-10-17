@@ -21,6 +21,26 @@ public sealed class SubscriptionEndpointTests(RollupDatabase database) : IClassF
         };
     }
 
+    [Fact]
+    public async Task Creation_receipt_and_persisted_list_use_the_same_PostgreSQL_microsecond_timestamp()
+    {
+        var scope = await Registry();
+        var clock = new SubscriptionClock();
+        await using var api = await MetricsApiServer.Start(database.DataSource, Token, timeProvider: clock);
+        var jwt = api.Jwt(scope.Group);
+        var row = await Create(api, jwt, Request(scope));
+        var listed = Assert.Single((await List(api, jwt)).Items);
+        Assert.Equal(clock.GetUtcNow().AddTicks(-7), row.CreatedAt);
+        Assert.Equal(0, row.CreatedAt.Ticks % 10);
+        Assert.Equal(row.CreatedAt, listed.CreatedAt);
+    }
+
+    private sealed class SubscriptionClock : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() =>
+            new DateTimeOffset(2026, 10, 17, 9, 0, 0, TimeSpan.Zero).AddTicks(1234567);
+    }
+
     [Theory]
     [InlineData("workflow", "Webhook")]
     [InlineData("schedule", "Email")]
