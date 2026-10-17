@@ -98,7 +98,7 @@ public sealed class RunEventsResyncTests
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(page, RunEventsJsonContext.Default.RunEventsPage));
         Assert.Equal(long.MaxValue, json.RootElement.GetProperty("lastSeq").GetInt64());
         var item = json.RootElement.GetProperty("events")[0];
-        Assert.Equal(new[] { "abort", "at", "entity", "key", "seq", "state" },
+        Assert.Equal(new[] { "abort", "agentId", "at", "attempt", "entity", "key", "progress", "seq", "state", "waitingReason" },
             item.EnumerateObject().Select(property => property.Name).Order());
         Assert.Equal(at.ToString("O", CultureInfo.InvariantCulture), item.GetProperty("at").GetString());
         Assert.Equal(long.MaxValue, item.GetProperty("seq").GetInt64());
@@ -113,8 +113,8 @@ public sealed class RunEventsResyncTests
             null, 0, 0, ImmutableDictionary<string, int>.Empty, ImmutableDictionary<string, int>.Empty, null, null,
             null, ImmutableDictionary<string, Guid>.Empty);
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(response, RunEventsJsonContext.Default.RunSnapshotResponse));
-        Assert.Equal(new[] { "abort", "endedAt", "lastSeq", "nodes", "parentRunId", "reusedNodes", "runId", "seriesId", "status", "tasks", "versionId", "workflowId" },
-            json.RootElement.EnumerateObject().Select(property => property.Name).Order());
+        Assert.Equal(new[] { "abort", "endedAt", "lastSeq", "nodes", "parentRunId", "placement", "placementAgentId", "reusedNodes", "runId", "seriesId", "status", "taskWaitReasons", "tasks", "versionId", "workflowId" },
+            json.RootElement.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal));
     }
 
     private static IQueryCollection Query(string text)

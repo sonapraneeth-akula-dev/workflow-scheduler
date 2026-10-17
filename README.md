@@ -723,7 +723,7 @@ system-assigned identity. No developer/browser/CLI credential fallback.
 `ctx.Secret(ctx.Var<SecretReference>("credential"))` accesses a declared resolved
 value. Missing or unavailable secrets become safe nonretryable `ValidationError`;
 resolved values never enter manifests, dispatches, journals or process arguments.
-Rebuild existing SDK packages: task-host private readiness protocol 4 is required.
+Rebuild existing SDK packages: task-host private readiness protocol 5 is required.
 Provisioning and provider details: [agent secrets](backend/src/Wf.Agent/Secrets/README.md).
 
 `Tasks.HttpOperation(...)` declares an opt-in long-running HTTP operation:
@@ -754,7 +754,23 @@ fields become `result`/`error` outputs; service errors are otherwise generic.
 Responses stay within the existing output bound. Redirects, unsafe references,
 undeclared origins and malformed states fail explicitly. Authentication reuses
 the existing agent-resolved `ctx.Secret` bearer reference; no new login flow.
-Remote cancellation on abort/timeout and System Events remain separate tasks.
+Abort/timeout attempts the declared POST/DELETE cancellation under its own bounded
+timeout (at most ten seconds), independent of the cancelled task token. A 2xx
+response alone never confirms cancellation: the configured terminal state must
+arrive in the cancel response or a bounded status check. Missing references,
+unavailable cancellation and unconfirmed responses record `OutcomeUnknown`; the
+local outcome remains Cancelled/TimedOut even if remote success/failure is
+observed during cleanup. Cancellation never resubmits the original request.
+
+Fixed lifecycle phases become durable per-attempt System Events: submission
+pending, submitted, waiting, resuming, succeeded, failed, cancel requested,
+cancel confirmed and outcome unknown. Their bounded payload contains only
+sequence, phase and occurrence time, never URLs, request/response bodies or
+credentials. Progress waits for the agent's durable journal, not engine ACK, so
+an engine outage cannot block cleanup. Reconnect replays in order; session,
+attempt and physical-reservation fences discard stale progress. Graph state,
+attempt status and timers remain unchanged. Individual status polls are task
+logs, not System Events.
 
 `await workflow.RunAsync(args)` selects local execution by default, `--describe`,
 `--engine <origin>`, `--task-host --socket <absolute-path>`, or
@@ -1608,7 +1624,9 @@ header capability for the exact attempt, assigned agent session and reservation
 epoch. It cannot commit the logical checkpoint pointer or accept user tokens,
 arbitrary object paths or redirect targets. Existing HMAC configuration and
 agent transport are reused; no login/logout flow or public read API is added.
-Private host readiness protocol 4 adds a checkpoint stream and explicit ACK.
+Private host readiness protocol 5 includes checkpoint and progress streams with
+explicit ACKs (engine durability for checkpoints; agent-journal durability for
+progress).
 Dispatch receive envelopes allow 4 MiB for the existing inputs plus a maximum-size
 checkpoint and protocol metadata; checkpoint JSON and outbound result limits
 remain 1 MiB.

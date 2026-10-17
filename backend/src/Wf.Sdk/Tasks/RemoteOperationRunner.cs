@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Wf.Contracts;
+using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Manifest;
 
@@ -43,69 +44,140 @@ internal static class RemoteOperationRunner
         try { state = context.Checkpoint.TryLoad(RemoteOperationJsonContext.Default.RemoteOperationState); }
         catch (JsonException) { throw Invalid("RemoteOperationInvalidCheckpoint: state is not a remote operation checkpoint."); }
         var resumed = state is not null;
-        if (state is null)
+        var terminal = false;
+        try
         {
-            state = new(Pending, key, fingerprint, clock.GetUtcNow(), null, null, null);
-            await Save(state);
-        }
-        else
-        {
-            if (state.Stage is not (Pending or Submitted) || state.SubmissionKey != key ||
-                state.Fingerprint != fingerprint || state.SubmittedAt > clock.GetUtcNow() ||
-                state.SubmittedAt == default ||
-                state.Stage == Pending && (state.StatusUrl is not null || state.OperationId is not null || state.NextPollAt is not null) ||
-                state.Stage == Submitted && (state.StatusUrl is null || state.NextPollAt is null))
-                throw Invalid("RemoteOperationInvalidCheckpoint: checkpoint identity or stage does not match.");
-            if (state.StatusUrl is { } statusUrl) _ = Resolve(statusUrl);
-        }
-        var statusDeadline = state.SubmittedAt + definition.Status.Retention;
-        EnsureRetained(statusDeadline);
-        if (state.Stage == Pending)
-        {
-            Reply? response = null;
-            var fromLookup = false;
-            if (resumed)
+            if (state is null)
             {
-                if (definition.Lookup is { } lookup && clock.GetUtcNow() < state.SubmittedAt + lookup.Retention)
-                {
-                    response = await Send(HttpMethod.Get, Resolve(lookup.UrlTemplate.Replace("{submissionKey}", key,
-                        StringComparison.Ordinal)), state.SubmittedAt + lookup.Retention);
-                    if (response.Status is HttpStatusCode.NotFound or HttpStatusCode.Gone) response = null;
-                    fromLookup = response is not null;
-                }
-                if (response is null && (definition.Deduplication is not { } dedup ||
-                    clock.GetUtcNow() >= state.SubmittedAt + dedup.Retention))
-                    throw Unknown();
+                state = new(Pending, key, fingerprint, clock.GetUtcNow(), null, null, null);
+                await Save(state);
+                await Emit(RemoteOperationPhase.SubmissionPending, context.CancellationToken);
             }
-            response ??= await Send(HttpMethod.Post, Resolve(definition.SubmissionUrl),
-                resumed ? Earlier(statusDeadline, state.SubmittedAt + definition.Deduplication!.Retention) : statusDeadline);
-            CheckStatus(response);
-            if (Complete(response, allowSynchronous: !fromLookup,
-                allowReferenceOnly: true)) return;
-            var operationId = Field(response.Body, definition.Status.OperationIdField);
-            string? location = response.Location;
-            if (location is null && operationId is not null && definition.Status.UrlTemplate is { } template)
-                location = template.Replace("{operationId}", Uri.EscapeDataString(operationId), StringComparison.Ordinal);
-            if (location is null) throw Invalid("RemoteOperationProtocol: pending response has no operation reference.");
-            var target = Resolve(location);
-            state = state with
+            else
             {
-                Stage = Submitted, StatusUrl = target.AbsoluteUri, OperationId = operationId,
-                NextPollAt = NextPoll(response, 0)
-            };
-            await Save(state);
-        }
-        var polls = 0;
-        var nextPoll = state.NextPollAt!.Value;
-        while (true)
-        {
+                if (state.Stage is not (Pending or Submitted) || state.SubmissionKey != key ||
+                    state.Fingerprint != fingerprint || state.SubmittedAt > clock.GetUtcNow() ||
+                    state.SubmittedAt == default ||
+                    state.Stage == Pending && (state.StatusUrl is not null || state.OperationId is not null || state.NextPollAt is not null) ||
+                    state.Stage == Submitted && (state.StatusUrl is null || state.NextPollAt is null))
+                    throw Invalid("RemoteOperationInvalidCheckpoint: checkpoint identity or stage does not match.");
+                if (state.StatusUrl is { } statusUrl) _ = Resolve(statusUrl);
+                await Emit(RemoteOperationPhase.Resuming, context.CancellationToken);
+            }
+            var statusDeadline = state.SubmittedAt + definition.Status.Retention;
             EnsureRetained(statusDeadline);
-            await WaitUntil(nextPoll, statusDeadline);
-            var response = await Send(HttpMethod.Get, Resolve(state.StatusUrl!), statusDeadline);
-            if (response.Status is HttpStatusCode.NotFound or HttpStatusCode.Gone) throw Unknown();
-            CheckStatus(response);
-            if (Complete(response, allowSynchronous: false)) return;
-            nextPoll = NextPoll(response, ++polls);
+            if (state.Stage == Pending)
+            {
+                Reply? response = null;
+                var fromLookup = false;
+                if (resumed)
+                {
+                    if (definition.Lookup is { } lookup && clock.GetUtcNow() < state.SubmittedAt + lookup.Retention)
+                    {
+                        response = await Send(HttpMethod.Get, Resolve(lookup.UrlTemplate.Replace("{submissionKey}", key,
+                            StringComparison.Ordinal)), state.SubmittedAt + lookup.Retention);
+                        if (response.Status is HttpStatusCode.NotFound or HttpStatusCode.Gone) response = null;
+                        fromLookup = response is not null;
+                    }
+                    if (response is null && (definition.Deduplication is not { } dedup ||
+                        clock.GetUtcNow() >= state.SubmittedAt + dedup.Retention))
+                        throw Unknown();
+                }
+                response ??= await Send(HttpMethod.Post, Resolve(definition.SubmissionUrl),
+                    resumed ? Earlier(statusDeadline, state.SubmittedAt + definition.Deduplication!.Retention) : statusDeadline,
+                    submission: true);
+                CheckStatus(response);
+                if (await CompleteAsync(response, allowSynchronous: !fromLookup, allowReferenceOnly: true)) return;
+                var operationId = Field(response.Body, definition.Status.OperationIdField);
+                string? location = response.Location;
+                if (location is null && operationId is not null && definition.Status.UrlTemplate is { } template)
+                    location = template.Replace("{operationId}", Uri.EscapeDataString(operationId), StringComparison.Ordinal);
+                if (location is null) throw Invalid("RemoteOperationProtocol: pending response has no operation reference.");
+                var target = Resolve(location);
+                state = state with
+                {
+                    Stage = Submitted, StatusUrl = target.AbsoluteUri, OperationId = operationId,
+                    NextPollAt = NextPoll(response, 0)
+                };
+                await Save(state);
+                await Emit(RemoteOperationPhase.Submitted, context.CancellationToken);
+            }
+            await Emit(RemoteOperationPhase.Waiting, context.CancellationToken);
+            var polls = 0;
+            var nextPoll = state.NextPollAt!.Value;
+            while (true)
+            {
+                EnsureRetained(statusDeadline);
+                await WaitUntil(nextPoll, statusDeadline);
+                var response = await Send(HttpMethod.Get, Resolve(state.StatusUrl!), statusDeadline);
+                if (response.Status is HttpStatusCode.NotFound or HttpStatusCode.Gone) throw Unknown();
+                CheckStatus(response);
+                if (await CompleteAsync(response, allowSynchronous: false)) return;
+                context.Log($"Remote operation status poll {++polls}: waiting.");
+                nextPoll = NextPoll(response, polls);
+            }
+        }
+        catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
+        {
+            var outcome = await CancelRemoteAsync();
+            throw new OperationCanceledException(outcome switch
+            {
+                RemoteOperationPhase.CancelConfirmed => "Remote operation stopped locally; remote cancellation was confirmed.",
+                RemoteOperationPhase.Succeeded => "Remote operation stopped locally; the service reported success.",
+                RemoteOperationPhase.Failed => "Remote operation stopped locally; the service reported failure.",
+                _ => "RemoteOutcomeUnknown: operation stopped locally without confirmed remote cancellation."
+            }, context.CancellationToken);
+        }
+        catch (TaskFailureException)
+        {
+            if (!terminal) await Emit(RemoteOperationPhase.OutcomeUnknown, context.CancellationToken);
+            throw;
+        }
+
+        async Task Emit(RemoteOperationPhase phase, CancellationToken token)
+        {
+            if (context.ProgressPublisher is { } publisher) await publisher(phase, token);
+            if (phase is RemoteOperationPhase.Succeeded or RemoteOperationPhase.Failed or
+                RemoteOperationPhase.CancelConfirmed or RemoteOperationPhase.OutcomeUnknown) terminal = true;
+        }
+
+        async Task<RemoteOperationPhase> CancelRemoteAsync()
+        {
+            var outcome = RemoteOperationPhase.OutcomeUnknown;
+            if (definition.Cancel is { } cancel && state?.StatusUrl is { } statusUrl)
+            {
+                using var cleanup = new CancellationTokenSource(cancel.RequestTimeout, clock);
+                var deadline = clock.GetUtcNow() + cancel.RequestTimeout;
+                try
+                {
+                    await Emit(RemoteOperationPhase.CancelRequested, cleanup.Token);
+                    if (cancel.UrlTemplate.Contains("{operationId}", StringComparison.Ordinal) && state.OperationId is null)
+                        throw Invalid("RemoteOperationProtocol: cancellation requires an operation ID.");
+                    var target = Resolve(cancel.UrlTemplate.Replace("{statusUrl}", statusUrl, StringComparison.Ordinal)
+                        .Replace("{operationId}", Uri.EscapeDataString(state.OperationId ?? ""), StringComparison.Ordinal));
+                    var response = await Send(cancel.Method == HttpOperationCancelMethod.Delete ? HttpMethod.Delete : HttpMethod.Post,
+                        target, deadline, cleanup.Token);
+                    var polls = 0;
+                    while (true)
+                    {
+                        CheckStatus(response);
+                        var remote = Field(response.Body, definition.Status.StateField);
+                        if (remote == definition.Status.Cancelled) { outcome = RemoteOperationPhase.CancelConfirmed; break; }
+                        if (remote == definition.Status.Succeeded) { outcome = RemoteOperationPhase.Succeeded; break; }
+                        if (remote == definition.Status.Failed) { outcome = RemoteOperationPhase.Failed; break; }
+                        if (remote is not null && remote != definition.Status.Pending && remote != definition.Status.Running)
+                            throw Invalid("RemoteOperationProtocol: unrecognized cancellation state.");
+                        await WaitUntil(NextPoll(response, polls++), deadline, cleanup.Token);
+                        response = await Send(HttpMethod.Get, Resolve(statusUrl), deadline, cleanup.Token);
+                    }
+                }
+                catch (Exception error) when (error is TaskFailureException or OperationCanceledException or IOException)
+                { context.Log("Remote cancellation was not confirmed; the remote outcome is unknown."); }
+            }
+            else context.Log("Remote cancellation is unavailable; the remote outcome is unknown.");
+            using var publication = new CancellationTokenSource(TimeSpan.FromSeconds(3), clock);
+            await Emit(outcome, publication.Token);
+            return outcome;
         }
 
         Task Save(RemoteOperationState value) =>
@@ -118,38 +190,40 @@ internal static class RemoteOperationRunner
             { throw Invalid("RemoteOperationProtocol: unsafe or undeclared operation reference."); }
         }
 
-        void EnsureRetained(DateTimeOffset deadline)
+        void EnsureRetained(DateTimeOffset deadline, CancellationToken? cancellationToken = null)
         {
-            context.CancellationToken.ThrowIfCancellationRequested();
+            (cancellationToken ?? context.CancellationToken).ThrowIfCancellationRequested();
             if (clock.GetUtcNow() >= deadline) throw Unknown();
         }
 
-        async Task WaitUntil(DateTimeOffset at, DateTimeOffset deadline)
+        async Task WaitUntil(DateTimeOffset at, DateTimeOffset deadline, CancellationToken? cancellationToken = null)
         {
             while (clock.GetUtcNow() < at)
             {
-                EnsureRetained(deadline);
+                EnsureRetained(deadline, cancellationToken);
                 var remaining = Earlier(at, deadline) - clock.GetUtcNow();
                 if (remaining <= TimeSpan.Zero) continue;
                 await Task.Delay(remaining > TimeSpan.FromDays(1) ? TimeSpan.FromDays(1) : remaining,
-                    clock, context.CancellationToken);
+                    clock, cancellationToken ?? context.CancellationToken);
             }
-            EnsureRetained(deadline);
+            EnsureRetained(deadline, cancellationToken);
         }
 
-        async Task<Reply> Send(HttpMethod method, Uri uri, DateTimeOffset deadline)
+        async Task<Reply> Send(HttpMethod method, Uri uri, DateTimeOffset deadline,
+            CancellationToken? cancellationToken = null, bool submission = false)
         {
-            EnsureRetained(deadline);
+            var requestToken = cancellationToken ?? context.CancellationToken;
+            EnsureRetained(deadline, requestToken);
             var remaining = deadline - clock.GetUtcNow();
             if (remaining <= TimeSpan.Zero) throw Unknown();
             using var timeout = new CancellationTokenSource(remaining < definition.RequestTimeout ?
                 remaining : definition.RequestTimeout, clock);
-            using var stop = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken, timeout.Token);
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(requestToken, timeout.Token);
             using var request = new HttpRequestMessage(method, uri);
             try
             {
                 if (secret is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", secret);
-                if (method == HttpMethod.Post)
+                if (submission)
                 {
                     if (operation.Body is not null)
                     {
@@ -191,7 +265,7 @@ internal static class RemoteOperationRunner
                 }
                 return new(response.StatusCode, body, location, response.Headers.RetryAfter);
             }
-            catch (OperationCanceledException) when (!context.CancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (!requestToken.IsCancellationRequested)
             { throw new TaskFailureException("RemoteOperationTransport: request timed out; durable intent is retained.", retryable: true); }
             catch (HttpRequestException)
             { throw new TaskFailureException("RemoteOperationTransport: request failed; durable intent is retained.", retryable: true); }
@@ -208,12 +282,14 @@ internal static class RemoteOperationRunner
                 retryable: response.Status is HttpStatusCode.TooManyRequests || (int)response.Status >= 500);
         }
 
-        bool Complete(Reply response, bool allowSynchronous, bool allowReferenceOnly = false)
+        async Task<bool> CompleteAsync(Reply response, bool allowSynchronous, bool allowReferenceOnly = false)
         {
             var status = Field(response.Body, definition.Status.StateField);
             if (status == definition.Status.Failed || status == definition.Status.Cancelled)
             {
                 Output(response.Body, definition.Status.ErrorField, "error");
+                await Emit(status == definition.Status.Failed ? RemoteOperationPhase.Failed : RemoteOperationPhase.CancelConfirmed,
+                    context.CancellationToken);
                 throw new TaskFailureException(status == definition.Status.Failed ?
                     "RemoteOperationFailed: service reported failure." : "RemoteOperationCancelled: service confirmed cancellation.",
                     retryable: false);
@@ -225,6 +301,7 @@ internal static class RemoteOperationRunner
                 if (!Output(response.Body, definition.Status.ResultField, "result") &&
                     definition.Status.ResultField is null && response.Body is { } body)
                     context.Outputs.Set("result", body, OutputJsonContext.Default.JsonElement);
+                await Emit(RemoteOperationPhase.Succeeded, context.CancellationToken);
                 return true;
             }
             if (status is not null && status != definition.Status.Pending && status != definition.Status.Running ||

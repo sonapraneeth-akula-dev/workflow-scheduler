@@ -151,6 +151,13 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             Assert.Equal("#/components/schemas/ScheduleRunNowResponse", runNow.GetProperty("responses").GetProperty("202")
                 .GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
             var schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
+            var liveEvent = schemas.GetProperty("LiveEvent").GetProperty("properties");
+            Assert.True(liveEvent.TryGetProperty("attempt", out _));
+            var progressSchema = liveEvent.GetProperty("progress");
+            Assert.Contains(progressSchema.GetProperty("oneOf").EnumerateArray(),
+                option => option.TryGetProperty("type", out var type) && type.GetString() == "null");
+            Assert.Equal(["occurredAt", "phase", "sequence"], schemas.GetProperty("LiveProgress").GetProperty("properties")
+                .EnumerateObject().Select(property => property.Name).Order());
             var runSnapshot = schemas.GetProperty("RunSnapshotResponse");
             Assert.True(runSnapshot.GetProperty("properties").TryGetProperty("parentRunId", out _));
             Assert.True(runSnapshot.GetProperty("properties").TryGetProperty("reusedNodes", out _));

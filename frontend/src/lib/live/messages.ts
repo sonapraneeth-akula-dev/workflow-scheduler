@@ -10,16 +10,44 @@ export const liveAbortSchema = z.object({
   reason: z.string().min(1).max(500),
   source: z.enum(["UI", "API", "CLI", "KillSwitch", "Local"]),
 })
-export const liveEventSchema = z.object({
-  seq: z.int().positive(),
-  at: timestamp,
-  entity: z.union([z.literal(0), z.literal(1), z.literal(2)]),
-  key: z.string().min(1).nullable(),
-  state: z.int().nonnegative(),
-  abort: liveAbortSchema.nullable(),
-  waitingReason: z.literal("WaitingForMachine").nullable().optional(),
-  agentId: z.uuid().nullable().optional(),
-})
+export const liveEventSchema = z
+  .object({
+    seq: z.int().positive(),
+    at: timestamp,
+    entity: z.union([z.literal(0), z.literal(1), z.literal(2)]),
+    key: z.string().min(1).nullable(),
+    state: z.int().nonnegative(),
+    abort: liveAbortSchema.nullable(),
+    waitingReason: z.literal("WaitingForMachine").nullable().optional(),
+    agentId: z.uuid().nullable().optional(),
+    attempt: z.int().min(1).max(32767).nullable().optional(),
+    progress: z
+      .object({
+        sequence: z.int().min(1).max(64),
+        phase: z.int().min(1).max(9),
+        occurredAt: timestamp,
+      })
+      .strict()
+      .nullable()
+      .optional(),
+  })
+  .superRefine((event, context) => {
+    if (
+      event.progress &&
+      (event.entity !== 2 ||
+        !event.key ||
+        !event.attempt ||
+        (event.state !== 2 && event.state !== 3) ||
+        event.abort ||
+        event.agentId ||
+        event.waitingReason)
+    )
+      context.addIssue({
+        code: "custom",
+        message:
+          "Progress must identify an active task attempt without a transition.",
+      })
+  })
 
 const runDelta = z
   .object({ runId: id, events: z.array(liveEventSchema).min(1).max(512) })

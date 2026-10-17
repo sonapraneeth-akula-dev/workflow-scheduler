@@ -217,6 +217,17 @@ export class RunStore {
     const run = this.state.run
     if (!run || event.seq !== run.lastSeq + 1)
       throw new Error("Run events are not contiguous.")
+    if (event.progress) {
+      if (
+        event.entity !== 2 ||
+        !event.key ||
+        run.tasks[event.key] !== event.state ||
+        (event.state !== 2 && event.state !== 3)
+      )
+        throw new Error("Progress does not match an active run task.")
+      this.state = { ...this.state, run: { ...run, lastSeq: event.seq } }
+      return
+    }
     if (event.entity === 0) {
       this.state = {
         ...this.state,

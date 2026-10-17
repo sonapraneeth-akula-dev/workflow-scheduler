@@ -16,6 +16,9 @@ service TaskHost {
   rpc Checkpoints(ReadyRequest) returns (stream wf.agent.v1.CheckpointSaved);
   // Agent confirms only after its journal and the engine's durable index acknowledge.
   rpc ConfirmCheckpoint(wf.agent.v1.CheckpointSaved) returns (HostReply);
+  rpc Progress(ReadyRequest) returns (stream wf.agent.v1.TaskProgress);
+  // Progress needs durable agent journaling, not engine connectivity.
+  rpc ConfirmProgress(wf.agent.v1.TaskProgress) returns (HostReply);
   rpc Cancel(CancelRequest) returns (HostReply);
   rpc Acknowledge(AcknowledgeRequest) returns (HostReply);
 }

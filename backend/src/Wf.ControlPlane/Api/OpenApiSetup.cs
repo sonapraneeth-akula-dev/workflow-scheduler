@@ -15,7 +15,8 @@ public static class OpenApiSetup
             options.AddSchemaTransformer((schema, context, _) =>
             {
                 // Transformer-generated nested object schemas otherwise lose the nullable abort annotation.
-                if (context.JsonTypeInfo.Type == typeof(LiveAbort) && context.JsonPropertyInfo is { IsGetNullable: true })
+                if ((context.JsonTypeInfo.Type == typeof(LiveAbort) || context.JsonTypeInfo.Type == typeof(LiveProgress)) &&
+                    context.JsonPropertyInfo is { IsGetNullable: true })
                     schema.Type |= JsonSchemaType.Null;
                 if (context.JsonTypeInfo.Type == typeof(VariableType))
                     schema.Type = JsonSchemaType.String;
@@ -25,7 +26,7 @@ public static class OpenApiSetup
             {
                 foreach (var type in new[] { typeof(RunDelta), typeof(ListDelta), typeof(LiveResync),
                     typeof(LiveEvent), typeof(LiveAbort), typeof(LiveRunSummary), typeof(LiveSubscriptionProblem),
-                    typeof(ReportAdded), typeof(LiveReconnect) })
+                    typeof(ReportAdded), typeof(LiveReconnect), typeof(LiveProgress) })
                     document.AddComponent(type.Name, await context.GetOrCreateSchemaAsync(type, null, token));
             });
         });

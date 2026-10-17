@@ -16,6 +16,60 @@ public sealed class ResultJournalTests : IDisposable
     private AgentOutbox Open() => new(new ResultJournal(root, id));
 
     [Fact]
+    public void Progress_survives_restart_and_cumulative_ACK_with_its_attempt_fence_and_original_bytes()
+    {
+        var task = Result().TaskCompleted.Task;
+        var progress = new TaskProgress
+        {
+            Task = task.Clone(), ReservationEpoch = 4, ProgressSequence = 1,
+            Phase = RemoteOperationPhase.CancelRequested,
+            At = Timestamp.FromDateTimeOffset(DateTimeOffset.UnixEpoch.AddSeconds(1))
+        };
+        byte[] original;
+        using (var first = Open())
+        {
+            first.ObserveReservationEpoch(4);
+            first.PublishProgress(progress);
+            original = first.NextAfter(0)!.ToByteArray();
+            Assert.Contains(task, first.UnacknowledgedAttempts());
+            progress.Phase = RemoteOperationPhase.CancelConfirmed;
+            progress.ProgressSequence = 2;
+            first.PublishProgress(progress);
+        }
+        using (var restarted = Open())
+        {
+            Assert.Equal(4UL, restarted.ReservationEpoch);
+            Assert.Equal(original, restarted.NextAfter(0)!.ToByteArray());
+            restarted.Acknowledge(new() { Sequence = 2 });
+            Assert.Equal(RemoteOperationPhase.CancelConfirmed, restarted.NextAfter(0)!.TaskProgress.Phase);
+            Assert.Contains(task, restarted.UnacknowledgedAttempts());
+            restarted.Acknowledge(new() { Sequence = 3 });
+        }
+        using var empty = Open();
+        Assert.Empty(empty.UnacknowledgedAttempts());
+        Assert.Null(empty.NextAfter(0));
+    }
+
+    [Fact]
+    public void Progress_requires_durable_storage_and_invalid_metadata_cannot_consume_a_sequence()
+    {
+        var progress = new TaskProgress
+        {
+            Task = Result().TaskCompleted.Task.Clone(), ReservationEpoch = 1,
+            ProgressSequence = 1, Phase = RemoteOperationPhase.Waiting,
+            At = Timestamp.FromDateTimeOffset(DateTimeOffset.UnixEpoch.AddSeconds(1))
+        };
+        using var volatileOutbox = new AgentOutbox();
+        Assert.Throws<InvalidOperationException>(() => volatileOutbox.PublishProgress(progress));
+        using var outbox = Open();
+        var before = File.ReadAllBytes(Path.Combine(root, "results.wfj"));
+        progress.Phase = (RemoteOperationPhase)99;
+        Assert.Throws<ArgumentException>(() => outbox.PublishProgress(progress));
+        Assert.Equal(before, File.ReadAllBytes(Path.Combine(root, "results.wfj")));
+        Assert.Null(outbox.NextAfter(0));
+    }
+
+    [Fact]
     public void Newly_created_journal_directory_is_private_to_its_agent_account()
     {
         using var outbox = Open();

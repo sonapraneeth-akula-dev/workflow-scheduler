@@ -5236,6 +5236,16 @@ export interface components {
             waitingReason?: null | string;
             /** Format: uuid */
             agentId?: null | string;
+            /** Format: int32 */
+            attempt?: null | number | string;
+            progress?: null | components["schemas"]["LiveProgress"];
+        };
+        LiveProgress: null | {
+            /** Format: uint32 */
+            sequence: number | string;
+            /** Format: int32 */
+            phase: number | string;
+            occurredAt: string;
         };
         LiveReconnect: {
             reason: string;
@@ -5573,6 +5583,15 @@ export interface components {
                 waitingReason?: null | string;
                 /** Format: uuid */
                 agentId?: null | string;
+                /** Format: int32 */
+                attempt?: null | number | string;
+                progress?: null | {
+                    /** Format: uint32 */
+                    sequence: number | string;
+                    /** Format: int32 */
+                    phase: number | string;
+                    occurredAt: string;
+                };
             }[];
         };
         RunEventsPage: {

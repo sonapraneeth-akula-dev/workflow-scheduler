@@ -95,6 +95,7 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                                 break;
                             case AgentMessage.PayloadOneofCase.TaskStarted:
                             case AgentMessage.PayloadOneofCase.TaskCompleted:
+                            case AgentMessage.PayloadOneofCase.TaskProgress:
                                 if (runs is null)
                                     throw new RpcException(new Status(StatusCode.Unimplemented, "Task dispatch persistence is not configured."));
                                 await runs.AcceptAsync(session, message, token);

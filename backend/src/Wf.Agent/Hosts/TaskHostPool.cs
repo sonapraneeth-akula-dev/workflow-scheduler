@@ -150,7 +150,8 @@ public sealed class TaskHostPool : IAsyncDisposable
         ByteString? nodeOutputsJson = null, TimeSpan? cancellationGrace = null, CancellationToken cancellationToken = default,
         Action<TaskCompleted>? journalResult = null, Func<string, string, Task>? captureLog = null,
         SecretMasker? secretMasker = null, Action<AgentMessage>? publishResources = null,
-        Func<CheckpointSaved, CancellationToken, Task>? publishCheckpoint = null)
+        Func<CheckpointSaved, CancellationToken, Task>? publishCheckpoint = null,
+        Action<TaskProgress>? publishProgress = null)
     {
         ArgumentNullException.ThrowIfNull(package);
         ArgumentNullException.ThrowIfNull(dispatch);
@@ -224,13 +225,15 @@ public sealed class TaskHostPool : IAsyncDisposable
             host.HasSecrets = request.ResolvedSecrets.Count != 0;
             using var checkpointStop = new CancellationTokenSource();
             using var checkpointStream = host.Client.Checkpoints(new ReadyRequest(), cancellationToken: checkpointStop.Token);
+            using var progressStream = host.Client.Progress(new ReadyRequest(), cancellationToken: checkpointStop.Token);
             var forwarding = ForwardCheckpoints();
+            var progressForwarding = ForwardProgress();
             using var call = host.Client.ExecuteAsync(request);
             TaskCompleted result;
             try
             {
-                var first = await Task.WhenAny(call.ResponseAsync, forwarding).WaitAsync(stop.Token);
-                if (first == forwarding) await forwarding;
+                var first = await Task.WhenAny(call.ResponseAsync, forwarding, progressForwarding).WaitAsync(stop.Token);
+                if (first != call.ResponseAsync) await first;
                 result = await call.ResponseAsync.WaitAsync(stop.Token);
             }
             catch (OperationCanceledException) when (stop.IsCancellationRequested)
@@ -263,7 +266,7 @@ public sealed class TaskHostPool : IAsyncDisposable
             finally
             {
                 await checkpointStop.CancelAsync();
-                await forwarding;
+                await Task.WhenAll(forwarding, progressForwarding);
             }
             if (result.Task is null || !result.Task.Equals(dispatch.Task) ||
                 result.Outcome == TaskOutcome.Unspecified || !System.Enum.IsDefined(result.Outcome))
@@ -292,6 +295,26 @@ public sealed class TaskHostPool : IAsyncDisposable
                             throw new InvalidOperationException("Durable checkpoint acknowledgement is not configured at the agent.");
                         await publishCheckpoint(saved, checkpointStop.Token);
                         using var confirmed = host.Client.ConfirmCheckpointAsync(saved, cancellationToken: checkpointStop.Token);
+                        await confirmed.ResponseAsync;
+                    }
+                }
+                catch (OperationCanceledException) when (checkpointStop.IsCancellationRequested) { }
+                catch (RpcException error) when (checkpointStop.IsCancellationRequested && error.StatusCode == StatusCode.Cancelled) { }
+            }
+
+            async Task ForwardProgress()
+            {
+                try
+                {
+                    await foreach (var update in progressStream.ResponseStream.ReadAllAsync(checkpointStop.Token))
+                    {
+                        _ = Wf.Contracts.Progress.TaskProgressProtocol.Validate(update);
+                        if (!update.Task.Equals(dispatch.Task) || update.ReservationEpoch != dispatch.ReservationEpoch)
+                            throw new InvalidDataException("Task host progress does not match its dispatched attempt.");
+                        if (publishProgress is null)
+                            throw new InvalidOperationException("Durable task progress journaling is not configured at the agent.");
+                        publishProgress(update);
+                        using var confirmed = host.Client.ConfirmProgressAsync(update, cancellationToken: checkpointStop.Token);
                         await confirmed.ResponseAsync;
                     }
                 }
@@ -420,7 +443,7 @@ public sealed class TaskHostPool : IAsyncDisposable
                         if (prewarming && !warm.Contains(host)) return null;
                     }
                     var ready = await call.ResponseAsync;
-                    if (ready.ProtocolVersion != 4 || ready.ProcessId != process.Id || ready.WorkflowVersion != package.Version || ready.Bound)
+                    if (ready.ProtocolVersion != 5 || ready.ProcessId != process.Id || ready.WorkflowVersion != package.Version || ready.Bound)
                         throw new InvalidDataException("Task-host readiness identity, version or state is invalid.");
                     containment.VerifyReady();
                     await TrimWarmAsync(prewarming ? host : null);

@@ -63,13 +63,17 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
     private CheckpointSaved? pendingCheckpoint;
     private TaskCompletionSource? checkpointAcknowledgement;
     private int checkpointReader;
+    private readonly Channel<TaskProgress> progress = Channel.CreateBounded<TaskProgress>(1);
+    private TaskProgress? pendingProgress;
+    private TaskCompletionSource? progressAcknowledgement;
+    private int progressReader;
 
     public override Task<HostReady> Ready(ReadyRequest request, ServerCallContext context)
     {
         lock (sync)
             return Task.FromResult(new HostReady
             {
-                ProtocolVersion = 4, ProcessId = uint.TryParse(
+                ProtocolVersion = 5, ProcessId = uint.TryParse(
                     Environment.GetEnvironmentVariable("WF_TASK_HOST_SUPERVISOR_PID"), out var supervisor)
                     ? supervisor : (uint)Environment.ProcessId,
                 WorkflowVersion = workflow.Version, Bound = bound is not null
@@ -236,6 +240,46 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
         await acknowledgement.Task.WaitAsync(token);
     }
 
+    public override async Task Progress(ReadyRequest request, IServerStreamWriter<TaskProgress> responseStream,
+        ServerCallContext context)
+    {
+        if (Interlocked.Exchange(ref progressReader, 1) != 0)
+            throw new RpcException(new Status(StatusCode.AlreadyExists, "Progress stream is already attached."));
+        await foreach (var update in progress.Reader.ReadAllAsync(context.CancellationToken))
+            await responseStream.WriteAsync(update, context.CancellationToken);
+    }
+
+    public override Task<HostReply> ConfirmProgress(TaskProgress request, ServerCallContext context)
+    {
+        lock (sync)
+        {
+            if (pendingProgress is null || !pendingProgress.Equals(request))
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Progress acknowledgement does not match the pending transition."));
+            progressAcknowledgement!.TrySetResult();
+            pendingProgress = null;
+            progressAcknowledgement = null;
+            return Task.FromResult(new HostReply());
+        }
+    }
+
+    private async Task PublishProgressAsync(TaskProgress update, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        _ = Wf.Contracts.Progress.TaskProgressProtocol.Validate(update);
+        using var journalDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        var acknowledgement = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (sync)
+        {
+            if (pendingProgress is not null)
+                throw new InvalidOperationException("An earlier progress transition is still awaiting acknowledgement.");
+            pendingProgress = update.Clone();
+            progressAcknowledgement = acknowledgement;
+        }
+        await progress.Writer.WriteAsync(update, journalDeadline.Token);
+        // Finish the journal handshake even if task cancellation arrives; cleanup may publish next.
+        await acknowledgement.Task.WaitAsync(journalDeadline.Token);
+    }
+
     private void CheckAttempt(AttemptRef? task)
     {
         if (bound is null || task is null || !bound.Equals(task))
@@ -296,11 +340,24 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
                 Timeout = TimeSpan.FromSeconds(30)
             };
             var checkpoint = CheckpointUploadClient.Create(checkpointHttp, dispatch, PublishCheckpointAsync, linked.Token);
+            uint progressSequence = 0;
             var taskContext = new TaskContext(linked.Token, variables, outputs, inputs, node.Inputs,
                 reports: reports, artifacts: artifacts, secrets: secrets, checkpoint: checkpoint,
                 attempt: new(dispatch.Task.Attempt, dispatch.Checkpoint?.Reference.SavedAt.ToDateTimeOffset()),
                 abort: dispatch.AbortJson.IsEmpty ? null : JsonSerializer.Deserialize(dispatch.AbortJson.Span,
-                    AbortRecordJsonContext.Default.AbortRecord), runId: Guid.Parse(dispatch.Task.RunId));
+                    AbortRecordJsonContext.Default.AbortRecord), runId: Guid.Parse(dispatch.Task.RunId))
+            {
+                ProgressPublisher = (phase, token) =>
+                {
+                    var now = DateTimeOffset.UtcNow;
+                    return PublishProgressAsync(new TaskProgress
+                    {
+                        Task = dispatch.Task.Clone(), ReservationEpoch = dispatch.ReservationEpoch,
+                        ProgressSequence = checked(++progressSequence), Phase = phase,
+                        At = Timestamp.FromDateTimeOffset(new(now.UtcTicks / 10 * 10, TimeSpan.Zero))
+                    }, token);
+                }
+            };
             await new TaskRegistry(workflow).ExecuteAsync($"{node.Key}/{dispatch.Task.TaskKey}", taskContext);
             linked.Token.ThrowIfCancellationRequested();
             result.Outcome = TaskOutcome.Succeeded;
@@ -321,6 +378,7 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
         finally
         {
             checkpoints.Writer.TryComplete();
+            progress.Writer.TryComplete();
             await deadlineStop.CancelAsync();
             await deadlineTimer;
         }

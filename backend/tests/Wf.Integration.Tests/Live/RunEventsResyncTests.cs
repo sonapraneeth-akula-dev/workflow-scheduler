@@ -21,6 +21,7 @@ using Microsoft.IdentityModel.Validators;
 using Npgsql;
 using Wf.Contracts;
 using Wf.Contracts.Definition;
+using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Events;
 using Wf.Contracts.Registry;
 using Wf.Contracts.Runs;
@@ -41,6 +42,45 @@ public sealed class RunEventsResyncTests(AuthorizationDatabase database) : IClas
 {
     private CancellationToken Token => TestContext.Current.CancellationToken;
     private RunStore Store => new(database.DataSource, NullLogger<RunStore>.Instance);
+
+    [Fact]
+    public async Task Progress_tail_uses_the_live_contract_without_changing_graph_state_or_exposing_remote_references()
+    {
+        var seed = await Seed();
+        var at = DateTimeOffset.UtcNow;
+        var changes = new[]
+        {
+            seed.State.Append(EventEntity.Run, null, (int)RunStatus.Running, at),
+            seed.State.Append(EventEntity.Node, "node", (int)ExecutionStatus.Ready, at),
+            seed.State.Append(EventEntity.Task, "node/task0", (int)ExecutionStatus.Ready, at),
+            seed.State.Append(EventEntity.Task, "node/task0", (int)ExecutionStatus.Dispatched, at),
+            seed.State.Append(EventEntity.Task, "node/task0", (int)ExecutionStatus.Running, at)
+        };
+        var occurrence = new DateTimeOffset(at.UtcTicks / 10 * 10, TimeSpan.Zero);
+        var progress = new RunEvent(seed.Id, 6, at, EventEntity.Task, "node/task0", (int)ExecutionStatus.Running)
+        { Attempt = 1, Progress = new(1, RemoteOperationPhase.Waiting, occurrence) };
+        seed.State.Apply(progress);
+        await Append([.. changes, progress]);
+        await using var server = await Server.Start(database.DataSource);
+        using var response = await server.Get(Events(seed.Id, 5), server.Jwt(seed.Group));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var page = await Json(response);
+        Assert.Equal(6, page.GetProperty("lastSeq").GetInt64());
+        var change = Assert.Single(page.GetProperty("events").EnumerateArray());
+        Assert.Equal(1, change.GetProperty("attempt").GetInt32());
+        Assert.Equal(3, change.GetProperty("state").GetInt32());
+        Assert.Equal(["occurredAt", "phase", "sequence"],
+            change.GetProperty("progress").EnumerateObject().Select(property => property.Name).Order());
+        Assert.Equal((int)RemoteOperationPhase.Waiting, change.GetProperty("progress").GetProperty("phase").GetInt32());
+        Assert.DoesNotContain("secret-sentinel", page.GetRawText());
+        Assert.Equal(LiveEvent.From(progress),
+            JsonSerializer.Deserialize(page, RunEventsJsonContext.Default.RunEventsPage)!.Events.Single());
+        using var snapshot = await server.Get(Snapshot(seed.Id), server.Jwt(seed.Group));
+        var graph = await Json(snapshot);
+        Assert.Equal(6, graph.GetProperty("lastSeq").GetInt64());
+        Assert.Equal(3, graph.GetProperty("tasks").GetProperty("node/task0").GetInt32());
+        Assert.False(graph.TryGetProperty("progress", out _));
+    }
 
     [Fact]
     public async Task Materialized_snapshot_plus_unsnapshotted_tail_restores_exact_graph_and_safe_live_wire()

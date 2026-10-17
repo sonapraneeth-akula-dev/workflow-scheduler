@@ -25,6 +25,7 @@ public sealed class TaskHostServerTests
             {
                 observedAbort = ctx.Abort;
                 Interlocked.Increment(ref invoked);
+                await ctx.ProgressPublisher!(RemoteOperationPhase.Waiting, ctx.CancellationToken);
                 await Task.Delay(Timeout.InfiniteTimeSpan, ctx.CancellationToken);
             })));
         var directory = Path.Combine(Path.GetTempPath(), $"wf-t-{Guid.NewGuid():N}");
@@ -53,14 +54,14 @@ public sealed class TaskHostServerTests
             deadline.CancelAfter(TimeSpan.FromSeconds(10));
             var ready = await client.ReadyAsync(new ReadyRequest(), cancellationToken: deadline.Token);
             Assert.False(ready.Bound);
-            Assert.Equal(4u, ready.ProtocolVersion);
+            Assert.Equal(5u, ready.ProtocolVersion);
             Assert.Equal((uint)Environment.ProcessId, ready.ProcessId);
             var attempt = new AttemptRef { RunId = Guid.NewGuid().ToString(), NodeKey = "work", TaskKey = "task", Attempt = 1 };
             var request = new ExecuteRequest
             {
                 Dispatch = new Dispatch
                 {
-                    Task = attempt, Version = "1",
+                    Task = attempt, Version = "1", ReservationEpoch = 1,
                     AbortJson = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(abort,
                         AbortRecordJsonContext.Default.AbortRecord)),
                     DeadlineAt = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddSeconds(30))
@@ -69,6 +70,7 @@ public sealed class TaskHostServerTests
             Assert.Empty((await client.RequiredSecretsAsync(request, cancellationToken: deadline.Token)).Names);
             Assert.Equal(0, Volatile.Read(ref invoked));
             Assert.False((await client.ReadyAsync(new ReadyRequest(), cancellationToken: deadline.Token)).Bound);
+            using var progress = client.Progress(new ReadyRequest(), cancellationToken: deadline.Token);
             using var execution = client.ExecuteAsync(request, cancellationToken: deadline.Token);
             while (!(await client.ReadyAsync(new ReadyRequest(), cancellationToken: deadline.Token)).Bound)
                 await Task.Delay(5, deadline.Token);
@@ -80,7 +82,19 @@ public sealed class TaskHostServerTests
             wrong.Attempt++;
             await RejectAsync(StatusCode.NotFound, () => client.CancelAsync(
                 new CancelRequest { Task = wrong }, cancellationToken: deadline.Token).ResponseAsync);
+            Assert.True(await progress.ResponseStream.MoveNext(deadline.Token));
+            var update = progress.ResponseStream.Current;
+            Assert.Equal(attempt, update.Task);
+            Assert.Equal(1UL, update.ReservationEpoch);
+            Assert.Equal(1U, update.ProgressSequence);
+            Assert.Equal(RemoteOperationPhase.Waiting, update.Phase);
+            var wrongProgress = update.Clone();
+            wrongProgress.Phase = RemoteOperationPhase.CancelConfirmed;
+            await RejectAsync(StatusCode.FailedPrecondition, () =>
+                client.ConfirmProgressAsync(wrongProgress, cancellationToken: deadline.Token).ResponseAsync);
             await client.CancelAsync(new CancelRequest { Task = attempt }, cancellationToken: deadline.Token);
+            Assert.False(execution.ResponseAsync.IsCompleted);
+            await client.ConfirmProgressAsync(update, cancellationToken: deadline.Token);
             Assert.Equal(TaskOutcome.Cancelled, (await execution.ResponseAsync).Outcome);
             Assert.Equal(1, Volatile.Read(ref invoked));
             Assert.Equal(abort, observedAbort);

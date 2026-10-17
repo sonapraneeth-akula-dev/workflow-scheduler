@@ -107,6 +107,43 @@ const ready = async (store: RunStore) =>
   waitFor(() => expect(store.getSnapshot().status).toBe("live"))
 
 describe("ordered authoritative run recovery", () => {
+  it("advances progress sequence without changing graph references, waits, placement, status or timers", async () => {
+    const f = fixture("connecting")
+    f.reads.snapshot.mockResolvedValueOnce({
+      ...snapshot,
+      tasks: { "build/task": 3 },
+      taskWaitReasons: {},
+    })
+    f.emit({ status: "live" })
+    await ready(f.store)
+    const before = f.store.getSnapshot().run!
+    f.emitEvents({
+      ...change(1),
+      attempt: 2,
+      progress: { sequence: 1, phase: 3, occurredAt: change(1).at },
+    })
+    const after = f.store.getSnapshot().run!
+    expect(after).toEqual({ ...before, lastSeq: 1 })
+    expect(after.tasks).toBe(before.tasks)
+    expect(after.nodes).toBe(before.nodes)
+    expect(after.taskWaitReasons).toBe(before.taskWaitReasons)
+    expect(f.reads.events).not.toHaveBeenCalled()
+    f.stop()
+  })
+
+  it("fails closed when progress names an inactive or unknown task", async () => {
+    const f = fixture()
+    await ready(f.store)
+    f.emitEvents({
+      ...change(1),
+      attempt: 1,
+      progress: { sequence: 1, phase: 3, occurredAt: change(1).at },
+    })
+    expect(f.store.getSnapshot().status).toBe("error")
+    expect(f.store.getSnapshot().error?.message).toContain("active run task")
+    f.stop()
+  })
+
   it("hydrates durable placement waits, applies a same-state Ready reason and clears it on the pinned dispatch", async () => {
     const f = fixture("connecting")
     f.reads.snapshot.mockResolvedValueOnce({

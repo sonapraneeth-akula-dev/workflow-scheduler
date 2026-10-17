@@ -52,6 +52,12 @@ public sealed class AgentOutbox : IDisposable
 
     public void Enqueue(AgentMessage message) => EnqueueCore(message);
 
+    public void PublishProgress(TaskProgress progress)
+    {
+        if (journal is null) throw new InvalidOperationException("Task progress requires a durable agent journal.");
+        EnqueueCore(new() { TaskProgress = progress });
+    }
+
     public async Task PublishCheckpointAsync(CheckpointSaved checkpoint, CancellationToken cancellationToken = default)
     {
         if (journal is null) throw new InvalidOperationException("Checkpoint acknowledgement requires a durable agent journal.");
@@ -68,7 +74,8 @@ public sealed class AgentOutbox : IDisposable
         if (message.PayloadCase is not (AgentMessage.PayloadOneofCase.TaskStarted or
             AgentMessage.PayloadOneofCase.TaskCompleted or AgentMessage.PayloadOneofCase.Heartbeat or
             AgentMessage.PayloadOneofCase.ResourceSample or AgentMessage.PayloadOneofCase.ReservationFenced or
-            AgentMessage.PayloadOneofCase.CalibrationCompleted or AgentMessage.PayloadOneofCase.CheckpointSaved))
+            AgentMessage.PayloadOneofCase.CalibrationCompleted or AgentMessage.PayloadOneofCase.CheckpointSaved or
+            AgentMessage.PayloadOneofCase.TaskProgress))
             throw new ArgumentException("Only task events, heartbeats, calibration results, checkpoints and fence acknowledgements belong in the agent outbox.", nameof(message));
         lock (gate)
         {
@@ -76,7 +83,7 @@ public sealed class AgentOutbox : IDisposable
             var copy = message.Clone();
             copy.Sequence = checked(Math.Max(sequence, 1) + 1);
             if ((journal is not null && copy.Heartbeat is null) || copy.CalibrationCompleted is not null ||
-                copy.CheckpointSaved is not null) ResultJournal.Validate(copy);
+                copy.CheckpointSaved is not null || copy.TaskProgress is not null) ResultJournal.Validate(copy);
             Persist(copy.Sequence, leaderEpoch, pending.Values.Append(copy));
             sequence = copy.Sequence;
             // Only the latest heartbeat is useful after a disconnection; task events are never dropped.
@@ -155,7 +162,7 @@ public sealed class AgentOutbox : IDisposable
     {
         lock (gate)
             return pending.Values.Select(message => message.TaskStarted?.Task ?? message.TaskCompleted?.Task ??
-                message.ResourceSample?.Task ?? message.CheckpointSaved?.Task)
+                message.ResourceSample?.Task ?? message.CheckpointSaved?.Task ?? message.TaskProgress?.Task)
                 .OfType<AttemptRef>().Select(task => task.Clone()).ToArray();
     }
 

@@ -24,6 +24,7 @@ message AgentMessage {
     ReservationFenced reservation_fenced = 16;
     CalibrationCompleted calibration_completed = 17;
     CheckpointSaved checkpoint_saved = 18;
+    TaskProgress task_progress = 19;
   }
 }
 
@@ -230,4 +231,27 @@ message CheckpointSaved {
   string blob_key = 5;
   string sha256 = 6;
   uint64 size_bytes = 7;
+}
+
+// Fixed remote lifecycle transitions only. URLs, payloads, credentials and poll
+// diagnostics never belong in this journaled System Events channel.
+message TaskProgress {
+  AttemptRef task = 1;
+  uint64 reservation_epoch = 2;
+  uint32 progress_sequence = 3;
+  google.protobuf.Timestamp at = 4;
+  RemoteOperationPhase phase = 5;
+}
+
+enum RemoteOperationPhase {
+  REMOTE_OPERATION_PHASE_UNSPECIFIED = 0;
+  REMOTE_OPERATION_PHASE_SUBMISSION_PENDING = 1;
+  REMOTE_OPERATION_PHASE_SUBMITTED = 2;
+  REMOTE_OPERATION_PHASE_WAITING = 3;
+  REMOTE_OPERATION_PHASE_SUCCEEDED = 4;
+  REMOTE_OPERATION_PHASE_FAILED = 5;
+  REMOTE_OPERATION_PHASE_CANCEL_REQUESTED = 6;
+  REMOTE_OPERATION_PHASE_CANCEL_CONFIRMED = 7;
+  REMOTE_OPERATION_PHASE_OUTCOME_UNKNOWN = 8;
+  REMOTE_OPERATION_PHASE_RESUMING = 9;
 }

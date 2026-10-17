@@ -159,6 +159,7 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
     {
         await Tasks.HttpOperation(ctx.Var<string>("remoteUrl"),
             new("state", TimeSpan.FromHours(1), resultField: "value", errorField: "error"),
+            cancel: new("{statusUrl}/cancel", requestTimeout: TimeSpan.FromSeconds(2)),
             deduplication: new("Idempotency-Key", TimeSpan.FromHours(1))).ExecuteAsync(ctx);
     }).Task("checkpoint", async ctx =>
     {

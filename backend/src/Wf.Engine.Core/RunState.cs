@@ -117,6 +117,12 @@ public sealed class RunState
     {
         ArgumentNullException.ThrowIfNull(@event);
         Validate(@event);
+        if (@event.Progress is not null)
+        {
+            Snapshot = Snapshot with { LastSequence = @event.Sequence };
+            events.Add(@event);
+            return;
+        }
         var metrics = RunMetricsRecorder.Record(Snapshot.Metrics!, @event);
         Snapshot = @event.Entity switch
         {
@@ -153,6 +159,22 @@ public sealed class RunState
             Reject($"Run '{Snapshot.RunId}' expected event sequence {Snapshot.LastSequence + 1} for the same run.");
         if (@event.At.Offset != TimeSpan.Zero)
             Reject("Event timestamps must use UTC.");
+        if (@event.Progress is { } progress)
+        {
+            try { Wf.Contracts.Progress.TaskProgressProtocol.Validate(progress); }
+            catch (ArgumentException) { Reject("Remote progress metadata is invalid."); }
+            if (@event.Entity != EventEntity.Task || @event.Key is null ||
+                !Snapshot.Tasks.TryGetValue(@event.Key, out var current) ||
+                current is not (ExecutionStatus.Dispatched or ExecutionStatus.Running) || @event.State != (int)current ||
+                @event.Attempt is null || !Snapshot.Metrics!.Tasks.TryGetValue(@event.Key, out var progressMetric) ||
+                progressMetric.Attempts.Length == 0 || progressMetric.Attempts[^1].Attempt != @event.Attempt ||
+                @event.Abort is not null || @event.AgentId is not null || @event.WaitingReason is not null ||
+                @event.RunQueuedAt is not null || @event.AttemptEndedAt is not null || @event.AttemptStatus is not null ||
+                @event.FailureCategory is not null || @event.FailureReason is not null ||
+                TransitionTable.IsTerminal(Snapshot.Status) || Snapshot.Abort is { } progressAbort && @event.At < progressAbort.At)
+                Reject("Remote progress requires the current active task attempt without a state transition.");
+            return;
+        }
         if (@event.WaitingReason is not null && (@event.WaitingReason != "WaitingForMachine" ||
                 @event.Entity != EventEntity.Task || (ExecutionStatus)@event.State != ExecutionStatus.Ready) ||
             @event.AgentId is { } agent && (agent == Guid.Empty || @event.Entity != EventEntity.Task ||

@@ -254,7 +254,7 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
                 (object?)metric.StartedAt ?? DBNull.Value, (object?)metric.EndedAt ?? DBNull.Value);
         }
         // Dispatch inserts the new attempt after this event; there is no attempt row to update yet.
-        if (change.Entity == EventEntity.Task && (ExecutionStatus)change.State != ExecutionStatus.Dispatched &&
+        if (change.Entity == EventEntity.Task && change.Progress is null && (ExecutionStatus)change.State != ExecutionStatus.Dispatched &&
             run.Snapshot.Metrics!.Tasks[change.Key!].Attempts is { Length: > 0 } attempts)
         {
             var attempt = attempts[^1];
@@ -354,14 +354,21 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
 
     public async Task AcceptAsync(AgentSession session, AgentMessage message, CancellationToken cancellationToken)
     {
-        var reference = message.TaskStarted?.Task ?? message.TaskCompleted?.Task;
+        var progress = message.TaskProgress;
+        if (progress is not null)
+        {
+            _ = Wf.Contracts.Progress.TaskProgressProtocol.Validate(progress);
+            if (progress.At.ToDateTimeOffset() > UtcNow.AddMinutes(1))
+                throw new ArgumentException("Task progress time is in the future.");
+        }
+        var reference = message.TaskStarted?.Task ?? message.TaskCompleted?.Task ?? progress?.Task;
         var identity = ResultDeduplicator.Identity(reference);
         var runId = identity.RunId;
-        var at = (message.TaskStarted?.At ?? message.TaskCompleted?.At)?.ToDateTimeOffset()
+        var at = (message.TaskStarted?.At ?? message.TaskCompleted?.At ?? progress?.At)?.ToDateTimeOffset()
             ?? throw new ArgumentException("Task event requires a timestamp.", nameof(message));
         var taskKey = identity.TaskKey;
         var completed = message.TaskCompleted;
-        var reportedEpoch = message.TaskStarted?.ReservationEpoch ?? completed?.ReservationEpoch ?? 0;
+        var reportedEpoch = message.TaskStarted?.ReservationEpoch ?? completed?.ReservationEpoch ?? progress?.ReservationEpoch ?? 0;
         if (completed is not null && TaskOutputJson.Error(completed.OutputsJson.Memory) is { } outputError)
             completed = TaskOutputJson.Reject(completed, outputError);
         if (completed is not null) ResultDeduplicator.Validate(completed);
@@ -404,8 +411,22 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
                 LogStaleReservation(identity, session.AgentId, reportedEpoch);
                 return;
             }
-            if (ResultDeduplicator.IsDuplicate((ExecutionStatus)status, completed is not null))
+            if (progress is null && ResultDeduplicator.IsDuplicate((ExecutionStatus)status, completed is not null))
                 return;
+            if (progress is not null && (status is not (2 or 3) || TransitionTable.IsTerminal(run.Snapshot.Status) ||
+                !run.Snapshot.Metrics!.Tasks.TryGetValue(taskKey, out var metric) ||
+                metric.Attempts.Length == 0 || metric.Attempts[^1].Attempt != identity.Attempt))
+            {
+                logger.LogWarning("Discarded progress for inactive task {RunId}/{TaskKey}/{Attempt}.",
+                    runId, taskKey, identity.Attempt);
+                return;
+            }
+        }
+        if (progress is not null)
+        {
+            await Events.TaskProgressProjector.AppendAsync(connection, run, progress, UtcNow, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return;
         }
         if (completed is { OutputsJson.Length: > 0 })
         {

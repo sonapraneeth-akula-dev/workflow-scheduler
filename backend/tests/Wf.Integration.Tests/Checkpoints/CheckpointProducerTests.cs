@@ -17,6 +17,7 @@ using Wf.Contracts;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Checkpoints;
 using Wf.Contracts.Definition;
+using Wf.Contracts.Progress;
 using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Checkpoints;
 using Wf.ControlPlane.Engine.Dispatch;
@@ -124,6 +125,140 @@ public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IC
         await Until(() => Task.FromResult(agent.Commands.Inflight.Count == 0), agent.Work);
         Assert.Null(PendingCheckpoint(agent.Outbox));
         Assert.Equal(1, agent.Hosts.ProcessStartCount);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Remote_cancellation_survives_blocked_engine_and_persists_only_confirmed_outcome(bool timedOut, bool confirmed)
+    {
+        var posts = 0;
+        var cancellations = 0;
+        var polls = 0;
+        var key = RandomNumberGenerator.GetBytes(32);
+        await using var host = await ReportHost.Start(database.DataSource, key: key, configureServices: builder =>
+        {
+            builder.Services.AddSingleton<CheckpointApplier>();
+            builder.Services.AddSingleton(new CheckpointUploadCapabilities(key, TimeProvider.System));
+        }, configure: app =>
+        {
+            app.MapCheckpointUploadEndpoints();
+            app.MapPost("/remote/jobs", (HttpContext context) =>
+            {
+                Interlocked.Increment(ref posts);
+                context.Response.Headers.Location = "/remote/status/one";
+                context.Response.Headers.RetryAfter = "3600";
+                return Results.Text("""{"state":"Pending"}""", "application/json", statusCode: 202);
+            });
+            app.MapPost("/remote/status/one/cancel", (HttpContext context) =>
+            {
+                Interlocked.Increment(ref cancellations);
+                Assert.Equal(0, context.Request.ContentLength ?? 0);
+                Assert.False(context.Request.Headers.ContainsKey("Idempotency-Key"));
+                context.Response.Headers.RetryAfter = confirmed ? "0" : "3600";
+                return Results.StatusCode(202);
+            });
+            app.MapGet("/remote/status/one", () =>
+            {
+                Interlocked.Increment(ref polls);
+                return Results.Text(confirmed ? """{"state":"Cancelled"}""" : """{"state":"Running"}""",
+                    "application/json");
+            });
+        });
+        var archive = await ReportPublishTests.Package();
+        host.App.MapGet("/remote-cancellation-package.zip", () => Results.Bytes(archive, "application/zip"));
+        var hash = Convert.ToHexStringLower(SHA256.HashData(archive));
+        var id = Guid.NewGuid();
+        await using var agent = new Agent(host, id);
+        await Until(() => Task.FromResult(host.Registry.Find(id) is not null), agent.Work);
+        var attempt = await host.Seed(dispatch: false, task: "remoteOperation");
+        var command = new Dispatch
+        {
+            Task = new() { RunId = attempt.RunId.ToString("D"), NodeKey = "$post", TaskKey = "remoteOperation", Attempt = 1 },
+            Version = "1.0.0", Sha256 = hash,
+            PackageUri = new Uri(host.Address, "/remote-cancellation-package.zip").AbsoluteUri,
+            VariablesJson = ByteString.CopyFromUtf8(JsonSerializer.Serialize(new
+            {
+                remoteUrl = new Uri(host.Address, "/remote/jobs").AbsoluteUri
+            })),
+            DeadlineAt = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddSeconds(timedOut ? 15 : 120))
+        };
+        using var dispatcher = new Dispatcher(database.DataSource, host.Runs, host.Registry,
+            new PlacementEngine(), TimeProvider.System);
+        var placed = await dispatcher.DispatchAsync(await host.Runs.LoadAsync(attempt.RunId, Token),
+            new(attempt.RunId, "$post", "remoteOperation", 1, hash, new(new(pool: host.Pool))), command, Token);
+        Assert.Equal(id, placed.Agent!.Id);
+        await Until(async () => Equals(3L, await Scalar("""
+            SELECT count(*) FROM run_events WHERE run_id=$1 AND convert_from(payload,'UTF8')::jsonb ? 'Progress'
+            """, attempt.RunId)), agent.Work);
+        await using var connection = await database.DataSource.OpenConnectionAsync(Token);
+        await using var barrier = await connection.BeginTransactionAsync(Token);
+        await using (var hold = new NpgsqlCommand("SELECT 1 FROM runs WHERE id=$1 FOR UPDATE", connection))
+        {
+            hold.Parameters.AddWithValue(attempt.RunId);
+            await hold.ExecuteScalarAsync(Token);
+        }
+        var outcome = timedOut ? TaskOutcome.TimedOut : TaskOutcome.Cancelled;
+        var finalPhase = confirmed ? RemoteOperationPhase.CancelConfirmed : RemoteOperationPhase.OutcomeUnknown;
+        try
+        {
+            if (!timedOut)
+                await agent.Commands.HandleAsync(new() { Cancel = new() { Task = command.Task } }, Token);
+            await Until(() => Task.FromResult(agent.Outbox.ContainsResult(command.Task)), agent.Work);
+            await Until(() => Task.FromResult(agent.Commands.Inflight.Count == 0), agent.Work);
+            var pending = PendingMessages(agent.Outbox);
+            Assert.Equal([RemoteOperationPhase.CancelRequested, finalPhase],
+                pending.Where(message => message.TaskProgress is not null).Select(message => message.TaskProgress.Phase));
+            Assert.Equal(outcome, Assert.Single(pending, message => message.TaskCompleted is not null).TaskCompleted.Outcome);
+            Assert.Equal(1, posts);
+            Assert.Equal(1, cancellations);
+            Assert.Equal(confirmed ? 1 : 0, polls);
+            Assert.Contains(command.Task, agent.Outbox.UnacknowledgedAttempts());
+            var copy = Path.Combine(host.Root, "progress-journal-copy");
+            Directory.CreateDirectory(copy);
+            File.Copy(Path.Combine(agent.Journal, "results.wfj"), Path.Combine(copy, "results.wfj"));
+            using var restored = new AgentOutbox(new ResultJournal(copy, id.ToString("D")));
+            Assert.Equal(2, PendingMessages(restored).Count(message => message.TaskProgress is not null));
+        }
+        finally { await barrier.CommitAsync(Token); }
+        await Until(async () => TransitionTable.IsTerminal(
+            (await host.Runs.LoadAsync(attempt.RunId, Token)).Snapshot.Tasks[attempt.TaskKey]), agent.Work);
+        Assert.Equal(timedOut ? ExecutionStatus.TimedOut : ExecutionStatus.Cancelled,
+            (await host.Runs.LoadAsync(attempt.RunId, Token)).Snapshot.Tasks[attempt.TaskKey]);
+        await using (var events = database.DataSource.CreateCommand("""
+            SELECT payload FROM run_events WHERE run_id=$1 AND convert_from(payload,'UTF8')::jsonb ? 'Progress' ORDER BY seq
+            """))
+        {
+            events.Parameters.AddWithValue(attempt.RunId);
+            await using var rows = await events.ExecuteReaderAsync(Token);
+            var progress = new List<RemoteOperationProgress>();
+            while (await rows.ReadAsync(Token))
+            {
+                var text = System.Text.Encoding.UTF8.GetString(rows.GetFieldValue<byte[]>(0));
+                Assert.DoesNotContain(host.Address.Authority, text);
+                Assert.DoesNotContain("remote/jobs", text);
+                using var json = JsonDocument.Parse(text);
+                progress.Add(JsonSerializer.Deserialize<RemoteOperationProgress>(json.RootElement.GetProperty("Progress"))!);
+            }
+            Assert.Equal([1U, 2U, 3U, 4U, 5U], progress.Select(item => item.Sequence));
+            Assert.Equal([RemoteOperationPhase.SubmissionPending, RemoteOperationPhase.Submitted,
+                RemoteOperationPhase.Waiting, RemoteOperationPhase.CancelRequested, finalPhase], progress.Select(item => item.Phase));
+        }
+        Assert.Equal(1, agent.Hosts.ProcessStartCount);
+    }
+
+    private static List<AgentMessage> PendingMessages(AgentOutbox outbox)
+    {
+        var messages = new List<AgentMessage>();
+        ulong sequence = 0;
+        while (outbox.NextAfter(sequence) is { } message)
+        {
+            messages.Add(message);
+            sequence = message.Sequence;
+        }
+        return messages;
     }
 
     [Theory]

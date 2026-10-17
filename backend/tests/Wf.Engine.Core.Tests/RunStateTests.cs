@@ -3,6 +3,8 @@ using System.Collections.Immutable;
 using Wf.Contracts;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
+using Wf.Contracts.Agent.V1;
+using Wf.Contracts.Progress;
 using Wf.Engine.Core;
 
 namespace Wf.Engine.Core.Tests;
@@ -10,6 +12,70 @@ namespace Wf.Engine.Core.Tests;
 public sealed class RunStateTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 15, 0, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void Progress_is_replayable_attempt_metadata_without_restarting_timers_or_changing_state()
+    {
+        var run = Active();
+        var before = run.Snapshot;
+        var progress = new RunEvent(before.RunId, before.LastSequence + 1, Now.AddSeconds(5),
+            EventEntity.Task, "node/task", (int)ExecutionStatus.Running)
+        { Attempt = 1, Progress = new(1, RemoteOperationPhase.Waiting, Now) };
+        run.Apply(progress);
+        Assert.Same(before.Metrics, run.Snapshot.Metrics);
+        Assert.Same(before.Tasks, run.Snapshot.Tasks);
+        Assert.Same(before.Nodes, run.Snapshot.Nodes);
+        Assert.Equal(before.Status, run.Snapshot.Status);
+        Assert.Equal(before.LastSequence + 1, run.Snapshot.LastSequence);
+        var restored = RunState.Restore(before, [progress], Assert.Fail);
+        Assert.Equal(JsonSerializer.Serialize(run.Snapshot), JsonSerializer.Serialize(restored.Snapshot));
+    }
+
+    [Theory]
+    [InlineData("entity")]
+    [InlineData("key")]
+    [InlineData("attempt")]
+    [InlineData("state")]
+    [InlineData("placement")]
+    [InlineData("failure")]
+    [InlineData("terminal")]
+    [InlineData("phase")]
+    public void Invalid_progress_cannot_mutate_the_graph_or_metrics(string field)
+    {
+        var run = Active();
+        if (field == "terminal")
+            run.Append(EventEntity.Task, "node/task", (int)ExecutionStatus.Succeeded, Now);
+        var before = run.Snapshot;
+        var change = new RunEvent(before.RunId, before.LastSequence + 1, Now,
+            EventEntity.Task, "node/task", (int)ExecutionStatus.Running)
+        { Attempt = 1, Progress = new(1, RemoteOperationPhase.Waiting, Now) };
+        change = field switch
+        {
+            "entity" => change with { Entity = EventEntity.Node },
+            "key" => change with { Key = "node/missing" },
+            "attempt" => change with { Attempt = 2 },
+            "state" => change with { State = (int)ExecutionStatus.Succeeded },
+            "placement" => change with { AgentId = Guid.NewGuid() },
+            "failure" => change with { FailureReason = "not progress" },
+            "phase" => change with { Progress = new(1, (RemoteOperationPhase)99, Now) },
+            _ => change
+        };
+        Assert.Throws<InvalidOperationException>(() => run.Apply(change));
+        Assert.Same(before, run.Snapshot);
+    }
+
+    private static RunState Active()
+    {
+        var run = Create(_ => { });
+        run.Append(EventEntity.Run, null, (int)RunStatus.Running, Now);
+        run.Append(EventEntity.Node, "node", (int)ExecutionStatus.Ready, Now);
+        run.Append(EventEntity.Node, "node", (int)ExecutionStatus.Dispatched, Now);
+        run.Append(EventEntity.Node, "node", (int)ExecutionStatus.Running, Now);
+        run.Append(EventEntity.Task, "node/task", (int)ExecutionStatus.Ready, Now);
+        run.Append(EventEntity.Task, "node/task", (int)ExecutionStatus.Dispatched, Now);
+        run.Append(EventEntity.Task, "node/task", (int)ExecutionStatus.Running, Now);
+        return run;
+    }
 
     [Fact]
     public void LiveStateEqualsReplayAndSnapshotPlusTail()

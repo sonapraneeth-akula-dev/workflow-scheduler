@@ -198,7 +198,8 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
                 execution.Cancellation.Token);
             result = await hosts.ExecuteAsync(package, dispatch, cancellationToken: execution.Cancellation.Token,
                 captureLog: capture is null ? null : capture.WriteAsync,
-                publishResources: outbox.Enqueue, publishCheckpoint: outbox.PublishCheckpointAsync, journalResult: completion =>
+                publishResources: outbox.Enqueue, publishCheckpoint: outbox.PublishCheckpointAsync,
+                publishProgress: outbox.PublishProgress, journalResult: completion =>
                 {
                     publishing = true;
                     completion.ReservationEpoch = dispatch.ReservationEpoch;

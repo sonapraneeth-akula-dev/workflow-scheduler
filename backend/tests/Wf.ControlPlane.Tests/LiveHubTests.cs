@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Wf.Contracts;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
+using Wf.Contracts.Agent.V1;
 using Wf.ControlPlane.Live;
 
 namespace Wf.ControlPlane.Tests;
@@ -96,7 +97,9 @@ public sealed class LiveHubTests
                 LiveEvent.From(new(run, 43, at, EventEntity.Task, "work", (int)ExecutionStatus.Ready)
                     { WaitingReason = "WaitingForMachine" }),
                 LiveEvent.From(new(run, 44, at, EventEntity.Task, "work", (int)ExecutionStatus.Dispatched)
-                    { AgentId = agent })
+                    { AgentId = agent }),
+                LiveEvent.From(new(run, 45, at, EventEntity.Task, "work/task", (int)ExecutionStatus.Running)
+                    { Attempt = 2, Progress = new(1, RemoteOperationPhase.Waiting, at) })
             ]);
         var bytes = MessagePackSerializer.Serialize(delta, cancellationToken: TestContext.Current.CancellationToken);
         using var packed = JsonDocument.Parse(MessagePackSerializer.ConvertToJson(bytes,
@@ -108,6 +111,11 @@ public sealed class LiveHubTests
         Assert.Equal("UI", packed.RootElement.GetProperty("events")[0].GetProperty("abort").GetProperty("source").GetString());
         Assert.Equal("WaitingForMachine", packed.RootElement.GetProperty("events")[1].GetProperty("waitingReason").GetString());
         Assert.Equal(agent.ToString("D"), packed.RootElement.GetProperty("events")[2].GetProperty("agentId").GetString());
+        var progress = packed.RootElement.GetProperty("events")[3];
+        Assert.Equal(2, progress.GetProperty("attempt").GetInt32());
+        Assert.Equal(1, progress.GetProperty("progress").GetProperty("sequence").GetInt32());
+        Assert.Equal((int)RemoteOperationPhase.Waiting, progress.GetProperty("progress").GetProperty("phase").GetInt32());
+        Assert.Equal(at.ToString("O"), progress.GetProperty("progress").GetProperty("occurredAt").GetString());
         Assert.DoesNotContain("variables", packed.RootElement.GetRawText());
         var problem = new LiveSubscriptionProblem(403, "Forbidden", "denied", "insufficient_scope_role");
         var problemBytes = MessagePackSerializer.Serialize(problem, cancellationToken: TestContext.Current.CancellationToken);

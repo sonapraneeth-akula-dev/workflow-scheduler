@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Wf.Contracts;
+using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Definition;
 using Wf.Sdk;
 
@@ -12,11 +13,11 @@ public sealed class RemoteOperationRunnerTests
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
     private static HttpOperationTask Operation(bool dedup = false, bool lookup = false, string? secret = null,
-        HttpOperationStatusContract? status = null) => Tasks.HttpOperation("https://remote.test/jobs",
+        HttpOperationStatusContract? status = null, HttpOperationCancelContract? cancel = null) => Tasks.HttpOperation("https://remote.test/jobs",
         status ?? new("state", TimeSpan.FromDays(2), resultField: "value", errorField: "reason"),
         deduplication: dedup ? new("Idempotency-Key", TimeSpan.FromDays(2)) : null,
         lookup: lookup ? new("https://remote.test/lookup/{submissionKey}", TimeSpan.FromDays(2)) : null,
-        secretReference: secret, body: """{"private":"request-body"}""");
+        secretReference: secret, body: """{"private":"request-body"}""", cancel: cancel);
 
     [Theory]
     [InlineData(200, """{"state":"Succeeded","value":42}""")]
@@ -290,6 +291,129 @@ public sealed class RemoteOperationRunnerTests
         Assert.DoesNotContain("never-echo", error.Message);
     }
 
+    [Theory]
+    [InlineData(HttpOperationCancelMethod.Post, true)]
+    [InlineData(HttpOperationCancelMethod.Post, false)]
+    [InlineData(HttpOperationCancelMethod.Delete, true)]
+    [InlineData(HttpOperationCancelMethod.Delete, false)]
+    public async Task Cancellation_uses_independent_token_and_confirms_remote_state_not_HTTP_acceptance(
+        HttpOperationCancelMethod method, bool immediate)
+    {
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        var cancels = 0;
+        var fixture = new Runner((request, _) =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/jobs")
+                return Task.FromResult(Reply(202, """{"state":"Pending"}""", "/status/one", TimeSpan.FromHours(1)));
+            Assert.True(cancellation.IsCancellationRequested);
+            Assert.Null(request.Content);
+            Assert.False(request.Headers.Contains("Idempotency-Key"));
+            if (request.RequestUri.AbsolutePath.EndsWith("/cancel", StringComparison.Ordinal))
+            {
+                Assert.Equal(method == HttpOperationCancelMethod.Post ? HttpMethod.Post : HttpMethod.Delete, request.Method);
+                cancels++;
+                return Task.FromResult(immediate
+                    ? Reply(200, """{"state":"Cancelled"}""") : Reply(202, "{}", retryAfter: TimeSpan.Zero));
+            }
+            Assert.Equal(HttpMethod.Get, request.Method);
+            return Task.FromResult(Reply(200, """{"state":"Cancelled"}"""));
+        });
+        fixture.Resume(cancellation: cancellation.Token);
+        var running = fixture.Run(Operation(dedup: true, cancel: new("{statusUrl}/cancel", method)));
+        await Until(() => fixture.Phases.Contains(RemoteOperationPhase.Waiting));
+        await cancellation.CancelAsync();
+        await Until(() => fixture.Phases.Contains(RemoteOperationPhase.CancelRequested));
+        if (!immediate) fixture.Clock.Advance(TimeSpan.FromMilliseconds(100));
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running.WaitAsync(TimeSpan.FromSeconds(5), Token));
+        Assert.Contains("remote cancellation was confirmed", error.Message);
+        Assert.Equal(1, cancels);
+        Assert.Equal(immediate ? 2 : 3, fixture.Requests);
+        Assert.Equal([RemoteOperationPhase.SubmissionPending, RemoteOperationPhase.Submitted, RemoteOperationPhase.Waiting,
+            RemoteOperationPhase.CancelRequested, RemoteOperationPhase.CancelConfirmed], fixture.Phases);
+        Assert.Single(fixture.Keys);
+    }
+
+    [Theory]
+    [InlineData(200)]
+    [InlineData(202)]
+    [InlineData(403)]
+    [InlineData(500)]
+    public async Task Unconfirmed_cancellation_is_unknown_and_total_cleanup_time_is_bounded(int code)
+    {
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        var fixture = new Runner((request, _) => Task.FromResult(request.RequestUri!.AbsolutePath == "/jobs"
+            ? Reply(202, "{}", "/status/one", TimeSpan.FromHours(1))
+            : Reply(code, "{}", retryAfter: TimeSpan.FromHours(1))));
+        fixture.Resume(cancellation: cancellation.Token);
+        var running = fixture.Run(Operation(cancel: new("{statusUrl}/cancel", requestTimeout: TimeSpan.FromSeconds(2))));
+        await Until(() => fixture.Phases.Contains(RemoteOperationPhase.Waiting));
+        await cancellation.CancelAsync();
+        await Until(() => fixture.Requests == 2);
+        fixture.Clock.Advance(TimeSpan.FromSeconds(2));
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running.WaitAsync(TimeSpan.FromSeconds(5), Token));
+        Assert.StartsWith("RemoteOutcomeUnknown:", error.Message);
+        Assert.DoesNotContain(RemoteOperationPhase.CancelConfirmed, fixture.Phases);
+        Assert.Equal(RemoteOperationPhase.OutcomeUnknown, fixture.Phases[^1]);
+        Assert.Equal(2, fixture.Requests);
+        Assert.Contains(fixture.Logs, log => log.Contains("remote outcome is unknown", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Cancellation_during_uncertain_submission_without_remote_reference_never_guesses_a_cancel_target()
+    {
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        var fixture = new Runner((_, _) =>
+        {
+            cancellation.Cancel();
+            throw new OperationCanceledException(cancellation.Token);
+        });
+        fixture.Resume(cancellation: cancellation.Token);
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            fixture.Run(Operation(cancel: new("{statusUrl}/cancel"))));
+        Assert.StartsWith("RemoteOutcomeUnknown:", error.Message);
+        Assert.Equal(1, fixture.Requests);
+        Assert.Equal("SubmissionPending", fixture.State!.Stage);
+        Assert.Equal([RemoteOperationPhase.SubmissionPending, RemoteOperationPhase.OutcomeUnknown], fixture.Phases);
+    }
+
+    [Theory]
+    [InlineData("Succeeded", RemoteOperationPhase.Succeeded)]
+    [InlineData("Failed", RemoteOperationPhase.Failed)]
+    public async Task Terminal_remote_outcome_during_cleanup_is_reported_without_claiming_remote_cancellation(
+        string state, RemoteOperationPhase phase)
+    {
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        var fixture = new Runner((request, _) => Task.FromResult(request.RequestUri!.AbsolutePath == "/jobs"
+            ? Reply(202, "{}", "/status/one", TimeSpan.FromHours(1))
+            : Reply(200, "{\"state\":\"" + state + "\"}")));
+        fixture.Resume(cancellation: cancellation.Token);
+        var running = fixture.Run(Operation(cancel: new("{statusUrl}/cancel")));
+        await Until(() => fixture.Phases.Contains(RemoteOperationPhase.Waiting));
+        await cancellation.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running.WaitAsync(TimeSpan.FromSeconds(5), Token));
+        Assert.Equal(phase, fixture.Phases[^1]);
+        Assert.DoesNotContain(RemoteOperationPhase.CancelConfirmed, fixture.Phases);
+        Assert.Equal(2, fixture.Requests);
+    }
+
+    [Fact]
+    public async Task Lifecycle_System_Events_are_separate_from_poll_diagnostics()
+    {
+        var fixture = new Runner((_, harness) => Task.FromResult(harness.Requests switch
+        {
+            1 => Reply(202, "{}", "/status"),
+            2 => Reply(200, """{"state":"Running"}""", retryAfter: TimeSpan.Zero),
+            _ => Reply(200, """{"state":"Succeeded","value":3}""")
+        }));
+        var running = fixture.Run(Operation());
+        await Until(() => fixture.Logs.Count == 1);
+        fixture.Clock.Advance(TimeSpan.FromMilliseconds(100));
+        await running.WaitAsync(TimeSpan.FromSeconds(5), Token);
+        Assert.Equal([RemoteOperationPhase.SubmissionPending, RemoteOperationPhase.Submitted,
+            RemoteOperationPhase.Waiting, RemoteOperationPhase.Succeeded], fixture.Phases);
+        Assert.Equal(["Remote operation status poll 1: waiting."], fixture.Logs);
+    }
+
     private static HttpResponseMessage Reply(int code, string body = "", string? location = null, TimeSpan? retryAfter = null)
     {
         var reply = new HttpResponseMessage((HttpStatusCode)code) { Content = new StringContent(body) };
@@ -317,6 +441,8 @@ public sealed class RemoteOperationRunnerTests
         public int Saves { get; private set; }
         public int Requests { get; private set; }
         public List<string> Keys { get; } = [];
+        public List<RemoteOperationPhase> Phases { get; } = [];
+        public List<string> Logs { get; } = [];
         private DateTimeOffset savedAt;
 
         public Runner(Func<HttpRequestMessage, Runner, Task<HttpResponseMessage>> handle)
@@ -338,7 +464,15 @@ public sealed class RemoteOperationRunnerTests
             }, initialState: Bytes ?? ReadOnlyMemory<byte>.Empty, sequence: Saves,
                 savedAt: Bytes is null ? null : savedAt, timeProvider: Clock);
             Context = new(cancellation ?? Token, checkpoint: store, runId: runId ?? this.runId,
-                taskKey: "node/task", attempt: new((uint)Saves + 1), secrets: secrets);
+                taskKey: "node/task", attempt: new((uint)Saves + 1), secrets: secrets, logger: Logs.Add)
+            {
+                ProgressPublisher = (phase, token) =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    Phases.Add(phase);
+                    return Task.CompletedTask;
+                }
+            };
         }
 
         public async Task Run(HttpOperationTask operation)
@@ -346,7 +480,7 @@ public sealed class RemoteOperationRunnerTests
             using var client = new HttpClient(new Handler((request, _) =>
             {
                 Requests++;
-                if (request.Method == HttpMethod.Post)
+                if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/jobs")
                     Keys.Add(request.Headers.TryGetValues("Idempotency-Key", out var keys) ? keys.Single() : "(no dedup header)");
                 return Handle(request, this);
             }));

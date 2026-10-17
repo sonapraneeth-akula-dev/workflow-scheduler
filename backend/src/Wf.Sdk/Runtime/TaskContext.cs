@@ -21,6 +21,7 @@ public sealed class TaskContext
     public AbortRecord? Abort { get; }
     public CheckpointStore Checkpoint { get; }
     public TaskAttempt Attempt { get; }
+    internal Func<Wf.Contracts.Agent.V1.RemoteOperationPhase, CancellationToken, Task>? ProgressPublisher { get; init; }
     public IReports Reports => reports ?? throw new NotSupportedException("Report publishing is not configured for this task host.");
     public IArtifacts Artifacts => artifacts ?? throw new NotSupportedException("Artifact publishing is not configured for this task host.");
 
@@ -55,7 +56,7 @@ public sealed class TaskContext
         new(CancellationToken, variables, Outputs, inputs,
         declaredInputs, Logger, reports is ReportPublisher publisher ? publisher.ForSource(key) : reports,
         artifacts is ArtifactPublisher artifactPublisher ? artifactPublisher.ForSource(key) : artifacts, key, Abort, secrets,
-        checkpoint ?? Checkpoint, attempt ?? Attempt, RunId);
+        checkpoint ?? Checkpoint, attempt ?? Attempt, RunId) { ProgressPublisher = ProgressPublisher };
 
     /// <summary>Read an agent-resolved reference for this attempt; never writes the value into variables or the manifest.</summary>
     public string Secret(SecretReference reference)

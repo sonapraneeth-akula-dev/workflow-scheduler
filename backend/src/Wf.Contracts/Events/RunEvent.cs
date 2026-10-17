@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using Wf.Contracts.Definition;
+using Wf.Contracts.Progress;
 
 namespace Wf.Contracts.Events;
 
@@ -24,4 +25,6 @@ public sealed record RunEvent(Guid RunId, long Sequence, DateTimeOffset At, Even
     public string? WaitingReason { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? AgentId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RemoteOperationProgress? Progress { get; init; }
 }
