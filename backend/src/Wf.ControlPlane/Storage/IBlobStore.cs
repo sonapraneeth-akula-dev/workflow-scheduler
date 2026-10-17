@@ -65,6 +65,15 @@ public sealed class BlobContent
 
 public interface IBlobStore
 {
+    IAsyncEnumerable<Guid> RunObjectsAsync(CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Run object retention is unsupported.");
+    Task DeleteRunObjectsAsync(Guid runId, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Run object retention is unsupported.");
+    IAsyncEnumerable<string> ArtifactHashesAsync(CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Artifact retention is unsupported.");
+    Task DeleteArtifactAsync(string sha256, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Artifact retention is unsupported.");
+
     IAsyncEnumerable<Guid> ResourceRunsAsync(CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("Resource retention is unsupported.");
     Task DeleteResourceRunAsync(Guid runId, CancellationToken cancellationToken = default) =>

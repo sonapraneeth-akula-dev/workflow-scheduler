@@ -142,6 +142,9 @@ if (engineEnabled)
 builder.Services.AddSingleton<AgentLossHandler>();
 if (engineEnabled)
     builder.Services.AddHostedService<AgentLossHandler>(services => services.GetRequiredService<AgentLossHandler>());
+builder.Services.AddSingleton<Wf.ControlPlane.Engine.Maintenance.RetentionPurger>();
+builder.Services.AddSingleton<Wf.ControlPlane.Engine.Maintenance.PartitionMaintenance>();
+if (engineEnabled) builder.Services.AddHostedService<Wf.ControlPlane.Engine.Maintenance.RetentionService>();
 var app = builder.Build();
 if (lan is not null)
     app.Logger.LogWarning("Trusted local LAN profile: {Endpoint}. Development authentication grants LAN clients full access; use only on a trusted network.",

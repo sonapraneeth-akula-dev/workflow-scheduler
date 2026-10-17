@@ -9,12 +9,12 @@ public sealed class ResourceRetentionService(NpgsqlDataSource source, IBlobStore
 {
     public async Task SweepAsync(CancellationToken token)
     {
-        await foreach (var run in blobs.ResourceRunsAsync(token))
+        await foreach (var run in blobs.RunObjectsAsync(token))
         {
             await using var lookup = source.CreateCommand("SELECT EXISTS(SELECT 1 FROM runs WHERE run_day=uuid_v7_run_day($1) AND id=$1)");
             lookup.Parameters.AddWithValue(run);
             if (await lookup.ExecuteScalarAsync(token) is false)
-                await blobs.DeleteResourceRunAsync(run, token);
+                await blobs.DeleteRunObjectsAsync(run, token);
         }
     }
 
@@ -26,7 +26,7 @@ public sealed class ResourceRetentionService(NpgsqlDataSource source, IBlobStore
             try { await SweepAsync(stoppingToken); }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception error) when (error is NpgsqlException or IOException or RequestFailedException or NotSupportedException)
-            { logger.LogWarning(error, "Resource series retention will retry."); }
+            { logger.LogWarning(error, "Orphan run-object retention will retry."); }
             try { if (!await timer.WaitForNextTickAsync(stoppingToken)) break; }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
         }

@@ -77,19 +77,91 @@ public sealed class FileSystemBlobStore
         await Task.CompletedTask;
     }
 
+    public async IAsyncEnumerable<Guid> RunObjectsAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        var seen = new HashSet<Guid>();
+        foreach (var kind in BlobRetention.RunPrefixes)
+        {
+            var prefix = Path.Combine(root, kind);
+            RejectLinks(prefix);
+            if (!Directory.Exists(prefix)) continue;
+            foreach (var directory in Directory.EnumerateDirectories(prefix))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                RejectLinks(directory);
+                if (BlobRetention.IsRun(Path.GetFileName(directory), out var run) && seen.Add(run))
+                    yield return run;
+            }
+        }
+        await Task.CompletedTask;
+    }
+
+    public Task DeleteRunObjectsAsync(Guid runId, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        BlobRetention.ValidateRun(runId);
+        foreach (var kind in BlobRetention.RunPrefixes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            DeleteTree(Path.Combine(root, kind, runId.ToString("D")), cancellationToken);
+        }
+        return Task.CompletedTask;
+    }
+
+    public async IAsyncEnumerable<string> ArtifactHashesAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        var prefix = Path.Combine(root, "artifacts");
+        RejectLinks(prefix);
+        if (!Directory.Exists(prefix)) yield break;
+        foreach (var file in Directory.EnumerateFiles(prefix))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            RejectLinks(file);
+            var name = Path.GetFileName(file);
+            if (name.Length == 64 && name.All(c => char.IsAsciiDigit(c) || c is >= 'a' and <= 'f'))
+                yield return name;
+        }
+        await Task.CompletedTask;
+    }
+
+    public Task DeleteArtifactAsync(string sha256, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        BlobRetention.ValidateArtifact(sha256);
+        cancellationToken.ThrowIfCancellationRequested();
+        var path = Path.Combine(root, "artifacts", sha256);
+        RejectLinks(path);
+        File.Delete(path);
+        return Task.CompletedTask;
+    }
+
     public Task DeleteResourceRunAsync(Guid runId, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        if (runId.Version != 7) throw new ArgumentException("Resource retention requires a version-7 run.");
+        BlobRetention.ValidateRun(runId);
         cancellationToken.ThrowIfCancellationRequested();
         var prefix = Path.Combine(root, "resources", runId.ToString("D"));
+        DeleteTree(prefix, cancellationToken);
+        return Task.CompletedTask;
+    }
+
+    private static void DeleteTree(string prefix, CancellationToken token)
+    {
         RejectLinks(prefix);
         if (Directory.Exists(prefix))
         {
-            foreach (var child in Directory.EnumerateFileSystemEntries(prefix, "*", SearchOption.AllDirectories)) RejectLinks(child);
+            foreach (var child in Directory.EnumerateFileSystemEntries(prefix, "*", SearchOption.AllDirectories))
+            {
+                token.ThrowIfCancellationRequested();
+                RejectLinks(child);
+            }
+            token.ThrowIfCancellationRequested();
             Directory.Delete(prefix, recursive: true);
         }
-        return Task.CompletedTask;
     }
 
     public Task<Stream> OpenLogReadAsync(string key, long maximumBytes, CancellationToken cancellationToken = default)

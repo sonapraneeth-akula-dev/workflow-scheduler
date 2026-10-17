@@ -80,6 +80,45 @@ public sealed class AzureBlobStore : IBlobStore
             await container.DeleteBlobIfExistsAsync(item.Name, DeleteSnapshotsOption.IncludeSnapshots, cancellationToken: cancellationToken);
     }
 
+    public async IAsyncEnumerable<Guid> RunObjectsAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var seen = new HashSet<Guid>();
+        foreach (var kind in BlobRetention.RunPrefixes)
+            await foreach (var item in container.GetBlobsByHierarchyAsync(traits: BlobTraits.None, states: BlobStates.None, prefix: kind + "/", delimiter: "/",
+                cancellationToken: cancellationToken))
+            {
+                if (item.IsPrefix && BlobRetention.IsRun(item.Prefix[(kind.Length + 1)..].TrimEnd('/'), out var run) && seen.Add(run))
+                    yield return run;
+            }
+    }
+
+    public async Task DeleteRunObjectsAsync(Guid runId, CancellationToken cancellationToken = default)
+    {
+        BlobRetention.ValidateRun(runId);
+        foreach (var kind in BlobRetention.RunPrefixes)
+            await foreach (var item in container.GetBlobsAsync(traits: BlobTraits.None, states: BlobStates.None, prefix: $"{kind}/{runId:D}/", cancellationToken: cancellationToken))
+                await container.DeleteBlobIfExistsAsync(item.Name, DeleteSnapshotsOption.IncludeSnapshots, cancellationToken: cancellationToken);
+    }
+
+    public async IAsyncEnumerable<string> ArtifactHashesAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await foreach (var item in container.GetBlobsAsync(traits: BlobTraits.None, states: BlobStates.None, prefix: "artifacts/", cancellationToken: cancellationToken))
+        {
+            var name = item.Name["artifacts/".Length..];
+            if (name.Length == 64 && name.All(c => char.IsAsciiDigit(c) || c is >= 'a' and <= 'f'))
+                yield return name;
+        }
+    }
+
+    public async Task DeleteArtifactAsync(string sha256, CancellationToken cancellationToken = default)
+    {
+        BlobRetention.ValidateArtifact(sha256);
+        await container.DeleteBlobIfExistsAsync("artifacts/" + sha256, DeleteSnapshotsOption.IncludeSnapshots,
+            cancellationToken: cancellationToken);
+    }
+
     public async Task<Stream> OpenLogReadAsync(string key, long maximumBytes, CancellationToken cancellationToken = default)
     {
         BlobStreaming.ValidateLogRead(key, maximumBytes);

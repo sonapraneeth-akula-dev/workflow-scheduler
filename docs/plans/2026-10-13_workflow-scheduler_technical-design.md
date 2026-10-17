@@ -815,7 +815,49 @@ locks referenced types, replaces defaults/overrides and appends `retention.updat
 before/after configuration in the same transaction. Last committed replacement wins; an audit failure
 rolls everything back. Missing/inconsistent persisted configuration is 500, not a fabricated default;
 database failures are logged and sanitized as 503. Configuration changes alone do not launch a purge.
-The separately tracked maintenance and live-load purge gates remain tasks 11.3.1.1.2-.3.
+The separately tracked live-load purge gate remains task 11.3.1.1.3.
+
+`RetentionService` runs only in the engine host. The current database-fenced leader pre-creates this
+month and next month's complete run/audit partition families daily. Policy deletion runs only from
+02:00 inclusive to 04:00 exclusive UTC. A sweep removes at most 5,000 runs, in transactions of at most
+100 runs with 50 ms pacing; each transaction reacquires the current policy and engine lease fence.
+The smaller transactions preserve the existing one-second database fence: actual 5,001-run testing
+exposed roughly 7.5 seconds of PostgreSQL foreign-key checking for one monolithic 5,000-run DELETE.
+Neither constraints nor the lease timeout are disabled or relaxed. SQL lock waits are bounded to
+100 ms; failed work rolls back and retries on a later ten-second tick.
+
+Both creation and terminal completion must be older than the applicable default/type cutoff. Active
+runs, unfinished nodes/attempts, unreleased physical reservations (even if expired), pending reservation
+queues, dispatches, commands and unexpired artifact grants are retained. Run and attempt deadlines
+must also be more than 24 hours 15 minutes old, preserving offline log recovery capabilities and their
+last short-lived upload grants. These conservative safety guards can retain data longer than its
+configured minimum; they never turn expiry into a physical-work acknowledgement.
+
+Each transaction explicitly removes run-owned FK children, report-ID locators and processed commands,
+refreshes affected daily/dashboard metric buckets under their existing ordered aggregate locks, and
+durably queues blob deletion before removing the run. Schedule-fire and rerun lineage references
+intentionally outlive the run; reused outputs are already copied into the child. Audit has a separate
+5,000-row batch and its independent minimum-one-year cutoff, retaining the exact boundary timestamp.
+Whole monthly partitions are detached and dropped only after every table in an expired run family
+is empty and its upper bound is past the maximum default/type retention. Audit families use the audit
+cutoff independently. Schema, inheritance, canonical names and actual partition bounds are checked;
+NOWAIT locks plus a second emptiness check protect readers and concurrent writers. No `CASCADE` is
+used, no child of a still-retained run month is removed, and one family is dropped per transaction.
+
+Migration `0041_retention_blob_deletions.sql` makes DB-to-blob cleanup restart-durable. Workers use
+SKIP LOCKED tombstones, ten-second cancellable deletions and sanitized one-minute-to-one-hour retry
+backoff. Blob IO does not hold the one-second logical engine lease fence; already-deleted run ownership,
+tombstone row locks and fresh reference checks provide its authority. Filesystem and Azure adapters
+delete only the exact run's logs, resources, checkpoints, reports, perf and parity prefixes. Packages,
+source and other runs are untouched; canonical ID/hash validation and filesystem reparse-point rejection
+apply before deletion. The existing orphan-run sweeper now covers all six run prefixes, so a late
+capability upload cannot become a permanent orphan.
+
+Artifact bytes are content-addressed and may be shared. GC acquires the same hash-specific transaction
+lock as actual artifact publication, checks both artifact and grant references, and deletes only when
+none remain. Busy publishers defer their tombstone for ten seconds without consuming failure retries
+or starving other queued work. An off-peak inventory also queues unreferenced artifact hashes left by
+failed/expired publications. Cancellation leaves unacknowledged tombstones for idempotent retry.
 
 ## 6. API Design
 **Style**: REST + JSON over HTTPS for queries and commands (`/api/v1`), SignalR (MessagePack) for push, gRPC for

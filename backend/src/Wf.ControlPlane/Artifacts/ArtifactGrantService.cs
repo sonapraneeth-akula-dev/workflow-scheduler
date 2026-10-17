@@ -69,6 +69,7 @@ public sealed class ArtifactGrantService(NpgsqlDataSource source, IBlobStore blo
         if (!grant.Committed && grant.ExpiresAt <= time.GetUtcNow()) throw new ArtifactAttemptRejectedException();
         if (contentLength != grant.Metadata.SizeBytes) throw new InvalidDataException("Artifact length does not match its grant.");
         var content = new BlobContent(BlobKind.Artifacts, grant.Metadata.Sha256, grant.Metadata.SizeBytes);
+        await LockContentAsync(connection, grant.Metadata.Sha256, cancellationToken);
         await blobs.UploadAsync(content, payload, cancellationToken);
         await Authorize(connection, actor, cancellationToken, grant.Committed);
         if (!grant.Committed)
@@ -129,6 +130,13 @@ public sealed class ArtifactGrantService(NpgsqlDataSource source, IBlobStore blo
         await using var gate = new NpgsqlCommand("SELECT pg_advisory_xact_lock($1,hashtext($2))", connection);
         gate.Parameters.AddWithValue(scope);
         gate.Parameters.AddWithValue(runId.ToString("D"));
+        await gate.ExecuteNonQueryAsync(token);
+    }
+
+    internal static async Task LockContentAsync(NpgsqlConnection connection, string sha256, CancellationToken token)
+    {
+        await using var gate = new NpgsqlCommand("SELECT pg_advisory_xact_lock(1464226382,hashtext($1))", connection);
+        gate.Parameters.AddWithValue(sha256);
         await gate.ExecuteNonQueryAsync(token);
     }
 

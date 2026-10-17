@@ -8,6 +8,7 @@ using Npgsql;
 using NpgsqlTypes;
 using Wf.Contracts.Definition;
 using Wf.ControlPlane.Auth;
+using Wf.ControlPlane.Data;
 
 namespace Wf.ControlPlane.Api.Admin;
 
@@ -36,13 +37,6 @@ public partial class RetentionJson : JsonSerializerContext;
 public static class RetentionEndpoints
 {
     private const int MaximumRequestBytes = 64 * 1024;
-    private const string ReadSql = """
-        SELECT c.default_days,c.audit_days,
-            coalesce((SELECT jsonb_object_agg(id,retention_days ORDER BY id)
-                FROM workflow_types WHERE retention_days IS NOT NULL),'{}'::jsonb)::text
-        FROM retention_config c WHERE singleton
-        """;
-
     public static IEndpointRouteBuilder MapRetentionEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints.MapGroup("/api/v1/admin/retention").RequireAuthorization(AuthExtensions.Admin)
@@ -97,19 +91,7 @@ public static class RetentionEndpoints
     private static async Task<IResult> Read(HttpContext context, NpgsqlDataSource source)
     {
         await using var connection = await source.OpenConnectionAsync(context.RequestAborted);
-        return Results.Json(await ReadPolicy(connection, context.RequestAborted), RetentionJson.Default.RetentionPolicy);
-    }
-
-    private static async Task<RetentionPolicy> ReadPolicy(NpgsqlConnection connection, CancellationToken token)
-    {
-        await using var command = new NpgsqlCommand(ReadSql, connection);
-        await using var reader = await command.ExecuteReaderAsync(token);
-        if (!await reader.ReadAsync(token)) throw new InvalidDataException("Retention singleton is missing.");
-        var perType = JsonSerializer.Deserialize(reader.GetString(2), RetentionJson.Default.DictionaryStringInt32)
-            ?? throw new InvalidDataException("Retention overrides are missing.");
-        var policy = new RetentionPolicy(reader.GetInt32(0), reader.GetInt32(1), perType);
-        try { return policy.Validate(); }
-        catch (ArgumentException error) { throw new InvalidDataException("Invalid persisted retention policy.", error); }
+        return Results.Json(await RetentionPolicyStore.ReadAsync(connection, context.RequestAborted), RetentionJson.Default.RetentionPolicy);
     }
 
     private static async Task<IResult> Write(HttpContext context, NpgsqlDataSource source, TimeProvider time)
@@ -132,7 +114,7 @@ public static class RetentionEndpoints
         await using var transaction = await connection.BeginTransactionAsync(token);
         await using (var mutex = new NpgsqlCommand("SELECT singleton FROM retention_config WHERE singleton FOR UPDATE", connection))
             if (await mutex.ExecuteScalarAsync(token) is not true) throw new InvalidDataException("Retention singleton is missing.");
-        var before = await ReadPolicy(connection, token);
+        var before = await RetentionPolicyStore.ReadAsync(connection, token);
         await using (var types = new NpgsqlCommand("SELECT id FROM workflow_types WHERE id=ANY($1) ORDER BY id FOR UPDATE", connection))
         {
             types.Parameters.AddWithValue(policy.PerType.Keys.ToArray());
