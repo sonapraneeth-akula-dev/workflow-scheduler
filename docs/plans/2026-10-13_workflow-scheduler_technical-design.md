@@ -796,6 +796,27 @@ Writers (§4.5, §4.7): the agent writes `logs/` and `resources/`; the task host
 - **Event payload versioning**: protobuf with additive fields only; `kind` values are never reused.
 - **Manifest versioning**: `manifest.schemaVersion`. The validator and engine support the current and previous schema versions.
 
+#### Retention configuration
+
+`GET/PUT /api/v1/admin/retention` reuse the existing global Admin policy, including local Development
+access; no separate login or authentication flow. Migration `0040_retention_config.sql` seeds the
+singleton defaults; existing nullable `workflow_types.retention_days` stores exact per-type overrides.
+The JSON contract is `{"default_days":90,"audit_days":365,"per_type":{"team/type":30}}`.
+Defaults and overrides accept integer days from 1 to 36,500; audit accepts 365 to 36,500 independently
+of run retention. Overrides must name registered workflow types (at most 256). Run-owned events, logs,
+reports, artifacts and metrics share run retention; an absent override inherits `default_days`.
+
+PUT is a full replacement: omitted override entries revert to inheritance. All three JSON properties
+are required; unknown, duplicate, null and mistyped members, query parameters, invalid day ranges and
+unknown types return 400. Requests are bounded to 64 KiB, including chunked bodies (413); non-JSON is
+415. Both routes require a nonempty audit-principal UUID and return no-store responses. One PostgreSQL
+statement reads a consistent configuration snapshot. PUT locks the singleton to serialize writers,
+locks referenced types, replaces defaults/overrides and appends `retention.update` with complete
+before/after configuration in the same transaction. Last committed replacement wins; an audit failure
+rolls everything back. Missing/inconsistent persisted configuration is 500, not a fabricated default;
+database failures are logged and sanitized as 503. Configuration changes alone do not launch a purge.
+The separately tracked maintenance and live-load purge gates remain tasks 11.3.1.1.2-.3.
+
 ## 6. API Design
 **Style**: REST + JSON over HTTPS for queries and commands (`/api/v1`), SignalR (MessagePack) for push, gRPC for
 agents. Within v1 only additive changes are allowed; breaking changes go to `/api/v2` alongside v1 for ≥ 1 release.

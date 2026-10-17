@@ -55,6 +55,7 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, MetricsJsonContext.Default);
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Admin.RetentionJson.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunTimelineJsonContext.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Series.SeriesTrendsJson.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Dashboards.DashboardJson.Default);
@@ -85,6 +86,7 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
             app.UseAuthentication();
             app.UseAuthorization();
             app.MapMetricsEndpoints();
+            Wf.ControlPlane.Api.Admin.RetentionEndpoints.MapRetentionEndpoints(app);
             app.MapRunTimelineEndpoints();
             Wf.ControlPlane.Api.Series.TrendsEndpoint.MapTrendsEndpoint(app);
             Wf.ControlPlane.Api.Dashboards.DashboardEndpoints.MapDashboardEndpoints(app);
@@ -124,9 +126,9 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
 
     public string Api => client.BaseAddress!.ToString().TrimEnd('/');
 
-    public string Jwt(Guid? group = null, string role = "", string identity = "user")
+    public string Jwt(Guid? group = null, string role = "", string identity = "user", string? actor = null)
     {
-        var claims = new List<Claim> { new("tid", Tenant), new("ver", "2.0"), new("oid", Guid.NewGuid().ToString()),
+        var claims = new List<Claim> { new("tid", Tenant), new("ver", "2.0"), new("oid", actor ?? Guid.NewGuid().ToString()),
             new("idtyp", identity), new("scp", "api.read"), new("azp", "60d24b19-f65a-4ed4-96cc-9174bfcacabc") };
         if (group is not null) claims.Add(new("groups", group.ToString()!));
         if (role.Length > 0) claims.Add(new("roles", role));

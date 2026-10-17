@@ -71,6 +71,12 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             var trends = paths.GetProperty("/api/v1/series/{id}/trends").GetProperty("get");
             var dashboard = paths.GetProperty("/api/v1/dashboards/{scope}/{id}").GetProperty("get");
             var subscriptions = paths.GetProperty("/api/v1/subscriptions");
+            var retention = paths.GetProperty("/api/v1/admin/retention");
+            Assert.True(retention.TryGetProperty("get", out _));
+            var retentionBody = retention.GetProperty("put").GetProperty("requestBody").GetProperty("content");
+            Assert.Equal(["application/json"], retentionBody.EnumerateObject().Select(property => property.Name));
+            Assert.Equal("#/components/schemas/RetentionPolicy",
+                retentionBody.GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
             Assert.True(subscriptions.TryGetProperty("get", out _));
             Assert.True(paths.GetProperty("/api/v1/subscriptions/{id}").TryGetProperty("delete", out _));
             var subscriptionBody = subscriptions.GetProperty("post").GetProperty("requestBody").GetProperty("content");
@@ -99,6 +105,7 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             using var ui = JsonDocument.Parse(await uiResponse.Content.ReadAsStringAsync(deadline.Token));
             Assert.StartsWith("3.1.", ui.RootElement.GetProperty("openapi").GetString());
             var internalPaths = ui.RootElement.GetProperty("paths");
+            Assert.False(internalPaths.TryGetProperty("/api/v1/admin/retention", out _));
             Assert.False(internalPaths.TryGetProperty("/api/v1/series/{id}/trends", out _));
             Assert.False(internalPaths.TryGetProperty("/api/v1/dashboards/{scope}/{id}", out _));
             Assert.False(internalPaths.TryGetProperty("/api/v1/subscriptions", out _));
@@ -192,6 +199,15 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             using var query = await client.GetAsync("/api/v1/runs/history", deadline.Token);
             Assert.Equal(HttpStatusCode.BadRequest, query.StatusCode);
             Assert.True(query.Headers.CacheControl!.NoStore);
+            using var retentionRead = await client.GetAsync("/api/v1/admin/retention", deadline.Token);
+            Assert.Equal(HttpStatusCode.OK, retentionRead.StatusCode);
+            using var retentionConfig = JsonDocument.Parse(await retentionRead.Content.ReadAsStringAsync(deadline.Token));
+            Assert.Equal(90, retentionConfig.RootElement.GetProperty("default_days").GetInt32());
+            Assert.Equal(365, retentionConfig.RootElement.GetProperty("audit_days").GetInt32());
+            using var retentionWrite = await client.PutAsync("/api/v1/admin/retention",
+                new StringContent("""{"default_days":91,"audit_days":366,"per_type":{}}""",
+                    System.Text.Encoding.UTF8, "application/json"), deadline.Token);
+            Assert.Equal(HttpStatusCode.OK, retentionWrite.StatusCode);
             if (Environment.GetEnvironmentVariable("WF_FRONTEND_API_CHECK") is { } frontend)
             {
                 var commands = Environment.GetEnvironmentVariable("WF_FRONTEND_API_GENERATE") == "true"
