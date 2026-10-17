@@ -156,6 +156,20 @@ public sealed class RetentionMaintenanceTests(RegistrationHostDatabase database)
     }
 
     [Fact]
+    public async Task Paced_blob_batches_stop_at_thirty_two_and_leave_the_remainder_durable()
+    {
+        var workflow = await Workflow();
+        for (var index = 0; index < 33; index++)
+            await Run(workflow, clock.GetUtcNow().AddDays(-120));
+        Assert.Equal(33, await Purger().PurgeBatchAsync(Token));
+        Assert.Equal(32, await Purger().DeleteBlobBatchAsync(Token));
+        Assert.Equal(1, await Count("SELECT count(*) FROM retention_blob_deletions"));
+        Assert.Equal(1, await Purger().DeleteBlobBatchAsync(Token));
+        Assert.Equal(0, await Purger().DeleteBlobBatchAsync(Token));
+        Assert.Equal(0, await Count("SELECT count(*) FROM retention_blob_deletions"));
+    }
+
+    [Fact]
     public async Task Database_failure_rolls_back_child_rows_blob_queue_and_metrics_before_any_storage_delete()
     {
         var workflow = await Workflow();

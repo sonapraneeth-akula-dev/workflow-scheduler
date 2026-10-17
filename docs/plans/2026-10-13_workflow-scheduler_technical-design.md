@@ -815,12 +815,27 @@ locks referenced types, replaces defaults/overrides and appends `retention.updat
 before/after configuration in the same transaction. Last committed replacement wins; an audit failure
 rolls everything back. Missing/inconsistent persisted configuration is 500, not a fabricated default;
 database failures are logged and sanitized as 503. Configuration changes alone do not launch a purge.
-The separately tracked live-load purge gate remains task 11.3.1.1.3.
+The live-load purge gate is exercised separately from the functional maintenance regressions by
+`RetentionPurgeTests`, tagged `Performance` and run alone in both backend CI OS jobs. It seeds 5,000
+expired full-graph runs with 20,000 real filesystem objects under a 14-day override, plus 150 retained
+runs under default, shorter and longer policies. Four additional active runs use real `RunStore`
+snapshots/events. Four steady HTTP lanes offer 200 requests/second to production metrics/timeline
+routes using RSA-signed Viewer JWTs, consume entire responses and verify unchanged committed answers.
+After warmup, 6,000 baseline samples are compared with every sample overlapping actual maintenance;
+the row-deletion subset is independently gated. Both p95 increases must be strictly below 10%:
+no artificial latency floor, discarded outliers, HTTP retry or mocked transport. The fixture drains
+shared bounded blob batches continuously, more aggressively than the hosted ten-second tick.
+Local evidence `compose-results/retention-purge-live-paced-blobs.trx` records baseline p95 33.965 ms,
+132,021 maintenance samples at 28.075 ms and 21,897 row-deletion samples at 30.623 ms. All expired
+rows, report locators and blobs disappear; all retained child rows/blobs and active runs survive.
+Earlier unpaced work exceeded the gate, motivating smaller row transactions and paced blob batches;
+the original lease fence and the workload/threshold were not weakened. This is measured local
+evidence, not a guarantee on every shared host or a claim that remote CI has run.
 
 `RetentionService` runs only in the engine host. The current database-fenced leader pre-creates this
 month and next month's complete run/audit partition families daily. Policy deletion runs only from
 02:00 inclusive to 04:00 exclusive UTC. A sweep removes at most 5,000 runs, in transactions of at most
-100 runs with 50 ms pacing; each transaction reacquires the current policy and engine lease fence.
+25 runs with 250 ms pacing; each transaction reacquires the current policy and engine lease fence.
 The smaller transactions preserve the existing one-second database fence: actual 5,001-run testing
 exposed roughly 7.5 seconds of PostgreSQL foreign-key checking for one monolithic 5,000-run DELETE.
 Neither constraints nor the lease timeout are disabled or relaxed. SQL lock waits are bounded to
@@ -846,7 +861,9 @@ used, no child of a still-retained run month is removed, and one family is dropp
 
 Migration `0041_retention_blob_deletions.sql` makes DB-to-blob cleanup restart-durable. Workers use
 SKIP LOCKED tombstones, ten-second cancellable deletions and sanitized one-minute-to-one-hour retry
-backoff. Blob IO does not hold the one-second logical engine lease fence; already-deleted run ownership,
+backoff. Each maintenance tick processes at most 32 tombstones with 25 ms between committed jobs;
+the shared bounded batch also prevents catch-up workers from monopolizing storage. Blob IO does not
+hold the one-second logical engine lease fence; already-deleted run ownership,
 tombstone row locks and fresh reference checks provide its authority. Filesystem and Azure adapters
 delete only the exact run's logs, resources, checkpoints, reports, perf and parity prefixes. Packages,
 source and other runs are untouched; canonical ID/hash validation and filesystem reparse-point rejection

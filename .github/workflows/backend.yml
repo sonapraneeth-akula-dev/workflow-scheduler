@@ -36,6 +36,14 @@ jobs:
           $suffix = if ($IsWindows) { ".exe" } else { "" }
           "WF_AGENT_EXECUTABLE=${{ runner.temp }}/wf-agent/wf-agent$suffix" >> $env:GITHUB_ENV
       - run: dotnet test backend/Wf.slnx --configuration Release --no-build --filter "Category!=Nightly&Category!=ChaosSmoke&Category!=Performance&Category!=LocalStackScenario" --collect:"XPlat Code Coverage"
+      - name: Verify retention impact under isolated live API traffic
+        run: dotnet test backend/tests/Wf.Integration.Tests --configuration Release --no-build --filter "FullyQualifiedName~RetentionPurgeTests" --logger "trx;LogFileName=retention-live-api.trx" --results-directory retention-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: retention-live-api-${{ matrix.os }}
+          path: retention-results
+          if-no-files-found: ignore
       - name: Verify native Linux API SIGTERM drain
         if: runner.os == 'Linux'
         env:

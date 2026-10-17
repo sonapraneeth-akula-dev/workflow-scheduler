@@ -10,7 +10,8 @@ public sealed class RetentionPurger(NpgsqlDataSource source, IBlobStore blobs, T
     ILogger<RetentionPurger> logger, LeaseManager? leadership = null)
 {
     public const int MaximumBatchSize = 5000;
-    public const int MaximumTransactionSize = 100;
+    public const int MaximumTransactionSize = 25;
+    public const int MaximumBlobBatchSize = 32;
     public static bool IsOffPeak(DateTimeOffset now) => now.UtcDateTime.Hour is >= 2 and < 4;
     private sealed record ExpiredRun(DateOnly Day, Guid Id, string Workflow);
 
@@ -22,7 +23,7 @@ public sealed class RetentionPurger(NpgsqlDataSource source, IBlobStore blobs, T
             var count = await PurgeTransactionAsync(Math.Min(MaximumTransactionSize, MaximumBatchSize - removed), token);
             removed += count;
             if (count == 0) break;
-            await Task.Delay(TimeSpan.FromMilliseconds(50), time, token);
+            await Task.Delay(TimeSpan.FromMilliseconds(250), time, token);
         }
         return removed;
     }
@@ -107,6 +108,17 @@ public sealed class RetentionPurger(NpgsqlDataSource source, IBlobStore blobs, T
         await transaction.CommitAsync(token);
         if (runs.Count != 0) logger.LogInformation("Retention removed {Count} expired runs; blob cleanup is durably queued.", runs.Count);
         return runs.Count;
+    }
+
+    public async Task<int> DeleteBlobBatchAsync(CancellationToken token = default)
+    {
+        var processed = 0;
+        while (processed < MaximumBlobBatchSize && await DeletePendingBlobsAsync(token))
+        {
+            processed++;
+            await Task.Delay(TimeSpan.FromMilliseconds(25), time, token);
+        }
+        return processed;
     }
 
     public async Task<bool> DeletePendingBlobsAsync(CancellationToken token = default)

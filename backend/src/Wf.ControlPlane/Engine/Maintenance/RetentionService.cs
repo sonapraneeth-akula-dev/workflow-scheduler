@@ -33,7 +33,7 @@ public sealed class RetentionService(RetentionPurger purger, PartitionMaintenanc
                             await purger.QueueOrphanArtifactsAsync(stoppingToken);
                             inventoried = today;
                         }
-                        for (var index = 0; index < 32 && await purger.DeletePendingBlobsAsync(stoppingToken); index++) { }
+                        await purger.DeleteBlobBatchAsync(stoppingToken);
                         if (removed == 0)
                             await partitions.DropExpiredEmptyAsync(stoppingToken);
                     }

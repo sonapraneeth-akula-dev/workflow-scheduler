@@ -126,14 +126,14 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
 
     public string Api => client.BaseAddress!.ToString().TrimEnd('/');
 
-    public string Jwt(Guid? group = null, string role = "", string identity = "user", string? actor = null)
+    public string Jwt(Guid? group = null, string role = "", string identity = "user", string? actor = null, TimeSpan? lifetime = null)
     {
         var claims = new List<Claim> { new("tid", Tenant), new("ver", "2.0"), new("oid", actor ?? Guid.NewGuid().ToString()),
             new("idtyp", identity), new("scp", "api.read"), new("azp", "60d24b19-f65a-4ed4-96cc-9174bfcacabc") };
         if (group is not null) claims.Add(new("groups", group.ToString()!));
         if (role.Length > 0) claims.Add(new("roles", role));
         return new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(Issuer, Audience, claims,
-            DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow.AddMinutes(10),
+            DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow.Add(lifetime ?? TimeSpan.FromMinutes(10)),
             new SigningCredentials(key, SecurityAlgorithms.RsaSha256)));
     }
 

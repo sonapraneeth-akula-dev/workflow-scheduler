@@ -21,7 +21,8 @@ public sealed class RetentionPurgerTests
     public void Run_batches_are_never_larger_than_five_thousand_and_transactions_fit_the_existing_lease_fence()
     {
         Assert.Equal(5000, RetentionPurger.MaximumBatchSize);
-        Assert.Equal(100, RetentionPurger.MaximumTransactionSize);
+        Assert.Equal(25, RetentionPurger.MaximumTransactionSize);
+        Assert.Equal(32, RetentionPurger.MaximumBlobBatchSize);
     }
 
     [Theory]
