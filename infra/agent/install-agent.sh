@@ -3,7 +3,7 @@ set -euo pipefail
 
 executable=''
 agent_id=''
-agent_name="$(hostname)"
+agent_name="$(< /proc/sys/kernel/hostname)"
 validate_only=false
 native_resource_sampling=false
 engines=()
@@ -55,7 +55,9 @@ if $validate_only; then echo 'Agent installer inputs valid; no changes made.'; e
 if $native_resource_sampling; then
   [[ -x /usr/bin/setpriv ]] ||
     { echo 'Native resource sampling requires /usr/bin/setpriv (util-linux) to drop task capabilities.' >&2; exit 2; }
-  systemd_version="$(systemd --version | head -n 1 | awk '{print $2}')"
+  systemd_version="$(systemctl --version)"
+  systemd_version="${systemd_version#systemd }"
+  systemd_version="${systemd_version%% *}"
   [[ "$systemd_version" =~ ^[0-9]+$ ]] && ((systemd_version >= 254)) ||
     { echo 'Native resource sampling profile requires systemd >=254 (DelegateSubgroup).' >&2; exit 2; }
   [[ ! -e /etc/systemd/system/wf-agent.service.d/resources.conf ]] ||

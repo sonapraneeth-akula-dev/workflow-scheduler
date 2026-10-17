@@ -205,6 +205,32 @@ agent to its own subgroup, grants only BPF/network capabilities, and configures
 the delegated root. Changing the unit's slice/path requires updating that root.
 Production requires no `CAP_SYS_ADMIN` or cgroup mount operation.
 
+The R-3 deployment probe boots real systemd in disposable Ubuntu 24.04 and Azure
+Linux 3.0 containers, retaining this unit's hardening. A capability-free
+`wf-agent` creates a task cgroup, sets CPU/RAM/swap caps, moves a real child and
+cleans up after exit. It also verifies an administrator-provisioned
+`systemd-run --scope` fallback and actual installation using a notification stub,
+not the agent binary. See the technical design's R-3 result for exact versions,
+evidence and the shared-WSL-kernel limitation; this does not verify native VM
+kernels, BPF permissions or workload limit enforcement.
+
+```powershell
+docker build --build-arg BASE_IMAGE=mcr.microsoft.com/azurelinux/base/core:3.0 `
+  --file infra\agent\Dockerfile.cgroup-delegation --tag wf-delegation:test infra\agent
+docker run --detach --name wf-delegation-test --privileged --cgroupns=private `
+  --tmpfs /run --tmpfs /run/lock --tmpfs /tmp `
+  --env WF_CGROUP_ISOLATED_CONTAINER=1 wf-delegation:test
+docker exec wf-delegation-test systemctl show --property=Version --value
+docker exec wf-delegation-test /opt/wf-delegation/test-cgroup-delegation.sh --test
+docker stop --timeout 15 wf-delegation-test
+docker rm wf-delegation-test
+```
+
+Wait for systemd to respond before running `--test`; use
+`mcr.microsoft.com/dotnet/sdk:10.0-noble-aot` for the Ubuntu variant. No host
+mounts, production agents or shared machines belong in this privileged fixture.
+The backend workflow automates readiness, failure logs and container cleanup.
+
 Each Linux host joins a newly created task cgroup before executing its program;
 descendants inherit it. Two minimal `cgroup_skb` BPF programs count `skb->len`
 in an unpinned map: no packet contents or host/sibling traffic. Only owned

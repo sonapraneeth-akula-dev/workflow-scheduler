@@ -105,6 +105,57 @@ jobs:
           sudo bash infra/agent/install-agent.sh --executable "$AGENT_BINARY" --engine http://localhost:5000 --name ci-linux
           sudo systemctl is-active --quiet wf-agent.service
       - run: dotnet run --file backend/samples/workflows/scenario-a.cs
+  cgroup-delegation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: ubuntu
+            image: mcr.microsoft.com/dotnet/sdk:10.0-noble-aot
+          - distro: azurelinux
+            image: mcr.microsoft.com/azurelinux/base/core:3.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify non-root systemd delegation and scope fallback
+        env:
+          BASE_IMAGE: ${{ matrix.image }}
+          DISTRO: ${{ matrix.distro }}
+        run: |
+          set -euo pipefail
+          mkdir delegation-results
+          name="wf-delegation-$DISTRO-${{ github.run_id }}-${{ github.run_attempt }}"
+          cleanup() {
+            result=$?
+            trap - EXIT
+            if docker container inspect "$name" >/dev/null 2>&1; then
+              docker logs "$name" >> delegation-results/boot.log 2>&1 || result=1
+              docker stop --timeout 15 "$name" && docker rm "$name" || result=1
+            fi
+            exit "$result"
+          }
+          trap cleanup EXIT
+          docker build --build-arg BASE_IMAGE="$BASE_IMAGE" \
+            --file infra/agent/Dockerfile.cgroup-delegation \
+            --tag "wf-delegation:$DISTRO" infra/agent 2>&1 | tee delegation-results/build.log
+          docker run --detach --name "$name" --privileged --cgroupns=private \
+            --tmpfs /run --tmpfs /run/lock --tmpfs /tmp \
+            --env WF_CGROUP_ISOLATED_CONTAINER=1 "wf-delegation:$DISTRO"
+          ready=false
+          for ((attempt=0; attempt<60; attempt++)); do
+            if docker exec "$name" systemctl show --property=Version --value; then ready=true; break; fi
+            sleep 0.5
+          done
+          $ready
+          docker exec "$name" /opt/wf-delegation/test-cgroup-delegation.sh --test \
+            2>&1 | tee delegation-results/actual.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cgroup-delegation-${{ matrix.distro }}
+          path: delegation-results
+          if-no-files-found: error
   local-stack:
     timeout-minutes: 20
     strategy:

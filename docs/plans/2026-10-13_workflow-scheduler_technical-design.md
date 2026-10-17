@@ -1757,7 +1757,7 @@ teams/<team>/<type>/<workflow>/tests/*.cs    # workflow tests (xUnit + Wf.Sdk.Te
 |---|-----------------|--------|--------------------|
 | R-1 | Azure PaaS: PG Flexible zone-redundant HA failover takes ~60–120 s, so runs resume up to ~150 s after a DB failover (NFR-033: DB failover time + ≤ 30 s). Self-hosted Patroni ≈ 10–20 s | Engine pauses commits during failover | Agents keep executing and journalling; the engine retries; runs resume ≤ 30 s after the new primary accepts writes. The chaos suite measures it per profile. |
 | R-2 | Group-commit latency with synchronous zone-redundant commit may exceed 4 ms | NFR-030 (≤ 10 ms/node) | Local spike completed in task 2.2.2.1.3; measurements below. Keep synchronous critical acknowledgements and bounded batches, immediate collection by default. Local storage misses the latency target; D4ds HA validation remains open. Never acknowledge critical effects before COMMIT. |
-| R-3 | cgroups v2 delegation on Linux agents | Per-task limits unavailable | systemd `Delegate=yes`; spike on Ubuntu 24.04 + Azure Linux; fall back to `systemd-run --scope`. |
+| R-3 | cgroups v2 delegation on Linux agents | Per-task limits unavailable | Non-root delegation and administrator-provisioned `systemd-run --scope` verified on Ubuntu 24.04 and Azure Linux 3.0 userspaces under real systemd; measured result and kernel qualification below. Use `Delegate=cpu memory` with `DelegateSubgroup=agent`. |
 | R-4 | Bond packages from the Microsoft-internal feed on .NET 10 | Phase 2 Bond codec | Isolated in `Wf.Codec.Bond`; spike early; nuget.org exact version as restore fallback; JSON codec first, and JSON over HTTP if Bond proves unusable. |
 | R-5 | File-based script compile time | NFR-022 (validate < 10 s) | Cache build output by content hash; `wf validate` reuses it. |
 | R-6 | GitHub-hosted runner latency noise | Benchmark gate flakiness (NFR-027/030) | Run macro benchmarks on self-hosted reference runner; use relative comparisons. |
@@ -1770,6 +1770,49 @@ teams/<team>/<type>/<workflow>/tests/*.cs    # workflow tests (xUnit + Wf.Sdk.Te
 | R-13 | Unvalidated assumptions: ≥ 1,000 definitions and ≥ 200 concurrent tasks (NFR-003), Entra ID tenant available (NFR-007), Bond packages available from the internal feed (R-4) | Sizing, auth, phase 2 codec | Validation task: confirm with stakeholders and size-test before M-011.1. |
 | R-14 | Remote API idempotency/status retention may be shorter than the task's retry window, or many waiting jobs may exhaust agent slots | Duplicate external side effects or queued work | Require a service contract covering the deadline/retry window, or disable automatic retries and mark uncertain outcomes for operator reconciliation; measure slot occupancy before considering durable suspension. |
 | Q-2 | Which profile is production first (Autopilot fleet vs Azure PaaS)? | Order of M-011.2 work and infrastructure | All profiles share code; only deploy tooling differs. Decided for the first build: Local (pure local + Docker Compose) on this single machine, which is not bare metal. Self-hosted next (matches test-lab machines; code kept portable and lab-verified meanwhile), PaaS after. |
+
+### R-3 non-root cgroup delegation spike (October 18, 2026)
+
+Task `2.2.2.2.1`: **supported on both tested distributions**. The reproducible
+`infra/agent/Dockerfile.cgroup-delegation` and `test-cgroup-delegation.sh`
+boot real systemd as PID 1 in explicitly opted-in disposable containers with
+private cgroup namespaces and no host cgroup bind mounts.
+
+| Userspace | Installed systemd | Service identity | Service / scope result |
+|-----------|-------------------|------------------|------------------------|
+| Ubuntu 24.04.5 LTS | 255.4-1ubuntu8.18 | `wf-agent`, UID 997, zero effective capabilities | Both pass |
+| Azure Linux 3.0.20260923 | 255-34.azl3 | `wf-agent`, UID 999, zero effective capabilities | Both pass |
+
+The service probe retains the shipped unit's user, no-new-privileges and filesystem
+hardening, adding the existing profile's `Delegate=cpu memory` and
+`DelegateSubgroup=agent` without its optional BPF capabilities. Its empty parent
+can enable both controllers. The non-root agent creates a private task cgroup,
+sets `cpu.max=25000 100000`, `memory.max=67108864`, `memory.swap.max=0`, moves a
+real child into it, reads its accounting, waits for exit and removes the group.
+These are delegation/configuration assertions, not CPU-throughput or OOM-kill
+measurements; workload limit enforcement remains task `2.2.2.2.2`.
+
+The fallback also passes: an administrator creates a system scope with
+`systemd-run --scope --property="Delegate=cpu memory"`, moves its supervisor to
+an `agent` child, delegates the necessary ancestor files to `wf-agent`, then
+drops all capabilities before the identical non-root probe. This is an explicit
+installation fallback, **not** an unprivileged system-bus/polkit bypass or an
+automatic runtime fallback. Prefer the service profile on systemd >=254.
+
+Both actual installers validate, install, enable, reach ready and stop using a
+notification stub (not the agent binary). Azure Linux exposed missing `hostname`
+and `awk` commands and no `systemd` executable on PATH; installer detection now
+reads the kernel hostname and parses `systemctl --version` with Bash built-ins.
+The test image installs `gawk` only for the probe's diagnostic parsing.
+
+Evidence: `compose-results/delegation-ubuntu-actual.log` and
+`delegation-azurelinux-actual.log`. Both use Docker Desktop's shared
+`6.18.33.2-microsoft-standard-WSL2` kernel; native Ubuntu/Azure Linux VM kernels,
+Azure-hosted deployment and BPF permissions are **not** verified by this spike.
+The harness requires container-only privileged setup to boot systemd/remount its
+private cgroup filesystem; the measured service needs no `CAP_SYS_ADMIN` or
+effective capabilities. Backend CI now contains the same two-distribution gate
+with uploaded logs; remote execution is not claimed.
 
 ### R-2 local group-commit spike (October 15, 2026)
 
