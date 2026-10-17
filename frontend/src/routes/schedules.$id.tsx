@@ -121,6 +121,9 @@ function ScheduleDetail() {
       <Link to="/series/$id" params={{ id: schedule.seriesId }}>
         View series history
       </Link>
+      <Link to="/dashboards/$scope/$id" params={{ scope: "schedule", id }}>
+        Schedule dashboard
+      </Link>
       <RunNowButton
         scheduleId={id}
         seriesId={schedule.seriesId}

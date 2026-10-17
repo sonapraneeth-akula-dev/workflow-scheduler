@@ -166,10 +166,10 @@ public sealed partial class DashboardEndpointTests(RollupDatabase database, ITes
         await Problem(encoded, 400, "invalid_dashboard_query");
     }
 
-    private async Task<Scope> Registry(Guid? machine = null)
+    private async Task<Scope> Registry(Guid? machine = null, Guid? group = null)
     {
         var team = "dashboard-" + Guid.NewGuid().ToString("N");
-        var scope = new Scope($"{team}/insights/workflow", Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.NewGuid(), machine ?? Guid.NewGuid());
+        var scope = new Scope($"{team}/insights/workflow", Guid.CreateVersion7(), Guid.CreateVersion7(), group ?? Guid.NewGuid(), machine ?? Guid.NewGuid());
         await using var connection = await database.DataSource.OpenConnectionAsync(Token);
         await using var transaction = await connection.BeginTransactionAsync(Token);
         await new RegistryWriter().UpsertAsync(connection, transaction, new(team,

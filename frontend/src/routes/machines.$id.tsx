@@ -12,6 +12,9 @@ function MachinePage() {
       <Link to="/machines" search={{}} className="underline">
         Back to machines
       </Link>
+      <Link to="/dashboards/$scope/$id" params={{ scope: "machine", id }}>
+        Machine dashboard
+      </Link>
       <MachineList id={id} />
     </>
   )

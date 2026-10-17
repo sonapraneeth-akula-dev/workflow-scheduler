@@ -58,6 +58,7 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
                 options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunEventsJsonContext.Default);
                 options.SerializerOptions.TypeInfoResolverChain.Insert(0, VersionsJsonContext.Default);
                 options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunHistoryJsonContext.Default);
+                options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunQueryJsonContext.Default);
             }
         });
         var metadata = new OpenIdConnectConfiguration { Issuer = Issuer };
@@ -86,6 +87,7 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
                 app.MapVersionsEndpoints();
                 app.MapPermissionsEndpoints();
                 app.MapRunHistoryEndpoints();
+                app.MapRunQueryEndpoints();
                 app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
             }
             app.MapWorkflowOpenApi();

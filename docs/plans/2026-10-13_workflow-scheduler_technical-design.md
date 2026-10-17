@@ -877,6 +877,19 @@ no global machine inventory metadata; inventory itself remains global Admin-only
 Unknown and ungranted resources share 403; responses are `no-store` and failures
 are sanitized. No additional login/logout flow.
 
+**Dashboard UI**: `/dashboards/$scope/$id` validates canonical scope identities and
+persists `window` and `top` in the URL. Existing charts display each ranking with
+an always-visible linked table alternative, explicit observed-duration and
+hard/soft-failure counts, null/zero semantics and CPU/RAM units. Workflow history,
+schedule detail and machine detail link to their dashboards; ranked rows link to
+the corresponding node dashboard. Node links search runs by exact workflow and
+UTC creation window across schedules/machines; the separate latest-contribution
+link identifies an actual run from the selected dashboard scope. The scoped
+dashboard read itself checks current Viewer authority, so machine analytics do
+not demand broader inventory access. Fetching/error states hide cached rankings;
+refresh, focus and remount recheck access without a permission-triggered retry
+loop or new polling/authentication flow.
+
 **UI-only routes** (FR-035): user-defined schedule mutations (create, edit, pause, resume, delete) serve only the Kardia UI. They are left out of the public `/openapi/v1.json` contract, the SDK/public client and the CLI (a separate internal document generates the SPA client), and accept only delegated user tokens issued to the Kardia SPA client (`azp` check); app-only and other-client tokens get 403. This is a product/contract boundary, not a security boundary: a user scripting the UI's token can do nothing beyond what their role already allows in the UI. Code-defined schedules and registration never create or modify user-defined schedules. Schedule reads and `run-now` stay public.
 
 **SignalR hub** `/hubs/live/v1` (MessagePack). Client → server: `Subscribe(scope, id)`, `Unsubscribe(scope, id)`; scopes
