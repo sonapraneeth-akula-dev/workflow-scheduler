@@ -3475,6 +3475,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/dashboards/{scope}/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Fresh Viewer-scoped node rankings. scope=workflow|schedule|node|machine; workflow/node id is canonical unpadded base64url UTF8 of team/type/workflow[/node], schedule/machine id a lowercase UUID. window=7d|30d|90d (default 30d), UTC creation days including today; top=1..50 (default 10). Terminal runs only. Workflow/schedule/node observations are terminal node occurrences; machine observations are terminal task attempts executed on that exact agent, NEVER whole-node timings or other agents' resources. Machine results include only currently granted workflow types, without global machine metadata. Schedule history survives deletion. Slowest ranks exact source p95; failures count hard failure, timeout and cancellation, soft failures separately. Rates are 0..1 fractions; skipped/reused occurrences count without invented duration. Missing measurements stay null and are excluded from their ranking. CPU and RAM are maxima across all attempts including failed retries; RAM in MiB. Ties use ordinal workflow/node order. LatestRunId/RunHref identify a contributing run, not a p95 exemplar. No metadata, variables, errors, output or storage capabilities. Unknown/foreign identities return 403. */
+        get: {
+            parameters: {
+                query?: {
+                    window?: "7d" | "30d" | "90d";
+                    top?: number;
+                };
+                header?: never;
+                path: {
+                    scope: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DashboardResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/schedules": {
         parameters: {
             query?: never;
@@ -4386,6 +4473,50 @@ export interface components {
         CatalogWorkflowPage: {
             items: components["schemas"]["CatalogWorkflow"][];
             nextCursor: null | string;
+        };
+        DashboardRankings: {
+            slowest: components["schemas"]["DashboardRow"][];
+            failureRate: components["schemas"]["DashboardRow"][];
+            cpu: components["schemas"]["DashboardRow"][];
+            ram: components["schemas"]["DashboardRow"][];
+        };
+        DashboardResponse: {
+            scope: string;
+            id: string;
+            window: string;
+            /** Format: date */
+            from: string;
+            /** Format: date */
+            to: string;
+            /** Format: int32 */
+            top: number | string;
+            observationKind: string;
+            rankings: components["schemas"]["DashboardRankings"];
+        };
+        DashboardRow: {
+            workflowId: string;
+            nodeKey: string;
+            /** Format: int64 */
+            observations: number | string;
+            /** Format: int64 */
+            failures: number | string;
+            /** Format: int64 */
+            softFailures: number | string;
+            /** Format: int64 */
+            durationCount: number | string;
+            /** Format: double */
+            failureRate: number | string;
+            /** Format: double */
+            p50Ms: null | number | string;
+            /** Format: double */
+            p95Ms: null | number | string;
+            /** Format: double */
+            cpuMaxPercent: null | number | string;
+            /** Format: double */
+            ramPeakMb: null | number | string;
+            /** Format: uuid */
+            latestRunId: string;
+            runHref: string;
         };
         /**
          * @default OnSuccess

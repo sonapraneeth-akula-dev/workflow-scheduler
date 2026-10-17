@@ -52,6 +52,7 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, MetricsJsonContext.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunTimelineJsonContext.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Series.SeriesTrendsJson.Default);
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Dashboards.DashboardJson.Default);
             if (browser)
             {
                 options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunEventsJsonContext.Default);
@@ -78,6 +79,7 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
             app.MapMetricsEndpoints();
             app.MapRunTimelineEndpoints();
             Wf.ControlPlane.Api.Series.TrendsEndpoint.MapTrendsEndpoint(app);
+            Wf.ControlPlane.Api.Dashboards.DashboardEndpoints.MapDashboardEndpoints(app);
             if (browser)
             {
                 app.MapRunEventsEndpoints();

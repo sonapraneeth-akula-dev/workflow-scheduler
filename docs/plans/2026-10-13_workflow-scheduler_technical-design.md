@@ -837,13 +837,35 @@ agents. Within v1 only additive changes are allowed; breaking changes go to `/ap
 | POST | /api/v1/schedules/{id}/run-now | Operator | — | 202 `{runId}` (series derived from the schedule's `run_series`) | 404 |
 | DELETE | /api/v1/schedules/{id} | Operator · **UI-only, not part of public API** | If-Match | 204 | 409 (code), 412 |
 | GET | /api/v1/series/{id}/runs · /trends | Viewer | `window=7d,30d,90d` | runs · trend series (rollups) | 404 |
-| GET | /api/v1/dashboards/{scope}/{id} | Viewer | `window` | top-N slow/flaky/heavy | 404 |
+| GET | /api/v1/dashboards/{scope}/{id} | Viewer | `window=7d,30d,90d`, `top=1..50` | node rankings: exact p95, hard-failure fraction, max CPU and RAM; contributing run links | 400, 403, 500, 503 |
 | GET | /api/v1/machines | Viewer | `label, pool, os, status` | machines + reservations | — |
 | PATCH | /api/v1/machines/{id} | Admin | labels, pool, capacity per profile | 200 | 400 |
 | POST | /api/v1/machines/{id}/calibrate · /drain | Admin | profile | 202 | 409 (reserved) |
 | GET/POST/DELETE | /api/v1/subscriptions | User | scope, events, channel | subscriptions | 400 |
 | GET | /api/v1/audit | Admin / team Author | `actor, target, from, to, cursor` | page | 403 |
 | GET/PUT | /api/v1/admin/retention | Admin | defaults + per-type | config | 400 |
+
+**Dashboard reads (FR-047)**: `scope` is `workflow`, `schedule`, `node` or `machine`.
+Workflow and node IDs are canonical unpadded base64url UTF8 of `team/type/workflow`
+and `team/type/workflow/node`; schedule and machine IDs are canonical lowercase UUIDs.
+Default window is 30 days including the current UTC creation day, with inclusive
+`from` and exclusive `to`; default `top` is 10. Each ranking groups by exact
+workflow/node, uses descending metric and ordinal identity tie-breaks, and links
+to the latest contributing run (not a claimed percentile exemplar). Slowest means
+exact interpolated source p95, never averaged daily percentiles. Terminal runs
+only; workflow/schedule/node observations are terminal node occurrences.
+Machine observations are terminal task attempts on that exact agent, not complete
+node durations or other agents' measurements. Failure fraction counts hard failure,
+timeout and cancellation; soft failures remain separate. Skipped/reused observations
+count without invented duration. Unknown CPU/RAM/duration remain null and are
+excluded from the corresponding ranking; real zero is retained, CPU may exceed
+100%, and RAM is MiB. Existing daily rollups already persist CPU/RAM maxima; source
+rows supply exact cross-day quantiles and scope-specific schedule/machine facts.
+Fresh existing Viewer grants apply on every request, including deleted-schedule
+history. Machine analytics filter to currently granted workflow types and disclose
+no global machine inventory metadata; inventory itself remains global Admin-only.
+Unknown and ungranted resources share 403; responses are `no-store` and failures
+are sanitized. No additional login/logout flow.
 
 **UI-only routes** (FR-035): user-defined schedule mutations (create, edit, pause, resume, delete) serve only the Kardia UI. They are left out of the public `/openapi/v1.json` contract, the SDK/public client and the CLI (a separate internal document generates the SPA client), and accept only delegated user tokens issued to the Kardia SPA client (`azp` check); app-only and other-client tokens get 403. This is a product/contract boundary, not a security boundary: a user scripting the UI's token can do nothing beyond what their role already allows in the UI. Code-defined schedules and registration never create or modify user-defined schedules. Schedule reads and `run-now` stay public.
 
