@@ -52,6 +52,14 @@ jobs:
           name: remote-http-${{ matrix.os }}
           path: remote-http-results
           if-no-files-found: error
+      - name: Verify physical agent drain and replacement
+        run: dotnet test backend/tests/Wf.Integration.Tests --configuration Release --no-build --filter "FullyQualifiedName~Wf.Integration.Tests.Agents.DrainTests" --logger "trx;LogFileName=agent-drain.trx" --results-directory agent-drain-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-drain-${{ matrix.os }}
+          path: agent-drain-results
+          if-no-files-found: error
       - name: Verify native Linux API SIGTERM drain
         if: runner.os == 'Linux'
         env:

@@ -156,7 +156,7 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
         ctx.Outputs["sourceKey"] = ctx.TaskKey;
         await ctx.Reports.PublishAsync("text", "Post summary",
             System.Text.Encoding.UTF8.GetBytes("Published by " + ctx.TaskKey), ctx.CancellationToken, ["post", "review"]);
-    }).Task("remoteOperation", async ctx =>
+    }).Task("drain", DrainFixture.ExecuteAsync).Task("remoteOperation", async ctx =>
     {
         if (ctx.Var<string>("checkpointMarker") is { Length: > 0 } marker)
         {

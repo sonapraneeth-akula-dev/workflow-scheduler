@@ -461,6 +461,18 @@ acknowledgement from the current session at the exact machine epoch. A deadline
 or disconnected agent alone never frees live capacity. Released means safe for
 maintenance, not Healthy: the machine stays Draining without automatic re-enable.
 
+`dotnet test backend\tests\Wf.Integration.Tests --filter "FullyQualifiedName~Agents.DrainTests"`
+exercises actual PostgreSQL, HTTP/2 agents, packaged SDK hosts and a spare agent:
+graceful completion, deadline cancellation with gated cleanup, forced process-tree
+termination, blocked engine acknowledgement and journal replay after reconnect.
+Each case holds a real reservation until physical release and ends with zero
+logical task failures. Forced stops cancel checkpoint/progress forwarding before
+terminating the host, so an expected transport shutdown cannot overwrite the
+cancellation with `PlatformError`. Backend CI runs this gate on Windows/Linux
+and uploads `agent-drain-<OS>` reports. Local Linux evidence uses the same portable
+managed build on the actual Linux .NET runtime, not a Linux native AOT build;
+host-process/agent-object reconnect tests do not claim a machine reboot.
+
 `/machines` shows that inventory with URL-persisted filters; a machine name opens
 `/machines/<uuid>` for hardware, heartbeat/resource metrics, current reservation
 and the profile capacity table with Admin manual-capacity and label/pool editors.

@@ -250,6 +250,8 @@ public sealed class TaskHostPool : IAsyncDisposable
                 catch (TimeoutException)
                 {
                     logger.LogWarning("Task host {Pid} ignored cancellation; killing its process tree.", host.Process.Id);
+                    await checkpointStop.CancelAsync();
+                    await Task.WhenAll(forwarding, progressForwarding);
                     await host.Containment.StopAsync(host.Process);
                     return new TaskCompleted
                     {
