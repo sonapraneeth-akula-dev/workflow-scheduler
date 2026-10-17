@@ -11,11 +11,14 @@ internal sealed partial class TaskHostContainment : IDisposable
     private readonly HostRecoveryBarrier.Lease recovery;
     private readonly string receiptPath;
     private readonly string receiptToken = Guid.NewGuid().ToString("N");
+    private readonly string? jobName;
     private readonly object sync = new();
     private Task? stopping;
     private bool bound;
+    private long startedUtcTicks;
+    private ulong startIdentity;
 
-    public unsafe TaskHostContainment(HostRecoveryBarrier barrier, ProcessStartInfo start, string socketPath)
+    public TaskHostContainment(HostRecoveryBarrier barrier, ProcessStartInfo start, string socketPath)
     {
         receiptPath = socketPath + ".lifetime";
         recovery = barrier.Begin();
@@ -25,13 +28,13 @@ internal sealed partial class TaskHostContainment : IDisposable
             start.Environment["WF_TASK_HOST_CONTAINMENT"] = "1";
             start.Environment["WF_TASK_HOST_CONTAINMENT_TOKEN"] = receiptToken;
             start.Environment.Remove("WF_TASK_HOST_SUPERVISOR_PID");
+            start.Environment.Remove("WF_TASK_HOST_LIFETIME_JOB");
             if (OperatingSystem.IsWindows())
             {
-                job = CreateJob(0, null);
+                jobName = $"Local\\wf-task-host-{receiptToken}";
+                start.Environment["WF_TASK_HOST_LIFETIME_JOB"] = jobName;
+                job = CreateJob(0, jobName);
                 if (job.IsInvalid) throw new Win32Exception(Marshal.GetLastPInvokeError(), "Create task-host lifetime job failed.");
-                var limits = new ExtendedLimits { Basic = new BasicLimits { Flags = 0x2000 } };
-                if (SetInformation(job, 9, &limits, (uint)sizeof(ExtendedLimits)) == 0)
-                    throw new Win32Exception(Marshal.GetLastPInvokeError(), "Set task-host KILL_ON_JOB_CLOSE failed.");
             }
             else if (!OperatingSystem.IsLinux())
                 throw new PlatformNotSupportedException("Physical task-host containment requires Windows or Linux.");
@@ -43,8 +46,17 @@ internal sealed partial class TaskHostContainment : IDisposable
     {
         if (job is not null && Assign(job, process.Handle) == 0)
             throw new Win32Exception(Marshal.GetLastPInvokeError(), "Assign task host to mandatory lifetime job failed.");
+        if (process.HasExited) throw new InvalidOperationException("Task host exited before its process identity could bind.");
+        startedUtcTicks = process.StartTime.ToUniversalTime().Ticks;
+        startIdentity = TaskHostLauncher.StartIdentity(process);
+        if (process.HasExited) throw new InvalidOperationException("Task host exited while its process identity was being established.");
         bound = true;
     }
+
+    public void Record(Process process, TaskHostPackage package, string socketPath, string? workloadCgroup,
+        Wf.Contracts.Agent.V1.Dispatch? dispatch = null) =>
+        TaskHostLauncher.Record(recovery, process, package, socketPath, jobName, receiptToken, workloadCgroup,
+            startedUtcTicks, startIdentity, dispatch);
 
     public void VerifyReady()
     {
@@ -75,8 +87,16 @@ internal sealed partial class TaskHostContainment : IDisposable
         }
         else
         {
-            // EOF also occurs on agent SIGKILL. The SDK subreaper remains alive until every descendant is reaped.
-            process.StandardInput.Close();
+            try
+            {
+                if (!process.HasExited)
+                {
+                    await process.StandardInput.BaseStream.WriteAsync(new byte[] { 1 });
+                    await process.StandardInput.BaseStream.FlushAsync();
+                }
+            }
+            catch (IOException) when (process.HasExited) { }
+            finally { process.StandardInput.Close(); }
         }
         await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
         if (job is null && (process.ExitCode != 0 || !HasReceipt()))
@@ -107,25 +127,6 @@ internal sealed partial class TaskHostContainment : IDisposable
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct BasicLimits
-    {
-        public long ProcessTime, JobTime;
-        public uint Flags;
-        public nuint MinimumWorkingSet, MaximumWorkingSet;
-        public uint ActiveProcessLimit;
-        public nuint Affinity;
-        public uint PriorityClass, SchedulingClass;
-    }
-    [StructLayout(LayoutKind.Sequential)]
-    private struct IoCounters { public ulong ReadOperations, WriteOperations, OtherOperations, ReadBytes, WriteBytes, OtherBytes; }
-    [StructLayout(LayoutKind.Sequential)]
-    private struct ExtendedLimits
-    {
-        public BasicLimits Basic;
-        public IoCounters Io;
-        public nuint ProcessMemory, JobMemory, PeakProcessMemory, PeakJobMemory;
-    }
-    [StructLayout(LayoutKind.Sequential)]
     private struct Accounting
     {
         public long User, Kernel, PeriodUser, PeriodKernel;
@@ -134,8 +135,6 @@ internal sealed partial class TaskHostContainment : IDisposable
 
     [LibraryImport("kernel32.dll", EntryPoint = "CreateJobObjectW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     private static partial SafeFileHandle CreateJob(nint attributes, string? name);
-    [LibraryImport("kernel32.dll", EntryPoint = "SetInformationJobObject", SetLastError = true)]
-    private static unsafe partial int SetInformation(SafeFileHandle job, int information, void* data, uint size);
     [LibraryImport("kernel32.dll", EntryPoint = "AssignProcessToJobObject", SetLastError = true)]
     private static partial int Assign(SafeFileHandle job, nint process);
     [LibraryImport("kernel32.dll", EntryPoint = "TerminateJobObject", SetLastError = true)]

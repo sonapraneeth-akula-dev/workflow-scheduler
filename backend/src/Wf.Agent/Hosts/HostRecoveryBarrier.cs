@@ -53,8 +53,18 @@ internal sealed partial class HostRecoveryBarrier
                     "Reboot this machine (not merely the agent) to guarantee orphan termination; do not delete lifetime records.");
             if (!Guid.TryParse(recordedBoot, out _))
                 throw new InvalidDataException("Task-host containment recovery record is invalid; physical quiescence cannot be established.");
+            RemoveAttemptMetadata(path);
             File.Delete(path);
         }
+    }
+
+    private static void RemoveAttemptMetadata(string path)
+    {
+        var directory = path[..^".pending".Length];
+        if (!Directory.Exists(directory)) return;
+        File.Delete(Path.Combine(directory, "attempt.json.next"));
+        File.Delete(Path.Combine(directory, "attempt.json"));
+        Directory.Delete(directory);
     }
 
     public Lease Begin()
@@ -69,18 +79,22 @@ internal sealed partial class HostRecoveryBarrier
                 stream.Write(Encoding.UTF8.GetBytes(boot));
                 stream.Flush(flushToDisk: true);
                 held.Add(path);
-                return new Lease(path, stream);
+                return new Lease(path, stream, boot);
             }
             catch { stream.Dispose(); throw; }
         }
     }
 
-    internal sealed class Lease(string path, FileStream stream)
+    internal sealed class Lease(string path, FileStream stream, string boot)
     {
+        public string BootId => boot;
+        public string AttemptDirectory => path[..^".pending".Length];
+
         public void Complete()
         {
             lock (sync)
             {
+                RemoveAttemptMetadata(path);
                 stream.Dispose();
                 File.Delete(path);
                 held.Remove(path);

@@ -202,6 +202,22 @@ Tasks execute on agents, never inside the engine or api, so control-plane failur
 
 **Task hosts outlive the agent.** On Windows each host is in its own named job object (limits applied, no kill-on-close tied to the agent); on Linux each host has its own cgroup under the agent's delegated slice and the unit uses `KillMode=process`, so restarting the agent stops only the agent process. Each attempt directory holds `attempt.json` (pid, process start time, socket path, last acked seq). On start, the agent scans attempt directories, verifies pid + start time (guards against pid reuse), reconnects to the host's socket, and resumes forwarding from the last acked seq. Because hosts survive, agent binary updates do not need a drain; drain is only for machine maintenance or an incompatible agent ↔ task-host protocol migration.
 
+Implementation staging for task `2.3.2.2.1`: independent named Windows Jobs and
+Linux supervisor lifetimes now survive agent-only termination. Explicit job
+termination/empty accounting and Linux subreaper/pidfd cleanup still gate normal
+release. The owner-only lifetime directory stores flushed atomic `attempt.json`
+with boot ID, PID, creation identity, diagnostic UTC start, socket/job, package
+paths, attempt, reservation epoch, deadline and caps. Creation identity is
+captured once before readiness: Windows creation FILETIME or Linux boot-relative
+`/proc/<pid>/stat` start counter. Cross-process Linux `Process.StartTime`
+reconstruction differed by roughly a millisecond in the actual test and is
+therefore not used as the adoption identity. Last acknowledged sequence starts
+at zero; reconnect/adoption and durable host streams remain tasks `2.3.2.2.2`
+and `2.3.2.2.3`. Until those paths are wired, an unfinished prior lifetime
+continues to quarantine restart admission and physical-fence acknowledgements;
+survival is not a substitute for quiescence or permission to reuse a machine.
+Private readiness protocol 7 rejects older SDK packages.
+
 **Checkpoints for long tasks.** `await ctx.Checkpoint.SaveAsync(state)` serialises JSON state (≤ 1 MB, at most once per 5 s); the task host uploads it to blob, then the agent journals `CheckpointSaved{run, taskKey, attempt, seq, uri, sha256}` until the engine acks it, like results. The engine applies it idempotently to `task_checkpoints` (keyed by run + task), keeping the highest `seq`, so neither an agent nor an engine crash loses or regresses a checkpoint. A later attempt of the same task gets it from `ctx.Checkpoint.TryLoad<T>()`, and `ctx.Attempt.ResumedFrom` says from when. Without checkpoints a retried task starts from the beginning. Built-in long tasks checkpoint automatically:
 - **Load shard**: every 10 s: position in the load shape, request-source offset, cumulative counts. Resume rejoins the shape at the current time (the ramp is not replayed); the missing interval is recorded and shown in the perf report.
 - **Parity**: request-source offset, category tallies, and samples written so far.

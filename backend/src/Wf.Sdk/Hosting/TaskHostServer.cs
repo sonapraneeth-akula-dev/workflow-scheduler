@@ -75,7 +75,7 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
         lock (sync)
             return Task.FromResult(new HostReady
             {
-                ProtocolVersion = 6, ProcessId = uint.TryParse(
+                ProtocolVersion = 7, ProcessId = uint.TryParse(
                     Environment.GetEnvironmentVariable("WF_TASK_HOST_SUPERVISOR_PID"), out var supervisor)
                     ? supervisor : (uint)Environment.ProcessId,
                 WorkflowVersion = workflow.Version, Bound = bound is not null

@@ -53,6 +53,8 @@ internal static class LinuxHostSupervisor
         var parentGone = Task.Run(() => Console.OpenStandardInput().ReadByte());
         var stop = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         var completed = await Task.WhenAny(exited, parentGone, stop);
+        if (completed == parentGone && await parentGone == -1)
+            completed = await Task.WhenAny(exited, stop);
         var forced = completed != exited;
         if (forced) KillChildren();
         await exited;

@@ -178,7 +178,7 @@ public sealed class PhysicalHostLifetimeTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Actual_parent_SIGKILL_stops_owned_hosts_and_descendants_but_restart_quarantines_until_reboot(bool productionIdentity)
+    public async Task Actual_parent_SIGKILL_preserves_owned_hosts_and_descendants_but_restart_stays_fenced_until_readoption(bool productionIdentity)
     {
         var root = Root();
         using var unrelated = StartUnrelated();
@@ -188,16 +188,33 @@ public sealed class PhysicalHostLifetimeTests
         start.Environment["WF_PHYSICAL_CRASH_ROOT"] = root;
         start.Environment["WF_PHYSICAL_PRODUCTION_IDENTITY"] = productionIdentity.ToString(CultureInfo.InvariantCulture);
         using var parent = Process.Start(start)!;
+        var owned = new List<int>();
         try
         {
             var child = await ReadPid(Path.Combine(root, "child.pid"));
             var worker = await ReadPid(Path.Combine(root, "child.pid.worker"));
             var host = await ReadPid(Path.Combine(root, "host.pid"));
+            owned.AddRange([child, worker, host]);
+            var recovery = productionIdentity
+                ? Path.Combine(Options(root).ResultJournalDirectory, "host-lifetimes", Guid.Parse(Options(root).Id).ToString("N"))
+                : Path.Combine(root, "recovery");
+            var metadata = Assert.Single(Directory.GetFiles(recovery, "attempt.json", SearchOption.AllDirectories));
+            using var record = JsonDocument.Parse(await File.ReadAllTextAsync(metadata, TestContext.Current.CancellationToken));
+            Assert.Equal(host, record.RootElement.GetProperty("Pid").GetInt32());
+            using (var process = Process.GetProcessById(host))
+                Assert.Equal(TaskHostLauncher.StartIdentity(process), record.RootElement.GetProperty("StartIdentity").GetUInt64());
+            Assert.Equal("block", record.RootElement.GetProperty("Attempt").GetProperty("TaskKey").GetString());
+            Assert.True(File.Exists(record.RootElement.GetProperty("SocketPath").GetString()));
+            if (OperatingSystem.IsWindows())
+                Assert.StartsWith("Local\\wf-task-host-", record.RootElement.GetProperty("JobName").GetString());
             parent.Kill(entireProcessTree: false);
             await parent.WaitForExitAsync(TestContext.Current.CancellationToken);
-            await AssertStopped(host);
-            await AssertStopped(worker);
-            await AssertStopped(child);
+            await Task.Delay(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+            foreach (var pid in owned)
+            {
+                using var process = Process.GetProcessById(pid);
+                Assert.False(process.HasExited, $"Owned host/worker/descendant {pid} died with its agent.");
+            }
             Assert.False(unrelated.HasExited);
             await using var restarted = productionIdentity
                 ? new TaskHostPool(NullLogger<TaskHostPool>.Instance, options: Options(root))
@@ -207,14 +224,21 @@ public sealed class PhysicalHostLifetimeTests
             var admission = await Assert.ThrowsAsync<InvalidOperationException>(() => restarted.PrewarmAsync(Package,
                 TestContext.Current.CancellationToken));
             Assert.Contains("quarantined", admission.Message);
-            var recovery = productionIdentity
-                ? Path.Combine(Options(root).ResultJournalDirectory, "host-lifetimes", Guid.Parse(Options(root).Id).ToString("N"))
-                : Path.Combine(root, "recovery");
             Assert.Single(Directory.GetFiles(recovery, "*.pending"));
         }
         finally
         {
             if (!parent.HasExited) { parent.Kill(entireProcessTree: true); await parent.WaitForExitAsync(TestContext.Current.CancellationToken); }
+            foreach (var pid in owned.Distinct())
+            {
+                try
+                {
+                    using var process = Process.GetProcessById(pid);
+                    if (!process.HasExited) process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+                }
+                catch (ArgumentException) { }
+            }
             StopUnrelated(unrelated);
             Directory.Delete(root, recursive: true);
         }
@@ -230,9 +254,13 @@ public sealed class PhysicalHostLifetimeTests
             Directory.CreateDirectory(recovery);
             var path = Path.Combine(recovery, "old.pending");
             await File.WriteAllTextAsync(path, Guid.NewGuid().ToString("D"), TestContext.Current.CancellationToken);
+            var metadata = Path.Combine(recovery, "old");
+            Directory.CreateDirectory(metadata);
+            await File.WriteAllTextAsync(Path.Combine(metadata, "attempt.json"), "old boot", TestContext.Current.CancellationToken);
             await using var pool = Pool(root);
             await pool.FenceAsync(TestContext.Current.CancellationToken);
             Assert.False(File.Exists(path));
+            Assert.False(Directory.Exists(metadata));
             await File.WriteAllTextAsync(path, "invalid", TestContext.Current.CancellationToken);
             await Assert.ThrowsAsync<InvalidDataException>(() => pool.FenceAsync(TestContext.Current.CancellationToken));
             Assert.True(File.Exists(path));

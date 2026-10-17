@@ -753,7 +753,7 @@ system-assigned identity. No developer/browser/CLI credential fallback.
 `ctx.Secret(ctx.Var<SecretReference>("credential"))` accesses a declared resolved
 value. Missing or unavailable secrets become safe nonretryable `ValidationError`;
 resolved values never enter manifests, dispatches, journals or process arguments.
-Rebuild existing SDK packages: task-host private readiness protocol 6 is required.
+Rebuild existing SDK packages: task-host private readiness protocol 7 is required.
 Provisioning and provider details: [agent secrets](backend/src/Wf.Agent/Secrets/README.md).
 
 `Tasks.HttpOperation(...)` declares an opt-in long-running HTTP operation:
@@ -1664,7 +1664,7 @@ header capability for the exact attempt, assigned agent session and reservation
 epoch. It cannot commit the logical checkpoint pointer or accept user tokens,
 arbitrary object paths or redirect targets. Existing HMAC configuration and
 agent transport are reused; no login/logout flow or public read API is added.
-Private host readiness protocol 6 includes checkpoint and progress streams with
+Private host readiness protocol 7 includes checkpoint and progress streams with
 explicit ACKs (engine durability for checkpoints; agent-journal durability for
 progress).
 Dispatch receive envelopes allow 4 MiB for the existing inputs plus a maximum-size
@@ -1699,8 +1699,11 @@ samples from expired or fenced reservations are discarded without changing
 outputs, events or resource blobs. Ordinary work after release carries the
 machine's advanced epoch, not a reset to epoch 1.
 Physical containment is mandatory even when resource sampling is unavailable:
-Windows uses kill-on-close jobs; Linux uses an SDK subreaper supervisor and
-pidfds to terminate and reap detached descendants. Persist each agent's UUID,
+Windows uses named independent Job Objects, explicitly terminated and queried
+until empty during cleanup; agent handle closure alone does not terminate them.
+Linux uses an SDK subreaper supervisor and pidfds to terminate and reap detached
+descendants. Explicit shutdown requests cleanup; agent stdin EOF does not.
+Persist each agent's UUID,
 result-journal directory and its `host-lifetimes` records across restarts.
 Uncertain same-boot crashes or unsupported containment primitives quarantine
 new work and fence acknowledgements. Recover uncertain crash records through a
@@ -2065,6 +2068,20 @@ grace (default 30 seconds). Workflow hosts use ordinary, untrimmed .NET IL, not
 Native AOT, and require the ASP.NET Core runtime. Live-host re-adoption remains
 a separate backlog item. The sample accepts
 `--task-host --socket <path>`; normal local execution is unchanged.
+
+Hosts now survive an abrupt agent-only process kill. Each lifetime has a
+flushed, atomically replaced `host-lifetimes/<lifetime>/attempt.json` beside its
+pending physical-fence record. It records boot ID, PID, OS creation identity,
+diagnostic UTC start time, private socket, Windows job name, package/runtime
+paths and the bound attempt/epoch/deadline/caps. Linux identity uses the
+boot-relative `/proc/<pid>/stat` start counter, not cross-process reconstructed
+`Process.StartTime` wall-clock estimates. Identity is captured once at launch,
+not refreshed when an attempt binds. The last-ack field starts at zero; replay
+spooling and automatic live-host re-adoption remain their following tasks.
+Until that recovery path is implemented, surviving or uncertain lifetimes keep
+restart admission and reservation acknowledgements quarantined; survival alone
+does not authorize reuse. Normal completion, cancellation, drain and fencing
+still require physical descendant cleanup before release.
 
 Authored `.Defaults(p => p.Limits(cpuCores: 0.5, ramMb: 512))`, node/stage
 `.Limits(...)`, and per-task `p => p.Limits(...)` configure optional caps.

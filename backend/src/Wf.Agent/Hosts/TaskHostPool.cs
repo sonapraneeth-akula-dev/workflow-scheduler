@@ -182,6 +182,13 @@ public sealed class TaskHostPool : IAsyncDisposable
         Task limitMonitor = Task.CompletedTask;
         try
         {
+            lock (host)
+            {
+                if (host.Release is not null)
+                    throw new InvalidOperationException("Task host was fenced before its attempt could bind.");
+                host.Containment.Record(host.Process, host.Package, host.SocketPath,
+                    host.WorkloadLimiter?.LinuxCgroupPath, dispatch);
+            }
             if (limits is { } && (limits.CpuCores > 0 || limits.RamMb > 0))
             {
                 lock (host)
@@ -490,6 +497,7 @@ public sealed class TaskHostPool : IAsyncDisposable
             if (!process.Start()) throw new InvalidOperationException("Task-host process did not start.");
             started = true;
             containment.Bind(process);
+            containment.Record(process, package, socketPath, workloadLimiter?.LinuxCgroupPath);
             Interlocked.Increment(ref processStartCount);
             var resourceBound = resourceScope is not null;
             try { resourceScope?.Bind(process); }
@@ -553,7 +561,7 @@ public sealed class TaskHostPool : IAsyncDisposable
                         if (prewarming && !warm.Contains(host)) return null;
                     }
                     var ready = await call.ResponseAsync;
-                    if (ready.ProtocolVersion != 6 || ready.ProcessId != process.Id || ready.WorkflowVersion != package.Version || ready.Bound)
+                    if (ready.ProtocolVersion != 7 || ready.ProcessId != process.Id || ready.WorkflowVersion != package.Version || ready.Bound)
                         throw new InvalidDataException("Task-host readiness identity, version or state is invalid.");
                     containment.VerifyReady();
                     await TrimWarmAsync(prewarming ? host : null);
