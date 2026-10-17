@@ -84,7 +84,7 @@ export async function getPermissions(
   signal?: AbortSignal
 ) {
   const request = permissionResourceSchema.parse(resource)
-  const result = await uiApi.GET("/api/v1/permissions/{scope}", {
+  const result = await publicApi.GET("/api/v1/permissions/{scope}", {
     params: { path: { scope: request.scope }, query: { id: request.id } },
     signal,
   })
@@ -190,14 +190,16 @@ export async function saveSchedule(
 export async function setSchedulePaused(
   current: ScheduleSnapshot
 ): Promise<ScheduleSnapshot> {
-  const path = current.schedule.paused
-    ? "/api/v1/schedules/{id}/resume"
-    : "/api/v1/schedules/{id}/pause"
-  const result = await uiApi.POST(path, {
-    params: { path: { id: current.schedule.id } },
-    headers: { "If-Match": current.etag },
-    parseAs: "text",
-  })
+  const result = await uiApi.POST(
+    current.schedule.paused
+      ? "/api/v1/schedules/{id}/resume"
+      : "/api/v1/schedules/{id}/pause",
+    {
+      params: { path: { id: current.schedule.id } },
+      headers: { "If-Match": current.etag },
+      parseAs: "text",
+    }
+  )
   if (!result.response.ok) {
     throw new ApiError(result.response, result.error)
   }

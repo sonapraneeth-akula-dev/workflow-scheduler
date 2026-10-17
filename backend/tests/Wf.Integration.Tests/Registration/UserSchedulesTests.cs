@@ -511,11 +511,13 @@ public sealed partial class UserSchedulesTests(RegistrationDatabase database) : 
         var publicDocument = await Json(publicResponse);
         Assert.StartsWith("3.1", publicDocument.GetProperty("openapi").GetString());
         var publicPaths = publicDocument.GetProperty("paths");
+        Assert.True(publicPaths.GetProperty(BasePath).TryGetProperty("get", out _));
+        Assert.False(publicPaths.GetProperty(BasePath).TryGetProperty("post", out _));
         Assert.True(publicPaths.GetProperty("/api/v1/schedules/{id}").TryGetProperty("get", out _));
         Assert.False(publicPaths.GetProperty("/api/v1/schedules/{id}").TryGetProperty("put", out _));
         Assert.False(publicPaths.GetProperty("/api/v1/schedules/{id}").TryGetProperty("delete", out _));
         Assert.True(publicPaths.GetProperty("/api/v1/schedules/{id}/run-now").TryGetProperty("post", out _));
-        foreach (var path in new[] { BasePath, BasePath + "/preview", BasePath + "/{id}/pause", BasePath + "/{id}/resume" })
+        foreach (var path in new[] { BasePath + "/preview", BasePath + "/{id}/pause", BasePath + "/{id}/resume" })
             Assert.False(publicPaths.TryGetProperty(path, out _), $"UI mutation leaked into public OpenAPI: {path}");
         using var internalResponse = await server.Send(HttpMethod.Get, "/openapi/ui.json", new ByteArrayContent([]), server.Token("Admin"));
         Assert.Equal(HttpStatusCode.OK, internalResponse.StatusCode);

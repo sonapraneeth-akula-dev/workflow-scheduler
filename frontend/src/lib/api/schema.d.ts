@@ -3390,6 +3390,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Public Viewer read of nondeleted Code and User schedules for one exact workflowId. Stable ascending schedule UUID keyset; limit 1-100, default 50. Cursor binds workflow and limit. The existing per-schedule read projection includes only secret references, never resolved secrets. No SPA client restriction. */
+        get: {
+            parameters: {
+                query: {
+                    workflowId: string;
+                    limit?: number;
+                    cursor?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScheduleListPage"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/schedules/{id}": {
         parameters: {
             query?: never;
@@ -3428,6 +3513,63 @@ export interface paths {
                 };
                 /** @description Not Found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permissions/{scope}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    id: string;
+                };
+                header?: never;
+                path: {
+                    scope: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CallerPermissions"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -3829,6 +3971,14 @@ export interface components {
             kind: components["schemas"]["BackoffKind"];
             delay: string;
             maxDelay: string;
+        };
+        CallerPermissions: {
+            scope: string;
+            id: string;
+            viewer: boolean;
+            author: boolean;
+            operator: boolean;
+            admin: boolean;
         };
         CatalogLatestRun: {
             /** Format: uuid */
@@ -4412,6 +4562,10 @@ export interface components {
         };
         /** @enum {unknown} */
         ScheduleCatchUpPolicy: "None" | "Latest";
+        ScheduleListPage: {
+            items: components["schemas"]["UserScheduleResponse"][];
+            nextCursor: null | string;
+        };
         /** @enum {unknown} */
         ScheduleOverlapPolicy: "Skip" | "Queue" | "Concurrent";
         ScheduleRunNowResponse: {

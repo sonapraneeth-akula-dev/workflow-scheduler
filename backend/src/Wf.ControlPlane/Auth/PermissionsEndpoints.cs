@@ -9,7 +9,7 @@ public static class PermissionsEndpoints
 {
     public static IEndpointRouteBuilder MapPermissionsEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapGet("/api/v1/permissions/{scope}", Read).WithGroupName("ui").RequireAuthorization()
+        endpoints.MapGet("/api/v1/permissions/{scope}", Read).RequireAuthorization()
             .Produces<CallerPermissions>().ProducesProblem(400).ProducesProblem(403);
         return endpoints;
     }

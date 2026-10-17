@@ -64,10 +64,13 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             foreach (var path in new[] { "/api/v1/runs", "/api/v1/runs/{id}/reports", "/api/v1/audit" })
                 Assert.True(paths.GetProperty(path).TryGetProperty("get", out _), $"Public read missing: {path}");
             Assert.True(paths.GetProperty("/api/v1/schedules/{id}").TryGetProperty("get", out _));
+            Assert.True(paths.GetProperty("/api/v1/schedules").TryGetProperty("get", out _));
+            Assert.False(paths.GetProperty("/api/v1/schedules").TryGetProperty("post", out _));
+            Assert.True(paths.GetProperty("/api/v1/permissions/{scope}").TryGetProperty("get", out _));
             Assert.True(paths.GetProperty("/api/v1/series/{id}/fires").TryGetProperty("get", out _));
             Assert.False(paths.GetProperty("/api/v1/schedules/{id}").TryGetProperty("put", out _));
             Assert.False(paths.GetProperty("/api/v1/schedules/{id}").TryGetProperty("delete", out _));
-            foreach (var path in new[] { "/api/v1/schedules", "/api/v1/schedules/preview",
+            foreach (var path in new[] { "/api/v1/schedules/preview",
                 "/api/v1/schedules/{id}/pause", "/api/v1/schedules/{id}/resume" })
                 Assert.False(paths.TryGetProperty(path, out _), $"UI mutation leaked into public OpenAPI: {path}");
             using var uiResponse = await client.GetAsync("/openapi/ui.json", deadline.Token);

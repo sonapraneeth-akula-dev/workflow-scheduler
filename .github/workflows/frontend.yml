@@ -28,7 +28,9 @@ jobs:
       - run: bun run test
       - run: dotnet build ../backend/src/Wf.ControlPlane --configuration Release
       - name: Check generated public and UI API contracts against the actual host
-        run: dotnet test ../backend/tests/Wf.Integration.Tests --configuration Release --filter 'FullyQualifiedName~RunHistory_and_RunNow_actual_Program'
+        run: |
+          dotnet test ../backend/tests/Wf.Integration.Tests --configuration Release --filter 'FullyQualifiedName~RunHistory_and_RunNow_actual_Program'
+          dotnet test ../backend/tests/Wf.ControlPlane.Tests --configuration Release --filter PublicApiContract
         env:
           WF_FRONTEND_API_CHECK: ${{ github.workspace }}/frontend
       - run: bunx playwright install --with-deps chromium firefox webkit

@@ -3,7 +3,9 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.OpenApi;
 using Npgsql;
+using NpgsqlTypes;
 using Wf.Contracts.Registry;
 using Wf.Contracts.Schedules;
 using Wf.ControlPlane.Auth;
@@ -25,6 +27,26 @@ public static class UserSchedulesEndpoints
 
     public static IEndpointRouteBuilder MapUserSchedulesEndpoints(this IEndpointRouteBuilder endpoints)
     {
+        endpoints.MapGet("/api/v1/schedules", List).RequireAuthorization()
+            .WithMetadata(new Microsoft.AspNetCore.Mvc.ResponseCacheAttribute { NoStore = true })
+            .Produces<ScheduleListPage>().ProducesProblem(400).ProducesProblem(401).ProducesProblem(403)
+            .ProducesProblem(500).ProducesProblem(503)
+            .WithDescription("Public Viewer read of nondeleted Code and User schedules for one exact workflowId. " +
+                "Stable ascending schedule UUID keyset; limit 1-100, default 50. Cursor binds workflow and limit. " +
+                "The existing per-schedule read projection includes only secret references, never resolved secrets. No SPA client restriction.")
+            .AddOpenApiOperationTransformer((operation, _, _) =>
+            {
+                operation.Parameters ??= [];
+                foreach (var name in new[] { "workflowId", "limit", "cursor" })
+                    operation.Parameters.Add(new OpenApiParameter
+                    {
+                        Name = name, In = ParameterLocation.Query, Required = name == "workflowId",
+                        Schema = name == "limit"
+                            ? new OpenApiSchema { Type = JsonSchemaType.Integer, Minimum = "1", Maximum = "100" }
+                            : new OpenApiSchema { Type = JsonSchemaType.String }
+                    });
+                return Task.CompletedTask;
+            });
         endpoints.MapGet("/api/v1/schedules/{id:guid}", Get).RequireAuthorization()
             .Produces<UserScheduleResponse>().ProducesProblem(403).ProducesProblem(404);
         var ui = endpoints.MapGroup("/api/v1/schedules").WithGroupName("ui").RequireAuthorization()
@@ -53,6 +75,35 @@ public static class UserSchedulesEndpoints
         ui.MapDelete("/{id:guid}", Delete).Produces(204)
             .ProducesProblem(403).ProducesProblem(409).ProducesProblem(412).ProducesProblem(428);
         return endpoints;
+    }
+
+    private static async Task<IResult> List(HttpContext context, NpgsqlDataSource source)
+    {
+        context.Response.Headers.CacheControl = "no-store";
+        ScheduleListQuery filter;
+        try { filter = ScheduleListQuery.Parse(context.Request.Query); }
+        catch (ArgumentException error) { return Results.Problem(statusCode: 400, title: "Invalid schedule query", detail: error.Message); }
+        try
+        {
+            if (!await AllowedAsync(context, filter.WorkflowId, RegistryRole.Viewer))
+                return Results.Problem(TeamAuthorizationExtensions.Forbidden());
+            await using var query = source.CreateCommand(ReadScheduleSql + """
+                WHERE s.workflow_id=$1 AND s.deleted_at IS NULL AND w.deleted_at IS NULL
+                    AND ($2::uuid IS NULL OR s.id>$2)
+                ORDER BY s.id LIMIT $3
+                """);
+            query.Parameters.AddWithValue(filter.WorkflowId);
+            query.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)filter.AfterId ?? DBNull.Value);
+            query.Parameters.AddWithValue(filter.Limit + 1);
+            var schedules = new List<UserScheduleResponse>();
+            await using var rows = await query.ExecuteReaderAsync(context.RequestAborted);
+            while (await rows.ReadAsync(context.RequestAborted)) schedules.Add(Schedule(rows));
+            var next = schedules.Count > filter.Limit ? filter.Cursor(schedules[filter.Limit - 1].Id) : null;
+            return Results.Json(new ScheduleListPage(schedules.Take(filter.Limit).ToArray(), next), UserScheduleJson.Default.ScheduleListPage);
+        }
+        catch (NpgsqlException) { return Results.Problem(statusCode: 503, title: "Schedule list unavailable"); }
+        catch (Exception error) when (error is InvalidDataException or JsonException or InvalidCastException)
+        { return Results.Problem(statusCode: 500, title: "Committed schedule metadata is inconsistent"); }
     }
 
     private static async Task<IResult> Get(HttpContext context, Guid id, NpgsqlDataSource source)
@@ -301,16 +352,24 @@ public static class UserSchedulesEndpoints
 
     private static async Task<UserScheduleResponse?> ReadAsync(NpgsqlConnection connection, Guid id, bool forUpdate, CancellationToken token)
     {
-        await using var query = Query(connection, """
+        await using var query = Query(connection, ReadScheduleSql + """
+            WHERE s.id=$1 AND s.deleted_at IS NULL AND w.deleted_at IS NULL
+            """ + (forUpdate ? " FOR UPDATE OF s" : ""), id);
+        await using var row = await query.ExecuteReaderAsync(token);
+        return await row.ReadAsync(token) ? Schedule(row) : null;
+    }
+
+    private const string ReadScheduleSql = """
             SELECT s.id,r.id,s.workflow_id,s.name,s.origin,s.timezone,s.cron,s.interval_s,s.version_pin,
                 s.overlap_policy,s.catchup_policy,s.variables::text,s.paused,s.row_version,s.next_fire_at,
                 c.source_path,c.git_commit
             FROM schedules s JOIN workflows w ON w.id=s.workflow_id LEFT JOIN run_series r ON r.schedule_id=s.id
             LEFT JOIN schedule_config_versions c ON c.id=s.config_version_id AND c.workflow_id=s.workflow_id
-            WHERE s.id=$1 AND s.deleted_at IS NULL AND w.deleted_at IS NULL
-            """ + (forUpdate ? " FOR UPDATE OF s" : ""), id);
-        await using var row = await query.ExecuteReaderAsync(token);
-        if (!await row.ReadAsync(token)) return null;
+
+            """;
+
+    private static UserScheduleResponse Schedule(NpgsqlDataReader row)
+    {
         if (row.IsDBNull(1)) throw new InvalidDataException("The schedule has no permanent run series.");
         var origin = row.GetInt16(4) switch { 0 => "Code", 1 => "User", _ => throw new InvalidDataException("The schedule origin is invalid.") };
         return new(row.GetGuid(0), row.GetGuid(1), row.GetString(2), row.GetString(3), origin, row.GetString(5),

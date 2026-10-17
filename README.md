@@ -846,6 +846,17 @@ time and JSON summary, including existing before/after metadata, without
 joining workflow variables or storage capabilities. This read surface does
 not imply the separate all-mutating-endpoint audit-coverage task is complete.
 
+Public schedule reads include `GET /api/v1/schedules?workflowId=team/type/name`
+and the existing detail, series-fire and series-history endpoints. The list
+requires current Viewer access to that exact workflow's owning type, accepts
+`limit` 1-100 (default 50) and an opaque `cursor`, and returns nondeleted Code
+and User schedules in ascending immutable UUID order. Keep the workflow and
+limit unchanged across pages. Rows reuse the detail projection, including
+origin and exact code provenance; existing secret references are never resolved.
+No-store reads accept authorized app or user tokens without a SPA-client
+restriction. `GET /api/v1/permissions/{scope}` is also public and retains the
+same current-resource authorization checks; publishing it grants no new access.
+
 Authenticated OpenAPI 3.1 documents use `Microsoft.AspNetCore.OpenApi`:
 `/openapi/v1.json` includes public reads and `run-now`, never UI-only mutations;
 `/openapi/ui.json` contains only the SPA schedule-management routes. Request
@@ -861,6 +872,14 @@ The Frontend workflow runs this check against an isolated actual control-plane
 host, not a checked-in document, and fails if either generated client drifts.
 The generator's process tests also prove nonzero exit on changed API/file
 contracts, missing files or unavailable documents, without overwriting clients.
+`PublicApiContractTests` scans every checked-in frontend API call against these
+generated operations, failing on an undocumented call or an unclassified
+computed path. Only the six schedule-editor operations (including preview)
+may use the internal client; reads and other mutations use the public client.
+Frontend CI runs this scan after the actual-host drift gate. Actual CLI
+acceptance also rejects schedule-management commands with no HTTP request,
+even when supplied a valid Admin token; these UI-only mutations are not CLI
+features.
 
 `dotnet run --project backend\tests\Wf.Benchmarks -c Release -- --trigger-api-bench`
 starts an isolated real API/PostgreSQL benchmark: 50 warmups, then 500 fresh-key

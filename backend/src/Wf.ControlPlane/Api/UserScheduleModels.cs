@@ -24,6 +24,7 @@ public sealed record UserScheduleResponse(Guid Id, Guid SeriesId, string Workflo
 }
 
 public sealed record UserSchedulePreview(ImmutableArray<DateTimeOffset> Fires);
+public sealed record ScheduleListPage(UserScheduleResponse[] Items, string? NextCursor);
 
 public static class ScheduleEntityTag
 {
@@ -50,4 +51,5 @@ public static class ScheduleEntityTag
 [JsonSerializable(typeof(UserScheduleRequest))]
 [JsonSerializable(typeof(UserScheduleResponse))]
 [JsonSerializable(typeof(UserSchedulePreview))]
+[JsonSerializable(typeof(ScheduleListPage))]
 public partial class UserScheduleJson : JsonSerializerContext;
