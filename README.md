@@ -349,7 +349,7 @@ the test's `curlimages/curl:8.12.1` client image.
 
 `GET /api/v1/machines` returns `{ items: [...] }`, ordered by immutable machine
 ID, with OS/architecture, hardware, slot/load metrics, pool, labels, heartbeat
-health and the current reservation. Optional `pool`, `os=windows|linux`,
+health, the current reservation and effective `capacities` per profile. Optional `pool`, `os=windows|linux`,
 `status=Healthy|Unhealthy|Draining` and repeated `label=key=value` filters combine
 with AND. Expired reservations remain visible until physical fencing settles;
 a stale heartbeat reports `Unhealthy` even before the next sweep.
@@ -357,7 +357,7 @@ Inventory and edits reuse the existing global Admin authorization boundary.
 The explicit loopback development profile remains login-free.
 
 Admin `PATCH /api/v1/machines/{id}` accepts a nonempty JSON object containing
-`labels` and/or `pool`; labels replace the whole map, and `{ "labels": {} }`
+`labels`, `pool` and/or `manualCapacity`; labels replace the whole map, and `{ "labels": {} }`
 clears it. Omitted fields stay unchanged; explicit nulls, duplicate/unknown
 fields, invalid metadata and bodies over 64 KiB are rejected. A successful
 edit returns 204 and atomically records before/after metadata in `audit_log`.
@@ -368,13 +368,29 @@ control-plane process, without interrupting existing work or freeing a
 reservation. Responses are never cached and expose no agent sessions or
 storage capabilities.
 
+`manualCapacity` has the shape
+`{ "profile": { "transport": "http", "codec": "json", "payloadSizeClass": "small", "loadSettings": { "threads": "8" } }, "capacityRps": 1234 }`.
+The rate must be an integer from 1 through 2,147,483,647. Profile identifiers
+and setting keys are exact, case-sensitive, 1-100 characters without surrounding
+whitespace or control characters; setting values are strings. Sorted settings
+form the shared canonical profile key, limited to 2,000 UTF-8 bytes by the server.
+A manual write replaces any calibrated value for only that profile, sets source
+`Manual` and clears `calibratedAt`; other profiles stay unchanged. Capacity,
+optional metadata and before/after audit commit or roll back together.
+Empty `capacities` means Unverified, not zero requests/s. Manual values remain
+Unverified until measured; calibrated entries include their UTC timestamp.
+The calibration command is a separate implementation task; this editor does not
+run a load generator.
+
 `/machines` shows that inventory with URL-persisted filters; a machine name opens
 `/machines/<uuid>` for hardware, heartbeat/resource metrics, current reservation
-and the Admin label/pool editor. Empty labels clears the map; the editor sends
+and the profile capacity table with Admin manual-capacity and label/pool editors.
+Empty labels clears the map; the metadata editor sends
 only changed fields. Global Admin permissions come from the existing permission
 API, not token inspection, and the local development profile remains login-free.
-Migration `0033_machine_notifications.sql` publishes committed agent and
-reservation changes through PostgreSQL `live_machines`; the existing authorized
+Migrations `0033_machine_notifications.sql` and `0034_capacity_notifications.sql`
+publish committed agent, reservation and capacity changes through PostgreSQL
+`live_machines`; the existing authorized
 MessagePack `machines/*` subscription coalesces invalidations for 250 ms and
 refetches the authoritative inventory without timer polling. Listener/transport
 reconnect resynchronizes; failed reads or denied/error live updates hide cached

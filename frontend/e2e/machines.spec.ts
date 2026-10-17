@@ -64,6 +64,11 @@ test("Admin sees mixed fleet and held reservation, filters, edits audited metada
       await request.post("/api/fixture/machine-heartbeat/false", { headers })
     ).status()
   ).toBe(204)
+  expect(
+    (
+      await request.post("/api/fixture/machine-capacity/false", { headers })
+    ).status()
+  ).toBe(204)
   await login(page, fixture.adminToken)
   await expect(page.locator("tbody tr")).toHaveCount(2)
   await expect(page.getByText("windows / x64", { exact: true })).toBeVisible()
@@ -98,6 +103,12 @@ test("Admin sees mixed fleet and held reservation, filters, edits audited metada
   ).toHaveValue("region=eu")
   await expect(page.locator("tbody tr")).toHaveCount(1)
   const observer = await page.context().newPage()
+  let observerResyncs = 0
+  observer.on("websocket", (socket) => {
+    socket.on("framereceived", ({ payload }) => {
+      if (payload.toString().includes("Resync")) observerResyncs++
+    })
+  })
   await login(observer, fixture.adminToken)
   await expect(observer.locator("tbody tr")).toHaveCount(2)
   await expect(
@@ -110,6 +121,9 @@ test("Admin sees mixed fleet and held reservation, filters, edits audited metada
     page.getByRole("heading", { name: fixture.machineName, exact: true })
   ).toBeVisible()
   await expect(page.getByText("0%", { exact: true })).toBeVisible()
+  await expect(
+    page.getByText("Unverified: no capacity has been set for any profile.")
+  ).toBeVisible()
   await page
     .getByRole("button", { name: "Edit labels and pool", exact: true })
     .click()
@@ -144,15 +158,89 @@ test("Admin sees mixed fleet and held reservation, filters, edits audited metada
   ).toBe(204)
   await expect(page.getByText("37%", { exact: true })).toBeVisible()
   await expect(observer.getByText(/1 \/ 4 task slots used/)).toBeVisible()
+  await observer.goto(`/machines/${fixture.machineId}`)
+  await expect(
+    observer.getByRole("status").filter({ hasText: "Fleet updates: live" })
+  ).toBeVisible()
+  await expect(
+    observer.getByText("Unverified: no capacity has been set for any profile.")
+  ).toBeVisible()
+  expect(
+    (
+      await request.post("/api/fixture/machine-capacity/true", { headers })
+    ).status()
+  ).toBe(204)
+  const capacities = page.getByRole("region", {
+    name: "Capacity table",
+    exact: true,
+  })
+  const observedCapacities = observer.getByRole("region", {
+    name: "Capacity table",
+    exact: true,
+  })
+  const small = capacities
+    .getByRole("row")
+    .filter({ has: page.getByRole("cell", { name: "small", exact: true }) })
+  const observedSmall = observedCapacities
+    .getByRole("row")
+    .filter({ has: observer.getByRole("cell", { name: "small", exact: true }) })
+  await expect(
+    small.getByRole("cell", { name: "Calibrated", exact: true })
+  ).toBeVisible()
+  await expect(
+    observedSmall.getByRole("cell", { name: "1000", exact: true })
+  ).toBeVisible()
+  await small.getByRole("button").click()
+  await expect(page.getByLabel("Transport", { exact: true })).toHaveValue(
+    "http"
+  )
+  await expect(page.getByLabel("Capacity (requests/s)")).toHaveValue("1000")
+  await page.getByLabel("Capacity (requests/s)").fill("1234")
+  await accessible(page)
+  const beforeCapacitySave = observerResyncs
+  await page.getByRole("button", { name: "Save capacity", exact: true }).click()
+  await expect(page.getByRole("alertdialog")).toHaveCount(0)
+  await expect(
+    small.getByRole("cell", { name: "Manual", exact: true })
+  ).toBeVisible()
+  await expect(
+    small.getByRole("cell", { name: "1234", exact: true })
+  ).toBeVisible()
+  await expect.poll(() => observerResyncs).toBeGreaterThan(beforeCapacitySave)
+  await expect(
+    observedSmall.getByRole("cell", { name: "1234", exact: true })
+  ).toBeVisible()
+  await expect(
+    observedSmall.getByText("Unverified (manual; not calibrated)", {
+      exact: true,
+    })
+  ).toBeVisible()
+  const large = capacities
+    .getByRole("row")
+    .filter({ has: page.getByRole("cell", { name: "large", exact: true }) })
+  await expect(
+    large.getByRole("cell", { name: "Calibrated", exact: true })
+  ).toBeVisible()
+  await expect(
+    large.getByRole("cell", { name: "3000", exact: true })
+  ).toBeVisible()
   await page.reload()
   await expect(
     page.getByText(fixture.pool + "-edited", { exact: true })
+  ).toBeVisible()
+  await expect(
+    small.getByRole("cell", { name: "1234", exact: true })
   ).toBeVisible()
   await page.setViewportSize({ width: 375, height: 812 })
   await page.getByRole("button", { name: "Dark theme" }).click()
   await accessible(page)
   await observer.setViewportSize({ width: 375, height: 812 })
   await accessible(observer)
+  await page
+    .getByRole("button", { name: "Set manual capacity", exact: true })
+    .click()
+  await accessible(page)
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
   await page
     .getByRole("button", { name: "Edit labels and pool", exact: true })
     .click()

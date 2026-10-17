@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { usePermissions } from "@/lib/auth/usePermissions"
 import { useLive } from "@/lib/live/useLive"
 import { EditLabelsDialog } from "./EditLabelsDialog"
+import { CapacityTable } from "./CapacityTable"
 import {
   formatLabels,
   getMachines,
@@ -230,6 +231,10 @@ export function MachineList({
             </dl>
             <h3 className="font-semibold">Current reservation</h3>
             <Reservation machine={machine} />
+            <CapacityTable
+              machine={machine}
+              canEdit={permissions.can("Admin")}
+            />
           </div>
         ) : rows ? (
           <p role="alert">Machine not found in the current inventory.</p>

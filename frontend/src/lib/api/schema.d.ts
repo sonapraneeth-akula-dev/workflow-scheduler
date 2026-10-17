@@ -3700,7 +3700,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Global Admin inventory, ordered by immutable machine ID. Optional pool, os=windows|linux, status=Healthy|Unhealthy|Draining and repeated label=key=value filters combine with AND. Stale healthy heartbeats are reported Unhealthy. Current reservation remains until physical fence settlement. */
+        /** @description Global Admin inventory, ordered by immutable machine ID. Optional pool, os=windows|linux, status=Healthy|Unhealthy|Draining and repeated label=key=value filters combine with AND. Stale healthy heartbeats are reported Unhealthy. Current reservation remains until physical fence settlement. Capacities list effective req/s per canonical profile; an empty list means Unverified, not zero capacity. */
         get: {
             parameters: {
                 query?: {
@@ -3796,7 +3796,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** @description Global Admin only. Atomically replaces supplied labels and/or pool with a before/after audit. Omitted fields stay unchanged; empty labels clears labels. Overrides survive agent reconnects. Does not interrupt running attempts or release reservations. */
+        /** @description Global Admin only. Atomically updates supplied labels, pool and/or manualCapacity with a before/after audit. manualCapacity is { profile: { transport, codec, payloadSizeClass, loadSettings }, capacityRps: positive Int32 }. Manual replaces calibrated capacity only for that canonical profile and clears its calibration timestamp. Omitted fields and other profiles stay unchanged; empty labels clears labels. Overrides survive agent reconnects. Does not interrupt running attempts or release reservations. */
         patch: {
             parameters: {
                 query?: never;
@@ -3980,6 +3980,14 @@ export interface components {
             operator: boolean;
             admin: boolean;
         };
+        CapacityProfile: {
+            transport: string;
+            codec: string;
+            payloadSizeClass: string;
+            loadSettings?: null | {
+                [key: string]: string;
+            };
+        };
         CatalogLatestRun: {
             /** Format: uuid */
             id: string;
@@ -4138,6 +4146,14 @@ export interface components {
             level: string;
             text: string;
         };
+        MachineCapacityResponse: {
+            profile: components["schemas"]["CapacityProfile"];
+            /** Format: int32 */
+            capacityRps: number | string;
+            source: string;
+            /** Format: date-time */
+            calibratedAt: null | string;
+        };
         MachineListResponse: {
             items: components["schemas"]["MachineResponse"][];
         };
@@ -4146,6 +4162,7 @@ export interface components {
                 [key: string]: string;
             };
             pool?: null | string;
+            manualCapacity?: null | components["schemas"]["ManualCapacityRequest"];
         };
         MachineReservationResponse: {
             /** Format: uuid */
@@ -4188,6 +4205,7 @@ export interface components {
             /** Format: int64 */
             diskFreeMb: number | string;
             currentReservation: null | components["schemas"]["MachineReservationResponse"];
+            capacities: components["schemas"]["MachineCapacityResponse"][];
         };
         ManifestChange: {
             key: string;
@@ -4202,6 +4220,11 @@ export interface components {
             variables: components["schemas"]["ManifestChange"][];
             policies: components["schemas"]["ManifestChange"][];
             settings: components["schemas"]["ManifestChange"][];
+        };
+        ManualCapacityRequest: {
+            profile: components["schemas"]["CapacityProfile"];
+            /** Format: int32 */
+            capacityRps: number;
         };
         MetricAttempt: {
             /** Format: int32 */

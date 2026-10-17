@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
+using Wf.Contracts;
 using Wf.ControlPlane.Api.Machines;
 using Wf.ControlPlane.Auth;
 using Wf.ControlPlane.Engine.Agents;
@@ -120,6 +121,19 @@ public sealed partial class AuthorizationMatrixTests
                 }, MachineToken)) throw new InvalidOperationException("Fixture lost its registered agent session.");
                 return Results.NoContent();
             }).RequireAuthorization(AuthExtensions.Admin);
+            app.MapPost("/api/fixture/machine-capacity/{calibrated:bool}", async (bool calibrated) =>
+            {
+                await using var clear = database.DataSource.CreateCommand("DELETE FROM agent_capacities WHERE agent_id=$1");
+                clear.Parameters.AddWithValue(session.AgentId);
+                await clear.ExecuteNonQueryAsync(MachineToken);
+                if (calibrated)
+                {
+                    var at = new DateTimeOffset(2026, 10, 17, 0, 0, 0, TimeSpan.Zero);
+                    await InsertMachineCapacity(session.AgentId, new("http", "json", "small"), 1000, CapacitySource.Calibrated, at);
+                    await InsertMachineCapacity(session.AgentId, new("http", "json", "large"), 3000, CapacitySource.Calibrated, at);
+                }
+                return Results.NoContent();
+            }).RequireAuthorization(AuthExtensions.Admin);
         });
         var actor = Guid.NewGuid();
         var start = new ProcessStartInfo("bun")
@@ -146,10 +160,21 @@ public sealed partial class AuthorizationMatrixTests
             await using var audit = database.DataSource.CreateCommand("""
                 SELECT count(*) FROM audit_log WHERE actor=$1 AND target_kind='Machine' AND target_id=$2
                   AND action='machine.update' AND summary->'after'->'labels'->>'region'='us <script>'
+                  AND NOT (summary->'after' ? 'manualCapacity')
                 """);
             audit.Parameters.AddWithValue(actor.ToString("D"));
             audit.Parameters.AddWithValue(hello.Id);
             Assert.Equal(3L, await audit.ExecuteScalarAsync(MachineToken));
+            await using var capacities = database.DataSource.CreateCommand("""
+                SELECT count(*) FROM audit_log WHERE actor=$1 AND target_kind='Machine' AND target_id=$2
+                  AND action='machine.update'
+                  AND summary->'before'->'manualCapacity'->>'source'='Calibrated'
+                  AND summary->'after'->'manualCapacity'->>'source'='Manual'
+                  AND summary->'after'->'manualCapacity'->>'capacityRps'='1234'
+                """);
+            capacities.Parameters.AddWithValue(actor.ToString("D"));
+            capacities.Parameters.AddWithValue(hello.Id);
+            Assert.Equal(3L, await capacities.ExecuteScalarAsync(MachineToken));
         }
         finally
         {

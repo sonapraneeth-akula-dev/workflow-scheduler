@@ -30,6 +30,34 @@ const idSchema = z
   .uuid()
   .refine((value) => value !== "00000000-0000-0000-0000-000000000000")
 const timestamp = z.iso.datetime({ offset: true })
+const profileIdentifier = text(100).refine(
+  (value) => value === value.trim(),
+  "Profile identifiers cannot have surrounding whitespace."
+)
+export const capacityProfileSchema = z.strictObject({
+  transport: profileIdentifier,
+  codec: profileIdentifier,
+  payloadSizeClass: profileIdentifier,
+  loadSettings: z.record(profileIdentifier, z.string()),
+})
+export const manualCapacitySchema = z.strictObject({
+  profile: capacityProfileSchema,
+  capacityRps: z.int().min(1).max(2147483647),
+})
+export type ManualCapacity = z.infer<typeof manualCapacitySchema>
+const capacitySchema = manualCapacitySchema
+  .extend({
+    source: z.enum(["Manual", "Calibrated"]),
+    calibratedAt: timestamp.nullable(),
+  })
+  .refine(
+    (value) =>
+      value.source === "Manual"
+        ? value.calibratedAt === null
+        : value.calibratedAt !== null &&
+          /(?:Z|\+00:00)$/.test(value.calibratedAt),
+    "Only calibrated capacity requires a UTC calibration timestamp."
+  )
 const machineSchema = machineMetadataSchema.extend({
   id: idSchema,
   name: z
@@ -63,6 +91,19 @@ const machineSchema = machineMetadataSchema.extend({
       releasePending: z.boolean(),
     })
     .nullable(),
+  capacities: z.array(capacitySchema).refine((rows) => {
+    const keys = rows.map(({ profile }) =>
+      JSON.stringify([
+        profile.transport,
+        profile.codec,
+        profile.payloadSizeClass,
+        Object.entries(profile.loadSettings).sort(([a], [b]) =>
+          a < b ? -1 : a > b ? 1 : 0
+        ),
+      ])
+    )
+    return new Set(keys).size === keys.length
+  }, "Capacity profiles must be unique."),
 })
 export type Machine = z.infer<typeof machineSchema>
 
@@ -138,15 +179,19 @@ export async function getMachines(
 }
 export async function patchMachine(
   id: string,
-  patch: Partial<MachineMetadata>
+  patch: Partial<MachineMetadata> & { manualCapacity?: ManualCapacity }
 ): Promise<void> {
   idSchema.parse(id)
   const body = machineMetadataSchema
     .partial()
+    .extend({ manualCapacity: manualCapacitySchema.optional() })
     .strict()
     .refine(
-      (value) => value.pool !== undefined || value.labels !== undefined,
-      "Change labels or pool before saving."
+      (value) =>
+        value.pool !== undefined ||
+        value.labels !== undefined ||
+        value.manualCapacity !== undefined,
+      "Change labels, pool or manual capacity before saving."
     )
     .parse(patch)
   const result = await publicApi.PATCH("/api/v1/machines/{id}", {

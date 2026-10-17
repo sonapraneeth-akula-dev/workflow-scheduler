@@ -4,6 +4,7 @@ import {
   formatLabels,
   getMachines,
   machineMetadataSchema,
+  manualCapacitySchema,
   machineSearchSchema,
   parseLabels,
   patchMachine,
@@ -40,6 +41,7 @@ const machine: Machine = {
     expiresAt: "2026-10-16T00:00:00Z",
     releasePending: true,
   },
+  capacities: [],
 }
 function respond(items: unknown[] = [machine]) {
   get.mockResolvedValue({
@@ -186,5 +188,119 @@ describe("machine API boundaries", () => {
     await expect(patchMachine(machine.id, { pool: "next" })).rejects.toThrow(
       "did not confirm"
     )
+  })
+  it("writes only exact profile and manual rate through the generated PATCH", async () => {
+    patch.mockResolvedValue({ response: new Response(null, { status: 204 }) })
+    const manualCapacity = {
+      profile: {
+        transport: "http",
+        codec: "json",
+        payloadSizeClass: "small",
+        loadSettings: { threads: "8", extra: "" },
+      },
+      capacityRps: 2147483647,
+    }
+    await patchMachine(machine.id, { manualCapacity })
+    expect(patch).toHaveBeenCalledWith("/api/v1/machines/{id}", {
+      params: { path: { id: machine.id } },
+      body: { manualCapacity },
+    })
+    expect(manualCapacitySchema.safeParse(manualCapacity).success).toBe(true)
+  })
+  it.each([0, -1, 1.5, "100", 2147483648, Number.NaN, Infinity])(
+    "rejects invalid manual rate %s before sending",
+    async (capacityRps) => {
+      const manualCapacity = manualCapacitySchema.safeParse({
+        profile: {
+          transport: "http",
+          codec: "json",
+          payloadSizeClass: "small",
+          loadSettings: {},
+        },
+        capacityRps,
+      })
+      expect(manualCapacity.success).toBe(false)
+      expect(patch).not.toHaveBeenCalled()
+    }
+  )
+  it.each([
+    { transport: "" },
+    { codec: " json" },
+    { payloadSizeClass: "x".repeat(101) },
+    { transport: "http\n" },
+    { loadSettings: { " threads": "8" } },
+    { loadSettings: { threads: 8 } },
+    { loadSettings: null },
+    { loadSettings: [] },
+    { profileKey: "not a public field" },
+  ])("rejects malformed profile %j", (change) => {
+    expect(
+      manualCapacitySchema.safeParse({
+        profile: {
+          transport: "http",
+          codec: "json",
+          payloadSizeClass: "small",
+          loadSettings: {},
+          ...change,
+        },
+        capacityRps: 100,
+      }).success
+    ).toBe(false)
+  })
+  it.each([
+    { source: "Unknown" },
+    { source: "Manual", calibratedAt: "2026-10-17T00:00:00Z" },
+    { source: "Calibrated", calibratedAt: null },
+    { source: "Calibrated", calibratedAt: "2026-10-17T01:00:00+01:00" },
+    { capacityRps: 0 },
+  ])("rejects inconsistent committed capacity %j", async (change) => {
+    respond([
+      {
+        ...machine,
+        capacities: [
+          {
+            profile: {
+              transport: "http",
+              codec: "json",
+              payloadSizeClass: "small",
+              loadSettings: {},
+            },
+            capacityRps: 100,
+            source: "Manual",
+            calibratedAt: null,
+            ...change,
+          },
+        ],
+      },
+    ])
+    await expect(getMachines({})).rejects.toThrow()
+  })
+  it("accepts calibrated UTC values and rejects duplicate equivalent profiles", async () => {
+    const capacity = {
+      profile: {
+        transport: "http",
+        codec: "json",
+        payloadSizeClass: "small",
+        loadSettings: { a: "1", b: "2" },
+      },
+      capacityRps: 100,
+      source: "Calibrated",
+      calibratedAt: "2026-10-17T00:00:00Z",
+    }
+    respond([{ ...machine, capacities: [capacity] }])
+    expect(await getMachines({})).toMatchObject([{ capacities: [capacity] }])
+    respond([
+      {
+        ...machine,
+        capacities: [
+          capacity,
+          {
+            ...capacity,
+            profile: { ...capacity.profile, loadSettings: { b: "2", a: "1" } },
+          },
+        ],
+      },
+    ])
+    await expect(getMachines({})).rejects.toThrow("unique")
   })
 })

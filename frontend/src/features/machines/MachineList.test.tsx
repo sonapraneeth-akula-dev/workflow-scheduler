@@ -69,6 +69,7 @@ const machine: Machine = {
     expiresAt: "2026-10-16T00:00:00Z",
     releasePending: true,
   },
+  capacities: [],
 }
 function show(id?: string) {
   const client = new QueryClient({
@@ -288,5 +289,142 @@ describe("machine list and editor", () => {
       screen.getByRole("button", { name: "Clear machine filters" })
     )
     expect(change).toHaveBeenLastCalledWith({})
+  })
+  it("marks absent capacities Unverified and saves exact profile, not metadata", async () => {
+    const shown = show(machine.id)
+    expect(await screen.findByText(/Unverified: no capacity/)).toBeVisible()
+    await userEvent.click(
+      screen.getByRole("button", { name: "Set manual capacity" })
+    )
+    expect(screen.getByRole("alertdialog")).toHaveAccessibleName(
+      "Set manual capacity"
+    )
+    fireEvent.change(screen.getByLabelText("Transport", { exact: true }), {
+      target: { value: "http" },
+    })
+    fireEvent.change(screen.getByLabelText("Codec", { exact: true }), {
+      target: { value: "json" },
+    })
+    fireEvent.change(screen.getByLabelText("Payload class", { exact: true }), {
+      target: { value: "small" },
+    })
+    fireEvent.change(
+      screen.getByLabelText("Load settings (JSON object of strings)"),
+      { target: { value: '{"threads":"8"}' } }
+    )
+    fireEvent.change(screen.getByLabelText("Capacity (requests/s)"), {
+      target: { value: "1234" },
+    })
+    await userEvent.click(screen.getByRole("button", { name: "Save capacity" }))
+    await waitFor(() =>
+      expect(patchMachine).toHaveBeenCalledWith(machine.id, {
+        manualCapacity: {
+          profile: {
+            transport: "http",
+            codec: "json",
+            payloadSizeClass: "small",
+            loadSettings: { threads: "8" },
+          },
+          capacityRps: 1234,
+        },
+      })
+    )
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(shown.client.getQueryData(["machines", {}])).toEqual([machine])
+  })
+  it("shows source and calibration time, prefills overrides and keeps drafts across live refetch and permission checks", async () => {
+    const calibrated = {
+      ...machine,
+      capacities: [
+        {
+          profile: {
+            transport: "http",
+            codec: "json",
+            payloadSizeClass: "small",
+            loadSettings: { threads: "8" },
+          },
+          capacityRps: 1000,
+          source: "Calibrated" as const,
+          calibratedAt: "2026-10-17T00:00:00Z",
+        },
+      ],
+    }
+    vi.mocked(getMachines).mockResolvedValue([calibrated])
+    const shown = show(machine.id)
+    expect(await screen.findByText("Calibrated")).toBeVisible()
+    expect(
+      document.querySelector("time[datetime='2026-10-17T00:00:00Z']")
+    ).toBeVisible()
+    await userEvent.click(
+      screen.getByRole("button", { name: "Override profile 1" })
+    )
+    expect(screen.getByLabelText("Transport", { exact: true })).toHaveValue(
+      "http"
+    )
+    expect(screen.getByLabelText("Capacity (requests/s)")).toHaveValue(1000)
+    fireEvent.change(screen.getByLabelText("Capacity (requests/s)"), {
+      target: { value: "1234" },
+    })
+    vi.mocked(getMachines).mockResolvedValue([
+      { ...calibrated, cpuPercent: 40 },
+    ])
+    await shown.client.invalidateQueries({ queryKey: ["machines"] })
+    expect(screen.getByLabelText("Capacity (requests/s)")).toHaveValue(1234)
+    state.checking = true
+    shown.rerender()
+    expect(screen.getByRole("button", { name: "Save capacity" })).toBeDisabled()
+    expect(screen.getByLabelText("Capacity (requests/s)")).toHaveValue(1234)
+    state.checking = false
+    shown.rerender()
+    expect(screen.getByRole("button", { name: "Save capacity" })).toBeEnabled()
+    state.permitted = false
+    shown.rerender()
+    expect(screen.queryByRole("alertdialog")).toBeNull()
+    expect(screen.queryByRole("table")).toBeNull()
+    expect(patchMachine).not.toHaveBeenCalled()
+  })
+  it("retains profile drafts on JSON and server errors, retries only explicitly, and cancels without writing", async () => {
+    vi.mocked(getMachines).mockResolvedValue([
+      {
+        ...machine,
+        capacities: [
+          {
+            profile: {
+              transport: "http",
+              codec: "json",
+              payloadSizeClass: "small",
+              loadSettings: {},
+            },
+            capacityRps: 100,
+            source: "Manual",
+            calibratedAt: null,
+          },
+        ],
+      },
+    ])
+    show(machine.id)
+    expect(
+      await screen.findByText("Unverified (manual; not calibrated)")
+    ).toBeVisible()
+    await userEvent.click(
+      screen.getByRole("button", { name: "Override profile 1" })
+    )
+    const settings = screen.getByLabelText(
+      "Load settings (JSON object of strings)"
+    )
+    fireEvent.change(settings, { target: { value: "[]" } })
+    await userEvent.click(screen.getByRole("button", { name: "Save capacity" }))
+    expect(screen.getByRole("alert")).toBeVisible()
+    expect(patchMachine).not.toHaveBeenCalled()
+    fireEvent.change(settings, { target: { value: '{"threads":"8"}' } })
+    vi.mocked(patchMachine).mockRejectedValue(new Error("Capacity unavailable"))
+    await userEvent.click(screen.getByRole("button", { name: "Save capacity" }))
+    expect(await screen.findByText("Capacity unavailable")).toBeVisible()
+    expect(settings).toHaveValue('{"threads":"8"}')
+    expect(screen.getByRole("alertdialog")).toBeVisible()
+    expect(patchMachine).toHaveBeenCalledTimes(1)
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(screen.queryByRole("alertdialog")).toBeNull()
+    expect(patchMachine).toHaveBeenCalledTimes(1)
   })
 })

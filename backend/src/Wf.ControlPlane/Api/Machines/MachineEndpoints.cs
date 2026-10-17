@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Npgsql;
 using NpgsqlTypes;
 using Microsoft.OpenApi;
+using Wf.Contracts;
 using Wf.ControlPlane.Auth;
 using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Reservations;
@@ -14,18 +15,24 @@ namespace Wf.ControlPlane.Api.Machines;
 
 public sealed record MachineReservationResponse(Guid Id, Guid RunId, string NodeKey, long Epoch,
     DateTimeOffset ExpiresAt, bool ReleasePending);
+public sealed record MachineCapacityResponse(CapacityProfile Profile, int CapacityRps, string Source, DateTimeOffset? CalibratedAt);
+public sealed record ManualCapacityRequest(CapacityProfile Profile,
+    [property: JsonNumberHandling(JsonNumberHandling.Strict)] int CapacityRps);
 public sealed record MachineResponse(Guid Id, string Name, string Os, string Arch, int Cores, int RamMb, int MaxTasks,
     int SlotsUsed, string Pool, IReadOnlyDictionary<string, string> Labels, string Status, DateTimeOffset LastHeartbeatAt,
-    string Version, double CpuPercent, long RamUsedMb, long DiskFreeMb, MachineReservationResponse? CurrentReservation);
+    string Version, double CpuPercent, long RamUsedMb, long DiskFreeMb, MachineReservationResponse? CurrentReservation,
+    IReadOnlyList<MachineCapacityResponse> Capacities);
 public sealed record MachineListResponse(IReadOnlyList<MachineResponse> Items);
 
-public sealed record MachinePatchRequest(Dictionary<string, string>? Labels = null, string? Pool = null)
+public sealed record MachinePatchRequest(Dictionary<string, string>? Labels = null, string? Pool = null,
+    ManualCapacityRequest? ManualCapacity = null)
 {
     public static MachinePatchRequest Parse(JsonElement element)
     {
         if (element.ValueKind != JsonValueKind.Object) throw new ArgumentException("A metadata object is required.");
         Dictionary<string, string>? labels = null;
         string? pool = null;
+        ManualCapacityRequest? capacity = null;
         var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var property in element.EnumerateObject())
         {
@@ -39,11 +46,17 @@ public sealed record MachinePatchRequest(Dictionary<string, string>? Labels = nu
                     if (label.Value.ValueKind != JsonValueKind.String || !labels.TryAdd(label.Name, label.Value.GetString()!))
                         throw new ArgumentException("Labels must be unique string values.");
             }
-            else throw new ArgumentException("Only nonnull labels and pool metadata fields are supported.");
+            else if (property.Name == "manualCapacity" && property.Value.ValueKind == JsonValueKind.Object)
+            {
+                capacity = JsonSerializer.Deserialize(property.Value, MachineJsonContext.Default.ManualCapacityRequest)
+                    ?? throw new ArgumentException("A manual capacity is required.");
+                if (capacity.CapacityRps <= 0) throw new ArgumentException("Manual capacity must be a positive Int32 req/s value.");
+            }
+            else throw new ArgumentException("Only nonnull labels, pool and manualCapacity fields are supported.");
         }
         if (names.Count == 0) throw new ArgumentException("At least one metadata field is required.");
         AgentRegistry.ValidateMetadata(labels ?? [], pool ?? "default");
-        return new(labels, pool);
+        return new(labels, pool, capacity);
     }
 }
 
@@ -90,10 +103,14 @@ public sealed record MachineQuery(string? Pool, short? Os, short? Status, string
     }
 }
 
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, RespectNullableAnnotations = true,
+    RespectRequiredConstructorParameters = true, AllowDuplicateProperties = false)]
 [JsonSerializable(typeof(MachineListResponse))]
 [JsonSerializable(typeof(MachinePatchRequest))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
+[JsonSerializable(typeof(ManualCapacityRequest))]
+[JsonSerializable(typeof(MachineCapacityResponse))]
 public partial class MachineJsonContext : JsonSerializerContext;
 
 public static class MachineEndpoints
@@ -106,7 +123,8 @@ public static class MachineEndpoints
             .ProducesProblem(401).ProducesProblem(403).ProducesProblem(500).ProducesProblem(503)
             .WithDescription("Global Admin inventory, ordered by immutable machine ID. Optional pool, os=windows|linux, " +
                 "status=Healthy|Unhealthy|Draining and repeated label=key=value filters combine with AND. " +
-                "Stale healthy heartbeats are reported Unhealthy. Current reservation remains until physical fence settlement.")
+                "Stale healthy heartbeats are reported Unhealthy. Current reservation remains until physical fence settlement. " +
+                "Capacities list effective req/s per canonical profile; an empty list means Unverified, not zero capacity.")
             .AddOpenApiOperationTransformer((operation, _, _) =>
             {
                 operation.Parameters ??= [];
@@ -130,8 +148,10 @@ public static class MachineEndpoints
         group.MapPatch("/{id}", Patch).Accepts<MachinePatchRequest>("application/json")
             .Produces(204).ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404)
             .ProducesProblem(413).ProducesProblem(415).ProducesProblem(500).ProducesProblem(503)
-            .WithDescription("Global Admin only. Atomically replaces supplied labels and/or pool with a before/after audit. " +
-                "Omitted fields stay unchanged; empty labels clears labels. Overrides survive agent reconnects. " +
+            .WithDescription("Global Admin only. Atomically updates supplied labels, pool and/or manualCapacity with a before/after audit. " +
+                "manualCapacity is { profile: { transport, codec, payloadSizeClass, loadSettings }, capacityRps: positive Int32 }. " +
+                "Manual replaces calibrated capacity only for that canonical profile and clears its calibration timestamp. " +
+                "Omitted fields and other profiles stay unchanged; empty labels clears labels. Overrides survive agent reconnects. " +
                 "Does not interrupt running attempts or release reservations.");
         return endpoints;
     }
@@ -162,22 +182,40 @@ public static class MachineEndpoints
             command.Parameters.AddWithValue(NpgsqlDbType.Smallint, (object?)filter.Status ?? DBNull.Value);
             command.Parameters.AddWithValue(filter.Labels);
             var items = new List<MachineResponse>();
-            await using var reader = await command.ExecuteReaderAsync(context.RequestAborted);
-            while (await reader.ReadAsync(context.RequestAborted))
-                items.Add(new(reader.GetGuid(0), reader.GetString(1),
-                    reader.GetInt16(2) switch { 0 => "windows", 1 => "linux", _ => throw new InvalidDataException() },
-                    reader.GetInt16(3) switch { 0 => "x64", 1 => "arm64", _ => throw new InvalidDataException() },
-                    reader.GetInt32(4), reader.GetInt32(5), reader.GetInt32(6), reader.GetInt32(7),
-                    reader.GetString(8), AgentRegistry.ParseLabels(reader.GetFieldValue<string[]>(9)),
-                    reader.GetInt16(10) switch { 0 => "Healthy", 1 => "Unhealthy", 2 => "Draining", _ => throw new InvalidDataException() },
-                    reader.GetFieldValue<DateTimeOffset>(11), reader.GetString(12), reader.GetDouble(13),
-                    reader.GetInt64(14), reader.GetInt64(15), reader.IsDBNull(16) ? null :
-                        new(reader.GetGuid(16), reader.GetGuid(17), reader.GetString(18), reader.GetInt64(19),
-                            reader.GetFieldValue<DateTimeOffset>(20), reader.GetBoolean(21))));
-            return Results.Json(new MachineListResponse(items), MachineJsonContext.Default.MachineListResponse);
+            await using (var reader = await command.ExecuteReaderAsync(context.RequestAborted))
+            {
+                while (await reader.ReadAsync(context.RequestAborted))
+                    items.Add(new(reader.GetGuid(0), reader.GetString(1),
+                        reader.GetInt16(2) switch { 0 => "windows", 1 => "linux", _ => throw new InvalidDataException() },
+                        reader.GetInt16(3) switch { 0 => "x64", 1 => "arm64", _ => throw new InvalidDataException() },
+                        reader.GetInt32(4), reader.GetInt32(5), reader.GetInt32(6), reader.GetInt32(7),
+                        reader.GetString(8), AgentRegistry.ParseLabels(reader.GetFieldValue<string[]>(9)),
+                        reader.GetInt16(10) switch { 0 => "Healthy", 1 => "Unhealthy", 2 => "Draining", _ => throw new InvalidDataException() },
+                        reader.GetFieldValue<DateTimeOffset>(11), reader.GetString(12), reader.GetDouble(13),
+                        reader.GetInt64(14), reader.GetInt64(15), reader.IsDBNull(16) ? null :
+                            new(reader.GetGuid(16), reader.GetGuid(17), reader.GetString(18), reader.GetInt64(19),
+                                reader.GetFieldValue<DateTimeOffset>(20), reader.GetBoolean(21)), []));
+            }
+            var capacities = items.ToDictionary(item => item.Id, _ => new List<MachineCapacityResponse>());
+            if (items.Count != 0)
+            {
+                await using var capacityQuery = source.CreateCommand("""
+                    SELECT agent_id,profile_key,capacity_rps,source,calibrated_at FROM agent_capacities
+                    WHERE agent_id=ANY($1) ORDER BY agent_id,profile_key COLLATE "C"
+                    """);
+                capacityQuery.Parameters.AddWithValue(items.Select(item => item.Id).ToArray());
+                await using var capacityReader = await capacityQuery.ExecuteReaderAsync(context.RequestAborted);
+                while (await capacityReader.ReadAsync(context.RequestAborted))
+                {
+                    var agent = capacityReader.GetGuid(0);
+                    capacities[agent].Add(ReadCapacity(capacityReader, agent, 1));
+                }
+            }
+            return Results.Json(new MachineListResponse(items.Select(item =>
+                item with { Capacities = capacities[item.Id] }).ToArray()), MachineJsonContext.Default.MachineListResponse);
         }
         catch (NpgsqlException) { return Results.Problem(statusCode: 503, title: "Machine inventory unavailable"); }
-        catch (Exception error) when (error is InvalidDataException or ArgumentException or IndexOutOfRangeException)
+        catch (Exception error) when (error is InvalidDataException or ArgumentException or IndexOutOfRangeException or JsonException)
         { return Results.Problem(statusCode: 500, title: "Committed machine metadata is inconsistent"); }
     }
 
@@ -224,6 +262,33 @@ public static class MachineEndpoints
                 beforeLabels = AgentRegistry.ParseLabels(reader.GetFieldValue<string[]>(0)).ToDictionary();
                 beforePool = reader.GetString(1);
             }
+            MachineCapacityResponse? beforeCapacity = null;
+            MachineCapacityResponse? afterCapacity = null;
+            if (request.ManualCapacity is { } manual)
+            {
+                await using (var before = new NpgsqlCommand("""
+                    SELECT profile_key,capacity_rps,source,calibrated_at FROM agent_capacities
+                    WHERE agent_id=$1 AND profile_key=$2 FOR UPDATE
+                    """, connection, transaction))
+                {
+                    before.Parameters.AddWithValue(machine);
+                    before.Parameters.AddWithValue(manual.Profile.ProfileKey);
+                    await using var reader = await before.ExecuteReaderAsync(token);
+                    if (await reader.ReadAsync(token)) beforeCapacity = ReadCapacity(reader, machine, 0);
+                }
+                await using var upsert = new NpgsqlCommand("""
+                    INSERT INTO agent_capacities(agent_id,profile_key,capacity_rps,source,calibrated_at)
+                    VALUES($1,$2,$3,0,NULL)
+                    ON CONFLICT(agent_id,profile_key) DO UPDATE
+                        SET capacity_rps=EXCLUDED.capacity_rps,source=0,calibrated_at=NULL
+                    """, connection, transaction);
+                upsert.Parameters.AddWithValue(machine);
+                upsert.Parameters.AddWithValue(manual.Profile.ProfileKey);
+                upsert.Parameters.AddWithValue(manual.CapacityRps);
+                if (await upsert.ExecuteNonQueryAsync(token) != 1)
+                    throw new InvalidDataException("Manual capacity did not update exactly one profile.");
+                afterCapacity = new(manual.Profile, manual.CapacityRps, "Manual", null);
+            }
             await using var command = new NpgsqlCommand("""
                 WITH updated AS (
                     UPDATE agents SET labels=COALESCE($2,labels),pool=COALESCE($3,pool),
@@ -232,8 +297,11 @@ public static class MachineEndpoints
                 )
                 INSERT INTO audit_log(actor,actor_kind,action,target_kind,target_id,summary)
                 SELECT $4,$5,'machine.update','Machine',id::text,
-                    jsonb_build_object('before',jsonb_build_object('labels',$6::jsonb,'pool',$7::text),
-                        'after',jsonb_build_object('labels',$8::jsonb,'pool',$9::text))
+                    jsonb_build_object(
+                        'before',jsonb_build_object('labels',$6::jsonb,'pool',$7::text) ||
+                            CASE WHEN $10::boolean THEN jsonb_build_object('manualCapacity',$11::jsonb) ELSE '{}'::jsonb END,
+                        'after',jsonb_build_object('labels',$8::jsonb,'pool',$9::text) ||
+                            CASE WHEN $10::boolean THEN jsonb_build_object('manualCapacity',$12::jsonb) ELSE '{}'::jsonb END)
                 FROM updated
                 """, connection, transaction);
             command.Parameters.AddWithValue(machine);
@@ -246,13 +314,30 @@ public static class MachineEndpoints
             command.Parameters.AddWithValue(beforePool);
             command.Parameters.AddWithValue(JsonSerializer.Serialize(request.Labels ?? beforeLabels, MachineJsonContext.Default.DictionaryStringString));
             command.Parameters.AddWithValue(request.Pool ?? beforePool);
+            command.Parameters.AddWithValue(request.ManualCapacity is not null);
+            command.Parameters.AddWithValue(beforeCapacity is null ? "null" :
+                JsonSerializer.Serialize(beforeCapacity, MachineJsonContext.Default.MachineCapacityResponse));
+            command.Parameters.AddWithValue(afterCapacity is null ? "null" :
+                JsonSerializer.Serialize(afterCapacity, MachineJsonContext.Default.MachineCapacityResponse));
             if (await command.ExecuteNonQueryAsync(token) != 1) throw new InvalidDataException("Machine edit did not create one audit row.");
             await transaction.CommitAsync(token);
             return Results.NoContent();
         }
         catch (NpgsqlException) { return Results.Problem(statusCode: 503, title: "Machine edit unavailable"); }
-        catch (Exception error) when (error is InvalidDataException or ArgumentException or IndexOutOfRangeException)
+        catch (Exception error) when (error is InvalidDataException or ArgumentException or IndexOutOfRangeException or JsonException)
         { return Results.Problem(statusCode: 500, title: "Committed machine metadata is inconsistent"); }
+    }
+
+    private static MachineCapacityResponse ReadCapacity(NpgsqlDataReader reader, Guid agent, int offset)
+    {
+        var key = reader.GetString(offset);
+        var profile = JsonSerializer.Deserialize(key, CapacityProfileJsonContext.Default.CapacityProfile)
+            ?? throw new InvalidDataException("Committed capacity profile is missing.");
+        if (profile.ProfileKey != key) throw new InvalidDataException("Committed capacity profile is not canonical.");
+        var capacity = new AgentCapacity(agent, profile, reader.GetInt32(offset + 1),
+            (CapacitySource)reader.GetInt16(offset + 2),
+            reader.IsDBNull(offset + 3) ? null : reader.GetFieldValue<DateTimeOffset>(offset + 3));
+        return new(profile, capacity.CapacityRps, capacity.Source == CapacitySource.Manual ? "Manual" : "Calibrated", capacity.CalibratedAt);
     }
 
     private static void Headers(HttpContext context)

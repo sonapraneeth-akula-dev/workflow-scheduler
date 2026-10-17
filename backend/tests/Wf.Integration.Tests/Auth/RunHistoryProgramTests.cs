@@ -132,6 +132,12 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
                 .Select(parameter => parameter.GetProperty("name").GetString()).Order());
             Assert.True(paths.GetProperty("/api/v1/machines/{id}").GetProperty("patch").GetProperty("responses").TryGetProperty("204", out _));
             Assert.True(schemas.GetProperty("MachineResponse").GetProperty("properties").TryGetProperty("currentReservation", out _));
+            Assert.True(schemas.GetProperty("MachineResponse").GetProperty("properties").TryGetProperty("capacities", out _));
+            Assert.True(schemas.GetProperty("MachinePatchRequest").GetProperty("properties").TryGetProperty("manualCapacity", out _));
+            Assert.Equal("integer", schemas.GetProperty("ManualCapacityRequest").GetProperty("properties")
+                .GetProperty("capacityRps").GetProperty("type").GetString());
+            Assert.True(schemas.GetProperty("MachineCapacityResponse").GetProperty("properties").TryGetProperty("calibratedAt", out _));
+            Assert.False(schemas.GetProperty("CapacityProfile").GetProperty("properties").TryGetProperty("profileKey", out _));
             Assert.True(schemas.TryGetProperty("RunHistoryPage", out _));
             Assert.Equal("#/components/schemas/ReservationQueueResponse",
                 paths.GetProperty("/api/v1/runs/{id}/reservation-queue").GetProperty("get")
