@@ -19,6 +19,7 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
     private readonly HashSet<AttemptKey> accepted = [];
     private readonly SemaphoreSlim fenceSerial = new(1, 1);
     private bool disposed;
+    private bool recovered;
     private bool fencePending;
     private Drain? drain;
     private Task drainWork = Task.CompletedTask;
@@ -28,6 +29,57 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
 
     public IReadOnlyList<AttemptRef> Inflight => active.Values.Select(item => item.Dispatch.Task.Clone()).ToArray();
     public Task Failure => failure.Task;
+
+    public async Task RecoverAsync(CancellationToken stoppingToken)
+    {
+        lock (gate)
+        {
+            if (recovered) return;
+            recovered = true;
+        }
+        var attempts = await hosts.RecoverAsync(cache.RestoreExistingAsync, stoppingToken);
+        var recoveryEpoch = attempts.Aggregate(outbox.ReservationEpoch,
+            (epoch, attempt) => Math.Max(epoch, attempt.Dispatch.ReservationEpoch));
+        outbox.ObserveReservationEpoch(recoveryEpoch);
+        foreach (var attempt in attempts.Where(attempt => attempt.Dispatch.ReservationEpoch < outbox.ReservationEpoch))
+        {
+            await hosts.DiscardRecoveredAsync(attempt.Dispatch.Task);
+            logger.LogWarning("Discarded stale recovered task host at machine epoch {Epoch}.", attempt.Dispatch.ReservationEpoch);
+        }
+        lock (gate)
+        {
+            var executions = new List<(AttemptKey Key, Execution Execution)>();
+            foreach (var attempt in attempts.Where(attempt => attempt.Dispatch.ReservationEpoch >= outbox.ReservationEpoch))
+            {
+                var dispatch = attempt.Dispatch;
+                var key = Key(dispatch.Task);
+                accepted.Add(key);
+                if (attempt.ResourceSample is { } sample) outbox.Enqueue(new AgentMessage { ResourceSample = sample });
+                if (attempt.Error is { } error)
+                {
+                    if (!outbox.ContainsResult(dispatch.Task))
+                        outbox.Enqueue(new AgentMessage { TaskCompleted = new()
+                        {
+                            Task = dispatch.Task.Clone(), ReservationEpoch = dispatch.ReservationEpoch,
+                            At = Timestamp.FromDateTimeOffset(timeProvider.GetUtcNow()), Outcome = TaskOutcome.Failed,
+                            Error = new() { Category = "AgentLost", Message = error, NonRetryable = false }
+                        } });
+                    continue;
+                }
+                var execution = new Execution(dispatch.Clone(),
+                    CancellationTokenSource.CreateLinkedTokenSource(stoppingToken)) { Recovered = true };
+                if (!active.TryAdd(key, execution))
+                    throw new InvalidDataException("Recovered attempt is already active.");
+                executions.Add((key, execution));
+            }
+            foreach (var (key, execution) in executions)
+                execution.Work = Task.Run(async () =>
+                {
+                    try { await ExecuteAsync(key, execution); }
+                    catch (Exception error) { failure.TrySetException(error); throw; }
+                }, CancellationToken.None);
+        }
+    }
 
     public async ValueTask HandleAsync(ControlMessage message, CancellationToken cancellationToken)
     {
@@ -255,29 +307,31 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
     {
         var dispatch = execution.Dispatch;
         TaskCompleted? result = null;
-        var persisted = false;
+        var persisted = execution.Recovered && outbox.ContainsResult(dispatch.Task);
         var publishing = false;
         AgentLogService.Capture? capture = null;
         try
         {
-            if (logs is not null)
+            if (logs is not null && !execution.Recovered)
             {
                 try { capture = await logs.BeginAsync(dispatch); }
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
                 { logs.Report(error); }
             }
-            outbox.Enqueue(new AgentMessage
-            {
-                TaskStarted = new TaskStarted { Task = dispatch.Task.Clone(), At = Timestamp.FromDateTimeOffset(timeProvider.GetUtcNow()),
-                    ReservationEpoch = dispatch.ReservationEpoch }
-            });
-            using var package = await cache.GetAsync(dispatch.Version, new Uri(dispatch.PackageUri), dispatch.Sha256,
-                execution.Cancellation.Token);
+            if (!execution.Recovered)
+                outbox.Enqueue(new AgentMessage
+                {
+                    TaskStarted = new TaskStarted { Task = dispatch.Task.Clone(), At = Timestamp.FromDateTimeOffset(timeProvider.GetUtcNow()),
+                        ReservationEpoch = dispatch.ReservationEpoch }
+                });
+            using var package = execution.Recovered ? hosts.RecoveredPackage(dispatch.Task) :
+                await cache.GetAsync(dispatch.Version, new Uri(dispatch.PackageUri), dispatch.Sha256, execution.Cancellation.Token);
             result = await hosts.ExecuteAsync(package, dispatch, cancellationToken: execution.Cancellation.Token,
                 captureLog: capture is null ? null : capture.WriteAsync,
                 publishResources: outbox.Enqueue, publishCheckpoint: outbox.PublishCheckpointAsync,
                 publishProgress: outbox.PublishProgress, journalResult: completion =>
                 {
+                    if (persisted) return;
                     if (execution.DrainInterrupted && completion.Outcome == TaskOutcome.Cancelled) return;
                     publishing = true;
                     completion.ReservationEpoch = dispatch.ReservationEpoch;
@@ -347,5 +401,6 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
         public CancellationTokenSource Cancellation { get; } = cancellation;
         public Task Work { get; set; } = Task.CompletedTask;
         public volatile bool DrainInterrupted;
+        public bool Recovered { get; init; }
     }
 }

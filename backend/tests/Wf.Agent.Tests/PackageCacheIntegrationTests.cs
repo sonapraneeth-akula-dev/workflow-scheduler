@@ -18,7 +18,8 @@ public sealed class PackageCacheIntegrationTests
         var token = TestContext.Current.CancellationToken;
         var bytes = await WorkflowArchiveAsync();
         await using var fixture = new PackageCacheTests.CacheFixture(bytes);
-        await using var pool = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
+        await using var pool = new TaskHostPool(NullLogger<TaskHostPool>.Instance,
+            containmentDirectory: Path.Combine(fixture.Root, "host-lifetimes"));
         for (var run = 0; run < 2; run++)
         {
             using var package = await fixture.Cache.GetAsync("1.0.0", PackageCacheTests.CacheFixture.Url, fixture.Sha, token);
@@ -43,7 +44,8 @@ public sealed class PackageCacheIntegrationTests
         var a = await WorkflowArchiveAsync(marker: "a");
         var b = await WorkflowArchiveAsync(marker: "b");
         using var fixture = new PackageCacheLruTests.BoundedCacheFixture([a, b], maxPackages: 1);
-        await using var pool = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
+        await using var pool = new TaskHostPool(NullLogger<TaskHostPool>.Instance,
+            containmentDirectory: Path.Combine(fixture.Root, "host-lifetimes"));
         using (var package = await fixture.GetAsync(a, version: "1.0.0"))
             await pool.PrewarmAsync(package, token);
         await Assert.ThrowsAsync<IOException>(() => fixture.GetAsync(b, version: "1.0.0"));
@@ -67,7 +69,8 @@ public sealed class PackageCacheIntegrationTests
         var a = await WorkflowArchiveAsync(marker: "a");
         var b = await WorkflowArchiveAsync(marker: "b");
         using var fixture = new PackageCacheLruTests.BoundedCacheFixture([a, b], maxPackages: 1);
-        await using var pool = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
+        await using var pool = new TaskHostPool(NullLogger<TaskHostPool>.Instance,
+            containmentDirectory: Path.Combine(fixture.Root, "host-lifetimes"));
         using (var package = await fixture.GetAsync(a, version: "1.0.0"))
             await pool.PrewarmAsync(package, TestContext.Current.CancellationToken);
         await Assert.ThrowsAsync<IOException>(() => fixture.GetAsync(b, version: "1.0.0"));
@@ -82,7 +85,8 @@ public sealed class PackageCacheIntegrationTests
         var a = await WorkflowArchiveAsync(version: "wrong", marker: "a");
         var b = await WorkflowArchiveAsync(marker: "b");
         using var fixture = new PackageCacheLruTests.BoundedCacheFixture([a, b], maxPackages: 1);
-        await using var pool = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
+        await using var pool = new TaskHostPool(NullLogger<TaskHostPool>.Instance,
+            containmentDirectory: Path.Combine(fixture.Root, "host-lifetimes"));
         using (var package = await fixture.GetAsync(a, version: "wrong"))
             await Assert.ThrowsAsync<InvalidDataException>(() => pool.PrewarmAsync(package, TestContext.Current.CancellationToken));
         (await fixture.GetAsync(b, version: "1.0.0")).Dispose();

@@ -48,6 +48,15 @@ public static class PhysicalLifetimeFixture
                     Spawn(context.Var<string>("marker"));
                     Thread.Sleep(Timeout.Infinite);
                 })
+                .Task("readopt", async context =>
+                {
+                    var marker = context.Var<string>("marker");
+                    await File.AppendAllTextAsync(marker + ".starts", "1\n", context.CancellationToken);
+                    Spawn(marker);
+                    while (!File.Exists(marker + ".release"))
+                        await Task.Delay(10, context.CancellationToken);
+                    context.Outputs["pid"] = Environment.ProcessId;
+                })
                 .Task("cooperate", async context =>
                 {
                     Spawn(context.Var<string>("marker"));

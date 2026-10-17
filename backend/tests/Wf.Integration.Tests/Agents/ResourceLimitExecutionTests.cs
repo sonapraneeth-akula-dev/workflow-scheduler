@@ -20,6 +20,7 @@ using ReportHost = Wf.Integration.Tests.Reports.ReportPublishTests.ReportHost;
 
 namespace Wf.Integration.Tests.Agents;
 
+[Collection("Agent process containment")]
 public sealed class ResourceLimitExecutionTests(ReportPublishDatabase database) : IClassFixture<ReportPublishDatabase>
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;

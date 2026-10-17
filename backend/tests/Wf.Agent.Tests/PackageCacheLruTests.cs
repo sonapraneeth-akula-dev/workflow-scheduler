@@ -11,6 +11,46 @@ namespace Wf.Agent.Tests;
 public sealed class PackageCacheLruTests
 {
     [Fact]
+    public async Task Recovery_restores_all_verified_pins_before_enforcing_a_reduced_cache_budget()
+    {
+        var a = Archive("aaa");
+        var b = Archive("bbb");
+        var c = Archive("ccc");
+        using var fixture = new BoundedCacheFixture([a, b, c], maxPackages: 2);
+        using var recordedA = await fixture.GetAsync(a);
+        using var recordedB = await fixture.GetAsync(b);
+        recordedA.Dispose();
+        recordedB.Dispose();
+        fixture.Restart(maxPackages: 1);
+        using var restoredA = await fixture.Cache.RestoreExistingAsync(recordedA, TestContext.Current.CancellationToken);
+        using var restoredB = await fixture.Cache.RestoreExistingAsync(recordedB, TestContext.Current.CancellationToken);
+        Assert.True(File.Exists(Assert.Single(restoredA.Arguments)));
+        Assert.True(File.Exists(Assert.Single(restoredB.Arguments)));
+        Assert.Equal(1, fixture.Downloads[Hash(a)]);
+        Assert.Equal(1, fixture.Downloads[Hash(b)]);
+        await Assert.ThrowsAsync<IOException>(() => fixture.GetAsync(c));
+        restoredA.Dispose();
+        restoredB.Dispose();
+        (await fixture.GetAsync(c)).Dispose();
+        Assert.False(Directory.Exists(fixture.PathFor(a)));
+        Assert.False(Directory.Exists(fixture.PathFor(b)));
+    }
+
+    [Fact]
+    public async Task Recovery_rejects_a_runtime_outside_the_cache_or_different_from_the_verified_package()
+    {
+        var bytes = Archive("aaa");
+        using var fixture = new BoundedCacheFixture([bytes]);
+        using var recorded = await fixture.GetAsync(bytes);
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Cache.RestoreExistingAsync(
+            new(recorded.Version, recorded.Executable, ["foreign.dll"], recorded.WorkingDirectory),
+            TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Cache.RestoreExistingAsync(
+            new(recorded.Version, recorded.Executable, recorded.Arguments, Path.GetTempPath()),
+            TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task Warm_touch_changes_lru_order_and_evicted_content_is_downloaded_again()
     {
         var a = Archive("aaa");

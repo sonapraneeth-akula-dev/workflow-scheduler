@@ -50,7 +50,7 @@ public sealed class TaskHostPackage : IDisposable
     public void Dispose() => CacheLease?.Dispose();
 }
 
-public sealed class TaskHostPool : IAsyncDisposable
+public sealed partial class TaskHostPool : IAsyncDisposable
 {
     public const int DefaultMaxWarmProcesses = 4;
     public const long DefaultMaxWarmRssBytes = 200_000_000;
@@ -64,6 +64,7 @@ public sealed class TaskHostPool : IAsyncDisposable
     private readonly SemaphoreSlim gate = new(1);
     private readonly List<Host> warm = [];
     private readonly ConcurrentDictionary<int, Host> live = new();
+    private readonly ConcurrentDictionary<AttemptRef, Host> recovered = new();
     private readonly CancellationTokenSource shutdown = new();
     private readonly Channel<byte> wake = Channel.CreateBounded<byte>(new BoundedChannelOptions(1)
     {
@@ -109,7 +110,7 @@ public sealed class TaskHostPool : IAsyncDisposable
     /// <summary>
     /// Stops every host in this pool, not only a particular reservation epoch. Callers must block admission
     /// and reject stale fences before calling, then drain execution tasks before acknowledging the fence.
-    /// Unclean same-boot lifetimes quarantine this stable agent/journal identity until a machine reboot.
+    /// Unproven same-boot lifetimes quarantine this identity until authenticated recovery or a machine reboot.
     /// </summary>
     public async Task FenceAsync(CancellationToken cancellationToken = default)
     {
@@ -172,9 +173,18 @@ public sealed class TaskHostPool : IAsyncDisposable
             ObjectDisposedException.ThrowIf(disposed || shutdown.IsCancellationRequested, this);
             await TrimWarmAsync();
             cancellationToken.ThrowIfCancellationRequested();
-            var index = warm.FindIndex(host => host.Package.Matches(package));
-            if (index < 0) host = (await StartAsync(package, cancellationToken))!;
-            else { host = warm[index]; warm.RemoveAt(index); }
+            if (recovered.TryRemove(dispatch.Task, out var adopted))
+            {
+                host = adopted;
+                if (!host.Package.Matches(package))
+                    throw new InvalidDataException("Recovered host package does not match the dispatched version.");
+            }
+            else
+            {
+                var index = warm.FindIndex(host => host.Package.Matches(package));
+                if (index < 0) host = (await StartAsync(package, cancellationToken))!;
+                else { host = warm[index]; warm.RemoveAt(index); }
+            }
         }
         finally { try { ScheduleSweep(); } finally { gate.Release(); } }
         using var limitStop = new CancellationTokenSource();
@@ -186,8 +196,9 @@ public sealed class TaskHostPool : IAsyncDisposable
             {
                 if (host.Release is not null)
                     throw new InvalidOperationException("Task host was fenced before its attempt could bind.");
-                host.Containment.Record(host.Process, host.Package, host.SocketPath,
-                    host.WorkloadLimiter?.LinuxCgroupPath, dispatch);
+                if (!host.Adopted)
+                    host.Containment.Record(host.Process, host.Package, host.SocketPath,
+                        host.WorkloadLimiter?.LinuxCgroupPath, dispatch);
             }
             if (limits is { } && (limits.CpuCores > 0 || limits.RamMb > 0))
             {
@@ -195,23 +206,30 @@ public sealed class TaskHostPool : IAsyncDisposable
                 {
                     if (host.Release is not null)
                         throw new InvalidOperationException("Task host was fenced before resource limits could bind.");
-                    host.Limiter = OperatingSystem.IsWindows() ? new JobObjectLimiter(host.Process, limits) :
+                    host.Limiter ??= OperatingSystem.IsWindows() ? new JobObjectLimiter(host.Process, limits, host.Containment.ResourceJobName) :
                         OperatingSystem.IsLinux() ? host.WorkloadLimiter ??
                             throw new InvalidOperationException("Task resource limits require Agent:LinuxCgroupRoot delegation before worker startup.") :
                         throw new PlatformNotSupportedException("Task resource limits require Windows Jobs or Linux cgroups v2.");
                     host.LimitStop = limitStop;
                     host.LimitMonitor = limitMonitor = MonitorLimitsAsync();
-                    host.WorkloadLimiter?.Apply(limits);
+                    if (!host.Adopted) host.WorkloadLimiter?.Apply(limits);
                 }
-                if (host.Limiter.LinuxCgroupPath is { } path)
+                if (!host.Adopted)
                 {
-                    using var binding = host.Client.ApplyLimitsAsync(new ApplyLimitsRequest { LinuxCgroupPath = path },
+                    var bindingRequest = OperatingSystem.IsWindows()
+                        ? new ApplyLimitsRequest { WindowsJobName = host.Containment.ResourceJobName }
+                        : new ApplyLimitsRequest { LinuxCgroupPath = host.Limiter.LinuxCgroupPath! };
+                    using var binding = host.Client.ApplyLimitsAsync(bindingRequest,
                         deadline: DateTime.UtcNow.AddSeconds(5), cancellationToken: cancellationToken);
                     await binding.ResponseAsync;
                 }
             }
             using var resourceTracking = sampling?.Track(host.Process, dispatch.Task, host.ResourceScope,
-                host.ResourceUnavailableReason, publishResources, dispatch.ReservationEpoch);
+                host.ResourceUnavailableReason, publishResources is null ? null : message =>
+                {
+                    host.Containment.RecordResourceSample(message.ResourceSample);
+                    publishResources(message);
+                }, dispatch.ReservationEpoch, host.ResourceSequence);
             host.CaptureLog = captureLog;
             var request = new ExecuteRequest { Dispatch = dispatch.Clone(), NodeOutputsJson = nodeOutputsJson ?? dispatch.NodeOutputsJson };
             using var deadline = new CancellationTokenSource();
@@ -222,16 +240,22 @@ public sealed class TaskHostPool : IAsyncDisposable
             try
             {
                 using var required = host.Client.RequiredSecretsAsync(new ExecuteRequest { Dispatch = dispatch.Clone() },
-                    cancellationToken: stop.Token);
-                var references = (await required.ResponseAsync).Names;
+                    deadline: host.Adopted ? DateTime.UtcNow.AddSeconds(3) : null,
+                    cancellationToken: host.Adopted ? cancellationToken : stop.Token);
+                var requiredSecrets = await required.ResponseAsync;
+                var references = requiredSecrets.Names;
                 if (references.Count > 128 || references.Any(name => !SecretReference.IsValidName(name)))
+                    throw new SecretResolutionException();
+                if (host.Adopted && requiredSecrets.RecoveredValues.Count != references.Count)
                     throw new SecretResolutionException();
                 var bytes = 0;
                 foreach (var name in references.Distinct(StringComparer.Ordinal))
                 {
                     var reference = new SecretReference(name);
-                    if (secretStore is null) throw new SecretResolutionException(reference);
-                    var value = await secretStore.ResolveAsync(reference, stop.Token);
+                    var value = host.Adopted
+                        ? requiredSecrets.RecoveredValues.TryGetValue(name, out var original) ? original : null
+                        : secretStore is not null ? await secretStore.ResolveAsync(reference, stop.Token)
+                        : throw new SecretResolutionException(reference);
                     if (string.IsNullOrEmpty(value) || value.Contains('\0') ||
                         Encoding.UTF8.GetByteCount(value) > LocalSecretStore.MaxSecretBytes)
                         throw new SecretResolutionException(reference);
@@ -261,19 +285,20 @@ public sealed class TaskHostPool : IAsyncDisposable
             // Keep manually supplied maskers for existing callers, while always masking real resolved values.
             host.Masker = (secretMasker ?? new SecretMasker([])).WithValues(request.ResolvedSecrets.Values);
             host.HasSecrets = request.ResolvedSecrets.Count != 0;
+            if (host.Adopted) request.ResolvedSecrets.Clear();
             using var checkpointStop = new CancellationTokenSource();
             using var checkpointStream = host.Client.Checkpoints(new ReadyRequest(), cancellationToken: checkpointStop.Token);
             using var progressStream = host.Client.Progress(new ReadyRequest(), cancellationToken: checkpointStop.Token);
             var forwarding = ForwardCheckpoints();
             var progressForwarding = ForwardProgress();
-            using var call = host.Client.ExecuteAsync(request);
+            using var call = host.Adopted ? host.Client.ResumeAsync(request) : host.Client.ExecuteAsync(request);
             TaskCompleted result;
             try
             {
                 var first = await (host.Limiter is null
                     ? Task.WhenAny(call.ResponseAsync, forwarding, progressForwarding)
                     : Task.WhenAny(call.ResponseAsync, forwarding, progressForwarding, limitMonitor)).WaitAsync(stop.Token);
-                if (first == limitMonitor)
+                if (host.Limiter is not null && first == limitMonitor)
                 {
                     await limitMonitor;
                     if (memoryBreach.IsCancellationRequested) throw new ResourceLimitException();
@@ -329,7 +354,7 @@ public sealed class TaskHostPool : IAsyncDisposable
                 deadline: DateTime.UtcNow.AddSeconds(5));
             await acknowledgement.ResponseAsync;
             await host.Process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
-            if (host.Process.ExitCode != 0)
+            if (!host.Adopted && host.Process.ExitCode != 0)
                 throw new InvalidOperationException($"Task host exited with code {host.Process.ExitCode}: {host.Diagnostics}");
             if (host.Limiter is not null)
             {
@@ -381,7 +406,8 @@ public sealed class TaskHostPool : IAsyncDisposable
             }
         }
         catch (Exception error) when (error is ResourceLimitException ||
-            error is RpcException { StatusCode: StatusCode.Unavailable or StatusCode.Cancelled or StatusCode.Unknown or StatusCode.Internal } &&
+            error is RpcException { StatusCode: StatusCode.Unavailable or StatusCode.Cancelled or StatusCode.Unknown or
+                StatusCode.Internal or StatusCode.DeadlineExceeded or StatusCode.ResourceExhausted } &&
             host.Limiter?.MemoryLimitExceeded == true)
         {
             await StopLimitMonitorAsync();
@@ -507,26 +533,7 @@ public sealed class TaskHostPool : IAsyncDisposable
                 resourceUnavailable = exception.Message;
                 logger.LogWarning("Task host native resource scope unavailable: {Reason}", resourceUnavailable);
             }
-            var endpoint = new UnixDomainSocketEndPoint(socketPath);
-            var handler = new SocketsHttpHandler
-            {
-                ConnectTimeout = TimeSpan.FromSeconds(1),
-                ConnectCallback = async (_, token) =>
-                {
-                    var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-                    try
-                    {
-                        await socket.ConnectAsync(endpoint, token);
-                        return new NetworkStream(socket, ownsSocket: true);
-                    }
-                    catch { socket.Dispose(); throw; }
-                }
-            };
-            var channel = GrpcChannel.ForAddress("http://localhost", new GrpcChannelOptions
-            {
-                HttpHandler = handler, DisposeHttpClient = true,
-                MaxReceiveMessageSize = 1024 * 1024, MaxSendMessageSize = 4 * 1024 * 1024
-            });
+            var channel = CreateChannel(socketPath, containment.Token);
             host = new Host(package, directory, socketPath, process, channel, logger, processLease,
                 resourceScope, resourceBound, resourceUnavailable, containment, workloadLimiter);
             live.TryAdd(process.Id, host);
@@ -561,7 +568,7 @@ public sealed class TaskHostPool : IAsyncDisposable
                         if (prewarming && !warm.Contains(host)) return null;
                     }
                     var ready = await call.ResponseAsync;
-                    if (ready.ProtocolVersion != 7 || ready.ProcessId != process.Id || ready.WorkflowVersion != package.Version || ready.Bound)
+                    if (ready.ProtocolVersion != 8 || ready.ProcessId != process.Id || ready.WorkflowVersion != package.Version || ready.Bound)
                         throw new InvalidDataException("Task-host readiness identity, version or state is invalid.");
                     containment.VerifyReady();
                     await TrimWarmAsync(prewarming ? host : null);
@@ -606,6 +613,32 @@ public sealed class TaskHostPool : IAsyncDisposable
                 throw new TimeoutException($"Task host did not become ready within 15 seconds: {host?.Diagnostics}", exception);
             throw;
         }
+    }
+
+    private static GrpcChannel CreateChannel(string socketPath, string token)
+    {
+        var endpoint = new UnixDomainSocketEndPoint(socketPath);
+        var handler = new SocketsHttpHandler
+        {
+            ConnectTimeout = TimeSpan.FromSeconds(1),
+            ConnectCallback = async (_, cancellationToken) =>
+            {
+                var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+                try
+                {
+                    await socket.ConnectAsync(endpoint, cancellationToken);
+                    return new NetworkStream(socket, ownsSocket: true);
+                }
+                catch { socket.Dispose(); throw; }
+            }
+        };
+        var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("x-wf-host-token", token);
+        return GrpcChannel.ForAddress("http://localhost", new GrpcChannelOptions
+        {
+            HttpClient = http, DisposeHttpClient = true,
+            MaxReceiveMessageSize = 1024 * 1024, MaxSendMessageSize = 4 * 1024 * 1024
+        });
     }
 
     private Task ReleaseAsync(Host host)
@@ -655,6 +688,8 @@ public sealed class TaskHostPool : IAsyncDisposable
                 {
                     host.Process.Dispose();
                     DisposeResourceScope(host.CleanupResourceScope);
+                    foreach (var pair in recovered.Where(pair => ReferenceEquals(pair.Value, host)))
+                        recovered.TryRemove(pair.Key, out _);
                     live.TryRemove(host.Id, out _);
                 }
             }
@@ -825,12 +860,16 @@ public sealed class TaskHostPool : IAsyncDisposable
         public Func<string, string, Task>? CaptureLog { get; set; }
         public SecretMasker Masker { get; set; } = new([]);
         public bool HasSecrets { get; set; }
+        public bool Adopted { get; }
+        public ulong ResourceSequence { get; init; }
         public string Diagnostics => string.Join(Environment.NewLine, diagnostics);
 
         public Host(TaskHostPackage package, string directory, string socketPath, Process process, GrpcChannel channel,
             ILogger<TaskHostPool> logger, PackageLease? packageLease, ITaskResourceScope? resourceScope,
-            bool resourceBound, string? resourceUnavailableReason, TaskHostContainment containment, CgroupV2Limiter? workloadLimiter)
+            bool resourceBound, string? resourceUnavailableReason, TaskHostContainment containment, CgroupV2Limiter? workloadLimiter,
+            bool adopted = false)
         {
+            Adopted = adopted;
             WorkloadLimiter = workloadLimiter;
             Containment = containment;
             CleanupResourceScope = resourceScope;
@@ -840,8 +879,8 @@ public sealed class TaskHostPool : IAsyncDisposable
             Id = process.Id;
             Package = package; Directory = directory; SocketPath = socketPath; Process = process; Channel = channel;
             Client = new(channel);
-            Output = DrainAsync(process.StandardOutput, "stdout");
-            Error = DrainAsync(process.StandardError, "stderr");
+            Output = adopted ? Task.CompletedTask : DrainAsync(process.StandardOutput, "stdout");
+            Error = adopted ? Task.CompletedTask : DrainAsync(process.StandardError, "stderr");
 
             async Task DrainAsync(StreamReader reader, string stream)
             {

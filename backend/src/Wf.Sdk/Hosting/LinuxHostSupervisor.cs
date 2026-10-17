@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Net.Sockets;
+using System.Text;
 using Microsoft.Win32.SafeHandles;
 
 namespace Wf.Sdk.Hosting;
@@ -29,6 +31,11 @@ internal static class LinuxHostSupervisor
             receipt.Write(System.Text.Encoding.UTF8.GetBytes(token));
             receipt.Flush(flushToDisk: true);
         }
+        using var control = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        control.Bind(new UnixDomainSocketEndPoint(socketPath + ".control"));
+        control.Listen(1);
+        using var controlStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var requestedStop = ReceiveStopAsync();
         var commandLine = System.Text.Encoding.UTF8.GetString(File.ReadAllBytes("/proc/self/cmdline"));
         if (commandLine.Length == 0 || commandLine[^1] != '\0')
             throw new InvalidDataException("Task-host command line cannot be safely re-executed.");
@@ -52,9 +59,9 @@ internal static class LinuxHostSupervisor
         var exited = worker.WaitForExitAsync();
         var parentGone = Task.Run(() => Console.OpenStandardInput().ReadByte());
         var stop = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-        var completed = await Task.WhenAny(exited, parentGone, stop);
+        var completed = await Task.WhenAny(exited, parentGone, requestedStop, stop);
         if (completed == parentGone && await parentGone == -1)
-            completed = await Task.WhenAny(exited, stop);
+            completed = await Task.WhenAny(exited, requestedStop, stop);
         var forced = completed != exited;
         if (forced) KillChildren();
         await exited;
@@ -68,8 +75,34 @@ internal static class LinuxHostSupervisor
                 throw new TimeoutException("Task-host descendant cleanup could not establish physical quiescence.");
             await Task.Delay(10, CancellationToken.None);
         }
+        await controlStop.CancelAsync();
+        try { await requestedStop; }
+        catch (OperationCanceledException) when (controlStop.IsCancellationRequested) { }
+        using (var certificate = new FileStream(socketPath + ".exited", FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+        {
+            certificate.Write(Encoding.ASCII.GetBytes(token));
+            certificate.Flush(flushToDisk: true);
+        }
         // Zero is the supervisor's physical-quiescence certificate, not the workflow's exit status.
         return 0;
+
+        async Task ReceiveStopAsync()
+        {
+            var expected = Encoding.ASCII.GetBytes(token);
+            while (true)
+            {
+                using var client = await control.AcceptAsync(controlStop.Token);
+                using var stream = new NetworkStream(client, ownsSocket: false);
+                var supplied = new byte[expected.Length];
+                using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(controlStop.Token);
+                requestStop.CancelAfter(TimeSpan.FromSeconds(1));
+                try { await stream.ReadExactlyAsync(supplied, requestStop.Token); }
+                catch (EndOfStreamException) { continue; }
+                catch (IOException) { continue; }
+                catch (OperationCanceledException) when (!controlStop.IsCancellationRequested) { continue; }
+                if (System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(expected, supplied)) return;
+            }
+        }
     }
 
     private static int[] Children()

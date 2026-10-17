@@ -753,7 +753,7 @@ system-assigned identity. No developer/browser/CLI credential fallback.
 `ctx.Secret(ctx.Var<SecretReference>("credential"))` accesses a declared resolved
 value. Missing or unavailable secrets become safe nonretryable `ValidationError`;
 resolved values never enter manifests, dispatches, journals or process arguments.
-Rebuild existing SDK packages: task-host private readiness protocol 7 is required.
+Rebuild existing SDK packages: task-host private readiness protocol 8 is required.
 Provisioning and provider details: [agent secrets](backend/src/Wf.Agent/Secrets/README.md).
 
 `Tasks.HttpOperation(...)` declares an opt-in long-running HTTP operation:
@@ -2054,8 +2054,8 @@ Hello includes both running attempts and every unACKed result, even when this
 logical backlog exceeds physical task slots. The registry bounds it to 8,192
 attempts and a 1 MiB protocol frame; physical slots remain clamped to MaxTasks
 until a heartbeat reports actual usage. Replayed terminal results are ACKed
-without a second event or changed outputs. Drain and live-host re-adoption
-remain separate tasks.
+without a second event or changed outputs. Startup restores surviving task hosts
+before constructing Hello; machine drain remains an explicit maintenance action.
 
 `TaskHostPool` prewarms compiled workflow processes and verifies their PID,
 protocol and workflow version over owner-only Unix domain sockets on Windows
@@ -2065,8 +2065,7 @@ The SDK server executes real registry delegates with typed variables, declared
 inputs and bounded outputs; completion waits for acknowledgement before exit.
 Cancellation is cooperative first, then kills that host's process tree after
 grace (default 30 seconds). Workflow hosts use ordinary, untrimmed .NET IL, not
-Native AOT, and require the ASP.NET Core runtime. Live-host re-adoption remains
-a separate backlog item. The sample accepts
+Native AOT, and require the ASP.NET Core runtime. The sample accepts
 `--task-host --socket <path>`; normal local execution is unchanged.
 
 Hosts now survive an abrupt agent-only process kill. Each lifetime has a
@@ -2076,12 +2075,32 @@ diagnostic UTC start time, private socket, Windows job name, package/runtime
 paths and the bound attempt/epoch/deadline/caps. Linux identity uses the
 boot-relative `/proc/<pid>/stat` start counter, not cross-process reconstructed
 `Process.StartTime` wall-clock estimates. Identity is captured once at launch,
-not refreshed when an attempt binds. The last-ack field starts at zero; replay
-spooling and automatic live-host re-adoption remain their following tasks.
-Until that recovery path is implemented, surviving or uncertain lifetimes keep
-restart admission and reservation acknowledgements quarantined; survival alone
-does not authorize reuse. Normal completion, cancellation, drain and fencing
-still require physical descendant cleanup before release.
+not refreshed when an attempt binds. Startup exclusively claims at most 1,024
+lifetime records, verifies same-boot native creation identity, restores every
+verified package pin without eviction, and authenticates the private socket with
+an owner-only per-host token. The SDK retains its own Windows lifetime/resource
+Job handles so their names and existing hard caps can be reopened after agent
+death. `Resume` requires the exact bound dispatch/epoch and returns the existing
+execution/result; it never invokes the delegate again. Original secret values
+stay in host memory and are recovered only over this authenticated IPC to
+restore masking, not replaced by newly rotated values or persisted in metadata.
+
+Recovered attempts enter `Hello.inflight` before engine reconciliation. The
+last complete resource observation is flushed before agent journaling, replayed
+idempotently on recovery, and followed by its next ordinal. Pending progress and
+checkpoint acknowledgements can reattach; a completed result remains available
+until host ACK. Linux re-adoption uses token-authenticated supervisor control and
+requires its final physical-quiescence certificate before removing a lifetime.
+Missing/mismatched/dead hosts report `AgentLost`; an unproven descendant tree
+still quarantines admission and physical-fence acknowledgements. A missing
+Windows Job name after supervisor death is not proof that its descendants died.
+Normal completion, cancellation, drain and fencing still require physical
+descendant cleanup before release. Windows hard caps survive re-adoption, but
+old IOCP breach notifications cannot be replayed; managed OOM classification
+remains available. Recovered native network counters expose an explicit gap.
+Lossless host-side log/resource spooling and self-enforced hard termination
+remain task `2.3.2.2.3`; the existing agent log recovery marks interrupted capture
+instead of claiming completeness.
 
 Authored `.Defaults(p => p.Limits(cpuCores: 0.5, ramMb: 512))`, node/stage
 `.Limits(...)`, and per-task `p => p.Limits(...)` configure optional caps.
@@ -2166,7 +2185,8 @@ Pinned capacity or an oversized package fails explicitly without partial
 capacity-plan eviction; corruption and filesystem failures are not cache misses.
 Use one cache owner per root. Limits exclude foreign content, abandoned staging,
 filesystem allocation overhead and one serialized in-progress download/extraction.
-Persisted host pins across agent restart belong to live-host re-adoption.
+Live-host re-adoption verifies and restores all surviving package pins before
+any normal cache eviction, even when the configured cache budget was reduced.
 
 `Dispatcher` accepts only database-committed Ready tasks in running runs.
 Dispatched event, attempt capacity reservation and dispatch outbox commit in one

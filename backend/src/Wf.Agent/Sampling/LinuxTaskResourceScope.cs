@@ -49,6 +49,17 @@ internal sealed class LinuxTaskResourceScope : ITaskResourceScope
         }
     }
 
+    internal LinuxTaskResourceScope(string existingDirectory, Process process)
+    {
+        directory = existingDirectory;
+        supervisor = Path.Combine(directory, "supervisor");
+        LinuxBpfNetworkCounters.RequireCgroupV2(directory);
+        if (!File.ReadLines(Path.Combine(supervisor, "cgroup.procs")).Contains(
+            process.Id.ToString(CultureInfo.InvariantCulture), StringComparer.Ordinal))
+            throw new InvalidDataException("Recovered supervisor is outside its resource accounting cgroup.");
+        networkUnavailable = "Agent restarted; previous BPF network counters cannot be resumed.";
+    }
+
     public void PrepareStart(ProcessStartInfo startInfo) => PrepareLaunch(startInfo, supervisor);
 
     internal static void PrepareLaunch(ProcessStartInfo startInfo, string? directory)

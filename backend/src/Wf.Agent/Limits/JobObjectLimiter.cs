@@ -9,15 +9,15 @@ namespace Wf.Agent.Limits;
 internal sealed unsafe partial class JobObjectLimiter : IResourceLimiter
 {
     private readonly SafeFileHandle job;
-    private readonly SafeFileHandle port;
+    private readonly SafeFileHandle? port;
     private volatile bool breached;
     public string? LinuxCgroupPath => null;
 
-    public JobObjectLimiter(Process process, TaskResourceLimits limits)
+    public JobObjectLimiter(Process process, TaskResourceLimits limits, string? name = null)
     {
         if (!OperatingSystem.IsWindows() || IntPtr.Size != 8)
             throw new PlatformNotSupportedException("Job resource limits require 64-bit Windows.");
-        job = CreateJob(0, null);
+        job = CreateJob(0, name);
         if (job.IsInvalid) throw Error("Create resource limit job");
         port = CreateIoCompletionPort(-1, 0, 0, 1);
         try
@@ -48,10 +48,42 @@ internal sealed unsafe partial class JobObjectLimiter : IResourceLimiter
         catch { port.Dispose(); job.Dispose(); throw; }
     }
 
+    internal JobObjectLimiter(Process process, TaskResourceLimits limits, string name, bool reopen)
+    {
+        if (!reopen || !OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("Resource job recovery requires Windows.");
+        job = OpenJob(0x1F003F, false, name);
+        try
+        {
+            if (job.IsInvalid) throw Error("Open resource limit job");
+            if (IsInJob(process.Handle, job, out var member) == 0 || member == 0)
+                throw new InvalidDataException("Recovered task host is outside its resource limit job.");
+            ExtendedLimits memory;
+            if (Query(job, 9, &memory, (uint)sizeof(ExtendedLimits), null) == 0)
+                throw Error("Query recovered memory limit");
+            if (limits.RamMb > 0 && ((memory.Basic.Flags & 0x200) == 0 ||
+                memory.JobMemory != checked((nuint)(limits.RamMb * 1024 * 1024))))
+                throw new InvalidDataException("Recovered task-host RAM cap does not match its dispatch.");
+            if (limits.CpuCores > 0)
+            {
+                CpuRate cpu;
+                if (Query(job, 15, &cpu, (uint)sizeof(CpuRate), null) == 0)
+                    throw Error("Query recovered CPU limit");
+                var expected = checked((uint)Math.Floor(Math.Min(1, limits.CpuCores /
+                    GetActiveProcessorCount(ushort.MaxValue)) * 10_000));
+                if (cpu.Flags != (1 | 4) || cpu.Rate != expected)
+                    throw new InvalidDataException("Recovered task-host CPU cap does not match its dispatch.");
+            }
+        }
+        catch { job.Dispose(); throw; }
+    }
+
     public bool MemoryLimitExceeded
     {
         get
         {
+            // Hard caps survive handle loss. Windows cannot replay notifications from the old IOCP.
+            if (port is null) return breached;
             while (GetQueuedCompletionStatus(port, out var message, out _, out _, 0) != 0)
                 if (message == 10) breached = true;
             if (Marshal.GetLastPInvokeError() != 258) throw Error("Read job resource limit notification");
@@ -65,7 +97,7 @@ internal sealed unsafe partial class JobObjectLimiter : IResourceLimiter
     }
 
     private static Win32Exception Error(string operation) => new(Marshal.GetLastPInvokeError(), operation + " failed.");
-    public void Dispose() { port.Dispose(); job.Dispose(); }
+    public void Dispose() { port?.Dispose(); job.Dispose(); }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Association { public nint Key, Port; }
@@ -90,6 +122,12 @@ internal sealed unsafe partial class JobObjectLimiter : IResourceLimiter
     }
     [LibraryImport("kernel32.dll", EntryPoint = "CreateJobObjectW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     private static partial SafeFileHandle CreateJob(nint attributes, string? name);
+    [LibraryImport("kernel32.dll", EntryPoint = "OpenJobObjectW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    private static partial SafeFileHandle OpenJob(uint access, [MarshalAs(UnmanagedType.Bool)] bool inherit, string name);
+    [LibraryImport("kernel32.dll", EntryPoint = "IsProcessInJob", SetLastError = true)]
+    private static partial int IsInJob(nint process, SafeFileHandle job, out int member);
+    [LibraryImport("kernel32.dll", EntryPoint = "QueryInformationJobObject", SetLastError = true)]
+    private static partial int Query(SafeFileHandle job, int information, void* value, uint size, uint* returned);
     [LibraryImport("kernel32.dll", EntryPoint = "AssignProcessToJobObject", SetLastError = true)]
     private static partial int Assign(SafeFileHandle job, nint process);
     [LibraryImport("kernel32.dll", EntryPoint = "SetInformationJobObject", SetLastError = true)]

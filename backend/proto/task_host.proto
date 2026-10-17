@@ -7,7 +7,7 @@ import "agent.proto";
 option csharp_namespace = "Wf.Contracts.Host.V1";
 
 // One prewarmed process executes exactly one attempt. A result remains available
-// until acknowledged; reconnect/re-adoption can extend this protocol later.
+// until acknowledged. Resume never invokes the delegate a second time.
 service TaskHost {
   rpc Ready(ReadyRequest) returns (HostReady);
   // Confirms the Linux worker's pre-exec cgroup before secrets; the supervisor stays outside.
@@ -15,6 +15,7 @@ service TaskHost {
   // Names only, bound from the immutable workflow and this attempt's variables.
   rpc RequiredSecrets(ExecuteRequest) returns (SecretReferences);
   rpc Execute(ExecuteRequest) returns (wf.agent.v1.TaskCompleted);
+  rpc Resume(ExecuteRequest) returns (wf.agent.v1.TaskCompleted);
   rpc Checkpoints(ReadyRequest) returns (stream wf.agent.v1.CheckpointSaved);
   // Agent confirms only after its journal and the engine's durable index acknowledge.
   rpc ConfirmCheckpoint(wf.agent.v1.CheckpointSaved) returns (HostReply);
@@ -29,6 +30,7 @@ message ReadyRequest {}
 
 message ApplyLimitsRequest {
   string linux_cgroup_path = 1;
+  string windows_job_name = 2;
 }
 
 message HostReady {
@@ -36,6 +38,8 @@ message HostReady {
   uint32 process_id = 2;
   string workflow_version = 3;
   bool bound = 4;
+  wf.agent.v1.AttemptRef attempt = 5;
+  uint64 reservation_epoch = 6;
 }
 
 message ExecuteRequest {
@@ -48,6 +52,9 @@ message ExecuteRequest {
 
 message SecretReferences {
   repeated string names = 1;
+  // Re-adoption only: original values retained in host memory, over authenticated private IPC.
+  // Never persist these values or substitute a rotated secret into a running attempt.
+  map<string, string> recovered_values = 2;
 }
 
 message CancelRequest {

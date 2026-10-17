@@ -211,12 +211,35 @@ paths, attempt, reservation epoch, deadline and caps. Creation identity is
 captured once before readiness: Windows creation FILETIME or Linux boot-relative
 `/proc/<pid>/stat` start counter. Cross-process Linux `Process.StartTime`
 reconstruction differed by roughly a millisecond in the actual test and is
-therefore not used as the adoption identity. Last acknowledged sequence starts
-at zero; reconnect/adoption and durable host streams remain tasks `2.3.2.2.2`
-and `2.3.2.2.3`. Until those paths are wired, an unfinished prior lifetime
-continues to quarantine restart admission and physical-fence acknowledgements;
-survival is not a substitute for quiescence or permission to reuse a machine.
-Private readiness protocol 7 rejects older SDK packages.
+therefore not used as the adoption identity.
+
+Task `2.3.2.2.2` now claims existing lifetime locks exclusively in a bounded
+1,024-record startup scan and validates native identity before adoption. SDK
+hosts retain their own named Windows lifetime and resource Job handles; merely
+having processes in a Job does not preserve its reopenable name after the last
+handle closes. The new agent verifies Job membership and unchanged CPU/RAM
+limits, or Linux delegated cgroup caps. Token-authenticated private IPC checks
+the actual bound attempt and machine epoch; `Resume` requires the exact
+persisted dispatch and observes the existing execution, never another delegate
+invocation. Original secrets remain host-memory-only and cross authenticated
+IPC to restore masking without substituting rotated values. All verified
+package pins and active attempt inventory are restored before Hello/admission.
+Pending checkpoint/progress acknowledgements reattach, and the last complete
+resource observation is durably saved before journaling, replayed identically,
+then followed by its next ordinal. Windows prior IOCP notifications and native
+network counter baselines cannot be replayed and are not claimed as continuous.
+
+Linux adopted cleanup uses a separate authenticated supervisor control socket,
+stable process exit and a flushed final descendant-quiescence certificate.
+Dead or mismatched hosts report AgentLost, but unverifiable descendants retain
+quarantine. A missing named Windows Job after root death is not physical proof:
+closing the last handle can make its name inaccessible while processes survive.
+No uncertain lifetime can acknowledge a reservation fence or admit new hosts.
+Whole-machine reboot remains the fallback for unprovable physical cleanup.
+Private readiness protocol 8 rejects older SDK packages. Lossless host-side
+spooling, a general acknowledged stream cursor (initially zero), and hard
+self-termination after deadline remain task `2.3.2.2.3`; interrupted agent log
+capture is explicitly marked, not presented as lossless.
 
 **Checkpoints for long tasks.** `await ctx.Checkpoint.SaveAsync(state)` serialises JSON state (≤ 1 MB, at most once per 5 s); the task host uploads it to blob, then the agent journals `CheckpointSaved{run, taskKey, attempt, seq, uri, sha256}` until the engine acks it, like results. The engine applies it idempotently to `task_checkpoints` (keyed by run + task), keeping the highest `seq`, so neither an agent nor an engine crash loses or regresses a checkpoint. A later attempt of the same task gets it from `ctx.Checkpoint.TryLoad<T>()`, and `ctx.Attempt.ResumedFrom` says from when. Without checkpoints a retried task starts from the beginning. Built-in long tasks checkpoint automatically:
 - **Load shard**: every 10 s: position in the load shape, request-source offset, cumulative counts. Resume rejoins the shape at the current time (the ramp is not replayed); the missing interval is recorded and shown in the perf report.

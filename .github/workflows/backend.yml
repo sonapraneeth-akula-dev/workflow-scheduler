@@ -65,6 +65,14 @@ jobs:
         env:
           WF_API_DRAIN_SIGNAL: "true"
         run: dotnet test backend/tests/Wf.Integration.Tests --configuration Release --no-build --filter "FullyQualifiedName~ApiDrainTests.Linux_SIGTERM"
+      - name: Verify native agent restart and authenticated host re-adoption
+        run: dotnet test backend/tests/Wf.Integration.Tests --configuration Release --no-build --filter "FullyQualifiedName~HostSurvivalTests" --logger "trx;LogFileName=host-readoption.trx" --results-directory host-readoption-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: host-readoption-${{ matrix.os }}
+          path: host-readoption-results
+          if-no-files-found: error
       - name: Install and start Windows service
         if: runner.os == 'Windows'
         shell: pwsh
@@ -120,17 +128,17 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
-      - name: Verify non-root CPU/RAM enforcement and independent host lifetimes
+      - name: Verify non-root CPU/RAM enforcement, independent host lifetimes and re-adoption
         run: |
           set -euo pipefail
           docker run --rm --privileged --cgroupns=private \
             --env WF_RESOURCE_ISOLATED_CONTAINER=1 \
-            --env 'WF_RESOURCE_TEST_FILTER=ResourceLimitTests|PhysicalHostLifetimeTests' \
+            --env 'WF_RESOURCE_TEST_FILTER=ResourceLimitTests|PhysicalHostLifetimeTests|HostReadoptionTests' \
             --env WF_RESOURCE_ARTIFACTS=/repo/.agent-artifacts/limits-linux \
             --mount "type=bind,source=$GITHUB_WORKSPACE,target=/repo" --workdir /repo \
             mcr.microsoft.com/dotnet/sdk:10.0-noble-aot \
             bash infra/agent/test-resource-sampling.sh --without-bpf
-      - name: Verify actual agent loss, host survival, RAM failures and durable replay
+      - name: Verify actual agent loss, host re-adoption, RAM failures and durable replay
         run: |
           set -euo pipefail
           docker run --rm --privileged --cgroupns=private --network host \

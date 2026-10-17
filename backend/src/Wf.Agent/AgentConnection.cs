@@ -22,6 +22,7 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
         Uri? redirect = null;
         try
         {
+            if (commands is TaskCommands tasks) await tasks.RecoverAsync(stoppingToken);
             while (!stoppingToken.IsCancellationRequested)
             {
                 var endpoint = redirect ?? options.Engines[index];

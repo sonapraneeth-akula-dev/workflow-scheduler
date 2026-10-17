@@ -85,8 +85,54 @@ internal sealed partial class HostRecoveryBarrier
         }
     }
 
+    public IReadOnlyList<Lease> Claim(IReadOnlySet<string> owned)
+    {
+        lock (sync)
+        {
+            var claims = new List<Lease>();
+            try
+            {
+                var scanned = 0;
+                foreach (var path in Directory.EnumerateFiles(directory, "*.pending"))
+                {
+                    if (++scanned > 1024)
+                        throw new InvalidDataException("Task-host recovery exceeds the 1024 lifetime scan limit.");
+                    if (owned.Contains(path)) continue;
+                    if (held.Contains(path))
+                        throw new InvalidOperationException("Another task-host pool already owns this lifetime.");
+                    var stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None,
+                        4096, FileOptions.WriteThrough);
+                    try
+                    {
+                        if (stream.Length != 36)
+                            throw new InvalidDataException("Task-host boot record is invalid.");
+                        using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
+                        var recordedBoot = reader.ReadToEnd();
+                        if (!Guid.TryParseExact(recordedBoot, "D", out _))
+                            throw new InvalidDataException("Task-host boot record is invalid.");
+                        var lease = new Lease(path, stream, recordedBoot);
+                        if (recordedBoot != boot) lease.Complete();
+                        else
+                        {
+                            held.Add(path);
+                            claims.Add(lease);
+                        }
+                    }
+                    catch { stream.Dispose(); throw; }
+                }
+                return claims;
+            }
+            catch
+            {
+                foreach (var lease in claims) lease.Abandon();
+                throw;
+            }
+        }
+    }
+
     internal sealed class Lease(string path, FileStream stream, string boot)
     {
+        public string LifetimePath => path;
         public string BootId => boot;
         public string AttemptDirectory => path[..^".pending".Length];
 

@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.ExceptionServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using Google.Protobuf;
@@ -36,6 +38,7 @@ public static class TaskHostServer
             throw new IOException("The task-host socket path already exists.");
         if (LinuxHostSupervisor.Required)
             return await LinuxHostSupervisor.RunAsync(socketPath, cancellationToken);
+        using var lifetimeJob = WindowsHostJobs.OpenLifetime();
         Console.OutputEncoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
         // Private IPC needs no application configuration watchers or public-web middleware defaults.
         var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions { Args = [], ContentRootPath = AppContext.BaseDirectory });
@@ -44,28 +47,50 @@ public static class TaskHostServer
             options.ListenUnixSocket(socketPath, listen => listen.Protocols = HttpProtocols.Http2));
         builder.Services.AddRoutingCore();
         builder.Services.AddGrpc(options => { options.MaxReceiveMessageSize = 4 * 1024 * 1024; options.MaxSendMessageSize = 1024 * 1024; });
-        builder.Services.AddSingleton(new TaskHostService(workflow));
+        builder.Services.AddSingleton(_ => new TaskHostService(workflow));
         await using var app = builder.Build();
+        var token = Environment.GetEnvironmentVariable("WF_TASK_HOST_CONTAINMENT_TOKEN");
+        if (token is not null)
+        {
+            if (!Guid.TryParseExact(token, "N", out _))
+                throw new InvalidOperationException("Task-host authentication token is invalid.");
+            var expected = Encoding.ASCII.GetBytes(token);
+            app.Use(async (context, next) =>
+            {
+                var supplied = context.Request.Headers["x-wf-host-token"].ToString();
+                if (!CryptographicOperations.FixedTimeEquals(expected, Encoding.ASCII.GetBytes(supplied)))
+                {
+                    context.Response.StatusCode = 403;
+                    return;
+                }
+                await next(context);
+            });
+        }
         app.MapGrpcService<TaskHostService>();
         await app.RunAsync(cancellationToken);
         return 0;
     }
 }
 
-internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.TaskHostBase
+internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.TaskHostBase, IDisposable
 {
     private readonly object sync = new();
     private AttemptRef? bound;
+    private Dispatch? boundDispatch;
+    private IReadOnlyDictionary<string, string>? boundSecrets;
     private Task<TaskCompleted>? execution;
     private CancellationTokenSource? attemptCancellation;
     private bool timedOut;
     private bool cancelled;
     private bool limitsApplied;
-    private readonly Channel<CheckpointSaved> checkpoints = Channel.CreateBounded<CheckpointSaved>(1);
+    private Microsoft.Win32.SafeHandles.SafeFileHandle? limitsJob;
+    private readonly Channel<byte> checkpoints = Channel.CreateBounded<byte>(new BoundedChannelOptions(1)
+        { FullMode = BoundedChannelFullMode.DropWrite });
     private CheckpointSaved? pendingCheckpoint;
     private TaskCompletionSource? checkpointAcknowledgement;
     private int checkpointReader;
-    private readonly Channel<TaskProgress> progress = Channel.CreateBounded<TaskProgress>(1);
+    private readonly Channel<byte> progress = Channel.CreateBounded<byte>(new BoundedChannelOptions(1)
+        { FullMode = BoundedChannelFullMode.DropWrite });
     private TaskProgress? pendingProgress;
     private TaskCompletionSource? progressAcknowledgement;
     private int progressReader;
@@ -73,13 +98,18 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
     public override Task<HostReady> Ready(ReadyRequest request, ServerCallContext context)
     {
         lock (sync)
-            return Task.FromResult(new HostReady
+        {
+            var ready = new HostReady
             {
-                ProtocolVersion = 7, ProcessId = uint.TryParse(
+                ProtocolVersion = 8, ProcessId = uint.TryParse(
                     Environment.GetEnvironmentVariable("WF_TASK_HOST_SUPERVISOR_PID"), out var supervisor)
                     ? supervisor : (uint)Environment.ProcessId,
-                WorkflowVersion = workflow.Version, Bound = bound is not null
-            });
+                WorkflowVersion = workflow.Version, Bound = bound is not null,
+                ReservationEpoch = boundDispatch?.ReservationEpoch ?? 0
+            };
+            if (bound is not null) ready.Attempt = bound.Clone();
+            return Task.FromResult(ready);
+        }
     }
 
     public override Task<HostReply> ApplyLimits(ApplyLimitsRequest request, ServerCallContext context)
@@ -88,7 +118,21 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
         {
             if (bound is not null || limitsApplied)
                 throw new RpcException(new Status(StatusCode.FailedPrecondition, "Task-host resource limits are already bound."));
-            try { LinuxWorkloadCgroup.Join(request.LinuxCgroupPath); }
+            try
+            {
+                if (OperatingSystem.IsWindows())
+                {
+                    if (request.LinuxCgroupPath.Length != 0)
+                        throw new InvalidDataException("Windows task host cannot bind a Linux workload cgroup.");
+                    limitsJob = WindowsHostJobs.OpenLimits(request.WindowsJobName);
+                }
+                else
+                {
+                    if (request.WindowsJobName.Length != 0)
+                        throw new InvalidDataException("Linux task host cannot bind a Windows resource Job.");
+                    LinuxWorkloadCgroup.Join(request.LinuxCgroupPath);
+                }
+            }
             catch (Exception error) when (error is ArgumentException or InvalidOperationException or IOException or
                 UnauthorizedAccessException or System.ComponentModel.Win32Exception)
             { throw new RpcException(new Status(StatusCode.FailedPrecondition, "Cannot join workload resource limits: " + error.Message)); }
@@ -97,12 +141,21 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
         }
     }
 
+    public void Dispose() => limitsJob?.Dispose();
+
     public override Task<SecretReferences> RequiredSecrets(ExecuteRequest request, ServerCallContext context)
     {
         lock (sync)
         {
             if (bound is not null)
-                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Task host is already bound to an attempt."));
+            {
+                if (!boundDispatch!.Equals(request.Dispatch))
+                    throw new RpcException(new Status(StatusCode.FailedPrecondition, "Recovered dispatch does not match this host."));
+                var recovered = new SecretReferences();
+                recovered.Names.Add(boundSecrets!.Keys);
+                foreach (var pair in boundSecrets) recovered.RecoveredValues.Add(pair.Key, pair.Value);
+                return Task.FromResult(recovered);
+            }
             try
             {
                 var dispatch = request.Dispatch;
@@ -154,6 +207,8 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
                     throw new ArgumentException("Required task secrets are unavailable.");
                 var deadline = dispatch.DeadlineAt.ToDateTimeOffset();
                 bound = task.Clone();
+                boundDispatch = dispatch.Clone();
+                boundSecrets = request.ResolvedSecrets.ToDictionary();
                 attemptCancellation = new CancellationTokenSource();
                 execution = ExecuteTaskAsync(dispatch, node, variables, inputs, outputs, deadline, request.ResolvedSecrets);
                 return execution;
@@ -162,6 +217,17 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
             {
                 throw new RpcException(new Status(StatusCode.InvalidArgument, "Task execution inputs or secret bindings are invalid."));
             }
+        }
+    }
+
+    public override Task<TaskCompleted> Resume(ExecuteRequest request, ServerCallContext context)
+    {
+        lock (sync)
+        {
+            CheckAttempt(request.Dispatch?.Task);
+            if (!boundDispatch!.Equals(request.Dispatch) || request.ResolvedSecrets.Count != 0)
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Recovered dispatch does not match this host."));
+            return execution!;
         }
     }
 
@@ -226,8 +292,17 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
     {
         if (Interlocked.Exchange(ref checkpointReader, 1) != 0)
             throw new RpcException(new Status(StatusCode.AlreadyExists, "Checkpoint stream is already attached."));
-        await foreach (var saved in checkpoints.Reader.ReadAllAsync(context.CancellationToken))
-            await responseStream.WriteAsync(saved, context.CancellationToken);
+        try
+        {
+            checkpoints.Writer.TryWrite(0);
+            await foreach (var _ in checkpoints.Reader.ReadAllAsync(context.CancellationToken))
+            {
+                CheckpointSaved? saved;
+                lock (sync) saved = pendingCheckpoint?.Clone();
+                if (saved is not null) await responseStream.WriteAsync(saved, context.CancellationToken);
+            }
+        }
+        finally { Volatile.Write(ref checkpointReader, 0); }
     }
 
     public override Task<HostReply> ConfirmCheckpoint(CheckpointSaved request, ServerCallContext context)
@@ -253,7 +328,7 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
             pendingCheckpoint = saved.Clone();
             checkpointAcknowledgement = acknowledgement;
         }
-        await checkpoints.Writer.WriteAsync(saved, token);
+        checkpoints.Writer.TryWrite(0);
         await acknowledgement.Task.WaitAsync(token);
     }
 
@@ -262,8 +337,17 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
     {
         if (Interlocked.Exchange(ref progressReader, 1) != 0)
             throw new RpcException(new Status(StatusCode.AlreadyExists, "Progress stream is already attached."));
-        await foreach (var update in progress.Reader.ReadAllAsync(context.CancellationToken))
-            await responseStream.WriteAsync(update, context.CancellationToken);
+        try
+        {
+            progress.Writer.TryWrite(0);
+            await foreach (var _ in progress.Reader.ReadAllAsync(context.CancellationToken))
+            {
+                TaskProgress? update;
+                lock (sync) update = pendingProgress?.Clone();
+                if (update is not null) await responseStream.WriteAsync(update, context.CancellationToken);
+            }
+        }
+        finally { Volatile.Write(ref progressReader, 0); }
     }
 
     public override Task<HostReply> ConfirmProgress(TaskProgress request, ServerCallContext context)
@@ -292,7 +376,7 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
             pendingProgress = update.Clone();
             progressAcknowledgement = acknowledgement;
         }
-        await progress.Writer.WriteAsync(update, journalDeadline.Token);
+        progress.Writer.TryWrite(0);
         // Finish the journal handshake even if task cancellation arrives; cleanup may publish next.
         await acknowledgement.Task.WaitAsync(journalDeadline.Token);
     }

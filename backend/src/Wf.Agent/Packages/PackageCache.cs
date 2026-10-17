@@ -134,6 +134,27 @@ public sealed class PackageCache : IDisposable
             if (directory.Exists) RejectLink(directory.FullName);
     }
 
+    internal async Task<TaskHostPackage> RestoreExistingAsync(TaskHostPackage recorded, CancellationToken cancellationToken)
+    {
+        await writes.WaitAsync(cancellationToken);
+        try
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            ValidateRoot();
+            var files = new DirectoryInfo(recorded.WorkingDirectory);
+            var target = files.Parent ?? throw new InvalidDataException("Recovered package has no cache directory.");
+            if (files.Name != "files" || !string.Equals(target.Parent?.FullName, root,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) ||
+                target.Name.Length != 64 || target.Name.Any(character => !char.IsAsciiHexDigit(character)))
+                throw new InvalidDataException("Recovered package is outside the configured cache.");
+            var package = await VerifyAsync(target.FullName, recorded.Version, target.Name, cancellationToken);
+            if (!recorded.Matches(package))
+                throw new InvalidDataException("Recovered package runtime does not match its verified manifest.");
+            return Lease(package, target.Name, []);
+        }
+        finally { writes.Release(); }
+    }
+
     private sealed record CacheEntry(string Hash, string Directory, long Bytes, DateTime LastUse);
 
     private List<CacheEntry> Inventory(CancellationToken token)

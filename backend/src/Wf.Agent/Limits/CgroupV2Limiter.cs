@@ -48,6 +48,24 @@ internal sealed class CgroupV2Limiter : IResourceLimiter
         }
     }
 
+    internal CgroupV2Limiter(string path, TaskResourceLimits limits, bool reopen)
+    {
+        if (!reopen || !OperatingSystem.IsLinux() || !Path.IsPathFullyQualified(path) ||
+            !Path.GetFileName(path).StartsWith("wf-limits-", StringComparison.Ordinal))
+            throw new InvalidDataException("Recovered workload cgroup path is invalid.");
+        LinuxBpfNetworkCounters.RequireCgroupV2(path);
+        LinuxCgroupPath = path;
+        memoryLimited = limits.RamMb > 0;
+        if (memoryLimited && (File.ReadAllText(Path.Combine(path, "memory.max")).Trim() !=
+            checked(limits.RamMb * 1024 * 1024).ToString(CultureInfo.InvariantCulture) ||
+            File.ReadAllText(Path.Combine(path, "memory.swap.max")).Trim() != "0" ||
+            File.ReadAllText(Path.Combine(path, "memory.oom.group")).Trim() != "1"))
+            throw new InvalidDataException("Recovered task-host RAM cgroup caps do not match its dispatch.");
+        if (limits.CpuCores > 0 && File.ReadAllText(Path.Combine(path, "cpu.max")).Trim() !=
+            $"{checked((long)Math.Floor(limits.CpuCores * 100_000)).ToString(CultureInfo.InvariantCulture)} 100000")
+            throw new InvalidDataException("Recovered task-host CPU cgroup cap does not match its dispatch.");
+    }
+
     public bool MemoryLimitExceeded => memoryLimited && File.ReadLines(Path.Combine(LinuxCgroupPath, "memory.events"))
         .Select(line => line.Split(' ', StringSplitOptions.RemoveEmptyEntries))
         .Any(parts => parts[0] is "oom" or "oom_kill" &&

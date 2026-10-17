@@ -42,3 +42,13 @@ with `buf build backend/proto -o backend/proto/compatibility.binpb`.
 CI runs `buf lint`, format, and `buf breaking` against that baseline and,
 when present, the pull request base schema. Do not regenerate the baseline
 to hide a breaking change; introduce a new versioned package instead.
+
+`task_host.proto` is private agent/SDK IPC, currently readiness protocol 8.
+Rebuild SDK packages when upgrading this private protocol. Every agent-created
+host requires its owner-only token in `x-wf-host-token`, including readiness,
+secrets and streaming RPCs. `HostReady` identifies the actual bound attempt and
+machine reservation epoch. `Resume` accepts only its exact original dispatch and
+returns the already-running/completed execution without invoking user code.
+`RequiredSecrets` returns names for a fresh host; for an exact re-adoption it can
+return original resolved values held in host memory, solely to restore masking
+over authenticated private IPC. Never copy those values to durable metadata.

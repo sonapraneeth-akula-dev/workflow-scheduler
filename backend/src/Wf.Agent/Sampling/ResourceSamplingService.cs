@@ -57,13 +57,15 @@ public sealed class ResourceSamplingService : BackgroundService
     internal void PrepareUnscopedStart(ProcessStartInfo startInfo) => sampler.PrepareUnscopedStart(startInfo);
 
     public IDisposable Track(Process process, AttemptRef attempt, ITaskResourceScope? scope = null,
-        string? nativeUnavailableReason = null, Action<AgentMessage>? publish = null, ulong reservationEpoch = 0)
+        string? nativeUnavailableReason = null, Action<AgentMessage>? publish = null, ulong reservationEpoch = 0,
+        ulong initialSequence = 0)
     {
         ArgumentNullException.ThrowIfNull(process);
         ArgumentNullException.ThrowIfNull(attempt);
         lock (gate)
         {
-            var tracking = new Tracking(this, process, attempt.Clone(), scope, nativeUnavailableReason, publish, reservationEpoch);
+            var tracking = new Tracking(this, process, attempt.Clone(), scope, nativeUnavailableReason, publish, reservationEpoch)
+                { Sequence = initialSequence };
             try { scope?.BeginAttempt(); }
             catch (Exception exception) when (exception is Win32Exception or IOException or InvalidOperationException or UnauthorizedAccessException)
             {
