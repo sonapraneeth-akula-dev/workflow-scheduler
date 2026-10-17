@@ -14,6 +14,84 @@ public sealed class DryRunTests
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task Explicit_checkpoint_seed_executes_only_the_named_resume_branch_and_preserves_context()
+    {
+        var at = DateTimeOffset.Parse("2026-10-17T10:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var calls = 0;
+        var workflow = Workflow.Define("resume", "1", w => w.Type("test").Variables(v => v.String("env", "test"))
+            .Node("first", n => n.Task("mock", _ => throw new InvalidOperationException("Must not execute")))
+            .Node("resume", n => n.DependsOn("first").Input("first", "answer").Task("work", context =>
+            {
+                calls++;
+                Assert.Equal("resume/work", context.TaskKey);
+                Assert.Equal(3u, context.Attempt.Number);
+                Assert.Equal(at, context.Attempt.ResumedFrom);
+                Assert.Equal("test", context.Var<string>("env"));
+                Assert.Equal(42, context.Input<int>("first", "answer"));
+                context.Outputs["position"] = context.Checkpoint.TryLoad<int>() + 1;
+            })).PostProcess((TaskContext _) => throw new InvalidOperationException("Must not execute")));
+        var spec = new DryRunSpec(new Dictionary<string, TaskMock>
+        {
+            ["first/mock"] = new(Outputs: ImmutableDictionary<string, JsonElement>.Empty.Add("answer", JsonSerializer.SerializeToElement(42))),
+            ["resume/work"] = new(MockOutcome.ExecuteCheckpointed,
+                Checkpoint: new(JsonSerializer.SerializeToElement(41), 7, at, 3))
+        }.ToImmutableDictionary(), new());
+        var log = await DryRunHost.ExecuteAsync(workflow, spec, Token);
+        Assert.Equal(1, calls);
+        Assert.Equal(0, log.ExitCode);
+        Assert.Equal(42, log.Outputs["resume"]["position"].GetInt32());
+        Assert.Equal(at, log.Events[0].At);
+    }
+
+    [Fact]
+    public async Task Checkpoint_seed_is_restored_for_each_retry_and_dry_run_cannot_pretend_to_save_durably()
+    {
+        var seen = new List<uint>();
+        var workflow = Workflow.Define("retry-resume", "1", w => w.Type("test").Node("node", n =>
+            n.Task("work", context =>
+            {
+                seen.Add(context.Attempt.Number);
+                Assert.Equal("seed", context.Checkpoint.TryLoad<string>());
+                throw new TaskFailureException("retry", retryable: true);
+            }, p => p.Retry(1))));
+        var seed = new CheckpointMockData(JsonSerializer.SerializeToElement("seed"), 1, DateTimeOffset.UnixEpoch);
+        var log = await DryRunHost.ExecuteAsync(workflow,
+            Spec("node/work", new(MockOutcome.ExecuteCheckpointed, Checkpoint: seed)), Token);
+        Assert.Equal(new uint[] { 2, 3 }, seen);
+        Assert.Equal(2, log.Attempts.Length);
+        var save = Workflow.Define("cannot-save", "1", w => w.Type("test").Node("node", n =>
+            n.Task("work", context => context.Checkpoint.SaveAsync("new", context.CancellationToken), p => p.Retry(0))));
+        var failed = await DryRunHost.ExecuteAsync(save,
+            Spec("node/work", new(MockOutcome.ExecuteCheckpointed, Checkpoint: seed)), Token);
+        Assert.Equal("NotSupportedException", Assert.Single(failed.Attempts).ErrorType);
+    }
+
+    [Fact]
+    public async Task Checkpoint_execution_never_defaults_or_accepts_ambiguous_invalid_seeds()
+    {
+        var workflow = Workflow.Define("invalid-resume", "1", w => w.Type("test").Node("node", n =>
+            n.Task("work", _ => throw new InvalidOperationException("Must not execute"))));
+        var seed = new CheckpointMockData(JsonSerializer.SerializeToElement(41), 1, DateTimeOffset.UnixEpoch);
+        var explicitMock = new TaskMock(MockOutcome.ExecuteCheckpointed, Checkpoint: seed);
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            DryRunHost.ExecuteAsync(workflow, new(Default: explicitMock), Token));
+        foreach (var mock in new[]
+        {
+            new TaskMock(MockOutcome.ExecuteCheckpointed),
+            new TaskMock(Checkpoint: seed),
+            explicitMock with { Checkpoint = seed with { Sequence = 0 } },
+            explicitMock with { Checkpoint = seed with { Attempt = 1 } },
+            explicitMock with { Checkpoint = seed with { State = default } },
+            explicitMock with { Checkpoint = seed with { SavedAt = DateTimeOffset.UnixEpoch.AddTicks(1) } },
+            explicitMock with { Checkpoint = seed with { SavedAt = DateTimeOffset.UnixEpoch.ToOffset(TimeSpan.FromHours(1)) } },
+            explicitMock with { Outputs = ImmutableDictionary<string, JsonElement>.Empty },
+            explicitMock with { Checkpoint = seed with { State = JsonSerializer.SerializeToElement(new string('a', 1048576)) } }
+        })
+            await Assert.ThrowsAnyAsync<ArgumentException>(() =>
+                DryRunHost.ExecuteAsync(workflow, Spec("node/work", mock), Token));
+    }
+
+    [Fact]
     public async Task SuccessPublishesMockOutputsWithoutInvokingAnyOriginalDelegate()
     {
         var calls = 0;

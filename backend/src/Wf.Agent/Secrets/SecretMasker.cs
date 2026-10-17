@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Wf.Contracts.Secrets;
 
 namespace Wf.Agent.Secrets;
 
@@ -18,9 +19,7 @@ public sealed class SecretMasker
             ArgumentException.ThrowIfNullOrEmpty(value, nameof(resolvedValues));
             return value;
         }).Distinct(StringComparer.Ordinal).ToArray();
-        _secrets = _values.SelectMany(value => new[] { value, Convert.ToBase64String(Encoding.UTF8.GetBytes(value)) })
-            .Distinct(StringComparer.Ordinal).OrderByDescending(value => value.Length)
-            .ThenBy(value => value, StringComparer.Ordinal).ToArray();
+        _secrets = SecretPatterns.Expand(_values);
         _longest = _secrets.Length == 0 ? 0 : _secrets[0].Length;
     }
 

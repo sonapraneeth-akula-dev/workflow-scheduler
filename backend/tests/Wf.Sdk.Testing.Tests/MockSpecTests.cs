@@ -8,6 +8,25 @@ namespace Wf.Sdk.Testing.Tests;
 public sealed class MockSpecTests
 {
     [Fact]
+    public void Checkpoint_mock_clones_the_seed_and_round_trips_explicit_resume_execution()
+    {
+        MockSpec spec;
+        var at = DateTimeOffset.UnixEpoch.AddDays(1);
+        using (var document = JsonDocument.Parse("""{"position":41}"""))
+            spec = new MockSpec(new TaskMock()).WithCheckpoint("node/work", new(document.RootElement, at, 7, 3));
+        var wire = JsonSerializer.Deserialize(spec.ToJson(), DryRunJsonContext.Default.DryRunSpec)!;
+        var mock = wire.Tasks!["node/work"];
+        Assert.Equal(MockOutcome.ExecuteCheckpointed, mock.Outcome);
+        Assert.Equal(41, mock.Checkpoint!.State.GetProperty("position").GetInt32());
+        Assert.Equal(7, mock.Checkpoint.Sequence);
+        Assert.Equal(3u, mock.Checkpoint.Attempt);
+        Assert.Equal(at, mock.Checkpoint.SavedAt);
+        Assert.ThrowsAny<ArgumentException>(() => new CheckpointMock(default, at));
+        Assert.ThrowsAny<ArgumentException>(() => new CheckpointMock(JsonSerializer.SerializeToElement(1), at, 0));
+        Assert.Throws<ArgumentNullException>(() => new MockSpec().WithCheckpoint("node/work", null!));
+    }
+
+    [Fact]
     public void FluentOutcomesUseTheExistingDryRunWireContract()
     {
         var outputs = new Dictionary<string, JsonElement> { ["answer"] = JsonSerializer.SerializeToElement(42) };

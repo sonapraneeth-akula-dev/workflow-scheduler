@@ -1,6 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Wf.Contracts.Checkpoints;
+using Wf.Contracts;
+using Wf.Contracts.Definition;
+using Wf.Contracts.Secrets;
 
 namespace Wf.Sdk;
 
@@ -16,6 +19,8 @@ public sealed class CheckpointStore
     private long sequence;
     private DateTimeOffset? savedAt;
     private long? savedTimestamp;
+    private readonly object secretGate = new();
+    private string[] secretPatterns = [];
 
     public CheckpointStore(
         Func<ReadOnlyMemory<byte>, long, DateTimeOffset, CancellationToken, Task>? persist = null,
@@ -45,6 +50,14 @@ public sealed class CheckpointStore
     public Task SaveAsync<T>(T value, CancellationToken cancellationToken = default) =>
         SaveAsync(value, TypeInfo<T>(null), cancellationToken);
 
+    internal void AddSecrets(IEnumerable<string> values)
+    {
+        var added = SecretPatterns.ForJson(values);
+        if (added.Length == 0) return;
+        lock (secretGate)
+            Volatile.Write(ref secretPatterns, secretPatterns.Concat(added).Distinct(StringComparer.Ordinal).ToArray());
+    }
+
     public async Task SaveAsync<T>(T value, JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(typeInfo);
@@ -54,6 +67,14 @@ public sealed class CheckpointStore
         using var bytes = new BoundedState();
         await JsonSerializer.SerializeAsync(bytes, value, typeInfo, stop.Token);
         var payload = bytes.ToArray();
+        var patterns = Volatile.Read(ref secretPatterns);
+        if (patterns.Length != 0)
+        {
+            using var document = JsonDocument.Parse(payload);
+            if (SecretPatterns.Contains(document.RootElement, patterns))
+                throw new TaskFailureException("Checkpoint state contains a resolved secret value.",
+                    retryable: false, category: FailureCategory.ValidationError);
+        }
         await gate.WaitAsync(stop.Token);
         try
         {

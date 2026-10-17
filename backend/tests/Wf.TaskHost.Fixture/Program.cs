@@ -177,6 +177,18 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
             await File.WriteAllTextAsync(ctx.Var<string>("checkpointMarker"), "2", ctx.CancellationToken);
             ctx.Outputs["loadedAfterSave"] = ctx.Checkpoint.TryLoad<string>();
         }
+    }).Task("checkpointSecret", async ctx =>
+    {
+        var value = ctx.Secret(ctx.Var<SecretReference>("credential"));
+        var state = ctx.Var<int>("amount") switch
+        {
+            0 => value,
+            1 => Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(value)),
+            2 => System.Text.Json.JsonEncodedText.Encode(value).ToString(),
+            _ => "safe-checkpoint-state"
+        };
+        await ctx.Checkpoint.SaveAsync(state, ctx.CancellationToken);
+        ctx.Outputs["saved"] = true;
     }).Task("artifact", async ctx =>
     {
         await ctx.Reports.PublishAsync("text", "Artifact summary",

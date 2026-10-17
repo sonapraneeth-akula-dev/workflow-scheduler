@@ -1562,8 +1562,22 @@ in-memory state; custom DTOs pass their generated type information.
 checkpoint's saved UTC time, or null when restarting without a checkpoint.
 Successful saves also update the store's locally loaded state. Missing or corrupt
 indexed blobs fail dispatch rather than silently restarting from scratch.
-Contexts without a configured durable publisher cannot save; dry-run checkpoint
-mocks, secret-content checks and the attempt UI remain separate checkpoint tasks.
+Contexts without a configured durable publisher cannot save. SDK checkpoint saves
+reject resolved secret values and their base64 representations in decoded JSON
+keys, strings (including escaped nested JSON), arrays and scalars before upload or
+sequence allocation. Rejection is a nonretryable `ValidationError` with a generic
+message, never the secret value. This is literal leak prevention, not arbitrary
+encoding or encryption detection.
+
+`Wf.Sdk.Testing.MockSpec.WithCheckpoint("node/task",
+new CheckpointMock(stateJson, savedAt, sequence: 1, attempt: 2))` explicitly executes
+that named real task delegate with a cloned seed, `TryLoad<T>()`, and
+`Attempt.ResumedFrom`. Other tasks still use mocks; checkpoint execution cannot be
+the default mock or supply synthetic outputs. This resume-branch test mode uses
+virtual workflow deadlines and is intended for immediate restore-path assertions,
+not arbitrary asynchronous work. Saves remain unsupported: the dry-run has no
+durable publisher and never claims to upload or acknowledge state. The attempt UI
+remains a separate checkpoint task.
 
 The internal blob-only `PUT /api/v1/checkpoint-uploads` requires a purpose-scoped
 header capability for the exact attempt, assigned agent session and reservation

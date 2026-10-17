@@ -13,7 +13,7 @@ public sealed class HarnessSelfTests
 
     public static IEnumerable<object[]> HarnessSelfPolicyCases()
     {
-        foreach (var outcome in Enum.GetValues<MockOutcome>())
+        foreach (var outcome in Enum.GetValues<MockOutcome>().Where(outcome => outcome != MockOutcome.ExecuteCheckpointed))
         foreach (var nodePolicy in Enum.GetValues<FailurePolicy>())
         foreach (var taskPolicy in Enum.GetValues<FailurePolicy>())
         foreach (var condition in Enum.GetValues<DependencyCondition>())

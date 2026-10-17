@@ -267,7 +267,8 @@ public sealed class LocalEngine
         active.Add(key, attempt);
         timers.Track(new(new(TimerScope.Attempt, key), DeadlineAt: Add(attempt.StartedAt, task.Policy.AttemptTimeout)));
         var context = new TaskContext(attempt.Cancellation.Token, variables, outputs[node.Key], outputs,
-            node.Inputs, message => renderer.Log($"{key}: {message}"), reports, artifacts, abort: run.Snapshot.Abort);
+            node.Inputs, message => renderer.Log($"{key}: {message}"), reports, artifacts, abort: run.Snapshot.Abort,
+            attempt: new(checked((uint)attempt.Number)));
         if (time is DryRunClock)
             _ = ExecuteAsync();
         else

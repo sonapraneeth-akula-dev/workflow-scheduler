@@ -7,7 +7,7 @@ namespace Wf.Sdk.Testing;
 
 /// <summary>
 /// Immutable task mocks using the SDK dry-run wire contract. Keys are stable node/task keys.
-/// Unspecified tasks require an explicit default; real task delegates never execute.
+/// Unspecified tasks require an explicit default; only WithCheckpoint opts a named real delegate into execution.
 /// </summary>
 public sealed class MockSpec
 {
@@ -29,6 +29,12 @@ public sealed class MockSpec
     }
 
     public MockSpec WithDefault(TaskMock mock) => new(spec with { Default = Copy(mock) });
+
+    public MockSpec WithCheckpoint(string taskKey, CheckpointMock checkpoint)
+    {
+        ArgumentNullException.ThrowIfNull(checkpoint);
+        return WithTask(taskKey, new(MockOutcome.ExecuteCheckpointed, Checkpoint: checkpoint.Seed));
+    }
 
     public MockSpec WithVariable(string key, JsonElement value)
     {
@@ -66,14 +72,11 @@ public sealed class MockSpec
     private static TaskMock Copy(TaskMock mock)
     {
         ArgumentNullException.ThrowIfNull(mock);
-        if (!Enum.IsDefined(mock.Outcome) || !Enum.IsDefined(mock.Category) || mock.FailuresBeforeSuccess < 0 ||
-            string.IsNullOrWhiteSpace(mock.ErrorMessage) ||
-            (mock.Outputs?.Keys.Any(string.IsNullOrWhiteSpace) ?? false) ||
-            (mock.Outputs?.Values.Any(value => value.ValueKind == JsonValueKind.Undefined) ?? false))
-            throw new ArgumentException("Mock contains an invalid outcome, category, count, message or output key/value.", nameof(mock));
+        DryRunHost.ValidateMock("task", mock);
         return mock with
         {
-            Outputs = mock.Outputs?.ToImmutableDictionary(pair => pair.Key, pair => pair.Value.Clone(), StringComparer.Ordinal)
+            Outputs = mock.Outputs?.ToImmutableDictionary(pair => pair.Key, pair => pair.Value.Clone(), StringComparer.Ordinal),
+            Checkpoint = mock.Checkpoint is { } checkpoint ? checkpoint with { State = checkpoint.State.Clone() } : null
         };
     }
 }

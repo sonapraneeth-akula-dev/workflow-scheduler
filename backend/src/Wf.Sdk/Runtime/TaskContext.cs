@@ -46,12 +46,14 @@ public sealed class TaskContext
         Attempt = attempt ?? new(1);
         this.secrets = secrets?.ToImmutableDictionary(StringComparer.Ordinal) ??
             ImmutableDictionary<string, string>.Empty;
+        Checkpoint.AddSecrets(this.secrets.Values);
     }
 
-    internal TaskContext ForTask(string key) => new(CancellationToken, variables, Outputs, inputs,
+    internal TaskContext ForTask(string key, CheckpointStore? checkpoint = null, TaskAttempt? attempt = null) =>
+        new(CancellationToken, variables, Outputs, inputs,
         declaredInputs, Logger, reports is ReportPublisher publisher ? publisher.ForSource(key) : reports,
         artifacts is ArtifactPublisher artifactPublisher ? artifactPublisher.ForSource(key) : artifacts, key, Abort, secrets,
-        Checkpoint, Attempt);
+        checkpoint ?? Checkpoint, attempt ?? Attempt);
 
     /// <summary>Read an agent-resolved reference for this attempt; never writes the value into variables or the manifest.</summary>
     public string Secret(SecretReference reference)

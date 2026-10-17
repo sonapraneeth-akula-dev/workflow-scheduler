@@ -4,15 +4,18 @@ using System.Text.Json.Serialization;
 using Wf.Contracts;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
+using Wf.Contracts.Checkpoints;
 using Wf.Engine.Core;
 using Wf.Sdk.Local;
 
 namespace Wf.Sdk.Hosting;
 
-public enum MockOutcome { Succeed, Fail, Timeout, Throw, FailThenSucceed }
+public enum MockOutcome { Succeed, Fail, Timeout, Throw, FailThenSucceed, ExecuteCheckpointed }
+public sealed record CheckpointMockData(JsonElement State, long Sequence, DateTimeOffset SavedAt, uint Attempt = 2);
 public sealed record TaskMock(MockOutcome Outcome = MockOutcome.Succeed,
     ImmutableDictionary<string, JsonElement>? Outputs = null, int FailuresBeforeSuccess = 1,
-    string ErrorMessage = "Mock task failure.", FailureCategory Category = FailureCategory.TaskError, bool Retryable = true);
+    string ErrorMessage = "Mock task failure.", FailureCategory Category = FailureCategory.TaskError, bool Retryable = true,
+    CheckpointMockData? Checkpoint = null);
 public sealed record DryRunSpec(ImmutableDictionary<string, TaskMock>? Tasks = null, TaskMock? Default = null,
     ImmutableDictionary<string, JsonElement>? Variables = null);
 public sealed record DryRunAttempt(string TaskKey, int Attempt, DateTimeOffset StartedAt, DateTimeOffset EndedAt,
@@ -55,21 +58,34 @@ public static class DryRunHost
             if (!workflow.Tasks.ContainsKey(key))
                 throw new ArgumentException($"Mock task '{key}' is not defined by the workflow.", nameof(spec));
         if (spec.Default is { } defaultMock)
-            Validate("default", defaultMock);
+        {
+            ValidateMock("default", defaultMock);
+            if (defaultMock.Outcome == MockOutcome.ExecuteCheckpointed)
+                throw new ArgumentException("Checkpoint execution requires an explicit task key, never a default mock.", nameof(spec));
+        }
         var handlers = ImmutableDictionary.CreateBuilder<string, Func<TaskContext, Task>>(StringComparer.Ordinal);
         foreach (var key in workflow.Tasks.Keys)
         {
             var mock = specified.TryGetValue(key, out var declared) ? declared : spec.Default ??
                 throw new ArgumentException($"Task '{key}' requires a mock or an explicit default mock.", nameof(spec));
-            Validate(key, mock);
+            ValidateMock(key, mock);
             var copied = mock with
             {
-                Outputs = mock.Outputs?.ToImmutableDictionary(p => p.Key, p => p.Value.Clone(), StringComparer.Ordinal)
+                Outputs = mock.Outputs?.ToImmutableDictionary(p => p.Key, p => p.Value.Clone(), StringComparer.Ordinal),
+                Checkpoint = mock.Checkpoint is { } seed ? seed with { State = seed.State.Clone() } : null
             };
             var attempt = 0;
             handlers.Add(key, context =>
             {
                 var number = ++attempt;
+                if (copied.Checkpoint is { } seed)
+                {
+                    var checkpoint = new CheckpointStore(initialState:
+                        JsonSerializer.SerializeToUtf8Bytes(seed.State, OutputJsonContext.Default.JsonElement),
+                        sequence: seed.Sequence, savedAt: seed.SavedAt);
+                    return workflow.Tasks[key](context.ForTask(key, checkpoint,
+                        new(checked(seed.Attempt + (uint)number - 1), seed.SavedAt)));
+                }
                 if (copied.Outcome == MockOutcome.Timeout)
                     return Task.Delay(Timeout.InfiniteTimeSpan, context.CancellationToken);
                 if (copied.Outcome == MockOutcome.Throw)
@@ -85,6 +101,9 @@ public static class DryRunHost
         var mocked = new WorkflowDefinition(workflow.Name, workflow.Version, workflow.Nodes, handlers.ToImmutable(),
             workflow.Variables, workflow.Metadata, workflow.RunTimeout, workflow.Placement);
         var clock = new DryRunClock();
+        foreach (var mock in specified.Values)
+            if (mock.Checkpoint is { } seed && seed.SavedAt > clock.GetUtcNow())
+                clock.AdvanceTo(seed.SavedAt);
         var result = await new LocalEngine(mocked, spec.Variables, output: TextWriter.Null, timeProvider: clock)
             .RunAsync(cancellationToken).ConfigureAwait(false);
         return new(result.Snapshot, result.Events, result.Attempts.Select(a => new DryRunAttempt(
@@ -92,13 +111,23 @@ public static class DryRunHost
             .ToImmutableArray(), result.Outputs);
     }
 
-    private static void Validate(string key, TaskMock mock)
+    public static void ValidateMock(string key, TaskMock mock)
     {
         if (mock is null || !Enum.IsDefined(mock.Outcome) || !Enum.IsDefined(mock.Category) || mock.FailuresBeforeSuccess < 0 ||
             string.IsNullOrWhiteSpace(mock.ErrorMessage) ||
             (mock.Outputs?.Keys.Any(string.IsNullOrWhiteSpace) ?? false) ||
             (mock.Outputs?.Values.Any(v => v.ValueKind == JsonValueKind.Undefined) ?? false))
             throw new ArgumentException($"Mock task '{key}' contains an invalid outcome, category, count, message or output key.");
+        if ((mock.Outcome == MockOutcome.ExecuteCheckpointed) != (mock.Checkpoint is not null) ||
+            (mock.Checkpoint is not null && mock.Outputs is not null))
+            throw new ArgumentException($"Mock task '{key}' requires an explicit checkpoint execution outcome and seed, without mock outputs.");
+        if (mock.Checkpoint is { } seed)
+        {
+            if (seed.State.ValueKind == JsonValueKind.Undefined || seed.Sequence <= 0 || seed.Attempt < 2 ||
+                seed.SavedAt.Offset != TimeSpan.Zero || seed.SavedAt.UtcTicks % 10 != 0)
+                throw new ArgumentException($"Mock task '{key}' contains an invalid checkpoint seed.");
+            CheckpointProtocol.ValidateState(JsonSerializer.SerializeToUtf8Bytes(seed.State, OutputJsonContext.Default.JsonElement));
+        }
     }
 }
 

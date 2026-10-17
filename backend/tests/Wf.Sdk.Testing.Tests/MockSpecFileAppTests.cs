@@ -13,6 +13,21 @@ public sealed class MockSpecFileAppTests(MockSpecFileAppFixture fixture)
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task Actual_published_file_app_executes_the_explicit_checkpoint_resume_branch()
+    {
+        var at = DateTimeOffset.Parse("2026-10-17T12:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var log = await fixture.Workflow.RunAsync(new MockSpec()
+            .WithVariable("mode", JsonSerializer.SerializeToElement("checkpoint"))
+            .WithCheckpoint("node/work", new(JsonSerializer.SerializeToElement(41), at, 7, 3)), Token);
+        Assert.Equal(0, log.ExitCode);
+        Assert.Equal(42, log.Outputs["node"]["position"].GetInt32());
+        Assert.Equal(3, log.Outputs["node"]["attempt"].GetInt32());
+        Assert.Equal(at, log.Outputs["node"]["resumedFrom"].GetDateTimeOffset());
+        Assert.Equal(at, Assert.Single(log.Attempts).StartedAt);
+        Assert.Empty(fixture.RunDirectories);
+    }
+
+    [Fact]
     public void BuildPublishesOnceThenUsesHashCacheAndTheActualAssemblyName()
     {
         Assert.False(fixture.Workflow.BuildResult.CacheHit);
@@ -285,7 +300,14 @@ public sealed class MockSpecFileAppFixture : IAsyncLifetime
             }
             var workflow = Workflow.Define("harness", "1", w => w.Type("test")
                 .Variables(v => v.String("env", "default").String("mode", "normal"))
-                .Node("node", n => n.Task("work", _ => throw new InvalidOperationException("Original task must never execute."),
+                .Node("node", n => n.Task("work", context =>
+                {
+                    if (context.Var<string>("mode") != "checkpoint" || context.Attempt.ResumedFrom is null)
+                        throw new InvalidOperationException("Original task must never execute.");
+                    context.Outputs["position"] = context.Checkpoint.TryLoad<int>() + 1;
+                    context.Outputs["attempt"] = checked((int)context.Attempt.Number);
+                    context.Outputs["resumedFrom"] = context.Attempt.ResumedFrom.Value.ToString("O");
+                },
                     p => p.Timeout(TimeSpan.FromHours(1)).Retry(2, Backoff.Fixed(TimeSpan.FromMinutes(1))))));
             try
             {

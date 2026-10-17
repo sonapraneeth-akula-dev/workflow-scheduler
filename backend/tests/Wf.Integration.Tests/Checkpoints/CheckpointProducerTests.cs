@@ -11,15 +11,18 @@ using Wf.Agent;
 using Wf.Agent.Hosts;
 using Wf.Agent.Journal;
 using Wf.Agent.Packages;
+using Wf.Agent.Secrets;
 using Wf.Contracts;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Checkpoints;
+using Wf.Contracts.Definition;
 using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Checkpoints;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Sweeper;
 using Wf.Engine.Core;
 using Wf.Engine.Core.Placement;
+using Wf.Engine.Core.StateMachine;
 using Wf.Integration.Tests.Reports;
 using ReportHost = Wf.Integration.Tests.Reports.ReportPublishTests.ReportHost;
 
@@ -28,6 +31,80 @@ namespace Wf.Integration.Tests.Checkpoints;
 public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IClassFixture<ReportPublishDatabase>
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task Actual_SDK_checkpoint_secret_guard_prevents_upload_journal_and_index_but_allows_safe_state(int mode)
+    {
+        var value = "checkpoint-runtime-canary-\"" + Guid.NewGuid().ToString("N");
+        var uploads = 0;
+        var key = RandomNumberGenerator.GetBytes(32);
+        await using var host = await ReportHost.Start(database.DataSource, key: key, configureServices: builder =>
+        {
+            builder.Services.AddSingleton<CheckpointApplier>();
+            builder.Services.AddSingleton(new CheckpointUploadCapabilities(key, TimeProvider.System));
+        }, configure: app =>
+        {
+            app.Use(async (context, next) =>
+            {
+                if (context.Request.Path == CheckpointProtocol.EndpointPath) Interlocked.Increment(ref uploads);
+                await next(context);
+            });
+            app.MapCheckpointUploadEndpoints();
+        });
+        var archive = await ReportPublishTests.Package();
+        host.App.MapGet("/secret-checkpoint-package.zip", () => Microsoft.AspNetCore.Http.Results.Bytes(archive, "application/zip"));
+        var hash = Convert.ToHexStringLower(SHA256.HashData(archive));
+        var id = Guid.NewGuid();
+        await using var agent = new Agent(host, id, new CanarySecretStore(value));
+        await Until(() => Task.FromResult(host.Registry.Find(id) is not null), agent.Work);
+        var attempt = await host.Seed(dispatch: false, task: "checkpointSecret");
+        var command = new Dispatch
+        {
+            Task = new() { RunId = attempt.RunId.ToString("D"), NodeKey = "$post", TaskKey = "checkpointSecret", Attempt = 1 },
+            Version = "1.0.0", Sha256 = hash, PackageUri = new Uri(host.Address, "/secret-checkpoint-package.zip").AbsoluteUri,
+            VariablesJson = ByteString.CopyFromUtf8(JsonSerializer.Serialize(new
+            {
+                amount = mode, credential = new { Name = "secret://local/checkpoint-canary" }
+            })),
+            DeadlineAt = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(2))
+        };
+        using var dispatcher = new Dispatcher(database.DataSource, host.Runs, host.Registry,
+            new PlacementEngine(), TimeProvider.System);
+        var placed = await dispatcher.DispatchAsync(await host.Runs.LoadAsync(attempt.RunId, Token),
+            new(attempt.RunId, "$post", "checkpointSecret", 1, hash, new(new(pool: host.Pool))), command, Token);
+        Assert.Equal(id, placed.Agent!.Id);
+        await Until(async () => TransitionTable.IsTerminal(
+            (await host.Runs.LoadAsync(attempt.RunId, Token)).Snapshot.Tasks[attempt.TaskKey]), agent.Work);
+        var run = await host.Runs.LoadAsync(attempt.RunId, Token);
+        Assert.Equal(mode == 3 ? ExecutionStatus.Succeeded : ExecutionStatus.Failed, run.Snapshot.Tasks[attempt.TaskKey]);
+        Assert.Equal(mode == 3 ? 1 : 0, uploads);
+        Assert.Equal(mode == 3 ? 1L : 0L,
+            await Scalar("SELECT count(*) FROM task_checkpoints WHERE run_id=$1", attempt.RunId));
+        Assert.Equal(1L, await Scalar("SELECT count(*) FROM task_attempts WHERE run_id=$1", attempt.RunId));
+        if (mode != 3)
+        {
+            Assert.Equal(FailureCategory.ValidationError, run.Snapshot.Metrics!.Tasks[attempt.TaskKey].Attempts.Single().FailureCategory);
+            var error = Assert.IsType<string>(await Scalar("SELECT error FROM task_attempts WHERE run_id=$1", attempt.RunId));
+            Assert.Contains("Checkpoint state contains a resolved secret value.", error);
+            Assert.DoesNotContain(value, error);
+            Assert.DoesNotContain(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(value)), error);
+            Assert.False(Directory.Exists(Path.Combine(host.Root, "checkpoints", attempt.RunId.ToString("D"))));
+        }
+        await Until(() => Task.FromResult(agent.Commands.Inflight.Count == 0), agent.Work);
+        Assert.Null(PendingCheckpoint(agent.Outbox));
+        await agent.Stop();
+        foreach (var path in Directory.GetFiles(agent.Journal, "*", SearchOption.AllDirectories))
+        {
+            var text = System.Text.Encoding.UTF8.GetString(await File.ReadAllBytesAsync(path, Token));
+            Assert.DoesNotContain(value, text);
+            Assert.DoesNotContain(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(value)), text);
+        }
+        Assert.Equal(1, agent.Hosts.ProcessStartCount);
+    }
 
     [Fact]
     public async Task Checkpoint_actual_SDK_blob_journal_engine_ack_and_replacement_resume_preserve_one_MiB_and_sequence()
@@ -178,7 +255,7 @@ public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IC
         public string Journal { get; }
         private bool stopped;
 
-        public Agent(ReportHost host, Guid id)
+        public Agent(ReportHost host, Guid id, ISecretStore? secrets = null)
         {
             Journal = Path.Combine(host.Root, "checkpoint-journal-" + id.ToString("N"));
             var options = new AgentOptions([host.GatewayAddress], id.ToString("D"), "checkpoint-" + id.ToString("N"),
@@ -186,7 +263,7 @@ public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IC
             packages = new(Path.Combine(host.Root, "checkpoint-packages-" + id.ToString("N")),
                 NullLogger<PackageCache>.Instance);
             Outbox = new(new ResultJournal(Journal, id.ToString("D")));
-            Hosts = new(NullLogger<TaskHostPool>.Instance, options: options);
+            Hosts = new(NullLogger<TaskHostPool>.Instance, options: options, secretStore: secrets);
             Commands = new(options, packages, Hosts, Outbox, TimeProvider.System, NullLogger<TaskCommands>.Instance);
             connection = new(options, new AgentTelemetry(TimeProvider.System, Commands), Commands, TimeProvider.System,
                 NullLogger<AgentConnection>.Instance, Outbox);
@@ -214,6 +291,7 @@ public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IC
                         packages.Dispose();
                         Outbox.Dispose();
                     }
+
                 }
             }
         }
@@ -222,6 +300,16 @@ public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IC
         {
             await Stop();
             stopping.Dispose();
+        }
+    }
+
+    private sealed class CanarySecretStore(string value) : ISecretStore
+    {
+        public ValueTask<string> ResolveAsync(SecretReference reference, CancellationToken cancellationToken = default)
+        {
+            Assert.Equal("secret://local/checkpoint-canary", reference.Name);
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(value);
         }
     }
 }
