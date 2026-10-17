@@ -154,6 +154,7 @@ public static class MachineEndpoints
                 "Omitted fields and other profiles stay unchanged; empty labels clears labels. Overrides survive agent reconnects. " +
                 "Does not interrupt running attempts or release reservations.");
         CalibrationEndpoints.Map(group);
+        AgentDrainEndpoints.Map(group);
         return endpoints;
     }
 

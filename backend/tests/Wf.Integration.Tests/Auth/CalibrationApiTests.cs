@@ -603,13 +603,15 @@ public sealed partial class AuthorizationMatrixTests
         server.GetPath($"/api/v1/machines/{machine}/calibrate", jwt, HttpMethod.Post, new StringContent(body ??
             """{"profile":{"transport":"http","codec":"json","payloadSizeClass":"small"}}""", Encoding.UTF8, "application/json"));
 
-    private static async Task<WebApplication> StartCalibrationGateway(AgentRegistry registry, CalibrationService calibrations)
+    private static async Task<WebApplication> StartCalibrationGateway(AgentRegistry registry, CalibrationService calibrations,
+        AgentDrainService? drains = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, listen => listen.Protocols = HttpProtocols.Http2));
         builder.Services.AddGrpc();
         builder.Services.AddSingleton(registry);
         builder.Services.AddSingleton(calibrations);
+        if (drains is not null) builder.Services.AddSingleton(drains);
         var app = builder.Build();
         app.MapGrpcService<AgentGatewayService>();
         await app.StartAsync(MachineToken);

@@ -329,7 +329,7 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
     {
         await using var command = new NpgsqlCommand("""
             SELECT o.id,o.payload FROM dispatch_outbox o JOIN agents a ON a.id=o.agent_id
-            WHERE o.agent_id=$1 AND a.session_id=$2 ORDER BY o.id LIMIT 100
+            WHERE o.agent_id=$1 AND a.session_id=$2 AND a.status<>2 ORDER BY o.id LIMIT 100
             """, connection);
         command.Parameters.AddWithValue(session.AgentId);
         command.Parameters.AddWithValue(session.SessionId);

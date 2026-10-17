@@ -369,6 +369,8 @@ public class AgentDatabase : IAsyncLifetime
             migrations = [.. migrations, "0031_machine_metadata_overrides.sql"];
         if (migrations.Contains("0005_agents.sql") && !migrations.Contains("0035_calibration_commands.sql"))
             migrations = [.. migrations, "0035_calibration_commands.sql"];
+        if (migrations.Contains("0005_agents.sql") && !migrations.Contains("0045_agent_drain.sql"))
+            migrations = [.. migrations, "0045_agent_drain.sql"];
         // Current RunStore writes per-attempt outputs, including in fixtures using historical schema subsets.
         if (migrations.Contains("0006_dispatch_outbox.sql") && !migrations.Contains("0027_task_outputs.sql"))
             migrations = [.. migrations, "0027_task_outputs.sql"];

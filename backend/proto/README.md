@@ -26,6 +26,17 @@ results and samples cannot revive old ownership. Legacy task events without an
 epoch are accepted only for ordinary attempts originally assigned epoch 1,
 while that machine still has epoch 1.
 
+Agents advertise `supports_drain_commands`. `Drain` carries a durable UUIDv7,
+deadline and current reservation epoch. The machine remains Draining across
+Hello and heartbeat, and no new dispatch is sent. The agent finishes existing
+work until the deadline, then cancels remaining work and waits for its physical
+process trees to exit. Interrupted cancellations are settled by the engine as
+AgentLost only after journaled `DrainCompleted`, not as author failures.
+Completed task results precede that acknowledgement in the journal. Only the
+current session's exact drain ID and machine epoch may release reservations.
+Expiry or lost connectivity alone never reports Released. Released machines
+remain Draining; maintenance does not automatically re-enable them.
+
 `compatibility.binpb` is the immutable initial v1 descriptor image, generated
 with `buf build backend/proto -o backend/proto/compatibility.binpb`.
 CI runs `buf lint`, format, and `buf breaking` against that baseline and,

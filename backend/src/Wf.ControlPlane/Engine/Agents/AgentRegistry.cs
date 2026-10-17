@@ -62,8 +62,8 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
             await using var command = new NpgsqlCommand("""
                 INSERT INTO agents
                     (id,name,os,arch,cores,ram_mb,max_tasks,labels,pool,status,last_heartbeat_at,agent_version,session_id,slots_used,
-                        supports_calibration_commands)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$11,$12,$13,$14)
+                        supports_calibration_commands,supports_drain_commands)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$11,$12,$13,$14,$15)
                 ON CONFLICT (id) DO UPDATE SET
                     name=EXCLUDED.name,os=EXCLUDED.os,arch=EXCLUDED.arch,cores=EXCLUDED.cores,
                     ram_mb=EXCLUDED.ram_mb,max_tasks=EXCLUDED.max_tasks,
@@ -71,7 +71,8 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
                     status=CASE WHEN agents.status=2 THEN 2 ELSE 0 END,
                     last_heartbeat_at=EXCLUDED.last_heartbeat_at,agent_version=EXCLUDED.agent_version,
                     session_id=EXCLUDED.session_id,slots_used=EXCLUDED.slots_used,cpu_percent=0,ram_used_mb=0,disk_free_mb=0,
-                    supports_calibration_commands=EXCLUDED.supports_calibration_commands
+                    supports_calibration_commands=EXCLUDED.supports_calibration_commands,
+                    supports_drain_commands=EXCLUDED.supports_drain_commands
                 RETURNING status,labels,pool
                 """, connection, transaction);
             command.Parameters.AddWithValue(agent.Id);
@@ -88,6 +89,7 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
             command.Parameters.AddWithValue(agent.SessionId);
             command.Parameters.AddWithValue(agent.SlotsUsed);
             command.Parameters.AddWithValue(hello.SupportsCalibrationCommands);
+            command.Parameters.AddWithValue(hello.SupportsDrainCommands);
             AgentStatus status;
             ImmutableDictionary<string, string> labels;
             string pool;

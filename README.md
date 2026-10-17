@@ -443,6 +443,24 @@ or inventing a rate. Status exposes `Failed` with `Unsupported`, `TimedOut`,
 (false for existing agents). The loopback load executor, Wf.Load, Bond profiles
 and repeated-run stability measurement remain deferred.
 
+Admin `POST /api/v1/machines/{id}/drain` accepts
+`{ "maxDrainSeconds": 300, "reason": "machine maintenance" }` (1..86400 seconds;
+nonblank reason, up to 1024 UTF-8 bytes). `GET` on the same path reports
+`Draining` or `Released`. Repeated requests retain the original deadline.
+Migration `0045_agent_drain.sql` persists the request and capability flag;
+legacy agents without drain support return 409. Existing Admin authorization
+is reused; no new login or logout flow.
+
+Draining immediately excludes the machine from placement and pending dispatch
+delivery, including after reconnects. Existing tasks may finish until the
+deadline; remaining attempts are cancelled, physically stopped, then re-placed
+according to their original retry budget and placement constraints.
+`NoAutoRetry`, named-machine constraints and exhausted budgets still apply.
+Reservations and the Released state require a journaled physical-completion
+acknowledgement from the current session at the exact machine epoch. A deadline
+or disconnected agent alone never frees live capacity. Released means safe for
+maintenance, not Healthy: the machine stays Draining without automatic re-enable.
+
 `/machines` shows that inventory with URL-persisted filters; a machine name opens
 `/machines/<uuid>` for hardware, heartbeat/resource metrics, current reservation
 and the profile capacity table with Admin manual-capacity and label/pool editors.

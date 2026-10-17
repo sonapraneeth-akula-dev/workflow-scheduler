@@ -75,15 +75,15 @@ public sealed class AgentOutbox : IDisposable
             AgentMessage.PayloadOneofCase.TaskCompleted or AgentMessage.PayloadOneofCase.Heartbeat or
             AgentMessage.PayloadOneofCase.ResourceSample or AgentMessage.PayloadOneofCase.ReservationFenced or
             AgentMessage.PayloadOneofCase.CalibrationCompleted or AgentMessage.PayloadOneofCase.CheckpointSaved or
-            AgentMessage.PayloadOneofCase.TaskProgress))
-            throw new ArgumentException("Only task events, heartbeats, calibration results, checkpoints and fence acknowledgements belong in the agent outbox.", nameof(message));
+            AgentMessage.PayloadOneofCase.TaskProgress or AgentMessage.PayloadOneofCase.DrainCompleted))
+            throw new ArgumentException("Only task events, heartbeats, calibration results, checkpoints, drain and fence acknowledgements belong in the agent outbox.", nameof(message));
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
             var copy = message.Clone();
             copy.Sequence = checked(Math.Max(sequence, 1) + 1);
             if ((journal is not null && copy.Heartbeat is null) || copy.CalibrationCompleted is not null ||
-                copy.CheckpointSaved is not null || copy.TaskProgress is not null) ResultJournal.Validate(copy);
+                copy.CheckpointSaved is not null || copy.TaskProgress is not null || copy.DrainCompleted is not null) ResultJournal.Validate(copy);
             Persist(copy.Sequence, leaderEpoch, pending.Values.Append(copy));
             sequence = copy.Sequence;
             // Only the latest heartbeat is useful after a disconnection; task events are never dropped.

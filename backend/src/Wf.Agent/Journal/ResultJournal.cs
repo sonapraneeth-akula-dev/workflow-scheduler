@@ -158,12 +158,17 @@ public sealed class ResultJournal : IDisposable
         if (message.PayloadCase is not (AgentMessage.PayloadOneofCase.TaskStarted or AgentMessage.PayloadOneofCase.TaskCompleted or
             AgentMessage.PayloadOneofCase.ResourceSample or AgentMessage.PayloadOneofCase.ReservationFenced or
             AgentMessage.PayloadOneofCase.CalibrationCompleted or AgentMessage.PayloadOneofCase.CheckpointSaved or
-            AgentMessage.PayloadOneofCase.TaskProgress) ||
+            AgentMessage.PayloadOneofCase.TaskProgress or AgentMessage.PayloadOneofCase.DrainCompleted) ||
             message.CalculateSize() > MaximumRecordBytes)
             throw new InvalidDataException("Journal accepts only bounded task events.");
         if (message.CalibrationCompleted is { } calibration)
         {
             _ = Wf.Contracts.CalibrationProtocol.Validate(calibration);
+            return;
+        }
+        if (message.DrainCompleted is { } drained)
+        {
+            _ = Wf.Contracts.DrainProtocol.Validate(drained);
             return;
         }
         if (message.CheckpointSaved is { } checkpoint)

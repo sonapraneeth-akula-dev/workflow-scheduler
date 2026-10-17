@@ -27,7 +27,7 @@ public sealed partial class AgentTelemetry(TimeProvider timeProvider, TaskComman
             Arch = RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant(),
             Cores = (uint)Environment.ProcessorCount, RamMb = total / (1024 * 1024),
             Version = typeof(AgentTelemetry).Assembly.GetName().Version!.ToString(),
-            ProtocolVersion = 1, SupportsCalibrationCommands = true,
+            ProtocolVersion = 1, SupportsCalibrationCommands = true, SupportsDrainCommands = true,
             Labels = { options.Labels.ToDictionary() }, Inflight = { tasks?.Inflight ?? [] }
         };
     }

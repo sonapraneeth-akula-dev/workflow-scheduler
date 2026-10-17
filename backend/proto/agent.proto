@@ -25,6 +25,7 @@ message AgentMessage {
     CalibrationCompleted calibration_completed = 17;
     CheckpointSaved checkpoint_saved = 18;
     TaskProgress task_progress = 19;
+    DrainCompleted drain_completed = 20;
   }
 }
 
@@ -57,6 +58,7 @@ message Hello {
   uint32 protocol_version = 11;
   string pool = 12;
   bool supports_calibration_commands = 13;
+  bool supports_drain_commands = 14;
 }
 
 message Calibrate {
@@ -151,6 +153,14 @@ message Cancel {
 message Drain {
   google.protobuf.Timestamp deadline_at = 1;
   string reason = 2;
+  string id = 3;
+  uint64 reservation_epoch = 4;
+}
+
+// All attempts and task-host process trees have physically exited.
+message DrainCompleted {
+  string id = 1;
+  uint64 reservation_epoch = 2;
 }
 
 // Agent must durably advance the fence, cancel and drain all older work before replying.

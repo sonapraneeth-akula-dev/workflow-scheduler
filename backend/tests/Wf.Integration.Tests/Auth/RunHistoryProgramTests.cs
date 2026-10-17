@@ -191,6 +191,14 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
                     .GetProperty("responses").GetProperty("200").GetProperty("content").GetProperty("application/json")
                     .GetProperty("schema").GetProperty("$ref").GetString());
             Assert.False(internalPaths.TryGetProperty("/api/v1/machines/{id}/calibrate", out _));
+            var drain = paths.GetProperty("/api/v1/machines/{id}/drain");
+            Assert.Equal("#/components/schemas/AgentDrainRequest", drain.GetProperty("post").GetProperty("requestBody")
+                .GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
+            Assert.Equal("#/components/schemas/AgentDrainRecord", drain.GetProperty("get").GetProperty("responses")
+                .GetProperty("200").GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
+            Assert.Equal(["maxDrainSeconds", "reason"], schemas.GetProperty("AgentDrainRequest").GetProperty("required")
+                .EnumerateArray().Select(property => property.GetString()).Order());
+            Assert.False(internalPaths.TryGetProperty("/api/v1/machines/{id}/drain", out _));
             Assert.True(schemas.TryGetProperty("RunHistoryPage", out _));
             Assert.Equal("#/components/schemas/ReservationQueueResponse",
                 paths.GetProperty("/api/v1/runs/{id}/reservation-queue").GetProperty("get")

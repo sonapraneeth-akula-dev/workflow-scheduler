@@ -19,6 +19,10 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
     private readonly SemaphoreSlim fenceSerial = new(1, 1);
     private bool disposed;
     private bool fencePending;
+    private Drain? drain;
+    private Task drainWork = Task.CompletedTask;
+    private ulong drainedEpoch;
+    private readonly CancellationTokenSource drainStop = new();
     private readonly TaskCompletionSource failure = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public IReadOnlyList<AttemptRef> Inflight => active.Values.Select(item => item.Dispatch.Task.Clone()).ToArray();
@@ -42,8 +46,73 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
             case ControlMessage.PayloadOneofCase.Calibrate:
                 Calibrate(message.Calibrate);
                 break;
+            case ControlMessage.PayloadOneofCase.Drain:
+                BeginDrain(message.Drain, cancellationToken);
+                break;
             default:
                 throw new NotSupportedException($"Agent command '{message.PayloadCase}' is not implemented.");
+        }
+    }
+
+    private void BeginDrain(Drain command, CancellationToken stoppingToken)
+    {
+        _ = Wf.Contracts.DrainProtocol.Validate(command);
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (command.ReservationEpoch < outbox.ReservationEpoch)
+            {
+                logger.LogWarning("Rejected stale drain {Id} at epoch {Epoch}.", command.Id, command.ReservationEpoch);
+                return;
+            }
+            if (drain is not null && (drain.Id != command.Id || !drain.DeadlineAt.Equals(command.DeadlineAt)))
+                throw new InvalidDataException("An active drain cannot change identity or deadline.");
+            outbox.ObserveReservationEpoch(command.ReservationEpoch);
+            drain ??= command.Clone();
+            if (!drainWork.IsCompleted || drainedEpoch >= command.ReservationEpoch) return;
+            var executions = active.Values.ToArray();
+            drainWork = Task.Run(async () =>
+            {
+                using var stop = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, drainStop.Token);
+                try
+                {
+                    var work = Task.WhenAll(executions.Select(execution => execution.Work));
+                    using var timerStop = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
+                    var remaining = command.DeadlineAt.ToDateTimeOffset() - timeProvider.GetUtcNow();
+                    var deadline = Task.Delay(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero, timeProvider, timerStop.Token);
+                    if (await Task.WhenAny(work, deadline) != work)
+                    {
+                        stop.Token.ThrowIfCancellationRequested();
+                        lock (gate)
+                            foreach (var execution in executions)
+                                if (active.Values.Contains(execution))
+                                {
+                                    execution.DrainInterrupted = true;
+                                    execution.Cancellation.Cancel();
+                                }
+                    }
+                    await timerStop.CancelAsync();
+                    await work.WaitAsync(stop.Token);
+                    await fenceSerial.WaitAsync(stop.Token);
+                    try
+                    {
+                        await hosts.FenceAsync(stop.Token);
+                        lock (gate)
+                        {
+                            var epoch = outbox.ReservationEpoch;
+                            outbox.Enqueue(new AgentMessage { DrainCompleted = new() { Id = command.Id, ReservationEpoch = epoch } });
+                            drainedEpoch = epoch;
+                        }
+                    }
+                    finally { fenceSerial.Release(); }
+                }
+                catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+                catch (Exception error)
+                {
+                    failure.TrySetException(error);
+                    throw;
+                }
+            }, CancellationToken.None);
         }
     }
 
@@ -134,6 +203,12 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
             if (fencePending)
                 throw new InvalidDataException("Dispatch cannot start until physical reservation fencing completes.");
             if (accepted.Contains(key) || outbox.ContainsResult(dispatch.Task)) return;
+            if (drain is not null)
+            {
+                logger.LogWarning("Rejected new task {RunId}/{NodeKey}/{TaskKey}/{Attempt}: machine is draining.",
+                    key.RunId, key.NodeKey, key.TaskKey, key.Attempt);
+                return;
+            }
             if (active.Count >= options.MaxTasks)
                 throw new InvalidDataException("Dispatch exceeds the agent's configured task capacity.");
             var execution = new Execution(dispatch.Clone(), CancellationTokenSource.CreateLinkedTokenSource(stoppingToken));
@@ -201,6 +276,7 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
                 publishResources: outbox.Enqueue, publishCheckpoint: outbox.PublishCheckpointAsync,
                 publishProgress: outbox.PublishProgress, journalResult: completion =>
                 {
+                    if (execution.DrainInterrupted && completion.Outcome == TaskOutcome.Cancelled) return;
                     publishing = true;
                     completion.ReservationEpoch = dispatch.ReservationEpoch;
                     outbox.Enqueue(new AgentMessage { TaskCompleted = completion });
@@ -219,7 +295,7 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
             result = Failure(TaskOutcome.Failed, "PlatformError", exception.Message, false);
         }
         if (capture is not null) await capture.CompleteAsync();
-        if (!persisted)
+        if (!persisted && !(execution.DrainInterrupted && result!.Outcome == TaskOutcome.Cancelled))
         {
             result!.ReservationEpoch = dispatch.ReservationEpoch;
             outbox.Enqueue(new AgentMessage { TaskCompleted = result });
@@ -254,10 +330,12 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
         lock (gate)
         {
             disposed = true;
+            drainStop.Cancel();
             executions = active.Values.ToArray();
             foreach (var execution in executions) execution.Cancellation.Cancel();
         }
         await Task.WhenAll(executions.Select(execution => execution.Work));
+        await drainWork;
     }
 
     private sealed record AttemptKey(Guid RunId, string NodeKey, string TaskKey, uint Attempt);
@@ -266,5 +344,6 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
         public Dispatch Dispatch { get; } = dispatch;
         public CancellationTokenSource Cancellation { get; } = cancellation;
         public Task Work { get; set; } = Task.CompletedTask;
+        public volatile bool DrainInterrupted;
     }
 }

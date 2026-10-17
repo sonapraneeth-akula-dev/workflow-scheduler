@@ -251,10 +251,10 @@ public sealed partial class HostedRunExecutionTests(HostedExecutionDatabase data
         }
 
         public static async Task<Runtime> Create(HostedExecutionDatabase database, Action<WorkflowBuilder> configure,
-            RunPlacement? placement = null, int maxTasks = 4, string? agentName = null, Guid? agentId = null)
+            RunPlacement? placement = null, int maxTasks = 4, string? agentName = null, Guid? agentId = null, string? teamName = null)
         {
             var runtime = new Runtime(database.DataSource);
-            var team = "hosted-" + Guid.NewGuid().ToString("N");
+            var team = teamName ?? "hosted-" + Guid.NewGuid().ToString("N");
             var definition = Wf.Sdk.Workflow.Define(team + "/test/workflow", "1.0.0", w =>
             {
                 w.Type("test").RunsOn(Machines.Pool(team));

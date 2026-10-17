@@ -16,7 +16,8 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
     Wf.ControlPlane.Artifacts.ArtifactUploadCapabilities? artifactUploads = null, ResourceSampleSink? resources = null,
     ReservationLeaseService? reservations = null, CalibrationService? calibrations = null,
     Wf.ControlPlane.Engine.Checkpoints.CheckpointApplier? checkpoints = null,
-    Wf.ControlPlane.Engine.Checkpoints.CheckpointUploadCapabilities? checkpointUploads = null)
+    Wf.ControlPlane.Engine.Checkpoints.CheckpointUploadCapabilities? checkpointUploads = null,
+    AgentDrainService? drains = null)
     : AgentGateway.AgentGatewayBase
 {
     public override async Task Connect(IAsyncStreamReader<AgentMessage> requestStream,
@@ -79,6 +80,11 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                         }
                         switch (message.PayloadCase)
                         {
+                            case AgentMessage.PayloadOneofCase.DrainCompleted:
+                                if (drains is null)
+                                    throw new RpcException(new Status(StatusCode.Unimplemented, "Agent drain is not configured."));
+                                await drains.AcceptAsync(session, message.DrainCompleted, token);
+                                break;
                             case AgentMessage.PayloadOneofCase.CheckpointSaved:
                                 if (checkpoints is null)
                                     throw new RpcException(new Status(StatusCode.Unimplemented, "Checkpoint persistence is not configured."));
@@ -133,6 +139,7 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                 var sentCancels = new HashSet<string>(StringComparer.Ordinal);
                 var sentFences = new HashSet<ulong>();
                 var sentCalibrations = new HashSet<string>(StringComparer.Ordinal);
+                var sentDrains = new HashSet<string>(StringComparer.Ordinal);
                 try
                 {
                     while (!token.IsCancellationRequested)
@@ -161,6 +168,13 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                                         Sequence = checked((ulong)Interlocked.Increment(ref sequence)),
                                         LeaderEpoch = epoch, Calibrate = calibration
                                     }, token);
+                        if (drains is not null && await drains.PendingAsync(session, token) is { } drain &&
+                            sentDrains.Add($"{drain.Id}/{drain.ReservationEpoch}"))
+                            await responseStream.WriteAsync(new ControlMessage
+                            {
+                                Sequence = checked((ulong)Interlocked.Increment(ref sequence)),
+                                LeaderEpoch = epoch, Drain = drain
+                            }, token);
                         if (runs is not null)
                         {
                             var pending = await runs.PendingControlsAsync(session, token);

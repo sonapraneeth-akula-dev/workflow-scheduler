@@ -559,6 +559,7 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
             builder.Services.AddSingleton<Wf.ControlPlane.Engine.Agents.AgentRegistry>();
             builder.Services.AddSingleton<RunStore>();
             builder.Services.AddSingleton<Wf.ControlPlane.Engine.Agents.CalibrationService>();
+            builder.Services.AddSingleton<Wf.ControlPlane.Engine.Agents.AgentDrainService>();
             builder.Services.AddTeamAuthorization();
             builder.Services.ConfigureHttpJsonOptions(options =>
             {

@@ -74,6 +74,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, ReservationQueueJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Machines.MachineJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Machines.CalibrationJsonContext.Default);
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Machines.AgentDrainJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunHistoryJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, AuditJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Admin.RetentionJson.Default);
@@ -105,6 +106,7 @@ if (engineEnabled) builder.Services.AddHostedService<EngineShutdownService>();
 builder.Services.AddSingleton<AgentRegistry>();
 builder.Services.AddSingleton<RunStore>();
 builder.Services.AddSingleton<CalibrationService>();
+builder.Services.AddSingleton<AgentDrainService>();
 builder.Services.AddSingleton<CommandInbox>();
 builder.Services.AddSingleton<RunRecovery>();
 if (engineEnabled)
