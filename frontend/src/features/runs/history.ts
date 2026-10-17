@@ -43,7 +43,7 @@ const rowSchema = z.object({
   startedAt: instantSchema.nullable(),
   endedAt: instantSchema.nullable(),
   durationMs: z.number().finite().nonnegative().nullable(),
-  trigger: z.enum(["Manual", "Schedule", "CatchUp"]).nullable(),
+  trigger: z.enum(["Manual", "Schedule", "CatchUp", "Rerun"]).nullable(),
   metadata: z
     .object({ type: z.string().min(1), values: metadataValuesSchema })
     .nullable(),

@@ -7,6 +7,8 @@ using Wf.Contracts.Runs;
 
 namespace Wf.ControlPlane.Api;
 
+internal sealed record IdempotentRunRequest(Guid Actor, JsonElement Request);
+
 public sealed class IdempotencyFilter(NpgsqlDataSource source, TimeProvider time) : IEndpointFilter
 {
     public static readonly TimeSpan Retention = TimeSpan.FromHours(24);
@@ -19,12 +21,17 @@ public sealed class IdempotencyFilter(NpgsqlDataSource source, TimeProvider time
             key.Any(character => character is < '!' or > '~'))
             return Results.Problem(statusCode: 400, title: "Invalid Idempotency-Key",
                 detail: "Supply one key of 1 to 200 visible ASCII characters without whitespace.");
-        var authorized = context.Features.Get<AuthorizedRunRequest>()
-            ?? throw new InvalidOperationException("Idempotency requires an authorized run request.");
+        var authorized = context.Features.Get<IdempotentRunRequest>();
+        if (authorized is null)
+        {
+            var trigger = context.Features.Get<AuthorizedRunRequest>()
+                ?? throw new InvalidOperationException("Idempotency requires an authorized run request.");
+            authorized = new(trigger.Actor, trigger.IdempotencyRequest ??
+                JsonSerializer.SerializeToElement(trigger.Request, RunJsonContext.Default.TriggerRunRequest));
+        }
         var route = context.Request.Method + " " +
             (context.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText;
-        var fingerprint = Fingerprint(authorized.IdempotencyRequest ??
-            JsonSerializer.SerializeToElement(authorized.Request, RunJsonContext.Default.TriggerRunRequest));
+        var fingerprint = Fingerprint(authorized.Request);
         var now = time.GetUtcNow();
         var token = context.RequestAborted;
         await using var connection = await source.OpenConnectionAsync(token);

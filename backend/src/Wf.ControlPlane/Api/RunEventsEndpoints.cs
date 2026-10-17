@@ -22,11 +22,6 @@ public static class RunEventsEndpoints
     {
         RespectRequiredConstructorParameters = true
     });
-    private static readonly RecoveryJson TriggerJson = new(new JsonSerializerOptions(RecoveryJson.Default.Options)
-    {
-        RespectRequiredConstructorParameters = true
-    });
-
     public static IEndpointRouteBuilder MapRunEventsEndpoints(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapGet("/api/v1/runs/{id}/events", Events).RequireAuthorization()
@@ -207,9 +202,7 @@ public static class RunEventsEndpoints
         command.Parameters.AddWithValue(run);
         await using var reader = await command.ExecuteReaderAsync(token);
         if (!await reader.ReadAsync(token)) return null;
-        var trigger = JsonSerializer.Deserialize(reader.GetString(0), TriggerJson.TriggerRunCommand)
-            ?? throw new InvalidDataException();
-        CommandInbox.Validate(trigger);
+        var trigger = CommandInbox.ReadInitial(reader.GetString(0));
         if (trigger.InitialState.RunId != run || trigger.DeadlineAt <= reader.GetFieldValue<DateTimeOffset>(1) ||
             !WorkflowIdentity.TryGetTypeScope(trigger.WorkflowId, out _))
             throw new InvalidDataException();

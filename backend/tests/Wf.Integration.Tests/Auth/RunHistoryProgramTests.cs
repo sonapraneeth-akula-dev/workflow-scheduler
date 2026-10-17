@@ -66,6 +66,18 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             Assert.True(paths.GetProperty("/api/v1/runs/history").TryGetProperty("get", out _));
             Assert.True(paths.GetProperty("/api/v1/series/{id}/history").TryGetProperty("get", out _));
             Assert.True(paths.GetProperty("/api/v1/workflows/{team}/{type}/{workflow}/history").TryGetProperty("get", out _));
+            var rerun = paths.GetProperty("/api/v1/runs/{id}/rerun").GetProperty("post");
+            Assert.Equal("#/components/schemas/RerunRunRequest", rerun.GetProperty("requestBody")
+                .GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
+            Assert.Equal("#/components/schemas/TriggerRunResponse", rerun.GetProperty("responses").GetProperty("202")
+                .GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
+            Assert.True(rerun.GetProperty("responses").TryGetProperty("409", out _));
+            Assert.Contains(rerun.GetProperty("parameters").EnumerateArray(), parameter =>
+                parameter.GetProperty("name").GetString() == "Idempotency-Key");
+            Assert.Contains(rerun.GetProperty("parameters").EnumerateArray(), parameter =>
+                parameter.GetProperty("name").GetString() == "id" &&
+                parameter.GetProperty("in").GetString() == "path" &&
+                parameter.GetProperty("required").GetBoolean());
             var activation = paths.GetProperty("/api/v1/workflows/{team}/{type}/{workflow}/versions/{version}/activate")
                 .GetProperty("post");
             Assert.False(activation.TryGetProperty("requestBody", out _));

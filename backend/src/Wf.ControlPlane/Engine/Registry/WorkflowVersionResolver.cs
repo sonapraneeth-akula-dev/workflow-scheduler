@@ -19,7 +19,13 @@ public static class WorkflowVersionResolver
         Guid? version, CancellationToken cancellationToken)
     {
         await using var connection = await source.OpenConnectionAsync(cancellationToken);
-        return await ReadAsync(workflowId, version?.ToString("D"), version.HasValue, version.GetValueOrDefault(),
+        return await ResolveAsync(connection, workflowId, version, cancellationToken);
+    }
+
+    internal static Task<SelectedWorkflowVersion> ResolveAsync(NpgsqlConnection connection, string workflowId,
+        Guid? version, CancellationToken cancellationToken)
+    {
+        return ReadAsync(workflowId, version?.ToString("D"), version.HasValue, version.GetValueOrDefault(),
             connection, cancellationToken, strict: true);
     }
 

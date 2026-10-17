@@ -6,6 +6,7 @@ it.each([
   ["Manual", "Manual"],
   ["Schedule", "Scheduled"],
   ["CatchUp", "Catch-up"],
+  ["Rerun", "Re-run"],
 ] as const)(
   "labels the %s trigger without changing its outcome",
   (trigger, label) => {

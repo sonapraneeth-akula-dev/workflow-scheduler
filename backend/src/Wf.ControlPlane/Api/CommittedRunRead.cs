@@ -43,9 +43,7 @@ internal static class CommittedRunRead
         command.Parameters.AddWithValue(id);
         await using var reader = await command.ExecuteReaderAsync(token);
         if (!await reader.ReadAsync(token)) throw new InvalidDataException();
-        var trigger = JsonSerializer.Deserialize(reader.GetString(0), RecoveryJson.Default.TriggerRunCommand)
-            ?? throw new InvalidDataException();
-        CommandInbox.Validate(trigger);
+        var trigger = CommandInbox.ReadInitial(reader.GetString(0));
         var created = reader.GetFieldValue<DateTimeOffset>(1);
         if (trigger.InitialState.RunId != id || trigger.DeadlineAt <= created ||
             !WorkflowIdentity.TryGetTypeScope(trigger.WorkflowId, out _))

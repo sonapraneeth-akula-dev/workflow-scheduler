@@ -35,7 +35,8 @@ public sealed class MigratorTests(MigrationDatabase database) : IClassFixture<Mi
         await using var original = scope.DataSource.CreateCommand("SELECT xmin::text FROM agents WHERE id=$1");
         original.Parameters.AddWithValue(id);
         var xmin = await original.ExecuteScalarAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(["0031_machine_metadata_overrides.sql"], Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance));
+        Assert.Equal(scripts.Where(script => string.CompareOrdinal(script.Name, "0031") >= 0).Select(script => script.Name),
+            Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance));
         Assert.Equal(xmin, await original.ExecuteScalarAsync(TestContext.Current.CancellationToken));
         await using var query = scope.DataSource.CreateCommand(
             "SELECT labels_override IS NULL,pool_override IS NULL,pool,cardinality(labels) FROM agents WHERE id=$1");

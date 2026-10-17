@@ -25,6 +25,7 @@ public static class RunsEndpoints
     public static IEndpointRouteBuilder MapRunsEndpoints(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapRunAbortEndpoint();
+        endpoints.MapRerunEndpoint();
         endpoints.MapTaskOutputsEndpoints();
         endpoints.MapReservationQueueEndpoints();
         endpoints.MapPost("/api/v1/runs", Trigger).RequireAuthorization()

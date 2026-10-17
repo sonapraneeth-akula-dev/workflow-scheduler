@@ -110,14 +110,17 @@ public sealed class RunRecovery(NpgsqlDataSource dataSource, RunStore runs, Leas
             }
             if (kind == 0)
             {
-                var trigger = JsonSerializer.Deserialize(payload, RecoveryJson.Default.TriggerRunCommand)
-                    ?? throw new InvalidDataException($"Trigger command '{id}' has no payload.");
-                CommandInbox.Validate(trigger);
+                var trigger = CommandInbox.ReadInitial(payload);
                 if (trigger.InitialState.RunId != runId || trigger.DeadlineAt <= createdAt)
                     throw new InvalidDataException($"Trigger command '{id}' has a mismatched run or invalid deadline.");
-                var run = RunState.Restore(trigger.InitialState, [], message => logger.LogWarning("{RunStateError}", message));
-                await RunStore.CreateAsync(connection, run, trigger.WorkflowId, trigger.VersionId,
-                    trigger.DeadlineAt, createdAt, createdBy, cancellationToken, trigger.SeriesId);
+                if (trigger.ParentRunId is not null)
+                    await RerunHandler.ApplyAsync(connection, trigger, createdAt, createdBy, cancellationToken);
+                else
+                {
+                    var run = RunState.Restore(trigger.InitialState, [], message => logger.LogWarning("{RunStateError}", message));
+                    await RunStore.CreateAsync(connection, run, trigger.WorkflowId, trigger.VersionId,
+                        trigger.DeadlineAt, createdAt, createdBy, cancellationToken, trigger.SeriesId);
+                }
             }
             else if (kind == 1)
             {

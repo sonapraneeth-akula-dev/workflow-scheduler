@@ -1,16 +1,23 @@
+using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Npgsql;
 using Wf.Contracts;
 using Wf.Engine.Core;
+using Wf.Engine.Core.Rerun;
 
 namespace Wf.ControlPlane.Engine.Recovery;
 
 public sealed record TriggerRunCommand(RunSnapshot InitialState, string WorkflowId, Guid VersionId, DateTimeOffset DeadlineAt,
-    Guid? SeriesId = null);
+    Guid? SeriesId = null, Guid? ParentRunId = null, ImmutableDictionary<string, ReusedNode>? ReusedNodes = null);
 
 public sealed class CommandInbox(NpgsqlDataSource dataSource, TimeProvider time)
 {
+    private static readonly RecoveryJson StrictJson = new(new(RecoveryJson.Default.Options)
+    {
+        RespectRequiredConstructorParameters = true, RespectNullableAnnotations = true
+    });
+
     public Task<Guid> TriggerAsync(TriggerRunCommand command, string createdBy, CancellationToken cancellationToken = default)
         => TriggerAsync(command, createdBy, null, cancellationToken);
 
@@ -33,7 +40,25 @@ public sealed class CommandInbox(NpgsqlDataSource dataSource, TimeProvider time)
             record.By, cancellationToken);
     }
 
-    internal static void Validate(TriggerRunCommand command)
+    internal Task<Guid> RerunAsync(TriggerRunCommand command, string createdBy, NpgsqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        Validate(command, rerun: true);
+        if (command.DeadlineAt <= time.GetUtcNow())
+            throw new ArgumentException("A rerun requires a future deadline.", nameof(command));
+        return InsertAsync(command.InitialState.RunId, 0,
+            JsonSerializer.Serialize(command, RecoveryJson.Default.TriggerRunCommand), createdBy, cancellationToken, transaction);
+    }
+
+    internal static TriggerRunCommand ReadInitial(string payload)
+    {
+        var command = JsonSerializer.Deserialize(payload, StrictJson.TriggerRunCommand)
+            ?? throw new InvalidDataException("The initial run command is null.");
+        Validate(command, rerun: command.ParentRunId is not null);
+        return command;
+    }
+
+    internal static void Validate(TriggerRunCommand command, bool rerun = false)
     {
         ArgumentNullException.ThrowIfNull(command);
         ArgumentNullException.ThrowIfNull(command.InitialState);
@@ -41,10 +66,27 @@ public sealed class CommandInbox(NpgsqlDataSource dataSource, TimeProvider time)
         var snapshot = command.InitialState;
         _ = RunState.Restore(snapshot, [], _ => { });
         if (snapshot.Status != RunStatus.Queued || snapshot.LastSequence != 0 || snapshot.Abort is not null ||
-            snapshot.EndedAt is not null || snapshot.Nodes.Values.Any(state => state != ExecutionStatus.Pending) ||
-            snapshot.Tasks.Values.Any(state => state != ExecutionStatus.Pending) || command.VersionId == Guid.Empty ||
+            snapshot.EndedAt is not null || snapshot.AbortTargets is { Length: > 0 } ||
+            snapshot.Nodes.Values.Any(state => state != ExecutionStatus.Pending && !(rerun && state == ExecutionStatus.Reused)) ||
+            snapshot.Tasks.Values.Any(state => state != ExecutionStatus.Pending && !(rerun && state == ExecutionStatus.Reused)) ||
+            command.VersionId == Guid.Empty ||
             command.DeadlineAt.Offset != TimeSpan.Zero || command.SeriesId == Guid.Empty)
             throw new ArgumentException("A trigger requires an initial queued snapshot, version and UTC deadline.", nameof(command));
+        if (!rerun)
+        {
+            if (command.ParentRunId is not null || command.ReusedNodes is not null)
+                throw new ArgumentException("A trigger cannot carry rerun provenance.", nameof(command));
+            return;
+        }
+        if (command.ParentRunId is not { Version: 7 } parent || parent == snapshot.RunId ||
+            command.ReusedNodes is not { } reused ||
+            snapshot.Nodes.Count(pair => pair.Value == ExecutionStatus.Reused) != reused.Count ||
+            reused.Any(pair => pair.Value is null || pair.Value.ReusedFromRunId != parent ||
+                pair.Value.Outputs.ValueKind != JsonValueKind.Object ||
+                snapshot.Nodes.GetValueOrDefault(pair.Key) != ExecutionStatus.Reused) ||
+            snapshot.Tasks.Any(pair => pair.Key.IndexOf('/') <= 0 ||
+                !snapshot.Nodes.TryGetValue(pair.Key[..pair.Key.IndexOf('/')], out var node) || node != pair.Value))
+            throw new ArgumentException("A rerun requires matching parent and reused-node provenance.", nameof(command));
     }
 
     private async Task<Guid> InsertAsync(Guid runId, short kind, string payload, string createdBy, CancellationToken cancellationToken,
