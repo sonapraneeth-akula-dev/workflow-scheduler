@@ -3,6 +3,7 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Wf.Sdk.Tests" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Grpc.AspNetCore" />
     <ProjectReference Include="..\Wf.Contracts\Wf.Contracts.csproj" />

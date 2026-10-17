@@ -300,7 +300,7 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
                 reports: reports, artifacts: artifacts, secrets: secrets, checkpoint: checkpoint,
                 attempt: new(dispatch.Task.Attempt, dispatch.Checkpoint?.Reference.SavedAt.ToDateTimeOffset()),
                 abort: dispatch.AbortJson.IsEmpty ? null : JsonSerializer.Deserialize(dispatch.AbortJson.Span,
-                    AbortRecordJsonContext.Default.AbortRecord));
+                    AbortRecordJsonContext.Default.AbortRecord), runId: Guid.Parse(dispatch.Task.RunId));
             await new TaskRegistry(workflow).ExecuteAsync($"{node.Key}/{dispatch.Task.TaskKey}", taskContext);
             linked.Token.ThrowIfCancellationRequested();
             result.Outcome = TaskOutcome.Succeeded;

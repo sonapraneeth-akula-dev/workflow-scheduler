@@ -16,7 +16,7 @@ if (args.Length > 0 && args[0] == "--physical-empty-argument-fixture")
     return args.Length > 1 && args[1] == "" ? await PhysicalLifetimeFixture.Create().RunAsync(args[2..]) : 99;
 
 var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test")
-    .Variables(v => v.Int("amount", 10).Secret("credential").String("checkpointMarker", ""))
+    .Variables(v => v.Int("amount", 10).Secret("credential").String("checkpointMarker", "").String("remoteUrl", ""))
     .Node("source", n => n.Task("noop", ctx => ctx.Outputs["value"] = 7))
     .Node("work", n => n.DependsOn("source").Input("source", "value")
         .Task("echo", ctx =>
@@ -155,6 +155,11 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
         ctx.Outputs["sourceKey"] = ctx.TaskKey;
         await ctx.Reports.PublishAsync("text", "Post summary",
             System.Text.Encoding.UTF8.GetBytes("Published by " + ctx.TaskKey), ctx.CancellationToken, ["post", "review"]);
+    }).Task("remoteOperation", async ctx =>
+    {
+        await Tasks.HttpOperation(ctx.Var<string>("remoteUrl"),
+            new("state", TimeSpan.FromHours(1), resultField: "value", errorField: "error"),
+            deduplication: new("Idempotency-Key", TimeSpan.FromHours(1))).ExecuteAsync(ctx);
     }).Task("checkpoint", async ctx =>
     {
         var state = ctx.Checkpoint.TryLoad<string>();

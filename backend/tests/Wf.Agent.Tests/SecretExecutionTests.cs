@@ -144,7 +144,7 @@ public sealed class SecretExecutionTests : IDisposable
         var operation = await hosts.ExecuteAsync(Package(), Dispatch("secretOperation"), cancellationToken: Token);
         Assert.Equal("secret://local/task-token", Assert.Single(store.Reads));
         Assert.Equal("ValidationError", operation.Error.Category);
-        Assert.Contains("HttpOperationRuntimeUnsupported", operation.Error.Message);
+        Assert.Contains("RemoteOperationRequiresCheckpoint", operation.Error.Message);
         Assert.True(operation.Error.NonRetryable);
         var dispatch = Dispatch("outputs");
         dispatch.SecretRefs.Add("secret://local/explicit");

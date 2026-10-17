@@ -8,7 +8,7 @@ namespace Wf.Sdk;
 
 /// <summary>
 /// Opt-in POST/status operation, attached directly through NodeBuilder.Task or StageBuilder.Task.
-/// Authoring and manifest support only: execution is unavailable until the durable remote runner exists.
+/// Requires a durable checkpoint publisher and a logical run/task identity before execution.
 /// </summary>
 public sealed class HttpOperationTask
 {
@@ -27,18 +27,8 @@ public sealed class HttpOperationTask
         ContentType = contentType;
     }
 
-    public Task ExecuteAsync(TaskContext context)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        context.CancellationToken.ThrowIfCancellationRequested();
-        throw new HttpOperationRuntimeUnsupportedException();
-    }
+    public Task ExecuteAsync(TaskContext context) => RemoteOperationRunner.ExecuteAsync(this, context);
 }
-
-/// <summary>Stable, nonretryable classifier until the durable remote-operation runner is implemented.</summary>
-public sealed class HttpOperationRuntimeUnsupportedException()
-    : TaskFailureException("HttpOperationRuntimeUnsupported: durable HTTP operation execution is not implemented.",
-        retryable: false, category: FailureCategory.ValidationError);
 
 public static partial class Tasks
 {

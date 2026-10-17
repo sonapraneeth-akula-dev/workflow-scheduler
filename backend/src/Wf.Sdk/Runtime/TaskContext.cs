@@ -16,6 +16,7 @@ public sealed class TaskContext
     public CancellationToken CancellationToken { get; }
     public NodeOutputs Outputs { get; }
     public string? TaskKey { get; }
+    public Guid RunId { get; }
     public Action<string> Logger { get; }
     public AbortRecord? Abort { get; }
     public CheckpointStore Checkpoint { get; }
@@ -28,7 +29,7 @@ public sealed class TaskContext
         IReadOnlyDictionary<string, NodeOutputs>? inputs = null, IEnumerable<InputBinding>? declaredInputs = null,
         Action<string>? logger = null, IReports? reports = null, IArtifacts? artifacts = null, string? taskKey = null,
         AbortRecord? abort = null, IReadOnlyDictionary<string, string>? secrets = null,
-        CheckpointStore? checkpoint = null, TaskAttempt? attempt = null)
+        CheckpointStore? checkpoint = null, TaskAttempt? attempt = null, Guid runId = default)
     {
         CancellationToken = cancellationToken;
         Outputs = outputs ?? new("task");
@@ -41,6 +42,7 @@ public sealed class TaskContext
         this.reports = reports;
         this.artifacts = artifacts;
         TaskKey = taskKey;
+        RunId = runId;
         Abort = abort;
         Checkpoint = checkpoint ?? new();
         Attempt = attempt ?? new(1);
@@ -53,7 +55,7 @@ public sealed class TaskContext
         new(CancellationToken, variables, Outputs, inputs,
         declaredInputs, Logger, reports is ReportPublisher publisher ? publisher.ForSource(key) : reports,
         artifacts is ArtifactPublisher artifactPublisher ? artifactPublisher.ForSource(key) : artifacts, key, Abort, secrets,
-        checkpoint ?? Checkpoint, attempt ?? Attempt);
+        checkpoint ?? Checkpoint, attempt ?? Attempt, RunId);
 
     /// <summary>Read an agent-resolved reference for this attempt; never writes the value into variables or the manifest.</summary>
     public string Secret(SecretReference reference)

@@ -53,17 +53,17 @@ public sealed class HttpOperationTaskTests
     }
 
     [Fact]
-    public async Task RuntimeIsExplicitlyUnsupportedAndNonRetryableWithoutSendingAnything()
+    public async Task RuntimeRequiresDurableCheckpointAndIdentityWithoutSendingAnything()
     {
         var operation = Tasks.HttpOperation("https://must-not-contact.invalid/jobs", Status);
         var workflow = Workflow.Define("remote", "1.0.0", w => w.Type("test")
             .Node("jobs", n => n.Task("submit", operation, p => p.NoAutoRetry().Retry(0))));
         var context = new TaskContext(TestContext.Current.CancellationToken);
-        var error = await Assert.ThrowsAsync<HttpOperationRuntimeUnsupportedException>(() =>
+        var error = await Assert.ThrowsAsync<Wf.Contracts.TaskFailureException>(() =>
             new TaskRegistry(workflow).ExecuteAsync("jobs/submit", context));
         Assert.False(error.Retryable);
         Assert.Equal(FailureCategory.ValidationError, error.Category);
-        Assert.StartsWith("HttpOperationRuntimeUnsupported:", error.Message);
+        Assert.StartsWith("RemoteOperationRequiresCheckpoint:", error.Message);
         Assert.DoesNotContain("must-not-contact", error.Message);
         Assert.Empty(context.Outputs.Values);
     }

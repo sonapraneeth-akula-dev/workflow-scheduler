@@ -4,6 +4,7 @@ using System.Text.Json;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
@@ -31,6 +32,99 @@ namespace Wf.Integration.Tests.Checkpoints;
 public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IClassFixture<ReportPublishDatabase>
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    [Fact]
+    public async Task RemoteOperation_actual_SDK_waits_for_durable_engine_ACK_before_POST_then_polls_one_remote_job()
+    {
+        var posts = 0;
+        var polls = 0;
+        string? submissionKey = null;
+        var key = RandomNumberGenerator.GetBytes(32);
+        await using var host = await ReportHost.Start(database.DataSource, key: key, configureServices: builder =>
+        {
+            builder.Services.AddSingleton<CheckpointApplier>();
+            builder.Services.AddSingleton(new CheckpointUploadCapabilities(key, TimeProvider.System));
+        }, configure: app =>
+        {
+            app.MapCheckpointUploadEndpoints();
+            app.MapPost("/remote/jobs", (HttpContext context) =>
+            {
+                Interlocked.Increment(ref posts);
+                submissionKey = context.Request.Headers["Idempotency-Key"].ToString();
+                context.Response.Headers.Location = "/remote/status/one";
+                context.Response.Headers.RetryAfter = "1";
+                return Results.Text("""{"state":"Pending"}""", "application/json", statusCode: 202);
+            });
+            app.MapGet("/remote/status/one", (HttpContext context) =>
+            {
+                context.Response.Headers.RetryAfter = "1";
+                return Results.Text(Interlocked.Increment(ref polls) == 1
+                    ? """{"state":"Running"}""" : """{"state":"Succeeded","value":31}""", "application/json");
+            });
+        });
+        var archive = await ReportPublishTests.Package();
+        host.App.MapGet("/remote-checkpoint-package.zip", () => Results.Bytes(archive, "application/zip"));
+        var hash = Convert.ToHexStringLower(SHA256.HashData(archive));
+        var id = Guid.NewGuid();
+        await using var agent = new Agent(host, id);
+        await Until(() => Task.FromResult(host.Registry.Find(id) is not null), agent.Work);
+        var attempt = await host.Seed(dispatch: false, task: "remoteOperation");
+        var command = new Dispatch
+        {
+            Task = new() { RunId = attempt.RunId.ToString("D"), NodeKey = "$post", TaskKey = "remoteOperation", Attempt = 1 },
+            Version = "1.0.0", Sha256 = hash, PackageUri = new Uri(host.Address, "/remote-checkpoint-package.zip").AbsoluteUri,
+            VariablesJson = ByteString.CopyFromUtf8(JsonSerializer.Serialize(new
+            {
+                remoteUrl = new Uri(host.Address, "/remote/jobs").AbsoluteUri
+            })),
+            DeadlineAt = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(2))
+        };
+        using var dispatcher = new Dispatcher(database.DataSource, host.Runs, host.Registry,
+            new PlacementEngine(), TimeProvider.System);
+        await using var indexLock = await database.DataSource.OpenConnectionAsync(Token);
+        await using var barrier = await indexLock.BeginTransactionAsync(Token);
+        await using (var hold = new NpgsqlCommand("LOCK TABLE task_checkpoints IN ACCESS EXCLUSIVE MODE", indexLock))
+            await hold.ExecuteNonQueryAsync(Token);
+        try
+        {
+            var placed = await dispatcher.DispatchAsync(await host.Runs.LoadAsync(attempt.RunId, Token),
+                new(attempt.RunId, "$post", "remoteOperation", 1, hash, new(new(pool: host.Pool))), command, Token);
+            Assert.Equal(id, placed.Agent!.Id);
+            await Until(async () =>
+            {
+                var error = await Scalar("SELECT error FROM task_attempts WHERE run_id=$1 AND error IS NOT NULL", attempt.RunId);
+                Assert.True(error is null or DBNull, $"SDK remote operation failed: {error}");
+                return PendingCheckpoint(agent.Outbox) is not null;
+            }, agent.Work);
+            Assert.Equal(0, Volatile.Read(ref posts));
+            Assert.Equal(0, Volatile.Read(ref polls));
+            Assert.Single(agent.Commands.Inflight);
+            var pending = PendingCheckpoint(agent.Outbox)!;
+            using var bytes = new MemoryStream();
+            await host.Blobs.DownloadAsync(new(Wf.ControlPlane.Storage.BlobKind.Checkpoints, pending.Sha256,
+                (long)pending.SizeBytes, pending.BlobKey), bytes, Token);
+            using var state = JsonDocument.Parse(bytes.ToArray());
+            Assert.Equal("SubmissionPending", state.RootElement.GetProperty("Stage").GetString());
+            Assert.Equal("wf-" + Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+                attempt.RunId.ToString("D") + "\n$post/remoteOperation"))),
+                state.RootElement.GetProperty("SubmissionKey").GetString());
+        }
+        finally { await barrier.CommitAsync(Token); }
+        await Until(async () => TransitionTable.IsTerminal(
+            (await host.Runs.LoadAsync(attempt.RunId, Token)).Snapshot.Tasks[attempt.TaskKey]), agent.Work);
+        Assert.Equal(ExecutionStatus.Succeeded,
+            (await host.Runs.LoadAsync(attempt.RunId, Token)).Snapshot.Tasks[attempt.TaskKey]);
+        Assert.Equal(1, posts);
+        Assert.Equal(2, polls);
+        Assert.StartsWith("wf-", submissionKey);
+        Assert.Equal(2L, await Scalar("SELECT sequence FROM task_checkpoints WHERE run_id=$1", attempt.RunId));
+        using var outputs = JsonDocument.Parse(Assert.IsType<string>(await Scalar(
+            "SELECT outputs::text FROM task_attempts WHERE run_id=$1", attempt.RunId)));
+        Assert.Equal(31, outputs.RootElement.GetProperty("result").GetInt32());
+        await Until(() => Task.FromResult(agent.Commands.Inflight.Count == 0), agent.Work);
+        Assert.Null(PendingCheckpoint(agent.Outbox));
+        Assert.Equal(1, agent.Hosts.ProcessStartCount);
+    }
 
     [Theory]
     [InlineData(0)]

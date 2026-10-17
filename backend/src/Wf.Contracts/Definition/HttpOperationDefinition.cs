@@ -20,6 +20,22 @@ public sealed record HttpOperationDefinition
     public string? SecretReference { get; }
     public TimeSpan RequestTimeout { get; }
 
+    /// <summary>Resolve a service reference, enforcing the same safe URL grammar and declared origins.</summary>
+    public Uri ResolveReference(string reference)
+    {
+        if (string.IsNullOrWhiteSpace(reference) || reference.Length > 2048 ||
+            reference.Any(c => char.IsWhiteSpace(c) || char.IsControl(c) || c is '\\' or '{' or '}') ||
+            reference.Contains('?') || reference.Contains('#'))
+            throw HttpOperationContractInput.Invalid();
+        var uri = HttpOperationContractInput.Url(new Uri(new Uri(SubmissionUrl), reference).AbsoluteUri);
+        var origin = uri.GetLeftPart(UriPartial.Authority);
+        if (!origin.Equals(new Uri(SubmissionUrl).GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase) &&
+            !TrustedOrigins.Any(value => origin.Equals(new Uri(value).GetLeftPart(UriPartial.Authority),
+                StringComparison.OrdinalIgnoreCase)))
+            throw HttpOperationContractInput.Invalid();
+        return uri;
+    }
+
     public HttpOperationDefinition(string submissionUrl, HttpOperationStatusContract status,
         HttpOperationCancelContract? cancel = null, HttpOperationDeduplicationContract? deduplication = null,
         HttpOperationLookupContract? lookup = null, ImmutableArray<string> trustedOrigins = default,

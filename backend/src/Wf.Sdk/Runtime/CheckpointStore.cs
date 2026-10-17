@@ -21,6 +21,7 @@ public sealed class CheckpointStore
     private long? savedTimestamp;
     private readonly object secretGate = new();
     private string[] secretPatterns = [];
+    internal bool CanSave => persist is not null;
 
     public CheckpointStore(
         Func<ReadOnlyMemory<byte>, long, DateTimeOffset, CancellationToken, Task>? persist = null,

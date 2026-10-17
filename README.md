@@ -736,12 +736,25 @@ Shared WFV021-WFV023 rules reject unsafe URLs/templates and require both
 contracts must retain remote identity through the entire run timeout. Ordinary
 `Tasks.Http` remains one-shot, including 202 responses.
 
-Only authoring/manifest/validation is available yet: attempting to execute an
-HTTP operation explicitly fails with nonretryable
-`HttpOperationRuntimeUnsupportedException`, without sending a request. Durable
-checkpointed submission, polling, reconciliation, remote cancellation and System
-Events follow in their prerequisite tasks. A lookup miss alone must never
-authorize resubmission without a service deduplication guarantee.
+Execution requires a durable checkpoint publisher and `ctx.RunId`/`ctx.TaskKey`;
+ordinary offline local execution fails before any request. The runner durably
+acknowledges `SubmissionPending` before POST, using a stable run/task key across
+attempts, then acknowledges `RemoteSubmitted` before polling a 202's status URL.
+Checkpoints contain contract/request hashes and remote identity, never the request
+body or bearer value. Restored submitted attempts only GET the retained status;
+restored pending attempts reconcile by authoritative lookup or resubmit the same
+key within the declared service deduplication guarantee. A lookup miss alone never
+authorizes another POST. Expired guarantees or missing remote status produce
+nonretryable `RemoteOutcomeUnknown`, not a guessed success or a fresh submission.
+
+Polling honors delta/date `Retry-After`, with bounded exponential fallback;
+each request has the declared timeout, task cancellation and retention deadline.
+Immediate terminal responses complete without a poll. Declared result/error
+fields become `result`/`error` outputs; service errors are otherwise generic.
+Responses stay within the existing output bound. Redirects, unsafe references,
+undeclared origins and malformed states fail explicitly. Authentication reuses
+the existing agent-resolved `ctx.Secret` bearer reference; no new login flow.
+Remote cancellation on abort/timeout and System Events remain separate tasks.
 
 `await workflow.RunAsync(args)` selects local execution by default, `--describe`,
 `--engine <origin>`, `--task-host --socket <absolute-path>`, or
