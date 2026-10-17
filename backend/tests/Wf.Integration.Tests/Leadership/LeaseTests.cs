@@ -13,6 +13,8 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
+using Wf.Agent;
+using Wf.Agent.Journal;
 using Wf.Contracts;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Definition;
@@ -334,6 +336,91 @@ public sealed class LeaseTests(LeaseDatabase database) : IClassFixture<LeaseData
         Assert.Equal(HttpStatusCode.OK, nowReady.StatusCode);
     }
 
+    [Fact]
+    public async Task LeaderConnector_actual_agent_follows_standby_hint_then_reconnects_after_database_lease_takeover()
+    {
+        await Reset();
+        await using var first = await Gateway();
+        await using var second = await Gateway();
+        var leader = first.Services.GetRequiredService<LeaseManager>();
+        var standby = second.Services.GetRequiredService<LeaseManager>();
+        var firstRegistry = first.Services.GetRequiredService<AgentRegistry>();
+        var secondRegistry = second.Services.GetRequiredService<AgentRegistry>();
+        Assert.True(await leader.TryAcquireOrRenewAsync(Token));
+        Assert.False(await standby.TryAcquireOrRenewAsync(Token));
+        Assert.Equal(Address(first).AbsoluteUri, standby.LeaderHint);
+        var id = Guid.NewGuid();
+        var root = Path.Combine(Path.GetTempPath(), "wf-leader-connector-" + id.ToString("N"));
+        try
+        {
+            using var journal = new ResultJournal(root, id.ToString());
+            using var outbox = new AgentOutbox(journal);
+            var options = new AgentOptions([Address(second), Address(first)], id.ToString(),
+                "leader-connector-" + id.ToString("N"), "connector", 1,
+                heartbeatInterval: TimeSpan.FromMilliseconds(100), resultJournalDirectory: root);
+            var probe = new ConnectorProbe();
+            using var connector = new AgentConnection(options, probe, probe, TimeProvider.System,
+                NullLogger<AgentConnection>.Instance, outbox);
+            using var stopping = CancellationTokenSource.CreateLinkedTokenSource(Token);
+            var running = connector.RunAsync(stopping.Token);
+            try
+            {
+                await WaitForAcknowledgedSession(firstRegistry);
+                Assert.Equal(2, probe.Hellos);
+                Assert.Null(secondRegistry.Find(id));
+                Assert.Equal(id, firstRegistry.Find(id)!.Id);
+                await leader.ReleaseAsync(Token);
+                Assert.True(await standby.TryAcquireOrRenewAsync(Token));
+                Assert.False(await leader.TryAcquireOrRenewAsync(Token));
+                Assert.Equal(Address(second).AbsoluteUri, leader.LeaderHint);
+                await WaitForAcknowledgedSession(secondRegistry);
+                Assert.Equal(id, secondRegistry.Find(id)!.Id);
+                Assert.NotEqual(firstRegistry.Find(id)!.SessionId, secondRegistry.Find(id)!.SessionId);
+                Assert.Equal(2L, standby.RequireLease().Epoch);
+                Assert.Throws<InvalidDataException>(() => outbox.ObserveLeaderEpoch(1));
+                Assert.False(running.IsCompleted);
+            }
+            finally
+            {
+                await stopping.CancelAsync();
+                await running.WaitAsync(TimeSpan.FromSeconds(5), Token);
+            }
+
+            async Task WaitForAcknowledgedSession(AgentRegistry registry)
+            {
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(Token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(8));
+                while (registry.Find(id) is null)
+                {
+                    if (running.IsCompleted) await running;
+                    await Task.Delay(10, deadline.Token);
+                }
+                outbox.Enqueue(new AgentMessage { Heartbeat = Heartbeat() });
+                while (outbox.NextAfter(0) is not null)
+                {
+                    if (running.IsCompleted) await running;
+                    await Task.Delay(10, deadline.Token);
+                }
+            }
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    }
+
+    private sealed class ConnectorProbe : IAgentTelemetry, IAgentCommandHandler
+    {
+        private readonly AgentTelemetry telemetry = new(TimeProvider.System);
+        private int hellos;
+        public int Hellos => Volatile.Read(ref hellos);
+        public Hello CreateHello(AgentOptions options)
+        {
+            Interlocked.Increment(ref hellos);
+            return telemetry.CreateHello(options);
+        }
+        public Heartbeat Sample() => telemetry.Sample();
+        public ValueTask HandleAsync(ControlMessage message, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("No task commands are expected during leader-connector acceptance.");
+    }
+
     private LeaseManager Manager(int port) => new(database.DataSource,
         new(Guid.NewGuid().ToString("N"), new Uri($"http://localhost:{port}")), NullLogger<LeaseManager>.Instance);
 
@@ -366,18 +453,24 @@ public sealed class LeaseTests(LeaseDatabase database) : IClassFixture<LeaseData
 
     private static Heartbeat Heartbeat() => new() { At = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow) };
 
-    private async Task<WebApplication> Gateway(LeaseManager leadership, AgentRegistry registry)
+    private async Task<WebApplication> Gateway(LeaseManager? leadership = null, AgentRegistry? registry = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0,
             listen => listen.Protocols = HttpProtocols.Http2));
         builder.Services.AddGrpc();
-        builder.Services.AddSingleton(leadership);
-        builder.Services.AddSingleton(registry);
-        builder.Services.AddSingleton(new RunStore(database.DataSource, NullLogger<RunStore>.Instance, leadership));
+        if (leadership is not null) builder.Services.AddSingleton(leadership);
+        else builder.Services.AddSingleton(provider => new LeaseManager(database.DataSource,
+            new(Guid.NewGuid().ToString("N"), new(provider.GetRequiredService<IServer>().Features
+                .Get<IServerAddressesFeature>()!.Addresses.Single())), NullLogger<LeaseManager>.Instance));
+        if (registry is not null) builder.Services.AddSingleton(registry);
+        else builder.Services.AddSingleton(provider => new AgentRegistry(database.DataSource, TimeProvider.System,
+            provider.GetRequiredService<LeaseManager>()));
+        builder.Services.AddSingleton(provider => new RunStore(database.DataSource, NullLogger<RunStore>.Instance,
+            provider.GetRequiredService<LeaseManager>()));
         var app = builder.Build();
         app.MapGrpcService<AgentGatewayService>();
-        app.MapGet("/healthz/leader", () => leadership.IsLeader ? Results.Ok() : Results.StatusCode(503));
+        app.MapGet("/healthz/leader", (LeaseManager manager) => manager.IsLeader ? Results.Ok() : Results.StatusCode(503));
         await app.StartAsync(Token);
         return app;
     }

@@ -1192,6 +1192,13 @@ leader hint and uses the actual epoch on commands/ACKs. Configure `Engine:Port`
 (default 5000) and `Engine:PublicEndpoint` for multiple instances. Standalone
 persistence test/benchmark modules may omit the lease manager; hosted DI always
 supplies it.
+Self-hosted agents configure ordered `Agent:Engines` origins. A standby's
+`NotLeader.leader_hint` bypasses the next endpoint and reconnects directly after
+100 ms only when it is a configured HTTP(S) origin with no credentials, path,
+query or fragment. Missing, malformed or unconfigured hints never expand that
+allowlist; normal disconnects retry the configured list after one second.
+Each connection sends a fresh Hello while retaining pending journal sequences
+and the highest observed leader epoch across redirects and takeover.
 
 `0010_commands.sql` adds the durable trigger/abort inbox. `CommandInbox` accepts
 preallocated UUIDv7 run IDs and preserves the first command of each kind per run.

@@ -28,9 +28,7 @@ public sealed class AgentOptions
         if (endpoints.Length == 0) throw new ArgumentException("At least one Agent:Engines endpoint is required.", nameof(engines));
         foreach (var endpoint in endpoints)
         {
-            if (!endpoint.IsAbsoluteUri || endpoint.Scheme is not ("http" or "https") ||
-                endpoint.AbsolutePath != "/" || endpoint.UserInfo.Length != 0 ||
-                endpoint.Query.Length != 0 || endpoint.Fragment.Length != 0)
+            if (!IsEngineOrigin(endpoint))
                 throw new ArgumentException("Agent engine endpoints must be HTTP(S) origins without credentials, paths or queries.", nameof(engines));
             if (endpoint.Scheme == "http" && !endpoint.IsLoopback && !allowInsecureTransport)
                 throw new ArgumentException("Non-loopback agent engines require HTTPS. Explicitly opt in only for an isolated container network.", nameof(engines));
@@ -65,6 +63,10 @@ public sealed class AgentOptions
         MaxLogBytes = maxLogBytes;
         LogSpoolQuotaBytes = logSpoolQuotaBytes;
     }
+
+    internal static bool IsEngineOrigin(Uri? endpoint) => endpoint is { IsAbsoluteUri: true } &&
+        endpoint.Scheme is "http" or "https" && endpoint.AbsolutePath == "/" &&
+        endpoint.UserInfo.Length == 0 && endpoint.Query.Length == 0 && endpoint.Fragment.Length == 0;
 
     public static AgentOptions FromConfiguration(IConfiguration configuration)
     {

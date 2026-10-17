@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Concurrent;
 using System.Net;
 using Grpc.Core;
 using Microsoft.AspNetCore.Builder;
@@ -149,17 +150,25 @@ public sealed class AgentConnectionTests
     }
 
     [Fact]
-    public async Task Configured_leader_hint_redirects_and_preserves_sequence()
+    public async Task LeaderConnector_configured_hint_skips_the_next_endpoint_in_one_retry_and_preserves_sequence()
     {
         var leaderHello = new TaskCompletionSource<AgentMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var visits = new ConcurrentQueue<string>();
         ulong standbySequence = 0;
         await using var leader = await Gateway.Start(async (requests, _, context) =>
         {
+            visits.Enqueue("leader");
             await foreach (var message in requests.ReadAllAsync(context.CancellationToken))
                 if (message.Hello is not null) leaderHello.TrySetResult(message);
         });
+        await using var distractor = await Gateway.Start((_, _, _) =>
+        {
+            visits.Enqueue("distractor");
+            throw new RpcException(new Status(StatusCode.Unavailable, "The configured hint must bypass this endpoint."));
+        });
         await using var standby = await Gateway.Start(async (requests, responses, context) =>
         {
+            visits.Enqueue("standby");
             if (await requests.MoveNext(context.CancellationToken))
             {
                 standbySequence = requests.Current.Sequence;
@@ -170,13 +179,14 @@ public sealed class AgentConnectionTests
             }
         });
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        var options = new AgentOptions([standby.Address, leader.Address], Id, "Test", "ci", 2);
+        var options = new AgentOptions([standby.Address, distractor.Address, leader.Address], Id, "Test", "ci", 2);
         var running = Create(options).RunAsync(cancellation.Token);
         try
         {
             var message = await leaderHello.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
             Assert.Equal(Id, message.Hello.Id);
             Assert.True(message.Sequence > standbySequence);
+            Assert.Equal(["standby", "leader"], visits);
         }
         finally
         {
@@ -250,11 +260,24 @@ public sealed class AgentConnectionTests
         Assert.Equal(StatusCode.PermissionDenied, exception.StatusCode);
     }
 
-    [Fact]
-    public async Task Unconfigured_leader_hint_cannot_redirect_agent_away_from_configured_engines()
+    [Theory]
+    [InlineData("empty")]
+    [InlineData("relative")]
+    [InlineData("unconfigured")]
+    [InlineData("userinfo")]
+    [InlineData("fragment")]
+    [InlineData("path")]
+    [InlineData("query")]
+    public async Task LeaderConnector_invalid_hint_retries_the_configured_list_without_contacting_the_hint(string kind)
     {
         var hello = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var leader = await Gateway.Start(async (requests, _, context) =>
+        var unsafeHello = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var hinted = await Gateway.Start(async (requests, _, context) =>
+        {
+            if (await requests.MoveNext(context.CancellationToken)) unsafeHello.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, context.CancellationToken);
+        });
+        await using var fallback = await Gateway.Start(async (requests, _, context) =>
         {
             if (await requests.MoveNext(context.CancellationToken)) hello.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, context.CancellationToken);
@@ -262,15 +285,35 @@ public sealed class AgentConnectionTests
         await using var standby = await Gateway.Start(async (requests, responses, context) =>
         {
             if (!await requests.MoveNext(context.CancellationToken)) return;
+            var hint = new UriBuilder(hinted.Address);
+            switch (kind)
+            {
+                case "userinfo": hint.UserName = "unexpected-user"; break;
+                case "fragment": hint.Fragment = "unexpected-fragment"; break;
+                case "path": hint.Path = "/not-an-origin"; break;
+                case "query": hint.Query = "unexpected-query"; break;
+            }
             await responses.WriteAsync(new ControlMessage
             {
-                Sequence = 1, NotLeader = new NotLeader { LeaderHint = "https://unconfigured.invalid" }
+                Sequence = 1, NotLeader = new NotLeader
+                {
+                    LeaderHint = kind switch { "empty" => "", "relative" => "/relative", _ => hint.Uri.AbsoluteUri }
+                }
             }, context.CancellationToken);
         });
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        var running = Create(new AgentOptions([standby.Address, leader.Address], Id, "Test", "ci", 2))
+        var options = new AgentOptions(kind == "unconfigured"
+            ? [standby.Address, fallback.Address]
+            : [standby.Address, fallback.Address, hinted.Address], Id, "Test", "ci", 2);
+        var running = Create(options)
             .RunAsync(cancellation.Token);
-        try { await hello.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken); }
+        try
+        {
+            var reached = await Task.WhenAny(hello.Task, unsafeHello.Task)
+                .WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            Assert.Same(hello.Task, reached);
+            Assert.False(unsafeHello.Task.IsCompleted);
+        }
         finally
         {
             await cancellation.CancelAsync();

@@ -21,6 +21,15 @@ public sealed class AgentOptionsTests
         Assert.Throws<ArgumentException>(() => Options([]));
         Assert.Throws<ArgumentOutOfRangeException>(() => new AgentOptions([new Uri("https://engine")], Id, "name", "pool", 0));
         Assert.Throws<ArgumentException>(() => new AgentOptions([new Uri("https://engine")], "", "name", "pool", 1));
+        Assert.Throws<ArgumentException>(() => Options([null!]));
+        Assert.Throws<ArgumentException>(() => Options([new Uri("engine", UriKind.Relative)]));
+    }
+
+    [Fact]
+    public void LeaderConnector_endpoint_list_preserves_priority_and_deduplicates_equivalent_origins()
+    {
+        var options = Options([new("https://standby:443"), new("https://leader"), new("https://standby/")]);
+        Assert.Equal(["https://standby/", "https://leader/"], options.Engines.Select(uri => uri.AbsoluteUri));
     }
 
     [Fact]

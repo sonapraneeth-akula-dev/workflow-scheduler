@@ -122,6 +122,7 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
                     if (message.PayloadCase == ControlMessage.PayloadOneofCase.NotLeader)
                     {
                         if (!Uri.TryCreate(message.NotLeader.LeaderHint, UriKind.Absolute, out var hint) ||
+                            !AgentOptions.IsEngineOrigin(hint) ||
                             !options.Engines.Contains(hint))
                         {
                             logger.LogWarning("Ignoring an absent or unconfigured leader hint; retrying configured engines.");
