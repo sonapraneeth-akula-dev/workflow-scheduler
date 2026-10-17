@@ -44,6 +44,14 @@ jobs:
           name: retention-live-api-${{ matrix.os }}
           path: retention-results
           if-no-files-found: ignore
+      - name: Verify durable remote HTTP fault matrix
+        run: dotnet test backend/tests/Wf.Integration.Tests --configuration Release --no-build --filter "FullyQualifiedName~RemoteOperation" --logger "trx;LogFileName=remote-http.trx" --results-directory remote-http-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: remote-http-${{ matrix.os }}
+          path: remote-http-results
+          if-no-files-found: error
       - name: Verify native Linux API SIGTERM drain
         if: runner.os == 'Linux'
         env:

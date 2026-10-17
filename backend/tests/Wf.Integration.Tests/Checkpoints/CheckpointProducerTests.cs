@@ -132,7 +132,7 @@ public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IC
     [InlineData(false, true)]
     [InlineData(true, false)]
     [InlineData(true, true)]
-    public async Task Remote_cancellation_survives_blocked_engine_and_persists_only_confirmed_outcome(bool timedOut, bool confirmed)
+    public async Task RemoteOperation_cancellation_survives_blocked_engine_and_persists_only_confirmed_outcome(bool timedOut, bool confirmed)
     {
         var posts = 0;
         var cancellations = 0;
@@ -454,7 +454,7 @@ public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IC
         return await command.ExecuteScalarAsync(Token);
     }
 
-    private static CheckpointSaved? PendingCheckpoint(AgentOutbox outbox)
+    internal static CheckpointSaved? PendingCheckpoint(AgentOutbox outbox)
     {
         ulong sequence = 0;
         while (outbox.NextAfter(sequence) is { } message)
@@ -465,7 +465,7 @@ public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IC
         return null;
     }
 
-    private static async Task Until(Func<Task<bool>> condition, Task connection)
+    internal static async Task Until(Func<Task<bool>> condition, Task connection)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Token);
         timeout.CancelAfter(TimeSpan.FromSeconds(45));
@@ -476,7 +476,7 @@ public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IC
         }
     }
 
-    private sealed class Agent : IAsyncDisposable
+    internal sealed class Agent : IAsyncDisposable
     {
         private readonly CancellationTokenSource stopping = CancellationTokenSource.CreateLinkedTokenSource(Token);
         private readonly PackageCache packages;

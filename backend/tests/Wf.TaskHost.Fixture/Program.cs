@@ -16,7 +16,8 @@ if (args.Length > 0 && args[0] == "--physical-empty-argument-fixture")
     return args.Length > 1 && args[1] == "" ? await PhysicalLifetimeFixture.Create().RunAsync(args[2..]) : 99;
 
 var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test")
-    .Variables(v => v.Int("amount", 10).Secret("credential").String("checkpointMarker", "").String("remoteUrl", ""))
+    .Variables(v => v.Int("amount", 10).Secret("credential").String("checkpointMarker", "").String("remoteUrl", "")
+        .String("remoteContract", "dedup").Int("remoteRetentionSeconds", 3600).Int("remoteCancel", 1))
     .Node("source", n => n.Task("noop", ctx => ctx.Outputs["value"] = 7))
     .Node("work", n => n.DependsOn("source").Input("source", "value")
         .Task("echo", ctx =>
@@ -157,10 +158,23 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
             System.Text.Encoding.UTF8.GetBytes("Published by " + ctx.TaskKey), ctx.CancellationToken, ["post", "review"]);
     }).Task("remoteOperation", async ctx =>
     {
-        await Tasks.HttpOperation(ctx.Var<string>("remoteUrl"),
-            new("state", TimeSpan.FromHours(1), resultField: "value", errorField: "error"),
-            cancel: new("{statusUrl}/cancel", requestTimeout: TimeSpan.FromSeconds(2)),
-            deduplication: new("Idempotency-Key", TimeSpan.FromHours(1))).ExecuteAsync(ctx);
+        if (ctx.Var<string>("checkpointMarker") is { Length: > 0 } marker)
+        {
+            await File.WriteAllTextAsync(marker + ".next", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ctx.CancellationToken);
+            File.Move(marker + ".next", marker, overwrite: true);
+        }
+        var url = ctx.Var<string>("remoteUrl");
+        var contract = ctx.Var<string>("remoteContract");
+        var retention = TimeSpan.FromSeconds(ctx.Var<int>("remoteRetentionSeconds"));
+        await Tasks.HttpOperation(url,
+            new("state", retention, resultField: "value", errorField: "error"),
+            cancel: ctx.Var<int>("remoteCancel") == 1
+                ? new("{statusUrl}/cancel", requestTimeout: TimeSpan.FromSeconds(2)) : null,
+            deduplication: contract == "dedup" ? new("Idempotency-Key", retention) : null,
+            lookup: contract == "lookup" ? new(new Uri(url).GetLeftPart(UriPartial.Authority) +
+                "/remote/lookup/{submissionKey}", retention) : null,
+            body: System.Text.Json.JsonSerializer.Serialize(new { runId = ctx.RunId, taskKey = ctx.TaskKey })).ExecuteAsync(ctx);
     }).Task("checkpoint", async ctx =>
     {
         var state = ctx.Checkpoint.TryLoad<string>();
@@ -171,7 +185,8 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
         {
             await ctx.Checkpoint.SaveAsync(new string('a', Wf.Contracts.Checkpoints.CheckpointProtocol.MaximumBytes - 2),
                 ctx.CancellationToken);
-            await File.WriteAllTextAsync(ctx.Var<string>("checkpointMarker"), "1", ctx.CancellationToken);
+            await File.WriteAllTextAsync(ctx.Var<string>("checkpointMarker") + ".next", "1", ctx.CancellationToken);
+            File.Move(ctx.Var<string>("checkpointMarker") + ".next", ctx.Var<string>("checkpointMarker"), overwrite: true);
             await Task.Delay(Timeout.InfiniteTimeSpan, ctx.CancellationToken);
         }
         else
@@ -180,7 +195,8 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
                 ctx.Attempt.ResumedFrom is null)
                 throw new InvalidOperationException("Replacement SDK attempt did not receive its verified checkpoint.");
             await ctx.Checkpoint.SaveAsync("continued", ctx.CancellationToken);
-            await File.WriteAllTextAsync(ctx.Var<string>("checkpointMarker"), "2", ctx.CancellationToken);
+            await File.WriteAllTextAsync(ctx.Var<string>("checkpointMarker") + ".next", "2", ctx.CancellationToken);
+            File.Move(ctx.Var<string>("checkpointMarker") + ".next", ctx.Var<string>("checkpointMarker"), overwrite: true);
             ctx.Outputs["loadedAfterSave"] = ctx.Checkpoint.TryLoad<string>();
         }
     }).Task("checkpointSecret", async ctx =>

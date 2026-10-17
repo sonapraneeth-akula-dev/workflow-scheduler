@@ -772,6 +772,16 @@ attempt and physical-reservation fences discard stale progress. Graph state,
 attempt status and timers remain unchanged. Individual status polls are task
 logs, not System Events.
 
+Run the actual remote API fault matrix with
+`dotnet test backend/tests/Wf.Integration.Tests --filter FullyQualifiedName~RemoteOperation`.
+The backend Windows/Linux CI matrix retains a separate `remote-http` report.
+Cases use actual SDK child processes, durable PostgreSQL checkpoints and a
+stub service: immediate/202 terminal states, occupied agent capacity, lost
+responses, killed hosts before/after submission, deduplication, lookup-only
+hit/miss, retention/status expiry and abort/deadline cancellation. Host-loss
+replacement simulates the engine's lost-machine classification; it is not a
+physical machine-reboot or agent re-adoption claim.
+
 `await workflow.RunAsync(args)` selects local execution by default, `--describe`,
 `--engine <origin>`, `--task-host --socket <absolute-path>`, or
 `--dry-run <mocks.json>`. Modes are exclusive; repeated `--var key=value` pairs
