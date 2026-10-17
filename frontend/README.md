@@ -68,6 +68,38 @@ refresh every 30 seconds and on window focus. Forms stay mounted during these
 checks, preserving unsaved drafts. Mutation endpoints remain authoritative,
 including after a role is revoked.
 
+`/machines` and `/machines/<uuid>` reuse the existing global Admin permission
+scope and public inventory/PATCH API. The list shows OS/architecture, labels,
+pool, health, hardware/task-slot capacity and reservations; detail adds current
+CPU/RAM/disk, heartbeat and agent version. Pool/OS/health and AND label filters
+survive URL reload. The label/pool modal validates exact server bounds, sends
+only changed fields, and preserves inputs on validation/write errors. Clearing
+labels requires an explicit empty map. Existing reservations stay visible while
+physical release acknowledgement is pending, including after lease expiry.
+
+The existing `machines/*` MessagePack scope receives `Resync` from committed
+agent/reservation changes, coalesced at 250 ms. It invalidates the shared list
+cache; reconnect resynchronizes and manual refresh retries the transport.
+Inventory has no timer polling. Authorization/read/live errors hide cached
+metadata and edit controls; reconnecting transport marks existing rows stale.
+No additional sign-in/logout flow is introduced.
+
+For actual PostgreSQL, signed-JWT and Chromium/Firefox/WebKit acceptance:
+
+```powershell
+$env:WF_MACHINE_BROWSER = "true"
+$env:WF_FRONTEND_ROOT = (Resolve-Path frontend).Path
+dotnet test backend\tests\Wf.Integration.Tests --filter "FullyQualifiedName~Machines_browser_real"
+```
+
+`scripts\machines-browser.ts` starts an isolated ephemeral Vite proxy.
+`e2e\machines.spec.ts` verifies mixed registered Windows/Linux inventory, a
+real release-pending reservation, filtered reload, audited metadata replacement
+and clearing, cross-page live invalidation, production registry heartbeats,
+Viewer denial, cached-data hiding on real 403, mobile/dark and dialog
+accessibility. JWT validation and HTTP/MessagePack responses are not mocked;
+the heartbeat-driving route exists only in the integration fixture.
+
 Operator-only Run now is available on schedule details (including Code and
 paused schedules) and series history. Series history uses the API's authoritative
 nullable current schedule identity, including when filters return no rows;

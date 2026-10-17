@@ -41,6 +41,7 @@ jobs:
           WF_LIVE_RESYNC_BROWSER: "true"
           WF_GRAPH_BROWSER: "true"
           WF_AUDIT_BROWSER: "true"
+          WF_MACHINE_BROWSER: "true"
           WF_FRONTEND_ROOT: ${{ github.workspace }}/frontend
       - run: bun run test:e2e
       - uses: actions/upload-artifact@v4

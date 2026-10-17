@@ -368,6 +368,18 @@ control-plane process, without interrupting existing work or freeing a
 reservation. Responses are never cached and expose no agent sessions or
 storage capabilities.
 
+`/machines` shows that inventory with URL-persisted filters; a machine name opens
+`/machines/<uuid>` for hardware, heartbeat/resource metrics, current reservation
+and the Admin label/pool editor. Empty labels clears the map; the editor sends
+only changed fields. Global Admin permissions come from the existing permission
+API, not token inspection, and the local development profile remains login-free.
+Migration `0033_machine_notifications.sql` publishes committed agent and
+reservation changes through PostgreSQL `live_machines`; the existing authorized
+MessagePack `machines/*` subscription coalesces invalidations for 250 ms and
+refetches the authoritative inventory without timer polling. Listener/transport
+reconnect resynchronizes; failed reads or denied/error live updates hide cached
+data, while reconnecting transport explicitly marks displayed data stale.
+
 ## Frontend
 
 `frontend` contains the React/TypeScript schedule-management SPA: create, edit,

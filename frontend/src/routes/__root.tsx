@@ -61,6 +61,7 @@ function RootLayout() {
           <nav aria-label="Main navigation" className="flex flex-wrap gap-4">
             <Link to="/">Kardia</Link>
             <Link to="/runs">Runs</Link>
+            <Link to="/machines">Machines</Link>
             <Link to="/admin/audit">Audit trail</Link>
           </nav>
           <div className="flex flex-wrap items-center gap-3">

@@ -17,6 +17,7 @@ public sealed class LiveFanout(NpgsqlDataSource source, LiveSubscriptions subscr
     private readonly Channel<bool> changed = Signal();
     private readonly Channel<bool> listChanged = Signal();
     private readonly Channel<bool> reportChanged = Signal();
+    private readonly Channel<bool> machinesChanged = Signal();
     private bool resync;
     private bool reauthorize;
     private int ready;
@@ -27,7 +28,7 @@ public sealed class LiveFanout(NpgsqlDataSource source, LiveSubscriptions subscr
     {
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         var workers = new[] { ListenAsync(lifetime.Token), PublishAsync(lifetime.Token),
-            PublishListsAsync(lifetime.Token), PublishReportsAsync(lifetime.Token) };
+            PublishListsAsync(lifetime.Token), PublishReportsAsync(lifetime.Token), PublishMachinesAsync(lifetime.Token) };
         await Task.WhenAny(workers);
         await lifetime.CancelAsync();
         try { await Task.WhenAll(workers); }
@@ -47,6 +48,10 @@ public sealed class LiveFanout(NpgsqlDataSource source, LiveSubscriptions subscr
                     lock (gate)
                     {
                         if (notification.Channel == "registry") reauthorize = true;
+                        else if (notification.Channel == "live_machines")
+                        {
+                            if (subscriptions.HasSubscribers("machines", "*")) machinesChanged.Writer.TryWrite(true);
+                        }
                         else if (notification.Channel == "report_added")
                         {
                             if (subscriptions.HasAnySubscribers) QueueReport(notification.Payload);
@@ -70,7 +75,7 @@ public sealed class LiveFanout(NpgsqlDataSource source, LiveSubscriptions subscr
                     changed.Writer.TryWrite(true);
                 };
                 await using (var listen = new NpgsqlCommand(
-                    "SET application_name='wf-live-feed'; LISTEN live_runs; LISTEN registry; LISTEN report_added", listener))
+                    "SET application_name='wf-live-feed'; LISTEN live_runs; LISTEN registry; LISTEN report_added; LISTEN live_machines", listener))
                     await listen.ExecuteNonQueryAsync(token);
                 lock (gate) resync = true;
                 changed.Writer.TryWrite(true);
@@ -123,6 +128,25 @@ public sealed class LiveFanout(NpgsqlDataSource source, LiveSubscriptions subscr
                 lock (gate) resync = true;
                 await Task.Delay(TimeSpan.FromSeconds(1), time, token);
                 changed.Writer.TryWrite(true);
+            }
+        }
+    }
+
+    private async Task PublishMachinesAsync(CancellationToken token)
+    {
+        while (await machinesChanged.Reader.WaitToReadAsync(token))
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(250), time, token);
+            machinesChanged.Reader.TryRead(out _);
+            try
+            {
+                await subscriptions.PublishAsync("machines", "*", "Resync", new LiveResync("machines", "*"), token);
+            }
+            catch (Exception error) when (error is NpgsqlException { IsTransient: true } or IOException or TimeoutException)
+            {
+                logger.LogError(error, "Live machine publication unavailable; retaining the inventory resynchronization request.");
+                await Task.Delay(TimeSpan.FromSeconds(1), time, token);
+                machinesChanged.Writer.TryWrite(true);
             }
         }
     }
