@@ -33,7 +33,7 @@ using Wf.Integration.Tests.Execution;
 
 namespace Wf.Integration.Tests;
 
-public sealed class TerminalNotificationTests(RollupDatabase database) : IClassFixture<RollupDatabase>, IAsyncLifetime
+public sealed partial class TerminalNotificationTests(RollupDatabase database) : IClassFixture<RollupDatabase>, IAsyncLifetime
 {
     private CancellationToken Token => TestContext.Current.CancellationToken;
     private readonly RunStore store = new(database.DataSource, NullLogger<RunStore>.Instance);
@@ -554,11 +554,15 @@ public sealed class TerminalNotificationTests(RollupDatabase database) : IClassF
     }
 
     [Fact]
-    public async Task Actual_Program_enables_the_configured_dispatcher_and_delivers_after_a_real_terminal_commit()
+    public async Task Actual_Program_enables_all_configured_channels_and_delivers_after_a_real_terminal_commit()
     {
         await using var receiver = await Receiver.Start(Token);
+        await using var teams = await Receiver.Start(Token);
+        await using var smtp = SmtpReceiver.Start();
         var scope = await Registry();
         await Subscribe(scope, target: receiver.Target);
+        await Subscribe(scope, channel: "Email");
+        await Subscribe(scope, channel: "Teams");
         var run = await Create(scope);
         using var enginePort = new TcpListener(IPAddress.Loopback, 0);
         using var apiPort = new TcpListener(IPAddress.Loopback, 0);
@@ -586,6 +590,8 @@ public sealed class TerminalNotificationTests(RollupDatabase database) : IClassF
             ["Notifications__Webhooks__0__SigningKeyBase64"] = Convert.ToBase64String(Key),
             ["Notifications__Webhooks__0__Addresses__0"] = "127.0.0.1"
         }) start.Environment[name] = value;
+        foreach (var (name, value) in ChannelValues(scope, receiver.Target, teams.Target, smtp.Port))
+            start.Environment[name.Replace(":", "__", StringComparison.Ordinal)] = value;
         enginePort.Stop();
         apiPort.Stop();
         using var process = Process.Start(start)!;
@@ -608,10 +614,12 @@ public sealed class TerminalNotificationTests(RollupDatabase database) : IClassF
                 await Task.Delay(50, deadline.Token);
             }
             var watch = Stopwatch.StartNew();
-            await Finish(run);
+            await Finish(run, RunStatus.Failed);
             VerifySignature(await receiver.Next(deadline.Token));
+            VerifyTeams(await teams.Next(deadline.Token), run.Snapshot.RunId, scope.Workflow, "Failed");
+            AssertEmail(await smtp.Next(deadline.Token), run.Snapshot.RunId, scope.Workflow);
             Assert.True(watch.Elapsed < TimeSpan.FromSeconds(30));
-            while (!(await State(run.Snapshot.RunId)).Delivered)
+            while (await Scalar("SELECT count(*) FROM notification_outbox WHERE run_id=$1 AND delivered_at IS NOT NULL", run.Snapshot.RunId) != 3)
                 await Task.Delay(20, deadline.Token);
         }
         finally
@@ -621,6 +629,8 @@ public sealed class TerminalNotificationTests(RollupDatabase database) : IClassF
             await Task.WhenAll(stdout, stderr);
             Assert.DoesNotContain(Convert.ToBase64String(Key), await stdout);
             Assert.DoesNotContain(Convert.ToBase64String(Key), await stderr);
+            Assert.DoesNotContain("private-teams-credential", await stdout);
+            Assert.DoesNotContain("private-teams-credential", await stderr);
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
     }
@@ -681,7 +691,7 @@ public sealed class TerminalNotificationTests(RollupDatabase database) : IClassF
             events ?? ["Completed"], channel, channel switch
             {
                 "Webhook" => target ?? "https://notify.example.test/hook",
-                "Email" => "subscriber@example.test", "Teams" => "secret://notifications/teams",
+                "Email" => target ?? "subscriber@example.test", "Teams" => target ?? "secret://notifications/teams",
                 _ => throw new ArgumentException("Unknown fixture channel.")
             }, new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Text, Value = channel == "Webhook" ? Secret : DBNull.Value });
         return id;
@@ -802,7 +812,7 @@ public sealed class TerminalNotificationTests(RollupDatabase database) : IClassF
         public void Advance(TimeSpan duration) => now += duration;
     }
 
-    private sealed record Receipt(byte[] Body, string Timestamp, string Signature, string ContentType, string Cookie);
+    private sealed record Receipt(byte[] Body, string Timestamp, string Signature, string ContentType, string Cookie, string Query = "");
     private sealed class Receiver(WebApplication app, string target, Channel<Receipt> received, TaskCompletionSource? gate,
         X509Certificate2? certificate) : IAsyncDisposable
     {
@@ -836,7 +846,7 @@ public sealed class TerminalNotificationTests(RollupDatabase database) : IClassF
                 await context.Request.Body.CopyToAsync(body, context.RequestAborted);
                 var receipt = new Receipt(body.ToArray(), context.Request.Headers[CloudEventSigner.TimestampHeader].ToString(),
                     context.Request.Headers[CloudEventSigner.SignatureHeader].ToString(), context.Request.ContentType ?? "",
-                    context.Request.Headers.Cookie.ToString());
+                    context.Request.Headers.Cookie.ToString(), context.Request.QueryString.Value ?? "");
                 receiver!.Deliveries.Enqueue(receipt);
                 await received.Writer.WriteAsync(receipt, context.RequestAborted);
                 if (gate is not null) await gate.Task;

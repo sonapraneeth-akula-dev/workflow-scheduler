@@ -4362,7 +4362,7 @@ export interface paths {
             };
         };
         put?: never;
-        /** @description Creates a user-owned durable completion/failure subscription after current scoped Viewer authorization. scope=workflow|schedule|type. Completed includes every terminal run; Failed includes failure, timeout and abort. Webhook uses an HTTPS destination (HTTP only on loopback), no URL credentials/query/fragment, and a signing secret reference; Email uses one mailbox; Teams uses a configured connector secret reference, never its literal credential URL. No resolved secret values are accepted or returned; duplicate configuration returns 409. Delivery is asynchronous. */
+        /** @description Creates a user-owned durable completion/failure subscription after current scoped Viewer authorization. scope=workflow|schedule|type. Completed includes every terminal run; Failed includes failure, timeout and abort. Webhook uses an HTTPS destination (HTTP only on loopback), no URL credentials/query/fragment, and a signing secret reference; Email uses one mailbox; Teams uses a configured workflow webhook secret reference, never its literal credential URL. No resolved secret values are accepted or returned; duplicate configuration returns 409. Delivery is asynchronous. */
         post: {
             parameters: {
                 query?: never;

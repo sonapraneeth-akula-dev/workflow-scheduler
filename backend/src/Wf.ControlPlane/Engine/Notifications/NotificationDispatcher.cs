@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net.Mail;
 using System.Text;
 using System.Text.Json;
 using Npgsql;
@@ -42,12 +43,12 @@ public sealed class NotificationDispatcher(NpgsqlDataSource source, Notification
         await using var connection = await source.OpenConnectionAsync(token);
         await using var transaction = await connection.BeginTransactionAsync(token);
         Guid subscription;
-        string type, target;
+        string type, target, channel;
         string? secret;
         // Lock the subscription before its outbox row, matching unsubscribe's cascade order.
         await using (var select = new NpgsqlCommand("""
-            SELECT s.id,s.type_scope,s.target,s.secret_ref FROM subscriptions s
-            WHERE s.channel='Webhook' AND EXISTS (
+            SELECT s.id,s.type_scope,s.target,s.secret_ref,s.channel FROM subscriptions s
+            WHERE EXISTS (
                 SELECT 1 FROM notification_outbox o WHERE o.subscription_id=s.id
                     AND o.delivered_at IS NULL AND o.failed_at IS NULL AND o.next_attempt_at<=$1)
             ORDER BY s.id FOR UPDATE OF s SKIP LOCKED LIMIT 1
@@ -60,6 +61,7 @@ public sealed class NotificationDispatcher(NpgsqlDataSource source, Notification
             type = reader.GetString(1);
             target = reader.GetString(2);
             secret = reader.IsDBNull(3) ? null : reader.GetString(3);
+            channel = reader.GetString(4);
         }
         Guid id;
         Guid runId;
@@ -84,14 +86,24 @@ public sealed class NotificationDispatcher(NpgsqlDataSource source, Notification
         string? error = null;
         var delivered = false;
         var retry = false;
+        var webhook = channel == "Webhook" ? options.Find(type, target, secret) : null;
+        var email = channel == "Email" && secret is null ? options.FindEmail(type, target) : null;
+        var teams = channel == "Teams" && secret is null ? options.FindTeams(type, target) : null;
         if (attempts >= MaximumAttempts) error = "attempt_limit";
-        else if (options.Find(type, target, secret) is not { } destination) error = "destination_not_approved";
+        else if (webhook is null && email is null && teams is null) error = "destination_not_approved";
         else if (!ValidPayload(body, runId, type)) error = "invalid_cloud_event";
         else
         {
             try
             {
-                var status = await destination.SendAsync(body,
+                int status;
+                if (email is not null)
+                {
+                    await email.SendAsync(body, token);
+                    status = 204;
+                }
+                else if (teams is not null) status = await teams.SendAsync(body, token);
+                else status = await webhook!.SendAsync(body,
                     time.GetUtcNow().ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture), token);
                 delivered = status is >= 200 and < 300;
                 if (!delivered)
@@ -104,6 +116,13 @@ public sealed class NotificationDispatcher(NpgsqlDataSource source, Notification
             {
                 error = "transport_unavailable";
                 retry = true;
+            }
+            catch (SmtpException failure)
+            {
+                token.ThrowIfCancellationRequested();
+                var status = (int)failure.StatusCode;
+                error = status is >= 400 and <= 599 ? "smtp_" + status.ToString(CultureInfo.InvariantCulture) : "smtp_unavailable";
+                retry = status is not (>= 500 and <= 599);
             }
             catch (OperationCanceledException) when (!token.IsCancellationRequested)
             {

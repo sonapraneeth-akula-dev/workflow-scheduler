@@ -50,7 +50,7 @@ public sealed record SubscriptionRequest(string Scope, string ScopeId, string[] 
                 break;
             case "Teams":
                 if (!SecretReference.IsValidName(target) || SecretRef is not null)
-                    throw new ArgumentException("Teams requires a configured destination secret reference, never a connector URL or literal credential.");
+                    throw new ArgumentException("Teams requires a configured destination secret reference, never a workflow webhook URL or literal credential.");
                 break;
             default:
                 throw new ArgumentException("Use Webhook, Email or Teams channel.");

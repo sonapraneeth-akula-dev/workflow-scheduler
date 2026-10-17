@@ -870,7 +870,7 @@ All responses are no-store with explicit sanitized failures. Migration 0038 adds
 the durable outbox schema; 0039 enqueues completion notifications atomically.
 No new login/logout flow.
 
-**Terminal outbox and webhook dispatch**: the 0039 row trigger runs in the
+**Terminal outbox and notification dispatch**: the 0039 row trigger runs in the
 terminal transaction, including ordinary RunStore and grouped commits. Grouped
 status publication precedes the terminal snapshot, so enqueue waits for terminal
 status plus `ended_at`. Existing completed history is not backfilled; future run
@@ -894,14 +894,16 @@ for example `Notifications__Webhooks__0__SigningKeyBase64` in the engine process
 environment; never commit them to source, put them in a subscription, or reuse an
 upload/agent authentication key. Reference names match this operator-managed
 configuration; this is not an implementation of agent DPAPI or Key Vault lookup.
-At most 64 distinct destinations are accepted. HTTPS certificate and hostname
+At most 64 distinct destinations across Webhooks, Emails and Teams are accepted.
+HTTPS certificate and hostname
 verification remain enabled; loopback HTTP requires loopback pins. The client
 connects only to approved IPs while preserving the original HTTP/TLS hostname,
 without DNS re-resolution, proxies, redirects, cookies or ambient credentials.
 Metadata, link-local, multicast and wildcard addresses are rejected; private
 unicast addresses require explicit operator pins. Address/key changes require
 engine configuration update and restart. Unapproved type/URL/reference tuples
-fail permanently without sending. This is a durable subscription to an
+fail permanently without sending. Email mailbox and Teams reference approvals
+also match the exact owning type. This is a durable subscription to an
 operator-approved type-scoped sink, not an indefinitely retained bearer token:
 no JWT, group claims or user membership snapshot is stored or replayed.
 Role revocation blocks interactive create/list; stop existing institutional-sink
@@ -909,13 +911,46 @@ delivery by unsubscribing or removing its approved destination.
 
 The hosted dispatcher locks subscription before outbox with `SKIP LOCKED`, matching
 unsubscribe's cascade order and allowing independent instances without concurrent
-duplicate sends. One claim holds a transaction through a bounded 10-second HTTP
+duplicate sends. One claim holds a transaction through a bounded 10-second
 attempt; stop/cancellation rolls it back. Success is HTTP 2xx. HTTP 5xx, 408, 429,
 transport failure and timeout retry after 1, 2, 4, 8, 16, 32 and 60 seconds, with
 eight total attempts. Other responses, including redirects, fail permanently.
 Only bounded reason codes/status numbers persist and are logged, never remote
-bodies, credential URLs or resolved keys. Email/Teams rows remain queued for
-task 14.1.1.1.3.
+bodies, credential URLs, SMTP replies or resolved keys.
+
+`Notifications:Emails:N` requires `TypeScope`, `Target` (one approved recipient
+mailbox), `Host` (operator-managed SMTP relay) and `From` (one sender mailbox).
+`Port` defaults to 587 and `EnableSsl` defaults to true: standard .NET SMTP
+STARTTLS with normal certificate/hostname verification, never implicit SMTPS.
+Optional `Username` and `Password` must be supplied together through external
+secret-backed configuration; ambient/default credentials are disabled.
+Plain SMTP is permitted only to a literal loopback IP and without credentials,
+for local mocks/relays, never a remote host or `localhost` DNS name.
+Each attempt creates its own SMTP client, sends UTF-8 plain text containing
+only the validated event facts, and uses `<run UUID@notifications.kardia>` as
+the stable Message-ID. SMTP 4xx and network failures retry; 5xx fail permanently.
+Missing STARTTLS never downgrades to plaintext. Ten-second deadlines and host
+cancellation apply to SMTP as well as HTTP; remote details are not persisted.
+
+`Notifications:Teams:N` requires `TypeScope`, `Target` (a safe configured
+destination reference such as `secret://notifications/teams`), private external
+`Url`, and `Addresses` pins with the same HTTP network policy as webhooks.
+Only the reference enters subscription storage/API/audit; the resolved URL
+may contain its provider-issued signature query but no userinfo or fragment,
+and must never be committed or logged. Use a Teams **Workflows** incoming
+webhook configured for **Anyone**; tenant-token triggers are unsupported in
+this prototype, with no new OAuth/login flow. Assign workflow co-owners to
+avoid an orphaned sink. The request is `application/json`, `type=message`,
+with one `application/vnd.microsoft.card.adaptive` attachment, null `contentUrl`
+and Adaptive Card 1.2 containing only safe run facts. It is not the generic
+CloudEvent envelope or the deprecated Office connector MessageCard payload.
+Teams reuses webhook HTTP retry, TLS, no-redirect/no-cookie and pinned-IP rules.
+Operator-managed pins require updates when provider addresses change.
+
+HTTP 2xx and SMTP acceptance record delivery to the configured relay, not a
+guarantee of inbox arrival or downstream Teams workflow completion. Every channel
+is at-least-once: a crash/storage failure after remote acceptance can replay the
+same event/Message-ID; receiver deduplication remains necessary.
 
 Webhook wire profile: POST `application/cloudevents+json` with
 `X-Kardia-Timestamp` (canonical Unix seconds) and
