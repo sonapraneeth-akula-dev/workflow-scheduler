@@ -60,13 +60,13 @@ function TypeCard({ type }: { type: CatalogType }) {
   const live = useCatalogLive(type.team, type.name)
   return (
     <li className="flex min-w-0 flex-col items-start gap-3 rounded-md border p-4">
-      <h2 className="text-xl font-semibold break-words">
+      <h2 className="max-w-full text-xl font-semibold break-words">
         <Link
           to="/t/$team/$type"
           params={{ team: type.team, type: type.name }}
           className="underline"
         >
-          {type.name}
+          {type.team} / {type.name}
         </Link>
       </h2>
       <p className="break-words">{type.description}</p>
@@ -86,8 +86,12 @@ function TypeCard({ type }: { type: CatalogType }) {
       {live.snapshot?.status === "error" ? (
         <>
           <p role="status">Live updates unavailable. Refresh types or retry.</p>
-          <Button variant="outline" onClick={live.retry}>
-            Retry live updates for {type.name}
+          <Button
+            variant="outline"
+            className="h-auto max-w-full whitespace-normal"
+            onClick={live.retry}
+          >
+            Retry live updates for {type.team} / {type.name}
           </Button>
         </>
       ) : (

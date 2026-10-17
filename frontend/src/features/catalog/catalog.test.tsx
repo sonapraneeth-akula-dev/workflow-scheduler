@@ -144,12 +144,41 @@ describe("catalogue views", () => {
     ])
     show(<TeamArea team="team" />)
     expect(
-      await screen.findByRole("link", { name: "release" })
+      await screen.findByRole("link", { name: "team / release" })
     ).toHaveAttribute("href", "/t/team/release")
     expect(screen.getByText("Deploy releases")).toBeInTheDocument()
     expect(screen.getByText("Failed").parentElement).toHaveTextContent("2")
     expect(screen.getByText("Never run").parentElement).toHaveTextContent("1")
     expect(useLive).toHaveBeenCalledWith({ scope: "type", id: "team/release" })
+  })
+
+  it("disambiguates identical type names with each owning team and preserves exact routes", async () => {
+    vi.mocked(getTeams).mockResolvedValue([
+      { team: "teamA", typeCount: 1, presentation: null },
+      { team: "teamB", typeCount: 1, presentation: null },
+    ])
+    vi.mocked(getTypes).mockImplementation(async (team) => [
+      {
+        team,
+        name: "perf",
+        description: "Performance workflows",
+        latestStatusCounts: {},
+      },
+    ])
+    show(
+      <>
+        <TeamArea team="teamA" />
+        <TeamArea team="teamB" />
+      </>
+    )
+    expect(
+      await screen.findByRole("link", { name: "teamA / perf" })
+    ).toHaveAttribute("href", "/t/teamA/perf")
+    expect(
+      await screen.findByRole("link", { name: "teamB / perf" })
+    ).toHaveAttribute("href", "/t/teamB/perf")
+    expect(useLive).toHaveBeenCalledWith({ scope: "type", id: "teamA/perf" })
+    expect(useLive).toHaveBeenCalledWith({ scope: "type", id: "teamB/perf" })
   })
 
   it("renders empty types without claiming workflow failures", async () => {
@@ -184,9 +213,9 @@ describe("catalogue views", () => {
       { team: "team", name: "perf", description: "", latestStatusCounts: {} },
     ])
     show(<TeamArea team="team" />)
-    await screen.findByRole("link", { name: "perf" })
+    await screen.findByRole("link", { name: "team / perf" })
     const links = screen.getAllByRole("link").map((link) => link.textContent)
-    expect(links).toEqual(["Teams", "perf", "release"])
+    expect(links).toEqual(["Teams", "team / perf", "team / release"])
     expect(getTypes).toHaveBeenCalledWith(
       "team",
       expect.any(AbortSignal),

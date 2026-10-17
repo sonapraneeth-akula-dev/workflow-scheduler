@@ -131,7 +131,9 @@ public static class TeamRegistryRules
                     {
                         errors.Add(DuplicateType.CreateError(file, path + ".name") with
                         {
-                            Hint = DuplicateType.Hint + $" Conflicting declaration: $.types[{previous.Index}].name."
+                            Hint = DuplicateType.Hint +
+                                $" Conflicting type: \"{JsonEncodedText.Encode(registry.Types[previous.Index].Name)}\"" +
+                                $" at $.types[{previous.Index}].name."
                         });
                         break;
                     }

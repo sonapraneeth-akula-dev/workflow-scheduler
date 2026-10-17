@@ -140,6 +140,7 @@ export function TypeWorkflows({ team, type }: { team: string; type: string }) {
                       <Link
                         to="/t/$team/$type/w/$wf/history"
                         params={{ team, type, wf: workflow.name }}
+                        className="inline-flex min-h-6 items-center"
                       >
                         Workflow history
                       </Link>
@@ -147,6 +148,7 @@ export function TypeWorkflows({ team, type }: { team: string; type: string }) {
                         <Link
                           to="/t/$team/$type/w/$wf/versions"
                           params={{ team, type, wf: workflow.name }}
+                          className="inline-flex min-h-6 items-center"
                         >
                           Versions
                         </Link>

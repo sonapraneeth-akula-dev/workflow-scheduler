@@ -43,7 +43,9 @@ test("home reaches workflows in two clicks and committed run changes update type
     page.getByText("Live updates connected.", { exact: true })
   ).toBeVisible()
   await accessible(page)
-  await page.getByRole("link", { name: "release", exact: true }).click()
+  await page
+    .getByRole("link", { name: "ui-tests / release", exact: true })
+    .click()
   await expect(page).toHaveURL("/t/ui-tests/release")
   const row = page.getByRole("row").filter({ hasText: workflowId })
   await expect(row).toContainText("Never run")
@@ -103,13 +105,15 @@ test("team presentation orders types and applies metadata grouping, columns, fil
   })
   await page.goto("/")
   await page.getByRole("link", { name: "presentation-a", exact: true }).click()
-  await expect(page.getByRole("link", { name: /^(perf|release)$/ })).toHaveText(
-    ["perf", "release"]
-  )
+  await expect(
+    page.getByRole("link", { name: /^presentation-a \/ (perf|release)$/ })
+  ).toHaveText(["presentation-a / perf", "presentation-a / release"])
   await expect(
     page.getByRole("region", { name: "Default metadata filters" })
   ).toContainText("Target environment:")
-  await page.getByRole("link", { name: "release", exact: true }).click()
+  await page
+    .getByRole("link", { name: "presentation-a / release", exact: true })
+    .click()
   const table = page.getByRole("table")
   await expect(table).toContainText("dev-workflow")
   await expect(table).not.toContainText("prod-workflow")
@@ -131,13 +135,15 @@ test("team presentation orders types and applies metadata grouping, columns, fil
   ).toBe(true)
   await page.getByRole("link", { name: "Teams", exact: true }).click()
   await page.getByRole("link", { name: "presentation-b", exact: true }).click()
-  await expect(page.getByRole("link", { name: /^(perf|release)$/ })).toHaveText(
-    ["release", "perf"]
-  )
+  await expect(
+    page.getByRole("link", { name: /^presentation-b \/ (perf|release)$/ })
+  ).toHaveText(["presentation-b / release", "presentation-b / perf"])
   await expect(
     page.getByRole("region", { name: "Default metadata filters" })
   ).toHaveCount(0)
-  await page.getByRole("link", { name: "release", exact: true }).click()
+  await page
+    .getByRole("link", { name: "presentation-b / release", exact: true })
+    .click()
   await expect(table).toContainText("dev-workflow")
   await expect(table).toContainText("prod-workflow")
   await expect(

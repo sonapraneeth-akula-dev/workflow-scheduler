@@ -92,12 +92,19 @@ public sealed class TeamRegistryRulesTests
     [InlineData("release", "releazeq")]
     [InlineData("release", "relea")]
     [InlineData("release", "releasesx")]
+    [InlineData("Load-Test", "load_tests")]
+    [InlineData("Load Test", "LOAD.TESTS!")]
+    [InlineData("\"Load-Test\"", "load_tests")]
+    [InlineData("<Load-Test>", "load_tests")]
     [RuleCoverage("WFV016", false)]
-    public void DuplicateAndNearbyNamesAreRejectedWithSafeConflictLocation(string first, string second)
+    public void NearDuplicateNamesAreRejectedWithEscapedConflictNameAndLocation(string first, string second)
     {
         var error = Assert.Single(TeamRegistryRules.Validate(Write(Registry(first, second)), cancellationToken: Token));
         AssertError(error, TeamRegistryRules.DuplicateType, "$.types[1].name");
         Assert.Contains("$.types[0].name", error.Hint);
+        Assert.Contains("Conflicting type: " + JsonSerializer.Serialize(first), error.Hint);
+        Assert.DoesNotContain('<', error.Hint);
+        Assert.DoesNotContain('\n', error.Hint);
     }
 
     [Theory]
@@ -105,11 +112,11 @@ public sealed class TeamRegistryRulesTests
     [InlineData("release", "releaseabc")]
     [InlineData("release", "qwertyu")]
     [RuleCoverage("WFV016", true)]
-    public void NamesMoreThanTwoEditsApartAreValid(string first, string second) =>
+    public void NearDuplicateThresholdAllowsNamesMoreThanTwoEditsApart(string first, string second) =>
         Assert.Empty(TeamRegistryRules.Validate(Write(Registry(first, second)), cancellationToken: Token));
 
     [Fact]
-    public void DuplicateNamesInAnotherTeamAreAllowed()
+    public void NearDuplicateNamesInAnotherTeamAreAllowed()
     {
         var registry = Registry();
         Assert.Empty(TeamRegistryRules.Validate(Write(registry), cancellationToken: Token));
@@ -118,6 +125,16 @@ public sealed class TeamRegistryRulesTests
             Team = "another-team",
             Types = [registry.Types[0] with { Team = "another-team" }]
         }), cancellationToken: Token));
+    }
+
+    [Fact]
+    public void NearDuplicateNamesIdentifyTheFirstActualConflictNotAnUnrelatedPredecessor()
+    {
+        var error = Assert.Single(TeamRegistryRules.Validate(
+            Write(Registry("cleanup", "Load-Test", "load_tests")), cancellationToken: Token));
+        AssertError(error, TeamRegistryRules.DuplicateType, "$.types[2].name");
+        Assert.Contains("Conflicting type: \"Load-Test\" at $.types[1].name.", error.Hint);
+        Assert.DoesNotContain("cleanup", error.Hint);
     }
 
     [Fact]

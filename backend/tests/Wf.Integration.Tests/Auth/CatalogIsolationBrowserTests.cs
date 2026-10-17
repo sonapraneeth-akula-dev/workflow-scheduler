@@ -43,6 +43,7 @@ public sealed partial class AuthorizationMatrixTests
         start.Environment["WF_CATALOG_API"] = server.Api;
         start.Environment["WF_CATALOG_TEAM_TOKEN"] = server.Token(group: teamGroup);
         start.Environment["WF_CATALOG_TYPE_TOKEN"] = server.Token(group: typeGroup);
+        start.Environment["WF_CATALOG_ADMIN_TOKEN"] = server.Token(role: "Admin");
         start.Environment["WF_CATALOG_TEAM"] = seed.Team;
         start.Environment["WF_CATALOG_OTHER_TEAM"] = seed.Other;
         start.Environment["WF_CATALOG_RUN"] = ownRun.ToString("D");

@@ -10,6 +10,7 @@ const settings = z
     otherRun: z.uuid(),
     teamToken: z.string().min(1),
     typeToken: z.string().min(1),
+    adminToken: z.string().min(1),
   })
   .parse({
     team: process.env.WF_CATALOG_TEAM,
@@ -18,6 +19,7 @@ const settings = z
     otherRun: process.env.WF_CATALOG_OTHER_RUN,
     teamToken: process.env.WF_CATALOG_TEAM_TOKEN,
     typeToken: process.env.WF_CATALOG_TYPE_TOKEN,
+    adminToken: process.env.WF_CATALOG_ADMIN_TOKEN,
   })
 
 async function accessible(page: Page) {
@@ -86,12 +88,18 @@ for (const scope of ["team", "type"] as const) {
     await accessible(page)
     await page.getByRole("link", { name: settings.team, exact: true }).click()
     await expect(
-      page.getByRole("link", { name: /^(sibling|release)$/ })
-    ).toHaveText(scope === "team" ? ["sibling", "release"] : ["release"])
+      page.getByRole("heading", { level: 2 }).getByRole("link")
+    ).toHaveText(
+      (scope === "team" ? ["sibling", "release"] : ["release"]).map(
+        (type) => `${settings.team} / ${type}`
+      )
+    )
     if (scope === "type")
       await expect(page.getByText("Team-only sibling workflows")).toHaveCount(0)
     await accessible(page)
-    await page.getByRole("link", { name: "release", exact: true }).click()
+    await page
+      .getByRole("link", { name: `${settings.team} / release`, exact: true })
+      .click()
     const table = page.getByRole("table")
     await expect(table).toContainText("catalog-visible")
     await expect(table).toContainText(settings.run)
@@ -194,7 +202,7 @@ for (const scope of ["team", "type"] as const) {
     expect(api.deniedEventsStatus).toBe(403)
     expect(JSON.stringify(api)).not.toContain(settings.other)
     expect(JSON.stringify(api)).not.toContain(settings.otherRun)
-    await page.getByRole("button", { name: "Dark theme" }).click()
+    await page.getByRole("button", { name: /^(Dark|Light) theme$/ }).click()
     await page.setViewportSize({ width: 375, height: 812 })
     await accessible(page)
     for (const path of [
@@ -219,3 +227,39 @@ for (const scope of ["team", "type"] as const) {
     expect(mutations).toEqual([])
   })
 }
+
+test("identical type names in two teams retain their prefixes and separate workflow routes", async ({
+  page,
+}) => {
+  await page.goto("/")
+  await page.evaluate(async (jwt) => {
+    const path = "/scripts/browser-auth.ts"
+    const { hydrateBrowserSession }: typeof import("../scripts/browser-auth") =
+      await import(path)
+    await hydrateBrowserSession(jwt)
+  }, settings.adminToken)
+  await page.reload()
+  for (const [team, workflow, excluded] of [
+    [settings.team, "catalog-visible", "catalog-private"],
+    [settings.other, "catalog-private", "catalog-visible"],
+  ] as const) {
+    await page.getByRole("link", { name: team, exact: true }).click()
+    const label = `${team} / release`
+    const link = page.getByRole("link", { name: label, exact: true })
+    await expect(link).toHaveAttribute("href", `/t/${team}/release`)
+    await expect(
+      page.getByRole("link", { name: "release", exact: true })
+    ).toHaveCount(0)
+    await accessible(page)
+    await link.click()
+    await expect(
+      page.getByRole("heading", { name: label, exact: true })
+    ).toBeVisible()
+    await expect(page.getByRole("table")).toContainText(workflow)
+    await expect(page.getByRole("table")).not.toContainText(excluded)
+    await page.getByRole("button", { name: /^(Dark|Light) theme$/ }).click()
+    await page.setViewportSize({ width: 375, height: 812 })
+    await accessible(page)
+    await page.getByRole("link", { name: "Teams", exact: true }).click()
+  }
+})

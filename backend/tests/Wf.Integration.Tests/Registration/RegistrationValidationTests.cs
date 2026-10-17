@@ -1,13 +1,75 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Wf.Contracts.Registry;
 using Wf.Validation;
+using Wf.Validation.Rules;
 using Wf.Validation.Tests;
 
 namespace Wf.Integration.Tests.Registration;
 
 public sealed partial class RegistrationTests
 {
+    [Theory]
+    [InlineData("releases")]
+    [InlineData("RE.LE_ASE")]
+    [InlineData("releazeq")]
+    public async Task NearDuplicate_http_registration_names_conflict_and_preserves_committed_snapshot(string name)
+    {
+        await using var server = await Server.Start(database.DataSource);
+        var request = await Request(server);
+        using var created = await server.Post(request);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var version = (await Json(created)).GetProperty("workflowVersion").GetGuid();
+        var registry = request.Registry!.Value.Deserialize(TeamRegistryJsonContext.Default.TeamRegistry)!;
+        registry = registry with
+        {
+            Types = registry.Types.Add(new(registry.Team, name, "Conflicting type", new([])))
+        };
+        var expected = Assert.Single(TeamRegistryRules.Validate(registry,
+            cancellationToken: TestContext.Current.CancellationToken));
+        using var response = await server.Post(request with
+        {
+            Registry = JsonSerializer.SerializeToElement(registry, TeamRegistryJsonContext.Default.TeamRegistry)
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        var error = Assert.Single((await Json(response)).GetProperty("errors").EnumerateArray());
+        Assert.Equal("WFV016", error.GetProperty("ruleId").GetString());
+        Assert.Equal("$.types[1].name", error.GetProperty("path").GetString());
+        Assert.Equal(expected.Hint, error.GetProperty("hint").GetString());
+        Assert.Contains("Conflicting type: \"release\" at $.types[0].name.", expected.Hint);
+        Assert.Equal(version, await Value("SELECT active_version_id FROM workflows WHERE id=$1", request.WorkflowId!));
+        Assert.Equal(1L, await Value("SELECT count(*) FROM workflow_versions WHERE workflow_id=$1", request.WorkflowId!));
+        Assert.Equal(1L, await Value("SELECT count(*) FROM workflow_types WHERE team_id=$1", registry.Team));
+        Assert.Equal(1L, await Value("SELECT count(*) FROM registry_snapshots WHERE team_id=$1", registry.Team));
+        Assert.Equal(1L, await Value("SELECT count(*) FROM audit_log WHERE target_id=$1", request.WorkflowId!));
+    }
+
+    [Fact]
+    public async Task NearDuplicate_http_registration_accepts_cross_team_names_and_distance_three()
+    {
+        await using var server = await Server.Start(database.DataSource);
+        foreach (var request in new[] { await Request(server), await Request(server) })
+        {
+            var registry = request.Registry!.Value.Deserialize(TeamRegistryJsonContext.Default.TeamRegistry)!;
+            registry = registry with
+            {
+                Types = registry.Types.Add(new(registry.Team, "releaseabc", "Three edits apart", new([])))
+            };
+            using var response = await server.Post(request with
+            {
+                Registry = JsonSerializer.SerializeToElement(registry, TeamRegistryJsonContext.Default.TeamRegistry)
+            });
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            Assert.Equal(2L, await Value("SELECT count(*) FROM workflow_types WHERE team_id=$1", registry.Team));
+            Assert.Equal("release", await Value(
+                "SELECT normalized_name FROM workflow_types WHERE team_id=$1 AND name='release'", registry.Team));
+            Assert.Equal("releaseabc", await Value(
+                "SELECT normalized_name FROM workflow_types WHERE team_id=$1 AND name='releaseabc'", registry.Team));
+        }
+    }
+
     [Fact]
     public async Task RegistrationValidation_actual_sdk_offline_and_http_errors_are_identical_and_no_state_changes()
     {

@@ -1162,6 +1162,11 @@ compares already-normalized strings with ordinary insertion/deletion/substitutio
 distance <= 2; transposition counts as two edits. It checks a five-cell band per
 row, observes cancellation and handles empty-string boundaries without
 truncating long names. This is literal normalization, not linguistic stemming.
+Within one team, shared offline and registration validation reject names at
+distance <= 2 with WFV016, naming the JSON-escaped conflicting type and its
+declaration path. The database additionally enforces `(team_id, normalized_name)`
+uniqueness. Identical names in different teams remain valid; catalogue links
+display `team / type` and preserve each team's exact route and permissions.
 
 The hosted control plane acquires the `0009_leases.sql` engine lease, renews
 every 3 seconds and expires after 10 seconds of database time. Each acquisition
