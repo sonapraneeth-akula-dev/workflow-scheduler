@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
+using System.Threading.Channels;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
@@ -41,7 +42,7 @@ public static class TaskHostServer
         builder.WebHost.UseKestrelCore().ConfigureKestrel(options =>
             options.ListenUnixSocket(socketPath, listen => listen.Protocols = HttpProtocols.Http2));
         builder.Services.AddRoutingCore();
-        builder.Services.AddGrpc(options => { options.MaxReceiveMessageSize = 1024 * 1024; options.MaxSendMessageSize = 1024 * 1024; });
+        builder.Services.AddGrpc(options => { options.MaxReceiveMessageSize = 4 * 1024 * 1024; options.MaxSendMessageSize = 1024 * 1024; });
         builder.Services.AddSingleton(new TaskHostService(workflow));
         await using var app = builder.Build();
         app.MapGrpcService<TaskHostService>();
@@ -58,13 +59,17 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
     private CancellationTokenSource? attemptCancellation;
     private bool timedOut;
     private bool cancelled;
+    private readonly Channel<CheckpointSaved> checkpoints = Channel.CreateBounded<CheckpointSaved>(1);
+    private CheckpointSaved? pendingCheckpoint;
+    private TaskCompletionSource? checkpointAcknowledgement;
+    private int checkpointReader;
 
     public override Task<HostReady> Ready(ReadyRequest request, ServerCallContext context)
     {
         lock (sync)
             return Task.FromResult(new HostReady
             {
-                ProtocolVersion = 3, ProcessId = uint.TryParse(
+                ProtocolVersion = 4, ProcessId = uint.TryParse(
                     Environment.GetEnvironmentVariable("WF_TASK_HOST_SUPERVISOR_PID"), out var supervisor)
                     ? supervisor : (uint)Environment.ProcessId,
                 WorkflowVersion = workflow.Version, Bound = bound is not null
@@ -195,6 +200,42 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
         }
     }
 
+    public override async Task Checkpoints(ReadyRequest request, IServerStreamWriter<CheckpointSaved> responseStream,
+        ServerCallContext context)
+    {
+        if (Interlocked.Exchange(ref checkpointReader, 1) != 0)
+            throw new RpcException(new Status(StatusCode.AlreadyExists, "Checkpoint stream is already attached."));
+        await foreach (var saved in checkpoints.Reader.ReadAllAsync(context.CancellationToken))
+            await responseStream.WriteAsync(saved, context.CancellationToken);
+    }
+
+    public override Task<HostReply> ConfirmCheckpoint(CheckpointSaved request, ServerCallContext context)
+    {
+        lock (sync)
+        {
+            if (pendingCheckpoint is null || !pendingCheckpoint.Equals(request))
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Checkpoint acknowledgement does not match the pending save."));
+            checkpointAcknowledgement!.TrySetResult();
+            pendingCheckpoint = null;
+            checkpointAcknowledgement = null;
+            return Task.FromResult(new HostReply());
+        }
+    }
+
+    private async Task PublishCheckpointAsync(CheckpointSaved saved, CancellationToken token)
+    {
+        var acknowledgement = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (sync)
+        {
+            if (pendingCheckpoint is not null)
+                throw new InvalidOperationException("An earlier checkpoint is still awaiting acknowledgement.");
+            pendingCheckpoint = saved.Clone();
+            checkpointAcknowledgement = acknowledgement;
+        }
+        await checkpoints.Writer.WriteAsync(saved, token);
+        await acknowledgement.Task.WaitAsync(token);
+    }
+
     private void CheckAttempt(AttemptRef? task)
     {
         if (bound is null || task is null || !bound.Equals(task))
@@ -245,8 +286,19 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
                 Timeout = Timeout.InfiniteTimeSpan
             };
             var artifacts = artifactHttp is null ? null : new ArtifactPublisher(artifactHttp, artifactGrant!, dispatch.Task);
+            using var checkpointHttp = new HttpClient(new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false, ConnectTimeout = TimeSpan.FromSeconds(10)
+            })
+            {
+                DefaultRequestVersion = System.Net.HttpVersion.Version20,
+                DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact,
+                Timeout = TimeSpan.FromSeconds(30)
+            };
+            var checkpoint = CheckpointUploadClient.Create(checkpointHttp, dispatch, PublishCheckpointAsync, linked.Token);
             var taskContext = new TaskContext(linked.Token, variables, outputs, inputs, node.Inputs,
-                reports: reports, artifacts: artifacts, secrets: secrets,
+                reports: reports, artifacts: artifacts, secrets: secrets, checkpoint: checkpoint,
+                attempt: new(dispatch.Task.Attempt, dispatch.Checkpoint?.Reference.SavedAt.ToDateTimeOffset()),
                 abort: dispatch.AbortJson.IsEmpty ? null : JsonSerializer.Deserialize(dispatch.AbortJson.Span,
                     AbortRecordJsonContext.Default.AbortRecord));
             await new TaskRegistry(workflow).ExecuteAsync($"{node.Key}/{dispatch.Task.TaskKey}", taskContext);
@@ -268,6 +320,7 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
         }
         finally
         {
+            checkpoints.Writer.TryComplete();
             await deadlineStop.CancelAsync();
             await deadlineTimer;
         }

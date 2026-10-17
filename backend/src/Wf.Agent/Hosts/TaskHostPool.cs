@@ -17,6 +17,7 @@ using Wf.Agent.Execution;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Host.V1;
 using Wf.Contracts.Definition;
+using Wf.Contracts.Checkpoints;
 
 namespace Wf.Agent.Hosts;
 
@@ -148,7 +149,8 @@ public sealed class TaskHostPool : IAsyncDisposable
     public async Task<TaskCompleted> ExecuteAsync(TaskHostPackage package, Dispatch dispatch,
         ByteString? nodeOutputsJson = null, TimeSpan? cancellationGrace = null, CancellationToken cancellationToken = default,
         Action<TaskCompleted>? journalResult = null, Func<string, string, Task>? captureLog = null,
-        SecretMasker? secretMasker = null, Action<AgentMessage>? publishResources = null)
+        SecretMasker? secretMasker = null, Action<AgentMessage>? publishResources = null,
+        Func<CheckpointSaved, CancellationToken, Task>? publishCheckpoint = null)
     {
         ArgumentNullException.ThrowIfNull(package);
         ArgumentNullException.ThrowIfNull(dispatch);
@@ -220,9 +222,17 @@ public sealed class TaskHostPool : IAsyncDisposable
             // Keep manually supplied maskers for existing callers, while always masking real resolved values.
             host.Masker = (secretMasker ?? new SecretMasker([])).WithValues(request.ResolvedSecrets.Values);
             host.HasSecrets = request.ResolvedSecrets.Count != 0;
+            using var checkpointStop = new CancellationTokenSource();
+            using var checkpointStream = host.Client.Checkpoints(new ReadyRequest(), cancellationToken: checkpointStop.Token);
+            var forwarding = ForwardCheckpoints();
             using var call = host.Client.ExecuteAsync(request);
             TaskCompleted result;
-            try { result = await call.ResponseAsync.WaitAsync(stop.Token); }
+            try
+            {
+                var first = await Task.WhenAny(call.ResponseAsync, forwarding).WaitAsync(stop.Token);
+                if (first == forwarding) await forwarding;
+                result = await call.ResponseAsync.WaitAsync(stop.Token);
+            }
             catch (OperationCanceledException) when (stop.IsCancellationRequested)
             {
                 var timedOut = deadline.IsCancellationRequested;
@@ -250,6 +260,11 @@ public sealed class TaskHostPool : IAsyncDisposable
                     };
                 }
             }
+            finally
+            {
+                await checkpointStop.CancelAsync();
+                await forwarding;
+            }
             if (result.Task is null || !result.Task.Equals(dispatch.Task) ||
                 result.Outcome == TaskOutcome.Unspecified || !System.Enum.IsDefined(result.Outcome))
                 throw new InvalidDataException("Task host returned an invalid attempt result.");
@@ -263,6 +278,26 @@ public sealed class TaskHostPool : IAsyncDisposable
             if (host.Process.ExitCode != 0)
                 throw new InvalidOperationException($"Task host exited with code {host.Process.ExitCode}: {host.Diagnostics}");
             return result;
+
+            async Task ForwardCheckpoints()
+            {
+                try
+                {
+                    await foreach (var saved in checkpointStream.ResponseStream.ReadAllAsync(checkpointStop.Token))
+                    {
+                        _ = CheckpointProtocol.Validate(saved);
+                        if (!saved.Task.Equals(dispatch.Task) || saved.ReservationEpoch != dispatch.ReservationEpoch)
+                            throw new InvalidDataException("Task host checkpoint does not match its dispatched attempt.");
+                        if (publishCheckpoint is null)
+                            throw new InvalidOperationException("Durable checkpoint acknowledgement is not configured at the agent.");
+                        await publishCheckpoint(saved, checkpointStop.Token);
+                        using var confirmed = host.Client.ConfirmCheckpointAsync(saved, cancellationToken: checkpointStop.Token);
+                        await confirmed.ResponseAsync;
+                    }
+                }
+                catch (OperationCanceledException) when (checkpointStop.IsCancellationRequested) { }
+                catch (RpcException error) when (checkpointStop.IsCancellationRequested && error.StatusCode == StatusCode.Cancelled) { }
+            }
         }
         catch (Exception error) when (host.HasSecrets && error is RpcException or InvalidOperationException or IOException or TimeoutException)
         { throw new InvalidOperationException(host.Masker.Redact(error.Message)); }
@@ -349,7 +384,7 @@ public sealed class TaskHostPool : IAsyncDisposable
             var channel = GrpcChannel.ForAddress("http://localhost", new GrpcChannelOptions
             {
                 HttpHandler = handler, DisposeHttpClient = true,
-                MaxReceiveMessageSize = 1024 * 1024, MaxSendMessageSize = 1024 * 1024
+                MaxReceiveMessageSize = 1024 * 1024, MaxSendMessageSize = 4 * 1024 * 1024
             });
             host = new Host(package, directory, socketPath, process, channel, logger, processLease,
                 resourceScope, resourceBound, resourceUnavailable, containment);
@@ -385,7 +420,7 @@ public sealed class TaskHostPool : IAsyncDisposable
                         if (prewarming && !warm.Contains(host)) return null;
                     }
                     var ready = await call.ResponseAsync;
-                    if (ready.ProtocolVersion != 3 || ready.ProcessId != process.Id || ready.WorkflowVersion != package.Version || ready.Bound)
+                    if (ready.ProtocolVersion != 4 || ready.ProcessId != process.Id || ready.WorkflowVersion != package.Version || ready.Bound)
                         throw new InvalidDataException("Task-host readiness identity, version or state is invalid.");
                     containment.VerifyReady();
                     await TrimWarmAsync(prewarming ? host : null);

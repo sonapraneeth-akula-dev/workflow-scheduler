@@ -59,7 +59,7 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
         };
         using var channel = GrpcChannel.ForAddress(endpoint, new GrpcChannelOptions
         {
-            HttpHandler = handler, DisposeHttpClient = true, MaxReceiveMessageSize = 1024 * 1024, MaxSendMessageSize = 1024 * 1024
+            HttpHandler = handler, DisposeHttpClient = true, MaxReceiveMessageSize = 4 * 1024 * 1024, MaxSendMessageSize = 1024 * 1024
         });
         using var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         using var call = new AgentGateway.AgentGatewayClient(channel).Connect(cancellationToken: session.Token);

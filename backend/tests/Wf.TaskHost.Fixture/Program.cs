@@ -16,7 +16,7 @@ if (args.Length > 0 && args[0] == "--physical-empty-argument-fixture")
     return args.Length > 1 && args[1] == "" ? await PhysicalLifetimeFixture.Create().RunAsync(args[2..]) : 99;
 
 var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test")
-    .Variables(v => v.Int("amount", 10).Secret("credential"))
+    .Variables(v => v.Int("amount", 10).Secret("credential").String("checkpointMarker", ""))
     .Node("source", n => n.Task("noop", ctx => ctx.Outputs["value"] = 7))
     .Node("work", n => n.DependsOn("source").Input("source", "value")
         .Task("echo", ctx =>
@@ -155,6 +155,28 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
         ctx.Outputs["sourceKey"] = ctx.TaskKey;
         await ctx.Reports.PublishAsync("text", "Post summary",
             System.Text.Encoding.UTF8.GetBytes("Published by " + ctx.TaskKey), ctx.CancellationToken, ["post", "review"]);
+    }).Task("checkpoint", async ctx =>
+    {
+        var state = ctx.Checkpoint.TryLoad<string>();
+        ctx.Outputs["attempt"] = checked((int)ctx.Attempt.Number);
+        ctx.Outputs["resumedFrom"] = ctx.Attempt.ResumedFrom?.ToString("O");
+        ctx.Outputs["loadedLength"] = state?.Length;
+        if (ctx.Attempt.Number == 1)
+        {
+            await ctx.Checkpoint.SaveAsync(new string('a', Wf.Contracts.Checkpoints.CheckpointProtocol.MaximumBytes - 2),
+                ctx.CancellationToken);
+            await File.WriteAllTextAsync(ctx.Var<string>("checkpointMarker"), "1", ctx.CancellationToken);
+            await Task.Delay(Timeout.InfiniteTimeSpan, ctx.CancellationToken);
+        }
+        else
+        {
+            if (state?.Length != Wf.Contracts.Checkpoints.CheckpointProtocol.MaximumBytes - 2 ||
+                ctx.Attempt.ResumedFrom is null)
+                throw new InvalidOperationException("Replacement SDK attempt did not receive its verified checkpoint.");
+            await ctx.Checkpoint.SaveAsync("continued", ctx.CancellationToken);
+            await File.WriteAllTextAsync(ctx.Var<string>("checkpointMarker"), "2", ctx.CancellationToken);
+            ctx.Outputs["loadedAfterSave"] = ctx.Checkpoint.TryLoad<string>();
+        }
     }).Task("artifact", async ctx =>
     {
         await ctx.Reports.PublishAsync("text", "Artifact summary",

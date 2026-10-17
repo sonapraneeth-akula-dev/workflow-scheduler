@@ -13,6 +13,9 @@ service TaskHost {
   // Names only, bound from the immutable workflow and this attempt's variables.
   rpc RequiredSecrets(ExecuteRequest) returns (SecretReferences);
   rpc Execute(ExecuteRequest) returns (wf.agent.v1.TaskCompleted);
+  rpc Checkpoints(ReadyRequest) returns (stream wf.agent.v1.CheckpointSaved);
+  // Agent confirms only after its journal and the engine's durable index acknowledge.
+  rpc ConfirmCheckpoint(wf.agent.v1.CheckpointSaved) returns (HostReply);
   rpc Cancel(CancelRequest) returns (HostReply);
   rpc Acknowledge(AcknowledgeRequest) returns (HostReply);
 }

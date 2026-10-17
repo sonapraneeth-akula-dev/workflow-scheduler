@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Security.Cryptography;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Wf.Contracts.Agent.V1;
@@ -9,6 +10,42 @@ namespace Wf.Contracts.Tests;
 
 public sealed class CheckpointProtocolTests
 {
+    [Theory]
+    [InlineData("valid")]
+    [InlineData("run")]
+    [InlineData("node")]
+    [InlineData("task")]
+    [InlineData("same-attempt")]
+    [InlineData("newer-attempt")]
+    [InlineData("attempt-overflow")]
+    [InlineData("bytes")]
+    [InlineData("size")]
+    [InlineData("json")]
+    public void Checkpoint_seed_must_be_verified_JSON_for_the_same_logical_task_and_an_earlier_attempt(string kind)
+    {
+        var saved = Saved();
+        var bytes = kind == "json" ? ByteString.CopyFromUtf8("}{") : ByteString.CopyFromUtf8("{}");
+        saved.Sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes.Span));
+        saved.BlobKey = CheckpointProtocol.Key(Guid.Parse(saved.Task.RunId), "work/task", 1, saved.Sha256);
+        var seed = new CheckpointSeed { Reference = saved, StateJson = bytes };
+        var target = saved.Task.Clone();
+        target.Attempt = 2;
+        switch (kind)
+        {
+            case "run": target.RunId = Guid.CreateVersion7().ToString("D"); break;
+            case "node": target.NodeKey = "other"; break;
+            case "task": target.TaskKey = "other"; break;
+            case "same-attempt": target.Attempt = 1; break;
+            case "newer-attempt": saved.Task.Attempt = 3; break;
+            case "attempt-overflow": target.Attempt = 32768; break;
+            case "bytes": seed.StateJson = ByteString.CopyFromUtf8("[]"); break;
+            case "size": seed.StateJson = ByteString.CopyFromUtf8(" {}"); break;
+        }
+        if (kind == "valid") Assert.Equal(1, CheckpointProtocol.ValidateSeed(seed, target).Sequence);
+        else if (kind == "json") Assert.ThrowsAny<JsonException>(() => CheckpointProtocol.ValidateSeed(seed, target));
+        else Assert.Throws<ArgumentException>(() => CheckpointProtocol.ValidateSeed(seed, target));
+    }
+
     [Fact]
     public void Checkpoint_reference_roundtrips_and_uses_a_canonical_run_scoped_key_and_microsecond_time()
     {

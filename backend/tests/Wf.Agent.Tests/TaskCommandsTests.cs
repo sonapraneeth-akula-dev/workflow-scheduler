@@ -220,6 +220,13 @@ public sealed class TaskCommandsTests
     [InlineData("artifacts", "http://localhost/api/v1/artifact-grants#fragment")]
     [InlineData("artifacts", "http://localhost/api/v1/report-publishes")]
     [InlineData("artifacts", "duplicate")]
+    [InlineData("checkpoints", "https://unconfigured.example/api/v1/checkpoint-uploads")]
+    [InlineData("checkpoints", "//unconfigured.example/api/v1/checkpoint-uploads")]
+    [InlineData("checkpoints", "http://localhost@unconfigured.example/api/v1/checkpoint-uploads")]
+    [InlineData("checkpoints", "http://localhost/api/v1/checkpoint-uploads?other=1")]
+    [InlineData("checkpoints", "http://localhost/api/v1/checkpoint-uploads#fragment")]
+    [InlineData("checkpoints", "http://localhost/api/v1/report-publishes")]
+    [InlineData("checkpoints", "duplicate")]
     public async Task ReportPublish_dispatch_capabilities_cannot_redirect_to_unconfigured_origins_or_ambiguous_targets(string kind, string uri)
     {
         await using var cache = new PackageCacheTests.CacheFixture([]);
@@ -230,7 +237,12 @@ public sealed class TaskCommandsTests
         message.Dispatch.Grants.Add(new UploadGrant
         {
             Kind = kind, UploadUri = uri == "duplicate"
-                ? kind == "reports" ? "/api/v1/report-publishes" : "/api/v1/artifact-grants" : uri
+                ? kind switch
+                {
+                    "reports" => "/api/v1/report-publishes",
+                    "artifacts" => "/api/v1/artifact-grants",
+                    _ => "/api/v1/checkpoint-uploads"
+                } : uri
         });
         if (uri == "duplicate")
             message.Dispatch.Grants.Add(message.Dispatch.Grants[0].Clone());

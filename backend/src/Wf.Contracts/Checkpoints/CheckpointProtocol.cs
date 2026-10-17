@@ -11,6 +11,8 @@ public sealed record CheckpointReference(Guid RunId, string TaskKey, short Attem
 public static class CheckpointProtocol
 {
     public const int MaximumBytes = 1024 * 1024;
+    public const string EndpointPath = "/api/v1/checkpoint-uploads";
+    public const string MetadataHeader = "X-Wf-Checkpoint";
     public static readonly TimeSpan MinimumInterval = TimeSpan.FromSeconds(5);
 
     public static CheckpointReference Validate(CheckpointSaved saved)
@@ -52,6 +54,20 @@ public static class CheckpointProtocol
         if (state.Length is 0 or > MaximumBytes)
             throw new ArgumentException("Checkpoint JSON must be between 1 byte and 1 MiB.", nameof(state));
         using var document = JsonDocument.Parse(state);
+    }
+
+    public static CheckpointReference ValidateSeed(CheckpointSeed seed, AttemptRef target)
+    {
+        ArgumentNullException.ThrowIfNull(seed);
+        ArgumentNullException.ThrowIfNull(target);
+        var reference = Validate(seed.Reference);
+        if (target.Attempt is 0 or > 32767 || seed.Reference.Task.RunId != target.RunId || seed.Reference.Task.NodeKey != target.NodeKey ||
+            seed.Reference.Task.TaskKey != target.TaskKey || seed.Reference.Task.Attempt >= target.Attempt ||
+            seed.StateJson.Length != reference.SizeBytes ||
+            Convert.ToHexStringLower(SHA256.HashData(seed.StateJson.Span)) != reference.Sha256)
+            throw new ArgumentException("Checkpoint seed does not match the resumed attempt.", nameof(seed));
+        ValidateState(seed.StateJson.Memory);
+        return reference;
     }
 
     private static bool ValidKey(string key) => !string.IsNullOrWhiteSpace(key) && !key.Contains('/') &&

@@ -115,6 +115,13 @@ message Dispatch {
   bytes node_outputs_json = 12;
   // The original accepted abort record for bounded post/always cleanup.
   bytes abort_json = 13;
+  // Verified latest logical-task checkpoint, supplied only by the engine.
+  CheckpointSeed checkpoint = 14;
+}
+
+message CheckpointSeed {
+  CheckpointSaved reference = 1;
+  bytes state_json = 2;
 }
 
 message ResourceLimits {

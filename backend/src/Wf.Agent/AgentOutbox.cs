@@ -16,6 +16,8 @@ public sealed class AgentOutbox : IDisposable
     private ulong leaderEpoch;
     private ulong reservationEpoch;
     private readonly ResultJournal? journal;
+    private readonly Dictionary<ulong, TaskCompletionSource> checkpointWaiters = [];
+    private bool disposed;
 
     public AgentOutbox(ResultJournal? journal = null)
     {
@@ -48,7 +50,19 @@ public sealed class AgentOutbox : IDisposable
         }
     }
 
-    public void Enqueue(AgentMessage message)
+    public void Enqueue(AgentMessage message) => EnqueueCore(message);
+
+    public async Task PublishCheckpointAsync(CheckpointSaved checkpoint, CancellationToken cancellationToken = default)
+    {
+        if (journal is null) throw new InvalidOperationException("Checkpoint acknowledgement requires a durable agent journal.");
+        cancellationToken.ThrowIfCancellationRequested();
+        var acknowledgement = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var id = EnqueueCore(new() { CheckpointSaved = checkpoint }, acknowledgement);
+        try { await acknowledgement.Task.WaitAsync(cancellationToken); }
+        finally { lock (gate) checkpointWaiters.Remove(id); }
+    }
+
+    private ulong EnqueueCore(AgentMessage message, TaskCompletionSource? acknowledgement = null)
     {
         ArgumentNullException.ThrowIfNull(message);
         if (message.PayloadCase is not (AgentMessage.PayloadOneofCase.TaskStarted or
@@ -58,6 +72,7 @@ public sealed class AgentOutbox : IDisposable
             throw new ArgumentException("Only task events, heartbeats, calibration results, checkpoints and fence acknowledgements belong in the agent outbox.", nameof(message));
         lock (gate)
         {
+            ObjectDisposedException.ThrowIf(disposed, this);
             var copy = message.Clone();
             copy.Sequence = checked(Math.Max(sequence, 1) + 1);
             if ((journal is not null && copy.Heartbeat is null) || copy.CalibrationCompleted is not null ||
@@ -69,8 +84,10 @@ public sealed class AgentOutbox : IDisposable
                 foreach (var key in pending.Where(pair => pair.Value.Heartbeat is not null).Select(pair => pair.Key).ToArray())
                     pending.Remove(key);
             pending.Add(copy.Sequence, copy);
+            if (acknowledgement is not null) checkpointWaiters.Add(copy.Sequence, acknowledgement);
+            changed.Writer.TryWrite(true);
+            return copy.Sequence;
         }
-        changed.Writer.TryWrite(true);
     }
 
     public AgentMessage? NextAfter(ulong sent)
@@ -89,6 +106,11 @@ public sealed class AgentOutbox : IDisposable
             Persist(sequence, leaderEpoch, pending.Where(pair => pair.Key > acknowledgement.Sequence).Select(pair => pair.Value));
             foreach (var key in pending.Keys.TakeWhile(key => key <= acknowledgement.Sequence).ToArray())
                 pending.Remove(key);
+            foreach (var key in checkpointWaiters.Keys.Where(key => key <= acknowledgement.Sequence).ToArray())
+            {
+                checkpointWaiters[key].TrySetResult();
+                checkpointWaiters.Remove(key);
+            }
         }
     }
 
@@ -140,7 +162,18 @@ public sealed class AgentOutbox : IDisposable
     private void Persist(ulong next, ulong epoch, IEnumerable<AgentMessage> messages) =>
         journal?.Save(next, epoch, messages.Where(message => message.Heartbeat is null).ToArray(), reservationEpoch);
 
-    public void Dispose() => journal?.Dispose();
+    public void Dispose()
+    {
+        lock (gate)
+        {
+            if (disposed) return;
+            disposed = true;
+            foreach (var waiter in checkpointWaiters.Values)
+                waiter.TrySetException(new ObjectDisposedException(nameof(AgentOutbox)));
+            checkpointWaiters.Clear();
+            journal?.Dispose();
+        }
+    }
 
     public async Task WaitForChangeAsync(CancellationToken cancellationToken) =>
         _ = await changed.Reader.ReadAsync(cancellationToken);

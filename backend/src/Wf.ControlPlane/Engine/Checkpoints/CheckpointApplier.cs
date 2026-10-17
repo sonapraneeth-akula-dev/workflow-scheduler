@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Npgsql;
 using Wf.Contracts;
 using Wf.Contracts.Agent.V1;
@@ -23,38 +25,9 @@ public sealed class CheckpointApplier(NpgsqlDataSource source, RunStore runs, IB
         await using var transaction = await connection.BeginTransactionAsync(token);
         await runs.FenceAsync(connection, transaction, lease, token);
         await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock($1)", token, ReservationManager.AllocationLock);
-        short attemptStatus;
-        RunStatus runStatus;
-        await using (var assignment = new NpgsqlCommand("""
-            SELECT g.session_id,g.reservation_epoch,a.reservation_epoch,a.dispatch_payload,a.status,r.status,
-                NOT EXISTS(SELECT 1 FROM task_attempts newer WHERE newer.run_day=a.run_day AND newer.run_id=a.run_id
-                    AND newer.task_key=a.task_key AND newer.attempt>a.attempt),
-                NOT EXISTS(SELECT 1 FROM reservations q WHERE q.agent_id=g.id AND q.released_at IS NULL
-                    AND (q.epoch<>a.reservation_epoch OR q.expires_at<=$5 OR q.release_requested_at IS NOT NULL))
-            FROM task_attempts a JOIN agents g ON g.id=a.agent_id JOIN runs r ON r.run_day=a.run_day AND r.id=a.run_id
-            WHERE a.run_day=uuid_v7_run_day($1) AND a.run_id=$1 AND a.task_key=$2 AND a.attempt=$3 AND a.agent_id=$4
-            FOR UPDATE OF g,r,a
-            """, connection))
-        {
-            assignment.Parameters.AddWithValue(checkpoint.RunId);
-            assignment.Parameters.AddWithValue(checkpoint.TaskKey);
-            assignment.Parameters.AddWithValue(checkpoint.Attempt);
-            assignment.Parameters.AddWithValue(session.AgentId);
-            assignment.Parameters.AddWithValue(runs.UtcNow);
-            await using var row = await assignment.ExecuteReaderAsync(token);
-            if (!await row.ReadAsync(token) || row.GetGuid(0) != session.SessionId || row.IsDBNull(3) ||
-                Wf.Contracts.Agent.V1.Dispatch.Parser.ParseFrom(row.GetFieldValue<byte[]>(3)).ReservationEpoch != checkpoint.ReservationEpoch)
-                throw new ArgumentException("Checkpoint does not match its assigned agent session and dispatch.");
-            if (row.GetInt64(1) != (long)checkpoint.ReservationEpoch ||
-                row.GetInt64(2) != (long)checkpoint.ReservationEpoch || !row.GetBoolean(6) || !row.GetBoolean(7))
-            {
-                logger.LogWarning("Discarded stale checkpoint for run {RunId}, task {TaskKey}, attempt {Attempt}.",
-                    checkpoint.RunId, checkpoint.TaskKey, checkpoint.Attempt);
-                return;
-            }
-            attemptStatus = row.GetInt16(4);
-            runStatus = (RunStatus)row.GetInt16(5);
-        }
+        var assignment = await LockAssignment(connection, session, checkpoint, token);
+        if (assignment is null) return;
+        var (attemptStatus, runStatus) = assignment.Value;
         DateTimeOffset? previousAt = null;
         await using (var latest = new NpgsqlCommand("""
             SELECT sequence,saved_at,attempt,blob_uri,sha256,size_bytes FROM task_checkpoints
@@ -106,5 +79,104 @@ public sealed class CheckpointApplier(NpgsqlDataSource source, RunStore runs, IB
             await insert.ExecuteNonQueryAsync(token);
         }
         await transaction.CommitAsync(token);
+    }
+
+    public async Task UploadAsync(AgentSession session, CheckpointSaved saved, Stream body, CancellationToken token = default)
+    {
+        var checkpoint = CheckpointProtocol.Validate(saved);
+        if (checkpoint.SavedAt > runs.UtcNow.AddMinutes(1))
+            throw new ArgumentException("Checkpoint time is in the future.", nameof(saved));
+        var bytes = new byte[checked((int)checkpoint.SizeBytes) + 1];
+        var count = 0;
+        while (count < bytes.Length)
+        {
+            var read = await body.ReadAsync(bytes.AsMemory(count), token);
+            if (read == 0) break;
+            count += read;
+        }
+        if (count != checkpoint.SizeBytes) throw new InvalidDataException("Checkpoint length does not match its metadata.");
+        CheckpointProtocol.ValidateState(bytes.AsMemory(0, count));
+        var lease = runs.CaptureLease();
+        await using var connection = await source.OpenConnectionAsync(token);
+        await using var transaction = await connection.BeginTransactionAsync(token);
+        await runs.FenceAsync(connection, transaction, lease, token);
+        await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock($1)", token, ReservationManager.AllocationLock);
+        (short Attempt, RunStatus Run)? assignment;
+        try { assignment = await LockAssignment(connection, session, checkpoint, token); }
+        catch (ArgumentException error)
+        { throw new UnauthorizedAccessException("Checkpoint upload does not match the current assignment.", error); }
+        if (assignment is not { } active || active.Run is not (RunStatus.Running or RunStatus.Aborting) ||
+            active.Attempt is not (2 or 3))
+            throw new UnauthorizedAccessException("Checkpoint upload requires the current active attempt.");
+        using var input = new MemoryStream(bytes, 0, count, writable: false);
+        await blobs.UploadAsync(new(BlobKind.Checkpoints, checkpoint.Sha256, checkpoint.SizeBytes, checkpoint.BlobKey), input, token);
+        await transaction.CommitAsync(token);
+    }
+
+    public async Task<CheckpointSeed?> LoadAsync(AttemptRef target, CancellationToken token = default)
+    {
+        if (target.Attempt <= 1) return null;
+        var seed = new CheckpointSeed();
+        await using (var command = source.CreateCommand("""
+            SELECT c.attempt,c.sequence,c.saved_at,c.blob_uri,c.sha256,c.size_bytes,a.reservation_epoch
+            FROM task_checkpoints c JOIN task_attempts a
+                ON a.run_day=c.run_day AND a.run_id=c.run_id AND a.task_key=c.task_key AND a.attempt=c.attempt
+            WHERE c.run_day=uuid_v7_run_day($1) AND c.run_id=$1 AND c.task_key=$2
+            """))
+        {
+            command.Parameters.AddWithValue(Guid.Parse(target.RunId));
+            command.Parameters.AddWithValue($"{target.NodeKey}/{target.TaskKey}");
+            await using var row = await command.ExecuteReaderAsync(token);
+            if (!await row.ReadAsync(token) || row.GetInt16(0) >= target.Attempt) return null;
+            var original = target.Clone();
+            original.Attempt = checked((uint)row.GetInt16(0));
+            seed.Reference = new()
+            {
+                Task = original, CheckpointSequence = checked((ulong)row.GetInt64(1)),
+                SavedAt = Timestamp.FromDateTimeOffset(row.GetFieldValue<DateTimeOffset>(2)),
+                BlobKey = row.GetString(3), Sha256 = row.GetString(4), SizeBytes = checked((ulong)row.GetInt64(5)),
+                ReservationEpoch = checked((ulong)row.GetInt64(6))
+            };
+        }
+        var reference = CheckpointProtocol.Validate(seed.Reference);
+        using var state = new MemoryStream();
+        await blobs.DownloadAsync(new(BlobKind.Checkpoints, reference.Sha256, reference.SizeBytes, reference.BlobKey), state, token);
+        seed.StateJson = ByteString.CopyFrom(state.GetBuffer(), 0, checked((int)state.Length));
+        _ = CheckpointProtocol.ValidateSeed(seed, target);
+        return seed;
+    }
+
+    private async Task<(short Attempt, RunStatus Run)?> LockAssignment(NpgsqlConnection connection,
+        AgentSession session, CheckpointReference checkpoint, CancellationToken token)
+    {
+        await using (var assignment = new NpgsqlCommand("""
+            SELECT g.session_id,g.reservation_epoch,a.reservation_epoch,a.dispatch_payload,a.status,r.status,
+                NOT EXISTS(SELECT 1 FROM task_attempts newer WHERE newer.run_day=a.run_day AND newer.run_id=a.run_id
+                    AND newer.task_key=a.task_key AND newer.attempt>a.attempt),
+                NOT EXISTS(SELECT 1 FROM reservations q WHERE q.agent_id=g.id AND q.released_at IS NULL
+                    AND (q.epoch<>a.reservation_epoch OR q.expires_at<=$5 OR q.release_requested_at IS NOT NULL))
+            FROM task_attempts a JOIN agents g ON g.id=a.agent_id JOIN runs r ON r.run_day=a.run_day AND r.id=a.run_id
+            WHERE a.run_day=uuid_v7_run_day($1) AND a.run_id=$1 AND a.task_key=$2 AND a.attempt=$3 AND a.agent_id=$4
+            FOR UPDATE OF g,r,a
+            """, connection))
+        {
+            assignment.Parameters.AddWithValue(checkpoint.RunId);
+            assignment.Parameters.AddWithValue(checkpoint.TaskKey);
+            assignment.Parameters.AddWithValue(checkpoint.Attempt);
+            assignment.Parameters.AddWithValue(session.AgentId);
+            assignment.Parameters.AddWithValue(runs.UtcNow);
+            await using var row = await assignment.ExecuteReaderAsync(token);
+            if (!await row.ReadAsync(token) || row.GetGuid(0) != session.SessionId || row.IsDBNull(3) ||
+                Wf.Contracts.Agent.V1.Dispatch.Parser.ParseFrom(row.GetFieldValue<byte[]>(3)).ReservationEpoch != checkpoint.ReservationEpoch)
+                throw new ArgumentException("Checkpoint does not match its assigned agent session and dispatch.");
+            if (row.GetInt64(1) != (long)checkpoint.ReservationEpoch ||
+                row.GetInt64(2) != (long)checkpoint.ReservationEpoch || !row.GetBoolean(6) || !row.GetBoolean(7))
+            {
+                logger.LogWarning("Discarded stale checkpoint for run {RunId}, task {TaskKey}, attempt {Attempt}.",
+                    checkpoint.RunId, checkpoint.TaskKey, checkpoint.Attempt);
+                return null;
+            }
+            return (row.GetInt16(4), (RunStatus)row.GetInt16(5));
+        }
     }
 }

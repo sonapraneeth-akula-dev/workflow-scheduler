@@ -723,7 +723,7 @@ system-assigned identity. No developer/browser/CLI credential fallback.
 `ctx.Secret(ctx.Var<SecretReference>("credential"))` accesses a declared resolved
 value. Missing or unavailable secrets become safe nonretryable `ValidationError`;
 resolved values never enter manifests, dispatches, journals or process arguments.
-Rebuild existing SDK packages: task-host private readiness protocol 3 is required.
+Rebuild existing SDK packages: task-host private readiness protocol 4 is required.
 Provisioning and provider details: [agent secrets](backend/src/Wf.Agent/Secrets/README.md).
 
 `Tasks.HttpOperation(...)` declares an opt-in long-running HTTP operation:
@@ -1542,8 +1542,38 @@ least five seconds apart. Superseded attempts and stale physical reservation
 fences cannot replace the pointer. A reconnected current session may replay its
 pending record. Timestamps use PostgreSQL microsecond precision. Retention removes
 the pointer before attempt rows and deletes every checkpoint blob under the exact
-run prefix, including older uploads. The SDK save/upload/resume producer remains
-the next checkpoint task; ingestion alone adds no login flow or public read API.
+run prefix, including older uploads.
+
+`await ctx.Checkpoint.SaveAsync(state, ctx.CancellationToken)` serializes supported
+primitive/JSON values; custom DTOs use the overload taking source-generated
+`JsonTypeInfo<T>`. The 1 MiB ceiling counts serialized UTF-8 JSON bytes, not
+characters. Concurrent saves are serialized and a second save waits until five
+seconds after the previous save timestamp. Cancellation interrupts that wait or
+the acknowledgement wait without deleting an already-journaled pointer. Failed
+or uncertain saves consume their sequence so a later save cannot conflict with
+an earlier commit. Save succeeds only after the blob upload, durable agent journal,
+engine index commit, engine ACK, and private host ACK; storage/transport failures
+surface to the task rather than succeeding locally.
+
+On a replacement attempt, the engine verifies the latest earlier-attempt blob
+and embeds its JSON in the dispatch. `ctx.Checkpoint.TryLoad<T>()` reads that
+in-memory state; custom DTOs pass their generated type information.
+`ctx.Attempt.Number` identifies the attempt and `ctx.Attempt.ResumedFrom` is the
+checkpoint's saved UTC time, or null when restarting without a checkpoint.
+Successful saves also update the store's locally loaded state. Missing or corrupt
+indexed blobs fail dispatch rather than silently restarting from scratch.
+Contexts without a configured durable publisher cannot save; dry-run checkpoint
+mocks, secret-content checks and the attempt UI remain separate checkpoint tasks.
+
+The internal blob-only `PUT /api/v1/checkpoint-uploads` requires a purpose-scoped
+header capability for the exact attempt, assigned agent session and reservation
+epoch. It cannot commit the logical checkpoint pointer or accept user tokens,
+arbitrary object paths or redirect targets. Existing HMAC configuration and
+agent transport are reused; no login/logout flow or public read API is added.
+Private host readiness protocol 4 adds a checkpoint stream and explicit ACK.
+Dispatch receive envelopes allow 4 MiB for the existing inputs plus a maximum-size
+checkpoint and protocol metadata; checkpoint JSON and outbound result limits
+remain 1 MiB.
 
 `Wf.ControlPlane.Engine.Reservations.ReservationManager.ReserveAsync` allocates
 an exact number of matching machines exclusively to an existing run/node.

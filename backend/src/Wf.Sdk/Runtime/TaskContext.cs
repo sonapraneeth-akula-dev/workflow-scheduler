@@ -18,6 +18,8 @@ public sealed class TaskContext
     public string? TaskKey { get; }
     public Action<string> Logger { get; }
     public AbortRecord? Abort { get; }
+    public CheckpointStore Checkpoint { get; }
+    public TaskAttempt Attempt { get; }
     public IReports Reports => reports ?? throw new NotSupportedException("Report publishing is not configured for this task host.");
     public IArtifacts Artifacts => artifacts ?? throw new NotSupportedException("Artifact publishing is not configured for this task host.");
 
@@ -25,7 +27,8 @@ public sealed class TaskContext
         IReadOnlyDictionary<string, object>? variables = null, NodeOutputs? outputs = null,
         IReadOnlyDictionary<string, NodeOutputs>? inputs = null, IEnumerable<InputBinding>? declaredInputs = null,
         Action<string>? logger = null, IReports? reports = null, IArtifacts? artifacts = null, string? taskKey = null,
-        AbortRecord? abort = null, IReadOnlyDictionary<string, string>? secrets = null)
+        AbortRecord? abort = null, IReadOnlyDictionary<string, string>? secrets = null,
+        CheckpointStore? checkpoint = null, TaskAttempt? attempt = null)
     {
         CancellationToken = cancellationToken;
         Outputs = outputs ?? new("task");
@@ -39,13 +42,16 @@ public sealed class TaskContext
         this.artifacts = artifacts;
         TaskKey = taskKey;
         Abort = abort;
+        Checkpoint = checkpoint ?? new();
+        Attempt = attempt ?? new(1);
         this.secrets = secrets?.ToImmutableDictionary(StringComparer.Ordinal) ??
             ImmutableDictionary<string, string>.Empty;
     }
 
     internal TaskContext ForTask(string key) => new(CancellationToken, variables, Outputs, inputs,
         declaredInputs, Logger, reports is ReportPublisher publisher ? publisher.ForSource(key) : reports,
-        artifacts is ArtifactPublisher artifactPublisher ? artifactPublisher.ForSource(key) : artifacts, key, Abort, secrets);
+        artifacts is ArtifactPublisher artifactPublisher ? artifactPublisher.ForSource(key) : artifacts, key, Abort, secrets,
+        Checkpoint, Attempt);
 
     /// <summary>Read an agent-resolved reference for this attempt; never writes the value into variables or the manifest.</summary>
     public string Secret(SecretReference reference)

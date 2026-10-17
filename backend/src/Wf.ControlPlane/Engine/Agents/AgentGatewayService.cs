@@ -15,7 +15,8 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
     Wf.ControlPlane.Reports.ReportUploadCapabilities? reportUploads = null,
     Wf.ControlPlane.Artifacts.ArtifactUploadCapabilities? artifactUploads = null, ResourceSampleSink? resources = null,
     ReservationLeaseService? reservations = null, CalibrationService? calibrations = null,
-    Wf.ControlPlane.Engine.Checkpoints.CheckpointApplier? checkpoints = null)
+    Wf.ControlPlane.Engine.Checkpoints.CheckpointApplier? checkpoints = null,
+    Wf.ControlPlane.Engine.Checkpoints.CheckpointUploadCapabilities? checkpointUploads = null)
     : AgentGateway.AgentGatewayBase
 {
     public override async Task Connect(IAsyncStreamReader<AgentMessage> requestStream,
@@ -171,6 +172,10 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                                         command.Grants.Add(reportUploads.Create(command.Task, command.DeadlineAt.ToDateTimeOffset()));
                                     if (artifactUploads is not null && command.Grants.All(grant => grant.Kind != "artifacts"))
                                         command.Grants.Add(artifactUploads.Create(command, session.AgentId, session.SessionId));
+                                    if (checkpointUploads is not null && command.Grants.All(grant => grant.Kind != "checkpoints"))
+                                        command.Grants.Add(checkpointUploads.Create(command, session));
+                                    if (checkpoints is not null)
+                                        command.Checkpoint = await checkpoints.LoadAsync(command.Task, token);
                                     await responseStream.WriteAsync(new ControlMessage
                                     {
                                         Sequence = checked((ulong)Interlocked.Increment(ref sequence)),

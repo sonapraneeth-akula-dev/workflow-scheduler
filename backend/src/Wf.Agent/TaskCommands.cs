@@ -118,6 +118,10 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
             throw new InvalidDataException("Dispatch contains duplicate report capabilities.");
         if (dispatch.Grants.Count(grant => grant.Kind == "artifacts") > 1)
             throw new InvalidDataException("Dispatch contains duplicate artifact capabilities.");
+        if (dispatch.Grants.Count(grant => grant.Kind == "checkpoints") > 1)
+            throw new InvalidDataException("Dispatch contains duplicate checkpoint capabilities.");
+        if (dispatch.Checkpoint is not null)
+            _ = Wf.Contracts.Checkpoints.CheckpointProtocol.ValidateSeed(dispatch.Checkpoint, dispatch.Task);
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
@@ -133,13 +137,17 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
             if (active.Count >= options.MaxTasks)
                 throw new InvalidDataException("Dispatch exceeds the agent's configured task capacity.");
             var execution = new Execution(dispatch.Clone(), CancellationTokenSource.CreateLinkedTokenSource(stoppingToken));
-            foreach (var grant in execution.Dispatch.Grants.Where(grant => grant.Kind is "reports" or "artifacts"))
+            foreach (var grant in execution.Dispatch.Grants.Where(grant => grant.Kind is "reports" or "artifacts" or "checkpoints"))
             {
                 if (!Uri.TryCreate(options.Engines[0], grant.UploadUri, out var uri) ||
                     !options.Engines.Any(engine => engine.GetLeftPart(UriPartial.Authority) == uri.GetLeftPart(UriPartial.Authority)) ||
                     uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0 ||
-                    uri.AbsolutePath != (grant.Kind == "reports" ? ReportUploadMetadata.EndpointPath :
-                        Wf.Contracts.Artifacts.ArtifactMetadata.GrantPath))
+                    uri.AbsolutePath != (grant.Kind switch
+                    {
+                        "reports" => ReportUploadMetadata.EndpointPath,
+                        "artifacts" => Wf.Contracts.Artifacts.ArtifactMetadata.GrantPath,
+                        _ => Wf.Contracts.Checkpoints.CheckpointProtocol.EndpointPath
+                    }))
                 {
                     execution.Cancellation.Dispose();
                     throw new InvalidDataException("Upload capability must target its configured engine endpoint.");
@@ -190,7 +198,7 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
                 execution.Cancellation.Token);
             result = await hosts.ExecuteAsync(package, dispatch, cancellationToken: execution.Cancellation.Token,
                 captureLog: capture is null ? null : capture.WriteAsync,
-                publishResources: outbox.Enqueue, journalResult: completion =>
+                publishResources: outbox.Enqueue, publishCheckpoint: outbox.PublishCheckpointAsync, journalResult: completion =>
                 {
                     publishing = true;
                     completion.ReservationEpoch = dispatch.ReservationEpoch;

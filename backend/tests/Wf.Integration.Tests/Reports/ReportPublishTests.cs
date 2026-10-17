@@ -478,7 +478,7 @@ public sealed partial class ReportPublishTests(ReportPublishDatabase database) :
         DeadlineAt = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(2))
     };
 
-    private static async Task<byte[]> Package()
+    internal static async Task<byte[]> Package()
     {
         using var buffer = new MemoryStream();
         using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
