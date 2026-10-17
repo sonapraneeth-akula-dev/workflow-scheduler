@@ -1601,6 +1601,73 @@ Alerts fire on:
 | Placement | Unit (engine core) + integration (3 simulated agents) | Selectors, affinity pins, reservation exclusion, warm-host preference, `Ready(reason=WaitingForMachine)` → `Failed(category=Placement)` on timeout, re-placement after agent loss | PR |
 | Deployment profiles | Local: `aspire run` smoke on Windows + Linux; `wf local up --env dev` on a Linux runner (no edge: clients call the gateway at `127.2.6.2:80` directly) runs scenario A, then kills the engine leader; a second step starts `ppe` beside it and checks both answer on their own addresses. Self-hosted: 2 VMs + 3-node Patroni lab, `deploy/selfhosted.ps1` under load. PaaS: revision deploy under load | Deploy + rollback with 100 active runs and 200 clients: 0 failed runs, 0 HTTP 5xx; Patroni failover → runs resume ≤ failover time + 30 s | Local: PR. Self-hosted/PaaS: nightly + pre-release |
 
+### Dispatch and run-start performance probe
+
+`dotnet run --project backend\tests\Wf.Benchmarks -- --dispatch-latency-bench`
+uses an isolated PostgreSQL 17 container, or a unique schema on `WF_TEST_POSTGRES`.
+All migrations and synchronous durability (`fsync`, `full_page_writes`,
+`synchronous_commit` ON), the renewing leader lease and production write fences
+remain enabled. CI runs the same strict gate on Windows and Linux.
+
+The dispatcher wakes the assigned agent's gateway stream only **after** the
+initial, hosted-execution or re-placement transaction commits. Per-stream
+bounded hints coalesce, share the ACK wake path and are detached on disconnect;
+they never carry commands or replace the durable outbox. Each scan reads
+dispatches and cancellations under one current lease fence/transaction. The
+unchanged 25 ms fallback still recovers missing hints and reconnects, with
+existing session checks and sent-command deduplication intact.
+Placement metadata, reservations and pending capacity use a single protocol
+batch of separate SQL statements. Run locking and snapshot reads likewise use
+separate batched statements, not a joined `FOR UPDATE`: the snapshot read must
+see the committed state after a concurrent lock holder releases. These batches
+remove transport round trips without removing locks or write fences.
+An already-current metrics snapshot does not reread its empty event tail;
+older snapshots and legacy metrics still replay history. Dispatch inserts the
+new attempt once, without first sending an update for a row not yet inserted.
+
+Local Windows x64/.NET 10.0.13 with Docker PostgreSQL 17.11, final report
+`BenchmarkDotNet.Artifacts/dispatch-latency/a22f8f935fa0436fabeaa5a2a8012481`:
+10,000 dispatches p95 **48.9340 ms**, p99 **57.9094 ms**; 100 HTTP-to-SDK
+starts p95 **842.2918 ms**. All raw samples are retained, including a trigger
+maximum of 1,184.7569 ms; the run-start requirement is p95, not maximum.
+Earlier full dispatch failures at p95 56.2904 and 52.0075 ms remain available
+in reports `73610a6c49414f39bb5f0561369126ea` and
+`6d4196289a414960b60b75109db2f974`. No threshold was relaxed or outlier removed.
+These are local observations, not Linux/remote-CI or production SLA results.
+
+Dispatch latency covers the call to `Dispatcher.DispatchAsync`, its durable
+transaction/outbox, real loopback Kestrel HTTP/2 and `AgentConnection`, ending at
+the agent command-handler receipt. The earlier committed Ready event is outside
+this interval. Exactly 10,000 sequential dispatches follow 100 explicit warmups;
+nearest-rank p95 must be <= 50 ms and p99 <= 200 ms. The dispatch-only handler
+sends synthetic start/completion protocol replies **after** receipt to drain
+the isolated outbox; these are transport measurements, not SDK execution proof.
+Ready-state fixture creation uses eight workers in 32-run batches with 10 ms
+gaps before the strictly sequential timed phase, never concurrently with
+dispatch measurement. The gaps let the exclusive lease renewal acquire between
+shared write fences without extending the production lease. Protocol-only
+fixture workflows intentionally remain Running after their synthetic task
+replies; the real SDK workflows alone are driven to terminal success. Finishing
+10,100 simulated workflows and their historical rollups is not dispatch proof
+and is unnecessary before removing the isolated schema.
+
+Run-start latency independently covers a real Development-authenticated HTTP
+trigger, durable command inbox, hosted 100 ms recovery and 25 ms execution loops,
+gRPC, host IPC and the **actual SDK delegate's** monotonic start timestamp.
+Exactly 100 triggers follow 10 warmups, with p95 <= 1 second. Each trigger gets
+a freshly prewarmed **one-shot** process before timing; its PID must match the
+delegate output, and exactly 110 processes must start. Cold-start provisioning,
+WAN latency, sustained offered-rate saturation and production JWT overhead are
+not measured by this probe. Physical isolation is not relaxed to reuse a host.
+
+All samples must be finite and positive; missing/extra samples fail the gate.
+No measured samples are dropped or retried. Completion polling stays outside
+the timed intervals. Exact durable run/version/agent/attempt counts, processed
+commands and an empty outbox are checked. Machine-readable reports and both raw
+sample arrays persist under `BenchmarkDotNet.Artifacts\dispatch-latency\<id>`.
+Temporary host/cache/blob directories, the unique schema and owned container
+are removed even when the probe fails.
+
 ## 11. Code Organization
 ```
 workflow-scheduler/

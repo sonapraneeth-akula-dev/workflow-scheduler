@@ -15,6 +15,9 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
     private readonly ConcurrentDictionary<Guid, AgentRecord> agents = new();
     private readonly SemaphoreSlim writes = new(1, 1);
 
+    internal event Action<Guid>? DispatchCommitted;
+    internal void NotifyDispatch(Guid agentId) => DispatchCommitted?.Invoke(agentId);
+
     public AgentRecord? Find(Guid id) => agents.GetValueOrDefault(id);
 
     public IReadOnlyList<AgentRecord> DispatchableAgents() =>

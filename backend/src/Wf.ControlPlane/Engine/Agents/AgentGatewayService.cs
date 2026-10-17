@@ -39,7 +39,14 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
             logger.LogInformation("Agent {AgentId} registered.", session.AgentId);
             var received = first.Sequence;
             var acknowledgements = Channel.CreateBounded<ulong>(32);
+            var wake = Channel.CreateBounded<byte>(new BoundedChannelOptions(1)
+                { SingleReader = true, FullMode = BoundedChannelFullMode.DropWrite });
+            void DispatchCommitted(Guid agentId)
+            {
+                if (agentId == session.AgentId) wake.Writer.TryWrite(0);
+            }
             await acknowledgements.Writer.WriteAsync(received, token);
+            registry.DispatchCommitted += DispatchCommitted;
             var sending = SendAsync();
             var receiving = ReceiveAsync();
             try
@@ -49,6 +56,7 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                 await Task.WhenAll(sending, receiving);
             }
             catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested) { }
+            finally { registry.DispatchCommitted -= DispatchCommitted; }
 
             async Task ReceiveAsync()
             {
@@ -61,7 +69,10 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                         if (message.Sequence <= received)
                         {
                             if (message.PayloadCase != AgentMessage.PayloadOneofCase.Ack)
+                            {
                                 await acknowledgements.Writer.WriteAsync(received, token);
+                                wake.Writer.TryWrite(0);
+                            }
                             continue;
                         }
                         switch (message.PayloadCase)
@@ -102,6 +113,7 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                         }
                         received = message.Sequence;
                         await acknowledgements.Writer.WriteAsync(received, token);
+                        wake.Writer.TryWrite(0);
                     }
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { }
@@ -117,6 +129,7 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                 {
                     while (!token.IsCancellationRequested)
                     {
+                        while (wake.Reader.TryRead(out _)) { }
                         CheckLeadership();
                         while (acknowledgements.Reader.TryRead(out var accepted))
                             await responseStream.WriteAsync(new ControlMessage
@@ -142,7 +155,8 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                                     }, token);
                         if (runs is not null)
                         {
-                            foreach (var (id, command) in await runs.PendingAsync(session, token))
+                            var pending = await runs.PendingControlsAsync(session, token);
+                            foreach (var (id, command) in pending.Dispatches)
                                 if (sent.Add(id))
                                 {
                                     if (logUploads is not null && command.Grants.All(grant => grant.Kind != "logs"))
@@ -157,7 +171,7 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                                         LeaderEpoch = epoch, Dispatch = command
                                     }, token);
                                 }
-                            foreach (var cancel in await runs.PendingCancelsAsync(session, token))
+                            foreach (var cancel in pending.Cancels)
                                 if (sentCancels.Add($"{cancel.Task.RunId}/{cancel.Task.NodeKey}/{cancel.Task.TaskKey}/{cancel.Task.Attempt}"))
                                     await responseStream.WriteAsync(new ControlMessage
                                     {
@@ -167,7 +181,7 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                         }
                         using var wait = CancellationTokenSource.CreateLinkedTokenSource(token);
                         wait.CancelAfter(TimeSpan.FromMilliseconds(25));
-                        try { _ = await acknowledgements.Reader.WaitToReadAsync(wait.Token); }
+                        try { _ = await wake.Reader.WaitToReadAsync(wait.Token); }
                         catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
                     }
                 }

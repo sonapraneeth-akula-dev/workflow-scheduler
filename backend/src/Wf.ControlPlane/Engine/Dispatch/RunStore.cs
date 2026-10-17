@@ -82,25 +82,42 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
     internal static async Task<RunState> LoadAsync(NpgsqlConnection connection, Guid runId, bool forUpdate,
         Action<string> log, CancellationToken cancellationToken)
     {
-        if (forUpdate)
+        byte[] payload;
+        long lastSequence;
+        await using (var batch = new NpgsqlBatch(connection))
         {
-            await using var locked = new NpgsqlCommand("""
-                SELECT 1 FROM runs WHERE run_day=uuid_v7_run_day($1) AND id=$1 FOR UPDATE
-                """, connection);
-            locked.Parameters.AddWithValue(runId);
-            if (await locked.ExecuteScalarAsync(cancellationToken) is null)
+            if (forUpdate)
+            {
+                // Read a fresh statement snapshot after any concurrent lock holder commits.
+                var locked = new NpgsqlBatchCommand("""
+                    SELECT 1 FROM runs WHERE run_day=uuid_v7_run_day($1) AND id=$1 FOR UPDATE
+                    """);
+                locked.Parameters.AddWithValue(runId);
+                batch.BatchCommands.Add(locked);
+            }
+            var snapshotQuery = new NpgsqlBatchCommand("""
+                SELECT s.payload,r.last_seq FROM runs r JOIN run_snapshots s
+                  ON s.run_day=r.run_day AND s.run_id=r.id AND s.seq=r.snapshot_seq
+                WHERE r.run_day=uuid_v7_run_day($1) AND r.id=$1
+                """);
+            snapshotQuery.Parameters.AddWithValue(runId);
+            batch.BatchCommands.Add(snapshotQuery);
+            await using var snapshots = await batch.ExecuteReaderAsync(cancellationToken);
+            if (forUpdate)
+            {
+                if (!await snapshots.ReadAsync(cancellationToken))
+                    throw new KeyNotFoundException($"Run '{runId}' does not exist.");
+                await snapshots.NextResultAsync(cancellationToken);
+            }
+            if (!await snapshots.ReadAsync(cancellationToken))
                 throw new KeyNotFoundException($"Run '{runId}' does not exist.");
+            payload = snapshots.GetFieldValue<byte[]>(0);
+            lastSequence = snapshots.GetInt64(1);
         }
-        await using var command = new NpgsqlCommand("""
-            SELECT s.payload FROM runs r JOIN run_snapshots s
-              ON s.run_day=r.run_day AND s.run_id=r.id AND s.seq=r.snapshot_seq
-            WHERE r.run_day=uuid_v7_run_day($1) AND r.id=$1
-            """, connection);
-        command.Parameters.AddWithValue(runId);
-        var payload = await command.ExecuteScalarAsync(cancellationToken) as byte[]
-            ?? throw new KeyNotFoundException($"Run '{runId}' does not exist.");
         var snapshot = JsonSerializer.Deserialize(payload, RunStoreJson.Default.RunSnapshot)
             ?? throw new InvalidDataException("Persisted run snapshot is null.");
+        if (snapshot.Metrics is not null && snapshot.LastSequence == lastSequence)
+            return RunState.Restore(snapshot, [], log);
         if (snapshot.Metrics is null)
             snapshot = await LoadMetricsBaselineAsync(connection, runId, cancellationToken);
         await using var tail = new NpgsqlCommand("""
@@ -234,7 +251,9 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
                 """, cancellationToken, change.RunId, change.Key!, (short)change.State,
                 (object?)metric.StartedAt ?? DBNull.Value, (object?)metric.EndedAt ?? DBNull.Value);
         }
-        if (change.Entity == EventEntity.Task && run.Snapshot.Metrics!.Tasks[change.Key!].Attempts is { Length: > 0 } attempts)
+        // Dispatch inserts the new attempt after this event; there is no attempt row to update yet.
+        if (change.Entity == EventEntity.Task && (ExecutionStatus)change.State != ExecutionStatus.Dispatched &&
+            run.Snapshot.Metrics!.Tasks[change.Key!].Attempts is { Length: > 0 } attempts)
         {
             var attempt = attempts[^1];
             await ExecuteAsync(connection, """
@@ -284,18 +303,38 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await FenceAsync(connection, transaction, lease, cancellationToken);
+        var pending = await ReadPendingAsync(connection, session, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return pending;
+    }
+
+    internal async Task<(IReadOnlyList<(long Id, DispatchCommand Command)> Dispatches, IReadOnlyList<Cancel> Cancels)> PendingControlsAsync(
+        AgentSession session, CancellationToken cancellationToken)
+    {
+        var lease = CaptureLease();
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await FenceAsync(connection, transaction, lease, cancellationToken);
+        var pending = await ReadPendingAsync(connection, session, cancellationToken);
+        IReadOnlyList<Cancel> cancels = execution is null ? [] :
+            await RunExecutionService.PendingCancelsAsync(connection, session.AgentId, session.SessionId, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return (pending, cancels);
+    }
+
+    private static async Task<IReadOnlyList<(long Id, DispatchCommand Command)>> ReadPendingAsync(NpgsqlConnection connection,
+        AgentSession session, CancellationToken cancellationToken)
+    {
         await using var command = new NpgsqlCommand("""
             SELECT o.id,o.payload FROM dispatch_outbox o JOIN agents a ON a.id=o.agent_id
             WHERE o.agent_id=$1 AND a.session_id=$2 ORDER BY o.id LIMIT 100
-            """, connection, transaction);
+            """, connection);
         command.Parameters.AddWithValue(session.AgentId);
         command.Parameters.AddWithValue(session.SessionId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var pending = new List<(long, DispatchCommand)>();
         while (await reader.ReadAsync(cancellationToken))
             pending.Add((reader.GetInt64(0), DispatchCommand.Parser.ParseFrom(reader.GetFieldValue<byte[]>(1))));
-        await reader.DisposeAsync();
-        await transaction.CommitAsync(cancellationToken);
         return pending;
     }
 

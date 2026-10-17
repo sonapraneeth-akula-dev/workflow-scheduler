@@ -8,6 +8,39 @@ on:
 permissions:
   contents: read
 jobs:
+  dispatch-latency:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 55
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: ankane/setup-postgres@v1
+        if: runner.os == 'Windows'
+        with:
+          postgres-version: 17
+      - name: Use isolated schema on Windows PostgreSQL
+        if: runner.os == 'Windows'
+        run: '"WF_TEST_POSTGRES=Host=localhost;Username=postgres;Database=postgres" >> $env:GITHUB_ENV'
+      - name: Verify exact counts, inclusive thresholds and invalid sample rejection
+        run: dotnet test backend/tests/Wf.Benchmarks.Tests --configuration Release --filter FullyQualifiedName~DispatchLatencyGate
+      - name: Require 10000 durable dispatches and real warm-host SDK run starts within budget
+        run: dotnet run --project backend/tests/Wf.Benchmarks --configuration Release --no-build -- --dispatch-latency-bench
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dispatch-latency-${{ matrix.os }}
+          path: BenchmarkDotNet.Artifacts/dispatch-latency
+          if-no-files-found: error
   run-query:
     strategy:
       matrix:

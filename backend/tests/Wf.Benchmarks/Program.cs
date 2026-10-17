@@ -4,6 +4,19 @@ using System.Text.Json;
 using Wf.Benchmarks;
 
 #if !ENGINE_BASELINE
+if (args.Length > 0 && args[0] == "--task-host")
+    return await DispatchLatencyBenchmarks.DefineWorkflow().RunAsync(args);
+
+if (args.Length > 0 && args[0] == "--dispatch-latency-bench")
+{
+    if (args.Length != 1)
+    {
+        Console.Error.WriteLine("Usage: --dispatch-latency-bench");
+        return 1;
+    }
+    return await DispatchLatencyBenchmarks.RunAsync();
+}
+
 if (args.Length > 0 && args[0] == "--sampler-overhead-bench")
     return await SamplerOverheadBenchmarks.RunAsync(args[1..]);
 if (args is ["--sampler-overhead-workload"])

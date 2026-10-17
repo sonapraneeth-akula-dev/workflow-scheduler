@@ -39,7 +39,11 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             var sequence = run.Snapshot.LastSequence;
             var decision = await advance(connection, run, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
-            if (decision?.Agent is not null) placement.Apply(decision);
+            if (decision?.Agent is { } agent)
+            {
+                placement.Apply(decision);
+                agents.NotifyDispatch(agent.Id);
+            }
             return run.Snapshot.LastSequence != sequence;
         }
         finally { gate.Release(); }
@@ -101,6 +105,7 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             await transaction.CommitAsync(cancellationToken);
             run.Apply(change);
             placement.Apply(decision);
+            agents.NotifyDispatch(decision.Agent.Id);
             return decision;
         }
         finally { gate.Release(); }
@@ -216,6 +221,7 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
                 """, cancellationToken, runId, taskKey, attempt, now);
             await transaction.CommitAsync(cancellationToken);
             placement.Apply(decision);
+            agents.NotifyDispatch(decision.Agent.Id);
             return AgentLossDisposition.Replaced;
         }
         finally { gate.Release(); }
@@ -225,53 +231,53 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
         CancellationToken cancellationToken)
     {
         var capacity = agents.DispatchableAgents().Select(agent => agent.Capacity(timeProvider.GetUtcNow())).ToDictionary(agent => agent.Id);
-        await using (var metadata = new NpgsqlCommand("SELECT id,labels,pool,status,last_heartbeat_at FROM agents WHERE id=ANY($1)", connection))
-        {
-            metadata.Parameters.AddWithValue(capacity.Keys.ToArray());
-            await using var reader = await metadata.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                var id = reader.GetGuid(0);
-                capacity[id] = capacity[id] with
-                {
-                    Labels = AgentRegistry.ParseLabels(reader.GetFieldValue<string[]>(1)), Pool = reader.GetString(2),
-                    Healthy = reader.GetInt16(3) == 0 &&
-                        reader.GetFieldValue<DateTimeOffset>(4) > timeProvider.GetUtcNow() - AgentRegistry.HeartbeatTimeout
-                };
-            }
-        }
-        var owned = new HashSet<Guid>();
-        await using (var reservations = new NpgsqlCommand("""
+        await using var batch = new NpgsqlBatch(connection);
+        var metadata = new NpgsqlBatchCommand("SELECT id,labels,pool,status,last_heartbeat_at FROM agents WHERE id=ANY($1)");
+        metadata.Parameters.AddWithValue(capacity.Keys.ToArray());
+        batch.BatchCommands.Add(metadata);
+        batch.BatchCommands.Add(new NpgsqlBatchCommand("""
             SELECT agent_id,run_id,node_key,epoch,expires_at,release_requested_at IS NULL
             FROM reservations WHERE released_at IS NULL
-            """, connection))
-        await using (var reader = await reservations.ExecuteReaderAsync(cancellationToken))
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                var id = reader.GetGuid(0);
-                var runId = reader.GetGuid(1);
-                var node = reader.GetString(2);
-                if (runId == request.RunId && node == request.NodeKey) owned.Add(id);
-                if (capacity.TryGetValue(id, out var agent))
-                    capacity[id] = agent with
-                    {
-                        ReservedForRun = runId, ReservedForNode = node, ReservationEpoch = reader.GetInt64(3),
-                        Healthy = agent.Healthy && reader.GetFieldValue<DateTimeOffset>(4) > timeProvider.GetUtcNow() &&
-                            reader.GetBoolean(5)
-                    };
-            }
-        if (owned.Count > 0) capacity = capacity.Where(pair => owned.Contains(pair.Key)).ToDictionary();
-        await using (var pending = new NpgsqlCommand("""
+            """));
+        batch.BatchCommands.Add(new NpgsqlBatchCommand("""
             SELECT agent_id,count(*),sum(required_ram_mb) FROM task_attempts WHERE status IN (2,3) GROUP BY agent_id
-            """, connection))
-        await using (var reader = await pending.ExecuteReaderAsync(cancellationToken))
-            while (await reader.ReadAsync(cancellationToken))
-                if (!reader.IsDBNull(0) && capacity.TryGetValue(reader.GetGuid(0), out var agent))
-                    capacity[agent.Id] = agent with
-                    {
-                        SlotsUsed = Math.Min(agent.MaxTasks, Math.Max(agent.SlotsUsed, checked((int)reader.GetInt64(1)))),
-                        AvailableRamMb = (long)Math.Max(0m, agent.AvailableRamMb - reader.GetFieldValue<decimal>(2))
-                    };
+            """));
+        await using var reader = await batch.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var id = reader.GetGuid(0);
+            capacity[id] = capacity[id] with
+            {
+                Labels = AgentRegistry.ParseLabels(reader.GetFieldValue<string[]>(1)), Pool = reader.GetString(2),
+                Healthy = reader.GetInt16(3) == 0 &&
+                    reader.GetFieldValue<DateTimeOffset>(4) > timeProvider.GetUtcNow() - AgentRegistry.HeartbeatTimeout
+            };
+        }
+        var owned = new HashSet<Guid>();
+        await reader.NextResultAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var id = reader.GetGuid(0);
+            var runId = reader.GetGuid(1);
+            var node = reader.GetString(2);
+            if (runId == request.RunId && node == request.NodeKey) owned.Add(id);
+            if (capacity.TryGetValue(id, out var agent))
+                capacity[id] = agent with
+                {
+                    ReservedForRun = runId, ReservedForNode = node, ReservationEpoch = reader.GetInt64(3),
+                    Healthy = agent.Healthy && reader.GetFieldValue<DateTimeOffset>(4) > timeProvider.GetUtcNow() &&
+                        reader.GetBoolean(5)
+                };
+        }
+        if (owned.Count > 0) capacity = capacity.Where(pair => owned.Contains(pair.Key)).ToDictionary();
+        await reader.NextResultAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            if (!reader.IsDBNull(0) && capacity.TryGetValue(reader.GetGuid(0), out var agent))
+                capacity[agent.Id] = agent with
+                {
+                    SlotsUsed = Math.Min(agent.MaxTasks, Math.Max(agent.SlotsUsed, checked((int)reader.GetInt64(1)))),
+                    AvailableRamMb = (long)Math.Max(0m, agent.AvailableRamMb - reader.GetFieldValue<decimal>(2))
+                };
         return placement.Propose(request, capacity.Values.ToArray());
     }
 
