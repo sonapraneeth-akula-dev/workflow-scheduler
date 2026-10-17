@@ -29,6 +29,7 @@ using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Data;
 using Wf.ControlPlane.Engine.Recovery;
 using Wf.ControlPlane.Engine.Registry;
+using Wf.ControlPlane.Live;
 using Wf.ControlPlane.Registration;
 using Wf.ControlPlane.Registry;
 using Wf.ControlPlane.Storage;
@@ -547,9 +548,10 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
         public ActiveVersionCache Versions => app.Services.GetRequiredService<ActiveVersionCache>();
         public ConcurrentQueue<Exception> Failures => failures;
 
-        public static async Task<Server> Start(NpgsqlDataSource source, bool runs = false, bool userSchedules = false)
+        public static async Task<Server> Start(NpgsqlDataSource source, bool runs = false, bool userSchedules = false,
+            bool live = false)
         {
-            runs |= userSchedules;
+            runs |= userSchedules || live;
             var root = Path.Combine(Path.GetTempPath(), "wf-registration-" + Guid.NewGuid().ToString("N"));
             var rsa = RSA.Create(2048);
             var key = new RsaSecurityKey(rsa) { KeyId = "registration-test" };
@@ -582,6 +584,11 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
                 builder.Services.AddSingleton<CommandInbox>();
                 builder.Services.AddSingleton<ActiveVersionCache>();
                 builder.Services.AddHostedService<ActiveVersionCache>(services => services.GetRequiredService<ActiveVersionCache>());
+            }
+            if (live)
+            {
+                builder.Services.AddSingleton<Wf.ControlPlane.Engine.Dispatch.RunStore>();
+                builder.Services.AddWorkflowLive();
             }
             var metadata = new OpenIdConnectConfiguration { Issuer = Issuer };
             metadata.SigningKeys.Add(key);
@@ -616,12 +623,23 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
                 app.MapRegistryEndpoints();
                 app.MapCatalogEndpoints();
             }
+            if (live)
+            {
+                app.MapHub<LiveHub>(LiveHub.Path, options => options.CloseOnAuthenticationExpiration = true);
+                app.MapRunTimelineEndpoints();
+            }
             if (userSchedules)
             {
                 app.MapUserSchedulesEndpoints();
                 app.MapWorkflowOpenApi();
             }
             await app.StartAsync(TestContext.Current.CancellationToken);
+            if (live)
+            {
+                using var ready = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+                ready.CancelAfter(TimeSpan.FromSeconds(10));
+                while (!app.Services.GetRequiredService<LiveFanout>().IsReady) await Task.Delay(10, ready.Token);
+            }
             var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
             return new(app, new HttpClient { BaseAddress = new(address), Timeout = TimeSpan.FromSeconds(20) }, rsa, key, root, clock, failures);
         }

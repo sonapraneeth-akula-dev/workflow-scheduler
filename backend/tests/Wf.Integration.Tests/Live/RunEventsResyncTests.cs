@@ -77,7 +77,9 @@ public sealed class RunEventsResyncTests(AuthorizationDatabase database) : IClas
         Assert.Equal((int)ExecutionStatus.Ready, snapshot.GetProperty("nodes").GetProperty("node").GetInt32());
         Assert.Equal((int)ExecutionStatus.Running, snapshot.GetProperty("tasks").GetProperty("node/task0").GetInt32());
         Assert.DoesNotContain("secret-sentinel", snapshot.GetRawText());
-        Assert.Equal(new[] { "abort", "endedAt", "lastSeq", "nodes", "runId", "seriesId", "status", "tasks", "versionId", "workflowId" },
+        Assert.Equal(JsonValueKind.Null, snapshot.GetProperty("parentRunId").ValueKind);
+        Assert.Empty(snapshot.GetProperty("reusedNodes").EnumerateObject());
+        Assert.Equal(new[] { "abort", "endedAt", "lastSeq", "nodes", "parentRunId", "reusedNodes", "runId", "seriesId", "status", "tasks", "versionId", "workflowId" },
             snapshot.EnumerateObject().Select(property => property.Name).Order());
         using var empty = await server.Get(Events(seed.Id, 5), server.Jwt(seed.Group));
         var emptyPage = await Json(empty);

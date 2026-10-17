@@ -27,6 +27,8 @@ const snapshot = {
   tasks: { "build/task": 3 },
   abort: null,
   endedAt: null,
+  parentRunId: null,
+  reusedNodes: {},
 }
 const signal = new AbortController().signal
 const respond = (data: unknown) =>
@@ -49,9 +51,40 @@ describe("run resync API boundaries", () => {
     { ...snapshot, tasks: { "foreign/task": 0 } },
     { ...snapshot, status: 7 },
     { ...snapshot, abort: { reason: "missing identity" } },
+    { ...snapshot, parentRunId: runId },
+    { ...snapshot, parentRunId: "https://foreign.invalid" },
+    { ...snapshot, parentRunId: snapshot.versionId, nodes: { build: 11 } },
+    {
+      ...snapshot,
+      parentRunId: snapshot.versionId,
+      reusedNodes: { build: snapshot.versionId },
+    },
+    {
+      ...snapshot,
+      nodes: { build: 11 },
+      reusedNodes: { build: snapshot.versionId },
+    },
+    {
+      ...snapshot,
+      parentRunId: snapshot.versionId,
+      nodes: { build: 11 },
+      reusedNodes: { build: runId },
+    },
   ])("rejects unsafe or mismatched run state", async (body) => {
     respond(body)
     await expect(readRunSnapshot(runId, signal)).rejects.toThrow()
+  })
+
+  it("keeps exact lineage for reused nodes and strips private source outputs", async () => {
+    const expected = {
+      ...snapshot,
+      parentRunId: snapshot.versionId,
+      nodes: { build: 11 },
+      tasks: { "build/task": 11 },
+      reusedNodes: { build: snapshot.versionId },
+    }
+    respond({ ...expected, outputs: { private: "never in store" } })
+    expect(await readRunSnapshot(runId, signal)).toEqual(expected)
   })
 
   it("requests exact decimal sequences, including the highest safe integer", async () => {

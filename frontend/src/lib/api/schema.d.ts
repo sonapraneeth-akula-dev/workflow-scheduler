@@ -4270,6 +4270,11 @@ export interface components {
             };
             abort: null | components["schemas"]["LiveAbort"];
             endedAt: null | string;
+            /** Format: uuid */
+            parentRunId: null | string;
+            reusedNodes: {
+                [key: string]: string;
+            };
         };
         RunTimelineAttempt: {
             nodeKey: string;

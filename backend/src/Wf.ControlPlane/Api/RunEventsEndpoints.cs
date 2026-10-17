@@ -111,14 +111,15 @@ public static class RunEventsEndpoints
     private static async Task<RunHeader?> Header(NpgsqlConnection connection, Guid run, CancellationToken token)
     {
         await using var command = new NpgsqlCommand("""
-            SELECT workflow_id,version_id,series_id,status,last_seq,snapshot_seq
+            SELECT workflow_id,version_id,series_id,status,last_seq,snapshot_seq,parent_run_id
             FROM runs WHERE run_day=uuid_v7_run_day($1) AND id=$1
             """, connection);
         command.Parameters.AddWithValue(run);
         await using var reader = await command.ExecuteReaderAsync(token);
         if (!await reader.ReadAsync(token)) return null;
         var header = new RunHeader(run, reader.GetString(0), reader.GetGuid(1),
-            reader.IsDBNull(2) ? null : reader.GetGuid(2), reader.GetInt16(3), reader.GetInt64(4), reader.GetInt64(5));
+            reader.IsDBNull(2) ? null : reader.GetGuid(2), reader.GetInt16(3), reader.GetInt64(4), reader.GetInt64(5),
+            reader.IsDBNull(6) ? null : reader.GetGuid(6));
         if (header.LastSeq < 0 || header.SnapshotSeq < 0 || header.SnapshotSeq > header.LastSeq ||
             !Enum.IsDefined((RunStatus)header.Status))
             throw new InvalidDataException();
@@ -177,12 +178,29 @@ public static class RunEventsEndpoints
         await using (var reader = await tail.ExecuteReaderAsync(token))
             while (await reader.ReadAsync(token))
                 state.Apply(Event(reader, header.RunId, checked(state.Snapshot.LastSequence + 1)));
-        return SnapshotResponse(header, state.Snapshot);
+        var reused = new Dictionary<string, Guid>(StringComparer.Ordinal);
+        await using (var lineage = new NpgsqlCommand("""
+            SELECT node_key,reused_from_run_id FROM node_runs
+            WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND reused_from_run_id IS NOT NULL
+            """, connection))
+        {
+            lineage.Parameters.AddWithValue(header.RunId);
+            await using var reader = await lineage.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token)) reused.Add(reader.GetString(0), reader.GetGuid(1));
+        }
+        return SnapshotResponse(header with { ReusedNodes = reused }, state.Snapshot);
     }
 
     private static IResult SnapshotResponse(RunHeader header, RunSnapshot restored)
     {
         if (restored.LastSequence != header.LastSeq || (int)restored.Status != header.Status)
+            throw new InvalidDataException();
+        var reused = header.ReusedNodes ?? new Dictionary<string, Guid>();
+        if (header.ParentRunId is { } parent && (parent == header.RunId || parent.Version != 7) ||
+            reused.Count != restored.Nodes.Count(pair => pair.Value == ExecutionStatus.Reused) ||
+            reused.Any(pair => header.ParentRunId is null || pair.Value == header.RunId ||
+                pair.Value.Version != 7 ||
+                !restored.Nodes.TryGetValue(pair.Key, out var status) || status != ExecutionStatus.Reused))
             throw new InvalidDataException();
         var abort = restored.Abort is not { } accepted ? null : new LiveAbort(accepted.By, accepted.ByName,
             accepted.At.ToString("O", CultureInfo.InvariantCulture), accepted.Reason, accepted.Source.ToString());
@@ -190,7 +208,8 @@ public static class RunEventsEndpoints
             (int)restored.Status, restored.LastSequence,
             restored.Nodes.ToDictionary(pair => pair.Key, pair => (int)pair.Value),
             restored.Tasks.ToDictionary(pair => pair.Key, pair => (int)pair.Value), abort,
-            restored.EndedAt?.ToString("O", CultureInfo.InvariantCulture)), RunEventsJsonContext.Default.RunSnapshotResponse);
+            restored.EndedAt?.ToString("O", CultureInfo.InvariantCulture), header.ParentRunId, reused),
+            RunEventsJsonContext.Default.RunSnapshotResponse);
     }
 
     private static async Task<RunHeader?> PendingTrigger(NpgsqlConnection connection, Guid run, CancellationToken token)
@@ -207,7 +226,8 @@ public static class RunEventsEndpoints
             !WorkflowIdentity.TryGetTypeScope(trigger.WorkflowId, out _))
             throw new InvalidDataException();
         return new(run, trigger.WorkflowId, trigger.VersionId, trigger.SeriesId,
-            (int)trigger.InitialState.Status, 0, 0, trigger.InitialState);
+            (int)trigger.InitialState.Status, 0, 0, trigger.ParentRunId, trigger.InitialState,
+            trigger.ReusedNodes?.ToDictionary(pair => pair.Key, pair => pair.Value.ReusedFromRunId, StringComparer.Ordinal));
     }
 
     private static NpgsqlCommand Tail(NpgsqlConnection connection, Guid run, long after, int? limit = null)
@@ -245,5 +265,6 @@ public static class RunEventsEndpoints
         Results.Problem(statusCode: status, title: title, extensions: new Dictionary<string, object?> { ["reason"] = reason });
 
     private sealed record RunHeader(Guid RunId, string WorkflowId, Guid VersionId, Guid? SeriesId,
-        int Status, long LastSeq, long SnapshotSeq, RunSnapshot? PendingState = null);
+        int Status, long LastSeq, long SnapshotSeq, Guid? ParentRunId, RunSnapshot? PendingState = null,
+        IReadOnlyDictionary<string, Guid>? ReusedNodes = null);
 }

@@ -8,7 +8,7 @@ public sealed record RunEventsPage(Guid RunId, long LastSeq, LiveEvent[] Events)
 
 public sealed record RunSnapshotResponse(Guid RunId, string WorkflowId, Guid VersionId, Guid? SeriesId,
     int Status, long LastSeq, IReadOnlyDictionary<string, int> Nodes, IReadOnlyDictionary<string, int> Tasks,
-    LiveAbort? Abort, string? EndedAt);
+    LiveAbort? Abort, string? EndedAt, Guid? ParentRunId, IReadOnlyDictionary<string, Guid> ReusedNodes);
 
 public static class RunEventsQuery
 {

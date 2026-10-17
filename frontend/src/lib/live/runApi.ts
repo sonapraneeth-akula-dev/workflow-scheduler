@@ -18,6 +18,12 @@ export const executionStatuses = [
   "Reused",
 ] as const
 
+export const runIdSchema = z
+  .string()
+  .regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+  )
+
 const runSnapshotSchema = z
   .object({
     runId: z.uuid(),
@@ -30,6 +36,8 @@ const runSnapshotSchema = z
     tasks: z.record(z.string().regex(/^[^/]+\/[^/]+$/), z.int().min(0).max(11)),
     abort: liveAbortSchema.nullable(),
     endedAt: z.iso.datetime({ offset: true }).nullable(),
+    parentRunId: runIdSchema.nullable(),
+    reusedNodes: z.record(z.string().min(1), runIdSchema),
   })
   .superRefine((snapshot, context) => {
     if (
@@ -41,6 +49,20 @@ const runSnapshotSchema = z
         code: "custom",
         message: "A run task has no matching node.",
       })
+    if (
+      snapshot.parentRunId === snapshot.runId ||
+      Object.entries(snapshot.reusedNodes).some(
+        ([key, source]) =>
+          snapshot.parentRunId === null ||
+          source === snapshot.runId ||
+          snapshot.nodes[key] !== 11
+      ) ||
+      Object.entries(snapshot.nodes).some(
+        ([key, state]) =>
+          state === 11 && !Object.hasOwn(snapshot.reusedNodes, key)
+      )
+    )
+      context.addIssue({ code: "custom", message: "Invalid run lineage." })
   })
 const runEventsSchema = z.object({
   runId: z.uuid(),

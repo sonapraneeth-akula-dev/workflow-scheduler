@@ -4,6 +4,8 @@ import { Tabs } from "radix-ui"
 import { ReconnectingIndicator } from "@/components/ReconnectingIndicator"
 import { LiveRunGraph } from "@/features/graph/RunGraph"
 import { AbortDialog } from "@/features/runs/AbortDialog"
+import { RerunDialog } from "@/features/runs/RerunDialog"
+import { RunLineage } from "@/features/runs/RunLineage"
 import { Timeline } from "@/features/runs/Timeline"
 import { ResourceCharts } from "@/features/runs/ResourceCharts"
 import { TaskOutputs } from "@/features/runs/TaskOutputs"
@@ -41,6 +43,14 @@ function RunDetail() {
             abort={run.abort}
             live={live.status === "live"}
           />
+          <RerunDialog
+            key={`rerun-${run.runId}`}
+            runId={run.runId}
+            versionId={run.versionId}
+            status={run.status}
+            live={live.status === "live"}
+          />
+          <RunLineage run={run} />
           <Link
             to="/t/$team/$type/w/$wf/versions/$v"
             params={{ team, type, wf, v: run.versionId }}

@@ -23,6 +23,8 @@ const snapshot: RunSnapshot = {
   tasks: { "build/task": 0 },
   abort: null,
   endedAt: null,
+  parentRunId: null,
+  reusedNodes: {},
 }
 const change = (seq: number): RunDelta["events"][number] => ({
   seq,
@@ -105,6 +107,35 @@ const ready = async (store: RunStore) =>
   waitFor(() => expect(store.getSnapshot().status).toBe("live"))
 
 describe("ordered authoritative run recovery", () => {
+  it("preserves immutable parent and reused-source identities through live deltas and reconnect tails", async () => {
+    const parent = "019ed132-2f44-7000-8000-000000000003"
+    const f = fixture("connecting")
+    const reusedNodes = { cached: parent }
+    f.reads.snapshot.mockResolvedValueOnce({
+      ...snapshot,
+      parentRunId: parent,
+      reusedNodes,
+      nodes: { ...snapshot.nodes, cached: 11 },
+      tasks: { ...snapshot.tasks, "cached/task": 11 },
+    })
+    f.emit({ status: "live" })
+    await ready(f.store)
+    f.emitEvents(change(1))
+    f.emit({ status: "connecting" })
+    f.reads.events.mockResolvedValueOnce(page(1, 3))
+    f.emit({ status: "live", resyncVersion: 1 })
+    await ready(f.store)
+    expect(f.store.getSnapshot().run).toMatchObject({
+      lastSeq: 3,
+      parentRunId: parent,
+      reusedNodes,
+      nodes: { cached: 11 },
+      tasks: { "cached/task": 11 },
+    })
+    expect(f.store.getSnapshot().run?.reusedNodes).toBe(reusedNodes)
+    expect(f.reads.snapshot).toHaveBeenCalledOnce()
+    f.stop()
+  })
   it("does not refetch run state or fabricate lifecycle changes for report notifications", async () => {
     const f = fixture()
     await ready(f.store)

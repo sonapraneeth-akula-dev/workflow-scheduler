@@ -96,6 +96,8 @@ const run: RunSnapshot = {
   nodes: { start: 5, finish: 3 },
   tasks: { "finish/sdk": 3 },
   endedAt: null,
+  parentRunId: null,
+  reusedNodes: {},
   abort: null,
 }
 
@@ -158,6 +160,33 @@ describe("live graph rendering", () => {
     expect(
       screen.getByRole("region", { name: "Selected node start" })
     ).toHaveTextContent("No declared tasks")
+  })
+
+  it("links reused node inspection to its exact source rather than inventing attempts on the rerun", () => {
+    render(
+      <RunGraph
+        plan={plan}
+        run={{
+          ...run,
+          parentRunId: versionId,
+          reusedNodes: { start: versionId },
+          nodes: { ...run.nodes, start: 11 },
+        }}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "start: Reused" }))
+    expect(
+      screen.getByRole("region", { name: "Selected node start" })
+    ).toHaveTextContent("Reused")
+    expect(
+      screen.getByRole("link", {
+        name: "Original outputs and attempts for start",
+      })
+    ).toHaveAttribute("href", `/runs/${versionId}`)
+    fireEvent.click(screen.getByRole("button", { name: "finish: Running" }))
+    expect(
+      screen.queryByRole("link", { name: /Original outputs and attempts/ })
+    ).not.toBeInTheDocument()
   })
 
   it("uses one tab stop, geometric arrows and Home/End without trapping Tab", async () => {

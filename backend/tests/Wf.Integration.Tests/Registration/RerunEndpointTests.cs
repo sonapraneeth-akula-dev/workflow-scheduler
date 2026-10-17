@@ -57,6 +57,10 @@ public sealed partial class RegistrationTests
             Assert.Equal(HttpStatusCode.OK, pending.StatusCode);
             var snapshot = await Json(pending);
             Assert.Equal(seed.Version, snapshot.GetProperty("versionId").GetGuid());
+            Assert.Equal(seed.Snapshot.RunId, snapshot.GetProperty("parentRunId").GetGuid());
+            Assert.Equal(selectBuild ? 0 : 2, snapshot.GetProperty("reusedNodes").EnumerateObject().Count());
+            if (!selectBuild)
+                Assert.Equal(seed.Snapshot.RunId, snapshot.GetProperty("reusedNodes").GetProperty("build").GetGuid());
             Assert.Equal((int)RunStatus.Queued, snapshot.GetProperty("status").GetInt32());
             Assert.Equal((int)(selectBuild ? ExecutionStatus.Pending : ExecutionStatus.Reused),
                 snapshot.GetProperty("nodes").GetProperty("build").GetInt32());
@@ -96,6 +100,16 @@ public sealed partial class RegistrationTests
             Assert.Equal(latest, await Value("SELECT active_version_id FROM workflows WHERE id=$1", seed.Request.WorkflowId!));
             Assert.Equal(accepted, await RerunAccepted(server, seed.Snapshot.RunId, body, bearer, key));
             Assert.Equal(1L, await Value("SELECT count(*) FROM runs WHERE id=$1", accepted));
+            using var read = await server.Send(HttpMethod.Get, $"/api/v1/runs/{accepted:D}", null!, bearer);
+            Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+            var committed = await Json(read);
+            Assert.Equal(seed.Snapshot.RunId, committed.GetProperty("parentRunId").GetGuid());
+            Assert.Equal(selectBuild ? 0 : 2, committed.GetProperty("reusedNodes").EnumerateObject().Count());
+            if (!selectBuild)
+            {
+                Assert.Equal(seed.Snapshot.RunId, committed.GetProperty("reusedNodes").GetProperty("build").GetGuid());
+                Assert.Equal(seed.Snapshot.RunId, committed.GetProperty("reusedNodes").GetProperty("deploy-eu").GetGuid());
+            }
         }
         finally { await leader.StopAsync(TestContext.Current.CancellationToken); }
         Assert.Empty(server.Failures);
@@ -289,7 +303,56 @@ public sealed partial class RegistrationTests
 
     private sealed record RerunSeed(RegistrationRequest Request, Guid Version, RunSnapshot Snapshot, Guid Group);
 
-    private async Task<RerunSeed> SeedRerun(Server server, bool terminal = true)
+    [Theory]
+    [InlineData("missing-source")]
+    [InlineData("extra-source")]
+    [InlineData("self-source")]
+    [InlineData("missing-parent")]
+    [InlineData("invalid-source")]
+    public async Task Rerun_snapshot_rejects_corrupt_lineage_without_exposing_original_outputs(string corruption)
+    {
+        await using var server = await Server.Start(database.DataSource, runs: true);
+        var seed = await SeedRerun(server);
+        var bearer = RerunOperator(server, seed.Group);
+        var child = await RerunAccepted(server, seed.Snapshot.RunId, new(null), bearer);
+        using var leader = new LeaseManager(database.DataSource,
+            new(Guid.NewGuid().ToString("N"), new Uri("http://localhost:5261")), NullLogger<LeaseManager>.Instance);
+        Assert.True(await leader.TryAcquireOrRenewAsync(TestContext.Current.CancellationToken));
+        try
+        {
+            var store = new RunStore(database.DataSource, NullLogger<RunStore>.Instance, leader);
+            using var recovery = new RunRecovery(database.DataSource, store, leader, server.Clock, NullLogger<RunRecovery>.Instance);
+            await recovery.RecoverAsync(TestContext.Current.CancellationToken);
+            switch (corruption)
+            {
+                case "missing-source":
+                    await Execute("UPDATE node_runs SET reused_from_run_id=NULL WHERE run_id=$1 AND node_key='build'", child);
+                    break;
+                case "extra-source":
+                    await Execute("UPDATE node_runs SET reused_from_run_id=$2 WHERE run_id=$1 AND node_key='deploy-us'", child, seed.Snapshot.RunId);
+                    break;
+                case "self-source":
+                    await Execute("UPDATE node_runs SET reused_from_run_id=$1 WHERE run_id=$1 AND node_key='build'", child);
+                    break;
+                case "missing-parent":
+                    await Execute("UPDATE runs SET parent_run_id=NULL WHERE id=$1", child);
+                    break;
+                case "invalid-source":
+                    await Execute("UPDATE node_runs SET reused_from_run_id=$2 WHERE run_id=$1 AND node_key='build'", child, Guid.NewGuid());
+                    break;
+                default: Assert.Fail("Unknown lineage corruption."); break;
+            }
+            using var response = await server.Send(HttpMethod.Get, $"/api/v1/runs/{child:D}", null!, bearer);
+            Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+            Assert.Equal("run_data_inconsistent", (await Json(response)).GetProperty("reason").GetString());
+            Assert.DoesNotContain("package-v1.0.0", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+            Assert.True(response.Headers.CacheControl!.NoStore);
+        }
+        finally { await leader.StopAsync(TestContext.Current.CancellationToken); }
+        Assert.Empty(server.Failures);
+    }
+
+    private async Task<RerunSeed> SeedRerun(Server server, bool terminal = true, Guid? viewerGroup = null)
     {
         var request = await Request(server);
         var workflow = Workflow.Define(request.WorkflowId!, "1.0.0", w => w.Type("release").Metadata("area", "rerun-original")
@@ -313,7 +376,9 @@ public sealed partial class RegistrationTests
                 Types = [registry.Types[0] with
                 {
                     MetadataSchema = new([new("area")]),
-                    RoleBindings = [new(RegistryRole.Operator, group)]
+                    RoleBindings = viewerGroup is { } viewer
+                        ? [new(RegistryRole.Operator, group), new(RegistryRole.Viewer, viewer)]
+                        : [new(RegistryRole.Operator, group)]
                 }]
             }, TeamRegistryJsonContext.Default.TeamRegistry)
         };

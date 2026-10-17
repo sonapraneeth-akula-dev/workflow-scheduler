@@ -223,6 +223,14 @@ export function RunGraph({
           className="mt-4 min-w-0 rounded-md border p-4 break-words"
         >
           <h3 className="font-semibold">{node.key}</h3>
+          {run.reusedNodes[node.key] ? (
+            <p className="break-all">
+              <StatusBadge status="Reused" />{" "}
+              <Link to="/runs/$id" params={{ id: run.reusedNodes[node.key]! }}>
+                Original outputs and attempts for {node.key}
+              </Link>
+            </p>
+          ) : null}
           <p>
             Dependencies:{" "}
             {node.dependencies

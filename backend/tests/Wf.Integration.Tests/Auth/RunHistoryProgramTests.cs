@@ -94,6 +94,11 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             Assert.Equal("#/components/schemas/ScheduleRunNowResponse", runNow.GetProperty("responses").GetProperty("202")
                 .GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
             var schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
+            var runSnapshot = schemas.GetProperty("RunSnapshotResponse");
+            Assert.True(runSnapshot.GetProperty("properties").TryGetProperty("parentRunId", out _));
+            Assert.True(runSnapshot.GetProperty("properties").TryGetProperty("reusedNodes", out _));
+            Assert.Contains(runSnapshot.GetProperty("required").EnumerateArray(), property => property.GetString() == "parentRunId");
+            Assert.Contains(runSnapshot.GetProperty("required").EnumerateArray(), property => property.GetString() == "reusedNodes");
             Assert.True(schemas.GetProperty("LiveReconnect").GetProperty("properties").TryGetProperty("reason", out _));
             var machines = paths.GetProperty("/api/v1/machines").GetProperty("get");
             Assert.Equal("#/components/schemas/MachineListResponse", machines.GetProperty("responses").GetProperty("200")
