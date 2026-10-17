@@ -14,7 +14,8 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
     LeaseManager? leadership = null, AgentLossSweeper? losses = null, LogUploadCapabilities? logUploads = null,
     Wf.ControlPlane.Reports.ReportUploadCapabilities? reportUploads = null,
     Wf.ControlPlane.Artifacts.ArtifactUploadCapabilities? artifactUploads = null, ResourceSampleSink? resources = null,
-    ReservationLeaseService? reservations = null, CalibrationService? calibrations = null)
+    ReservationLeaseService? reservations = null, CalibrationService? calibrations = null,
+    Wf.ControlPlane.Engine.Checkpoints.CheckpointApplier? checkpoints = null)
     : AgentGateway.AgentGatewayBase
 {
     public override async Task Connect(IAsyncStreamReader<AgentMessage> requestStream,
@@ -77,6 +78,11 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                         }
                         switch (message.PayloadCase)
                         {
+                            case AgentMessage.PayloadOneofCase.CheckpointSaved:
+                                if (checkpoints is null)
+                                    throw new RpcException(new Status(StatusCode.Unimplemented, "Checkpoint persistence is not configured."));
+                                await checkpoints.AcceptAsync(session, message.CheckpointSaved, token);
+                                break;
                             case AgentMessage.PayloadOneofCase.ResourceSample:
                                 if (resources is null)
                                     throw new RpcException(new Status(StatusCode.Unimplemented, "Resource persistence is not configured."));

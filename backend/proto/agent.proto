@@ -23,6 +23,7 @@ message AgentMessage {
     ResourceSample resource_sample = 15;
     ReservationFenced reservation_fenced = 16;
     CalibrationCompleted calibration_completed = 17;
+    CheckpointSaved checkpoint_saved = 18;
   }
 }
 
@@ -210,4 +211,16 @@ message ResourceSample {
   uint64 reservation_epoch = 2;
   uint64 sample_sequence = 3;
   bytes sample_json = 4;
+}
+
+// The immutable JSON blob is uploaded before this record is journaled.
+// Sequence is monotonic for the logical run/task, including later attempts.
+message CheckpointSaved {
+  AttemptRef task = 1;
+  uint64 reservation_epoch = 2;
+  uint64 checkpoint_sequence = 3;
+  google.protobuf.Timestamp saved_at = 4;
+  string blob_key = 5;
+  string sha256 = 6;
+  uint64 size_bytes = 7;
 }

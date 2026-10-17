@@ -8,7 +8,7 @@ namespace Wf.ControlPlane.Engine.Maintenance;
 
 public sealed partial class PartitionMaintenance(NpgsqlDataSource source, TimeProvider time, LeaseManager? leadership = null)
 {
-    private static readonly string[] RunParents = ["artifacts", "reports", "task_attempts", "node_runs", "run_snapshots", "run_events", "runs"];
+    private static readonly string[] RunParents = ["task_checkpoints", "artifacts", "reports", "task_attempts", "node_runs", "run_snapshots", "run_events", "runs"];
     private sealed record Partition(string Parent, string Name, DateOnly Month);
 
     public static bool IsExpiredMonth(DateOnly month, DateTimeOffset now, int days) =>
@@ -64,7 +64,7 @@ public sealed partial class PartitionMaintenance(NpgsqlDataSource source, TimePr
             FROM pg_inherits i JOIN pg_class p ON p.oid=i.inhparent JOIN pg_class c ON c.oid=i.inhrelid
             JOIN pg_namespace pn ON pn.oid=p.relnamespace JOIN pg_namespace cn ON cn.oid=c.relnamespace
             WHERE pn.nspname=current_schema() AND cn.nspname=pn.nspname
-                AND p.relname IN('runs','run_events','run_snapshots','node_runs','task_attempts','reports','artifacts','audit_log')
+                AND p.relname IN('runs','run_events','run_snapshots','node_runs','task_attempts','reports','artifacts','task_checkpoints','audit_log')
             """, connection))
         {
             await using var reader = await command.ExecuteReaderAsync(token);

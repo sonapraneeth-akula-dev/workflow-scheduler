@@ -282,13 +282,13 @@ public sealed class RetentionMaintenanceTests(RegistrationHostDatabase database)
         var old = new DateOnly(2024, 1, 1);
         await Execute("SELECT ensure_run_partitions($1)", old);
         var dropped = await Partitions().DropExpiredEmptyAsync(Token);
-        Assert.Equal(7, dropped);
+        Assert.Equal(8, dropped);
         Assert.Equal(0, await Count("SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND c.relname LIKE '%_202401'"));
         var workflow = await Workflow();
         var active = await Run(workflow, new DateTimeOffset(2024, 2, 5, 0, 0, 0, TimeSpan.Zero));
         await Execute("UPDATE runs SET status=1,ended_at=NULL WHERE id=$1", active);
         await Partitions().DropExpiredEmptyAsync(Token);
-        Assert.Equal(7, await Count("SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND c.relname LIKE '%_202402'"));
+        Assert.Equal(8, await Count("SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND c.relname LIKE '%_202402'"));
         await using var invalid = database.DataSource.CreateCommand("""
             INSERT INTO run_events(run_day,run_id,seq,ts,kind,payload) VALUES(uuid_v7_run_day($1),$1,1,$2,0,''::bytea)
             """);
@@ -305,11 +305,11 @@ public sealed class RetentionMaintenanceTests(RegistrationHostDatabase database)
         await Partitions().EnsureAsync(Token);
         await Partitions().EnsureAsync(Token);
         foreach (var suffix in new[] { "202711", "202712" })
-            Assert.Equal(8, await Count("""
+            Assert.Equal(9, await Count("""
                 SELECT count(*) FROM pg_inherits i JOIN pg_class c ON c.oid=i.inhrelid
                 JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema()
                     AND c.relname IN('runs_'||$1,'run_events_'||$1,'run_snapshots_'||$1,'node_runs_'||$1,
-                        'task_attempts_'||$1,'reports_'||$1,'artifacts_'||$1,'audit_log_'||$1)
+                        'task_attempts_'||$1,'reports_'||$1,'artifacts_'||$1,'task_checkpoints_'||$1,'audit_log_'||$1)
                 """, suffix));
         Assert.Equal(0, await Purger().PurgeBatchAsync(Token));
         Assert.Equal(0, await Partitions().DropExpiredEmptyAsync(Token));
@@ -437,7 +437,7 @@ public sealed class RetentionMaintenanceTests(RegistrationHostDatabase database)
             """, Guid.CreateVersion7(), subscription, expired);
         await Execute("SELECT refresh_daily_rollups(uuid_v7_run_day($1),$2)", expired, workflow);
         Assert.Equal(1, await Purger().PurgeBatchAsync(Token));
-        foreach (var table in new[] { "task_attempts", "node_runs", "run_events", "run_snapshots", "reports",
+        foreach (var table in new[] { "task_checkpoints", "task_attempts", "node_runs", "run_events", "run_snapshots", "reports",
             "artifacts", "artifact_grants", "reservations", "commands", "notification_outbox" })
             Assert.Equal(0, await Count($"SELECT count(*) FROM {table} WHERE run_id=$1", expired));
         Assert.Equal(0, await Count("SELECT count(*) FROM report_ids WHERE id=$1", reportId));
@@ -457,7 +457,7 @@ public sealed class RetentionMaintenanceTests(RegistrationHostDatabase database)
         await Workflow(3650);
         await Execute("SELECT ensure_run_partitions($1)", new DateOnly(2024, 1, 1));
         await Partitions().DropExpiredEmptyAsync(Token);
-        Assert.Equal(7, await Count("""
+        Assert.Equal(8, await Count("""
             SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
             WHERE n.nspname=current_schema() AND c.relname LIKE '%_202401'
             """));
@@ -538,7 +538,7 @@ public sealed class RetentionMaintenanceTests(RegistrationHostDatabase database)
                 await Count("SELECT count(*) FROM retention_blob_deletions") != 0)
                 await Task.Delay(25, deadline.Token);
             Assert.Equal(1, await Count("SELECT count(*) FROM runs WHERE id=$1", retained));
-            Assert.Equal(8, await Count("""
+            Assert.Equal(9, await Count("""
                 SELECT count(*) FROM pg_inherits i JOIN pg_class c ON c.oid=i.inhrelid
                 JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND c.relname LIKE '%_203601'
                 """));
@@ -561,12 +561,12 @@ public sealed class RetentionMaintenanceTests(RegistrationHostDatabase database)
         deadline.CancelAfter(TimeSpan.FromSeconds(2));
         var error = await Assert.ThrowsAsync<PostgresException>(() => Partitions().DropExpiredEmptyAsync(deadline.Token));
         Assert.Equal(PostgresErrorCodes.LockNotAvailable, error.SqlState);
-        Assert.Equal(7, await Count("""
+        Assert.Equal(8, await Count("""
             SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
             WHERE n.nspname=current_schema() AND c.relname LIKE '%_202001'
             """));
         await transaction.CommitAsync(Token);
-        Assert.Equal(7, await Partitions().DropExpiredEmptyAsync(Token));
+        Assert.Equal(8, await Partitions().DropExpiredEmptyAsync(Token));
     }
 
     private async Task<string> Workflow(int? days = null)

@@ -1533,6 +1533,18 @@ fails `Placement` instead of silently using another worker. Re-run without
 `placement` keeps the source override; `singleMachine: false` explicitly removes
 it. Existing authorization remains unchanged; no login/logout flow is added.
 
+Checkpoint ingestion uses a journaled `CheckpointSaved` pointer, never JSON state
+in the agent result journal. The engine verifies the immutable run/task/sequence
+blob, SHA-256 and JSON (at most 1 MiB), then commits `task_checkpoints` before its
+cumulative acknowledgement. The logical run/task keeps only its highest sequence;
+exact replay is idempotent, conflicting replay fails, and new saves must be at
+least five seconds apart. Superseded attempts and stale physical reservation
+fences cannot replace the pointer. A reconnected current session may replay its
+pending record. Timestamps use PostgreSQL microsecond precision. Retention removes
+the pointer before attempt rows and deletes every checkpoint blob under the exact
+run prefix, including older uploads. The SDK save/upload/resume producer remains
+the next checkpoint task; ingestion alone adds no login flow or public read API.
+
 `Wf.ControlPlane.Engine.Reservations.ReservationManager.ReserveAsync` allocates
 an exact number of matching machines exclusively to an existing run/node.
 PostgreSQL transactions and the dispatcher's allocation lock serialize competing

@@ -19,8 +19,9 @@ public sealed class BlobContent
         SizeBytes = sizeBytes;
         if (logKey is not null && !(kind == BlobKind.Logs && IsLogKey(logKey) ||
                                    kind == BlobKind.Reports && IsReportKey(logKey) ||
-                                   kind == BlobKind.Resources && IsResourceKey(logKey)))
-            throw new ArgumentException("Named content requires a canonical log-attempt or report key.", nameof(logKey));
+                                   kind == BlobKind.Resources && IsResourceKey(logKey) ||
+                                   kind == BlobKind.Checkpoints && IsCheckpointKey(logKey, Sha256)))
+            throw new ArgumentException("Named content requires a canonical run-scoped object key.", nameof(logKey));
         Key = logKey ?? $"{Kind.ToString().ToLowerInvariant()}/{Sha256}{(Kind == BlobKind.Packages ? ".zip" : "")}";
     }
 
@@ -28,6 +29,20 @@ public sealed class BlobContent
     public string Sha256 { get; }
     public long SizeBytes { get; }
     public string Key { get; }
+
+    private static bool IsCheckpointKey(string key, string sha256)
+    {
+        var parts = key.Split('/');
+        if (parts.Length != 4 || parts[0] != "checkpoints" ||
+            !Guid.TryParseExact(parts[1], "D", out var run) || run.Version != 7 || parts[1] != run.ToString("D") ||
+            parts[2].Length != 64 || !parts[2].All(c => char.IsAsciiDigit(c) || c is >= 'a' and <= 'f') ||
+            !parts[3].EndsWith("-" + sha256 + ".json", StringComparison.Ordinal))
+            return false;
+        var ordinal = parts[3][..^70];
+        return long.TryParse(ordinal, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture,
+            out var sequence) && sequence > 0 &&
+            ordinal == sequence.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
 
     internal static bool IsResourceKey(string key)
     {

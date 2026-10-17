@@ -54,13 +54,14 @@ public sealed class AgentOutbox : IDisposable
         if (message.PayloadCase is not (AgentMessage.PayloadOneofCase.TaskStarted or
             AgentMessage.PayloadOneofCase.TaskCompleted or AgentMessage.PayloadOneofCase.Heartbeat or
             AgentMessage.PayloadOneofCase.ResourceSample or AgentMessage.PayloadOneofCase.ReservationFenced or
-            AgentMessage.PayloadOneofCase.CalibrationCompleted))
-            throw new ArgumentException("Only task events, heartbeats, calibration results and fence acknowledgements belong in the agent outbox.", nameof(message));
+            AgentMessage.PayloadOneofCase.CalibrationCompleted or AgentMessage.PayloadOneofCase.CheckpointSaved))
+            throw new ArgumentException("Only task events, heartbeats, calibration results, checkpoints and fence acknowledgements belong in the agent outbox.", nameof(message));
         lock (gate)
         {
             var copy = message.Clone();
             copy.Sequence = checked(Math.Max(sequence, 1) + 1);
-            if ((journal is not null && copy.Heartbeat is null) || copy.CalibrationCompleted is not null) ResultJournal.Validate(copy);
+            if ((journal is not null && copy.Heartbeat is null) || copy.CalibrationCompleted is not null ||
+                copy.CheckpointSaved is not null) ResultJournal.Validate(copy);
             Persist(copy.Sequence, leaderEpoch, pending.Values.Append(copy));
             sequence = copy.Sequence;
             // Only the latest heartbeat is useful after a disconnection; task events are never dropped.
@@ -131,7 +132,8 @@ public sealed class AgentOutbox : IDisposable
     public IReadOnlyList<AttemptRef> UnacknowledgedAttempts()
     {
         lock (gate)
-            return pending.Values.Select(message => message.TaskStarted?.Task ?? message.TaskCompleted?.Task ?? message.ResourceSample?.Task)
+            return pending.Values.Select(message => message.TaskStarted?.Task ?? message.TaskCompleted?.Task ??
+                message.ResourceSample?.Task ?? message.CheckpointSaved?.Task)
                 .OfType<AttemptRef>().Select(task => task.Clone()).ToArray();
     }
 

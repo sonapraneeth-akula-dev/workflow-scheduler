@@ -25,6 +25,41 @@ public sealed class MigratorTests(MigrationDatabase database) : IClassFixture<Mi
         Assert.Equal(7L, await tables.ExecuteScalarAsync(TestContext.Current.CancellationToken));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Checkpoint_upgrade_preserves_old_rows_and_empty_partition_families_and_retries_atomically(bool failFirst)
+    {
+        await using var scope = await Scope();
+        var scripts = Migrator.LoadScripts();
+        var previous = scripts.Where(script => string.CompareOrdinal(script.Name, "0043") < 0).ToArray();
+        Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance, previous);
+        var agent = await CapacityMigrationsTests.SeedAgent(scope.DataSource);
+        await using var row = scope.DataSource.CreateCommand("SELECT xmin::text FROM agents WHERE id=$1");
+        row.Parameters.AddWithValue(agent);
+        var before = await row.ExecuteScalarAsync(TestContext.Current.CancellationToken);
+        await using (var historical = scope.DataSource.CreateCommand("SELECT ensure_run_partitions(date '2020-01-01')"))
+            await historical.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        var checkpoint = Assert.Single(scripts, script => script.Name == "0043_task_checkpoints.sql");
+        if (failFirst)
+        {
+            var broken = new SqlScript(checkpoint.Name, checkpoint.Contents.Replace("COMMIT;", "SELECT 1/0; COMMIT;", StringComparison.Ordinal));
+            Assert.Throws<InvalidOperationException>(() =>
+                Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance, [.. previous, broken]));
+            await using var absent = scope.DataSource.CreateCommand("SELECT to_regclass('task_checkpoints')::text");
+            Assert.Equal(DBNull.Value, await absent.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+        }
+        Assert.Equal([checkpoint.Name], Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance));
+        Assert.Empty(Migrator.Upgrade(scope.ConnectionString, NullLogger.Instance));
+        Assert.Equal(before, await row.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+        await using var family = scope.DataSource.CreateCommand("""
+            SELECT count(*) FROM pg_inherits i JOIN pg_class p ON p.oid=i.inhparent JOIN pg_class c ON c.oid=i.inhrelid
+            WHERE p.relnamespace=current_schema()::regnamespace AND c.relname LIKE '%_202001'
+                AND p.relname IN('runs','run_events','run_snapshots','node_runs','task_attempts','reports','artifacts','task_checkpoints')
+            """);
+        Assert.Equal(8L, await family.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+    }
+
     [Fact]
     public async Task Machine_metadata_upgrade_preserves_existing_rows_and_legacy_writer_columns()
     {

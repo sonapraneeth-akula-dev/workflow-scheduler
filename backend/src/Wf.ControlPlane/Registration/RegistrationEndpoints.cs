@@ -36,6 +36,7 @@ public static class RegistrationEndpoints
         services.AddSingleton(provider => new Wf.ControlPlane.Artifacts.ArtifactUploadCapabilities(key, provider.GetRequiredService<TimeProvider>()));
         services.AddSingleton<Wf.ControlPlane.Artifacts.ArtifactGrantService>();
         services.AddSingleton<Wf.ControlPlane.Engine.ResourceSampleSink>();
+        services.AddSingleton<Wf.ControlPlane.Engine.Checkpoints.CheckpointApplier>();
         services.AddSingleton(provider => new Wf.ControlPlane.Api.ResourceReadCursors(key, provider.GetRequiredService<TimeProvider>()));
         services.AddHostedService<Wf.ControlPlane.Engine.ResourceRetentionService>();
         services.AddSingleton<RegistrationService>();

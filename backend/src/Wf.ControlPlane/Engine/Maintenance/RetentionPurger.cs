@@ -83,7 +83,7 @@ public sealed class RetentionPurger(NpgsqlDataSource source, IBlobStore blobs, T
                 WITH removed AS (DELETE FROM reports WHERE run_id=ANY($1) AND run_day=ANY($2) RETURNING id)
                 DELETE FROM report_ids WHERE id IN(SELECT id FROM removed)
                 """, token, ids, days);
-            foreach (var table in new[] { "artifacts", "artifact_grants", "dispatch_outbox", "reservations",
+            foreach (var table in new[] { "task_checkpoints", "artifacts", "artifact_grants", "dispatch_outbox", "reservations",
                 "reservation_queue", "task_attempts", "node_runs", "run_snapshots", "run_events" })
                 await Execute(connection, $"DELETE FROM {table} WHERE run_id=ANY($1) AND run_day=ANY($2)", token, ids, days);
             await Execute(connection, "DELETE FROM commands WHERE run_id=ANY($1)", token, ids);
