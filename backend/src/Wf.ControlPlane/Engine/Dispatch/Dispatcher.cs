@@ -225,7 +225,7 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
         CancellationToken cancellationToken)
     {
         var capacity = agents.DispatchableAgents().Select(agent => agent.Capacity(timeProvider.GetUtcNow())).ToDictionary(agent => agent.Id);
-        await using (var metadata = new NpgsqlCommand("SELECT id,labels,pool FROM agents WHERE id=ANY($1)", connection))
+        await using (var metadata = new NpgsqlCommand("SELECT id,labels,pool,status,last_heartbeat_at FROM agents WHERE id=ANY($1)", connection))
         {
             metadata.Parameters.AddWithValue(capacity.Keys.ToArray());
             await using var reader = await metadata.ExecuteReaderAsync(cancellationToken);
@@ -234,7 +234,9 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
                 var id = reader.GetGuid(0);
                 capacity[id] = capacity[id] with
                 {
-                    Labels = AgentRegistry.ParseLabels(reader.GetFieldValue<string[]>(1)), Pool = reader.GetString(2)
+                    Labels = AgentRegistry.ParseLabels(reader.GetFieldValue<string[]>(1)), Pool = reader.GetString(2),
+                    Healthy = reader.GetInt16(3) == 0 &&
+                        reader.GetFieldValue<DateTimeOffset>(4) > timeProvider.GetUtcNow() - AgentRegistry.HeartbeatTimeout
                 };
             }
         }

@@ -156,9 +156,15 @@ public sealed class ResultJournal : IDisposable
     internal static void Validate(AgentMessage message)
     {
         if (message.PayloadCase is not (AgentMessage.PayloadOneofCase.TaskStarted or AgentMessage.PayloadOneofCase.TaskCompleted or
-            AgentMessage.PayloadOneofCase.ResourceSample or AgentMessage.PayloadOneofCase.ReservationFenced) ||
+            AgentMessage.PayloadOneofCase.ResourceSample or AgentMessage.PayloadOneofCase.ReservationFenced or
+            AgentMessage.PayloadOneofCase.CalibrationCompleted) ||
             message.CalculateSize() > MaximumRecordBytes)
             throw new InvalidDataException("Journal accepts only bounded task events.");
+        if (message.CalibrationCompleted is { } calibration)
+        {
+            _ = Wf.Contracts.CalibrationProtocol.Validate(calibration);
+            return;
+        }
         if (message.ReservationFenced is { } fenced)
         {
             if (fenced.ReservationEpoch == 0) throw new InvalidDataException("Fence acknowledgement requires a positive epoch.");

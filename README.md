@@ -379,8 +379,34 @@ A manual write replaces any calibrated value for only that profile, sets source
 optional metadata and before/after audit commit or roll back together.
 Empty `capacities` means Unverified, not zero requests/s. Manual values remain
 Unverified until measured; calibrated entries include their UTC timestamp.
-The calibration command is a separate implementation task; this editor does not
-run a load generator.
+This editor does not run a load generator.
+
+Admin `POST /api/v1/machines/{id}/calibrate` accepts `{ "profile": { ... } }`
+with the same strict profile contract and 64 KiB body limit. It returns 202,
+a durable request and a `Location` pointing to
+`GET /api/v1/machines/{id}/calibrations/{calibrationId}` (also Admin).
+Reserved machines return 409 even after reservation expiry until physically
+released. Busy, stale, unhealthy, draining or legacy agents without calibration
+command support also return 409. Acceptance atomically audits the request,
+advances the machine fence and marks it Draining, blocking both placement and
+reservation acquisition across control-plane processes.
+
+The engine resends the same command after reconnect or leader failover.
+Expiry or disconnection alone never frees the machine: only a terminal response
+from its current session at the exact request fence ends calibration.
+Successful positive Int32 req/s received before the two-minute server deadline
+updates only the requested profile as Calibrated with a server UTC timestamp.
+A Manual override, including one written while calibration is pending, always
+wins; status then reports `Succeeded`, the reported rate and `applied: false`.
+Capacity, terminal status, restored machine health and completion audit commit
+together. Stale/duplicate responses have no effects.
+
+The native agent currently durably reports `Unsupported` without starting load
+or inventing a rate. Status exposes `Failed` with `Unsupported`, `TimedOut`,
+`Busy` or `Failed`; failures never change capacity. Migration
+`0035_calibration_commands.sql` adds the durable requests and capability flag
+(false for existing agents). The loopback load executor, Wf.Load, Bond profiles
+and repeated-run stability measurement remain deferred.
 
 `/machines` shows that inventory with URL-persisted filters; a machine name opens
 `/machines/<uuid>` for hardware, heartbeat/resource metrics, current reservation
@@ -1759,8 +1785,10 @@ case and escaping; settings order does not change identity. Keys are bounded to
 positive whole-number rate; only Calibrated values carry a UTC calibration time.
 Migration `0012_agent_capacities.sql` adds per-agent/profile rows with foreign-key,
 source and timestamp checks without changing existing agents. No row means
-unverified, not zero capacity. Manual override APIs and calibration dispatch
-remain separate tasks; no Bond codec profiles or load executor are included.
+unverified, not zero capacity. Admin manual overrides and fenced, durable
+calibration command/result APIs are available; no Bond codec profiles or load
+executor are included. A simulated agent's reported rate verifies the protocol
+and storage path, not benchmark accuracy or stability.
 
 HTTPS is required off loopback. `Agent__AllowInsecureTransport=true` is only for
 an isolated internal container network; TLS certificate validation stays enabled.

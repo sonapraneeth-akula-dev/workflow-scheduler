@@ -39,8 +39,39 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
             case ControlMessage.PayloadOneofCase.ReservationFence:
                 await FenceAsync(message.ReservationFence.ReservationEpoch, cancellationToken);
                 break;
+            case ControlMessage.PayloadOneofCase.Calibrate:
+                Calibrate(message.Calibrate);
+                break;
             default:
                 throw new NotSupportedException($"Agent command '{message.PayloadCase}' is not implemented.");
+        }
+    }
+
+    private void Calibrate(Calibrate command)
+    {
+        _ = Wf.Contracts.CalibrationProtocol.Validate(command);
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (outbox.ContainsCalibrationResult(command.Id, command.ReservationEpoch)) return;
+            if (command.ReservationEpoch < outbox.ReservationEpoch)
+            {
+                logger.LogWarning("Rejected stale calibration {Id} at machine epoch {Epoch}.", command.Id, command.ReservationEpoch);
+                return;
+            }
+            var busy = fencePending || !active.IsEmpty;
+            if (!busy) outbox.ObserveReservationEpoch(command.ReservationEpoch);
+            outbox.Enqueue(new AgentMessage
+            {
+                CalibrationCompleted = new()
+                {
+                    Id = command.Id, ReservationEpoch = command.ReservationEpoch,
+                    At = Timestamp.FromDateTimeOffset(timeProvider.GetUtcNow()),
+                    Outcome = busy ? CalibrationOutcome.Busy :
+                        timeProvider.GetUtcNow() >= command.DeadlineAt.ToDateTimeOffset()
+                            ? CalibrationOutcome.TimedOut : CalibrationOutcome.Unsupported
+                }
+            });
         }
     }
 

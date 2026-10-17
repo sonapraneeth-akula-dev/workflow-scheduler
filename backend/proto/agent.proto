@@ -22,6 +22,7 @@ message AgentMessage {
     Ack ack = 14;
     ResourceSample resource_sample = 15;
     ReservationFenced reservation_fenced = 16;
+    CalibrationCompleted calibration_completed = 17;
   }
 }
 
@@ -36,6 +37,7 @@ message ControlMessage {
     Ack ack = 13;
     NotLeader not_leader = 14;
     ReservationFence reservation_fence = 15;
+    Calibrate calibrate = 16;
   }
 }
 
@@ -52,6 +54,31 @@ message Hello {
   repeated AttemptRef inflight = 10;
   uint32 protocol_version = 11;
   string pool = 12;
+  bool supports_calibration_commands = 13;
+}
+
+message Calibrate {
+  string id = 1;
+  string profile_json = 2;
+  google.protobuf.Timestamp deadline_at = 3;
+  uint64 reservation_epoch = 4;
+}
+
+message CalibrationCompleted {
+  string id = 1;
+  google.protobuf.Timestamp at = 2;
+  uint64 reservation_epoch = 3;
+  CalibrationOutcome outcome = 4;
+  int32 capacity_rps = 5;
+}
+
+enum CalibrationOutcome {
+  CALIBRATION_OUTCOME_UNSPECIFIED = 0;
+  CALIBRATION_OUTCOME_SUCCEEDED = 1;
+  CALIBRATION_OUTCOME_UNSUPPORTED = 2;
+  CALIBRATION_OUTCOME_TIMED_OUT = 3;
+  CALIBRATION_OUTCOME_BUSY = 4;
+  CALIBRATION_OUTCOME_FAILED = 5;
 }
 
 message Heartbeat {

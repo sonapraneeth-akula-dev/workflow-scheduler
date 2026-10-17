@@ -138,6 +138,20 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
                 .GetProperty("capacityRps").GetProperty("type").GetString());
             Assert.True(schemas.GetProperty("MachineCapacityResponse").GetProperty("properties").TryGetProperty("calibratedAt", out _));
             Assert.False(schemas.GetProperty("CapacityProfile").GetProperty("properties").TryGetProperty("profileKey", out _));
+            var calibration = paths.GetProperty("/api/v1/machines/{id}/calibrate").GetProperty("post");
+            Assert.Equal("#/components/schemas/CalibrationRequest", calibration.GetProperty("requestBody")
+                .GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
+            Assert.Equal("#/components/schemas/CalibrationRecord", calibration.GetProperty("responses").GetProperty("202")
+                .GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
+            Assert.True(calibration.GetProperty("responses").TryGetProperty("409", out _));
+            Assert.True(calibration.GetProperty("responses").TryGetProperty("413", out _));
+            Assert.Contains(schemas.GetProperty("CalibrationRequest").GetProperty("required").EnumerateArray(),
+                property => property.GetString() == "profile");
+            Assert.Equal("#/components/schemas/CalibrationRecord",
+                paths.GetProperty("/api/v1/machines/{id}/calibrations/{calibrationId}").GetProperty("get")
+                    .GetProperty("responses").GetProperty("200").GetProperty("content").GetProperty("application/json")
+                    .GetProperty("schema").GetProperty("$ref").GetString());
+            Assert.False(internalPaths.TryGetProperty("/api/v1/machines/{id}/calibrate", out _));
             Assert.True(schemas.TryGetProperty("RunHistoryPage", out _));
             Assert.Equal("#/components/schemas/ReservationQueueResponse",
                 paths.GetProperty("/api/v1/runs/{id}/reservation-queue").GetProperty("get")

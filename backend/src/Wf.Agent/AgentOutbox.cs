@@ -53,13 +53,14 @@ public sealed class AgentOutbox : IDisposable
         ArgumentNullException.ThrowIfNull(message);
         if (message.PayloadCase is not (AgentMessage.PayloadOneofCase.TaskStarted or
             AgentMessage.PayloadOneofCase.TaskCompleted or AgentMessage.PayloadOneofCase.Heartbeat or
-            AgentMessage.PayloadOneofCase.ResourceSample or AgentMessage.PayloadOneofCase.ReservationFenced))
-            throw new ArgumentException("Only task events, heartbeats and fence acknowledgements belong in the agent outbox.", nameof(message));
+            AgentMessage.PayloadOneofCase.ResourceSample or AgentMessage.PayloadOneofCase.ReservationFenced or
+            AgentMessage.PayloadOneofCase.CalibrationCompleted))
+            throw new ArgumentException("Only task events, heartbeats, calibration results and fence acknowledgements belong in the agent outbox.", nameof(message));
         lock (gate)
         {
             var copy = message.Clone();
             copy.Sequence = checked(Math.Max(sequence, 1) + 1);
-            if (journal is not null && copy.Heartbeat is null) ResultJournal.Validate(copy);
+            if ((journal is not null && copy.Heartbeat is null) || copy.CalibrationCompleted is not null) ResultJournal.Validate(copy);
             Persist(copy.Sequence, leaderEpoch, pending.Values.Append(copy));
             sequence = copy.Sequence;
             // Only the latest heartbeat is useful after a disconnection; task events are never dropped.
@@ -118,6 +119,13 @@ public sealed class AgentOutbox : IDisposable
             journal?.Save(sequence, leaderEpoch, pending.Values.Where(message => message.Heartbeat is null).ToArray(), epoch);
             reservationEpoch = epoch;
         }
+    }
+
+    public bool ContainsCalibrationResult(string id, ulong epoch)
+    {
+        lock (gate)
+            return pending.Values.Any(message => message.CalibrationCompleted is { } result &&
+                Guid.Parse(result.Id) == Guid.Parse(id) && result.ReservationEpoch == epoch);
     }
 
     public IReadOnlyList<AttemptRef> UnacknowledgedAttempts()

@@ -10,6 +10,99 @@ namespace Wf.Agent.Tests;
 
 public sealed class TaskCommandsTests
 {
+    [Theory]
+    [InlineData(false, CalibrationOutcome.Unsupported)]
+    [InlineData(true, CalibrationOutcome.TimedOut)]
+    public async Task Calibration_reports_explicit_terminal_failure_without_fabricating_load_or_capacity(
+        bool expired, CalibrationOutcome expected)
+    {
+        await using var cache = new PackageCacheTests.CacheFixture([]);
+        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
+        using var outbox = new AgentOutbox();
+        await using var commands = Create(cache, hosts, outbox);
+        var message = Calibration(expired);
+        await commands.HandleAsync(message, TestContext.Current.CancellationToken);
+        await commands.HandleAsync(message.Clone(), TestContext.Current.CancellationToken);
+        var result = outbox.NextAfter(0)!;
+        Assert.Equal(expected, result.CalibrationCompleted.Outcome);
+        Assert.Equal(0, result.CalibrationCompleted.CapacityRps);
+        Assert.Equal(2UL, outbox.ReservationEpoch);
+        Assert.Null(outbox.NextAfter(result.Sequence));
+        Assert.Empty(commands.Inflight);
+        Assert.Equal(0, hosts.ProcessStartCount);
+        Assert.Equal(0, cache.Handler.Count);
+    }
+
+    [Fact]
+    public async Task Calibration_cannot_interrupt_active_work_or_lower_the_machine_fence()
+    {
+        var began = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var cache = new PackageCacheTests.CacheFixture([], async (_, token) =>
+        {
+            began.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            throw new InvalidOperationException("unreachable");
+        });
+        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
+        using var outbox = new AgentOutbox();
+        await using var commands = Create(cache, hosts, outbox);
+        await commands.HandleAsync(Dispatch(cache.Sha), TestContext.Current.CancellationToken);
+        await began.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        var calibration = Calibration(false);
+        await commands.HandleAsync(calibration, TestContext.Current.CancellationToken);
+        var result = outbox.NextAfter(outbox.NextAfter(0)!.Sequence)!;
+        Assert.Equal(CalibrationOutcome.Busy, result.CalibrationCompleted.Outcome);
+        Assert.Single(commands.Inflight);
+        Assert.Equal(1UL, outbox.ReservationEpoch);
+        await commands.DisposeAsync();
+        outbox.ObserveReservationEpoch(4);
+        await using var idle = Create(cache, hosts, outbox);
+        var stale = Calibration(false);
+        await idle.HandleAsync(stale, TestContext.Current.CancellationToken);
+        Assert.False(outbox.ContainsCalibrationResult(stale.Calibrate.Id, stale.Calibrate.ReservationEpoch));
+        Assert.Equal(4UL, outbox.ReservationEpoch);
+    }
+
+    [Fact]
+    public async Task Calibration_result_and_fence_survive_restart_and_deduplicate_command_replay()
+    {
+        var root = Path.GetFullPath(Path.Combine(".agent-artifacts", "calibration-journal", Guid.NewGuid().ToString("N")));
+        var id = Guid.NewGuid().ToString("D");
+        try
+        {
+            await using var cache = new PackageCacheTests.CacheFixture([]);
+            await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
+            var message = Calibration(false);
+            ulong sequence;
+            using (var original = new AgentOutbox(new ResultJournal(root, id)))
+            {
+                await using var commands = Create(cache, hosts, original);
+                await commands.HandleAsync(message, TestContext.Current.CancellationToken);
+                sequence = original.NextAfter(0)!.Sequence;
+            }
+            using var restored = new AgentOutbox(new ResultJournal(root, id));
+            await using var restarted = Create(cache, hosts, restored);
+            await restarted.HandleAsync(message, TestContext.Current.CancellationToken);
+            Assert.Equal(2UL, restored.ReservationEpoch);
+            Assert.Equal(sequence, restored.NextAfter(0)!.Sequence);
+            Assert.Equal(CalibrationOutcome.Unsupported, restored.NextAfter(0)!.CalibrationCompleted.Outcome);
+            Assert.Null(restored.NextAfter(sequence));
+            restored.Acknowledge(new Ack { Sequence = sequence });
+            Assert.Null(restored.NextAfter(0));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    }
+
+    private static ControlMessage Calibration(bool expired) => new()
+    {
+        Calibrate = new()
+        {
+            Id = Guid.CreateVersion7().ToString("D"), ReservationEpoch = 2,
+            ProfileJson = new Wf.Contracts.CapacityProfile("http", "json", "small").ProfileKey,
+            DeadlineAt = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(expired ? -1 : 1))
+        }
+    };
+
     [Fact]
     public async Task Dispatch_is_nonblocking_deduplicated_and_cancelled_while_downloading()
     {

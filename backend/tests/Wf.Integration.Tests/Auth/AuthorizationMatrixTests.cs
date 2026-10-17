@@ -555,6 +555,10 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
             builder.Configuration["AzureAd:ClientId"] = Audience;
             builder.Services.AddWorkflowAuthentication(builder.Configuration, builder.Environment);
             builder.Services.AddSingleton(source);
+            builder.Services.AddSingleton(TimeProvider.System);
+            builder.Services.AddSingleton<Wf.ControlPlane.Engine.Agents.AgentRegistry>();
+            builder.Services.AddSingleton<RunStore>();
+            builder.Services.AddSingleton<Wf.ControlPlane.Engine.Agents.CalibrationService>();
             builder.Services.AddTeamAuthorization();
             builder.Services.ConfigureHttpJsonOptions(options =>
             {
@@ -565,7 +569,6 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
             builder.Services.AddWorkflowOpenApi();
             if (live)
             {
-                builder.Services.AddSingleton(TimeProvider.System);
                 builder.Services.AddWorkflowLive();
             }
             else

@@ -58,15 +58,17 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
             if (leadership is not null) await leadership.FenceAsync(connection, transaction, lease!, cancellationToken);
             await using var command = new NpgsqlCommand("""
                 INSERT INTO agents
-                    (id,name,os,arch,cores,ram_mb,max_tasks,labels,pool,status,last_heartbeat_at,agent_version,session_id,slots_used)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$11,$12,$13)
+                    (id,name,os,arch,cores,ram_mb,max_tasks,labels,pool,status,last_heartbeat_at,agent_version,session_id,slots_used,
+                        supports_calibration_commands)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$11,$12,$13,$14)
                 ON CONFLICT (id) DO UPDATE SET
                     name=EXCLUDED.name,os=EXCLUDED.os,arch=EXCLUDED.arch,cores=EXCLUDED.cores,
                     ram_mb=EXCLUDED.ram_mb,max_tasks=EXCLUDED.max_tasks,
                     labels=COALESCE(agents.labels_override,EXCLUDED.labels),pool=COALESCE(agents.pool_override,EXCLUDED.pool),
                     status=CASE WHEN agents.status=2 THEN 2 ELSE 0 END,
                     last_heartbeat_at=EXCLUDED.last_heartbeat_at,agent_version=EXCLUDED.agent_version,
-                    session_id=EXCLUDED.session_id,slots_used=EXCLUDED.slots_used,cpu_percent=0,ram_used_mb=0,disk_free_mb=0
+                    session_id=EXCLUDED.session_id,slots_used=EXCLUDED.slots_used,cpu_percent=0,ram_used_mb=0,disk_free_mb=0,
+                    supports_calibration_commands=EXCLUDED.supports_calibration_commands
                 RETURNING status,labels,pool
                 """, connection, transaction);
             command.Parameters.AddWithValue(agent.Id);
@@ -82,12 +84,17 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
             command.Parameters.AddWithValue(agent.Version);
             command.Parameters.AddWithValue(agent.SessionId);
             command.Parameters.AddWithValue(agent.SlotsUsed);
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken)) throw new InvalidDataException("Agent registration returned no row.");
-            var status = (AgentStatus)reader.GetInt16(0);
-            var labels = ParseLabels(reader.GetFieldValue<string[]>(1));
-            var pool = reader.GetString(2);
-            await reader.DisposeAsync();
+            command.Parameters.AddWithValue(hello.SupportsCalibrationCommands);
+            AgentStatus status;
+            ImmutableDictionary<string, string> labels;
+            string pool;
+            await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+            {
+                if (!await reader.ReadAsync(cancellationToken)) throw new InvalidDataException("Agent registration returned no row.");
+                status = (AgentStatus)reader.GetInt16(0);
+                labels = ParseLabels(reader.GetFieldValue<string[]>(1));
+                pool = reader.GetString(2);
+            }
             await transaction.CommitAsync(cancellationToken);
             agents[agent.Id] = agent with { Status = status, Labels = labels, Pool = pool };
             return new AgentSession(agent.Id, agent.SessionId);
@@ -119,7 +126,7 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
             await using var command = new NpgsqlCommand("""
                 UPDATE agents SET last_heartbeat_at=$3,status=CASE WHEN status=1 THEN 0 ELSE status END,
                     cpu_percent=$4,ram_used_mb=$5,disk_free_mb=$6,slots_used=$7
-                WHERE id=$1 AND session_id=$2
+                WHERE id=$1 AND session_id=$2 RETURNING status
                 """, connection, transaction);
             command.Parameters.AddWithValue(session.AgentId);
             command.Parameters.AddWithValue(session.SessionId);
@@ -128,11 +135,11 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
             command.Parameters.AddWithValue((long)heartbeat.RamUsedMb);
             command.Parameters.AddWithValue((long)heartbeat.DiskFreeMb);
             command.Parameters.AddWithValue((int)heartbeat.SlotsUsed);
-            if (await command.ExecuteNonQueryAsync(cancellationToken) != 1) return false;
+            if (await command.ExecuteScalarAsync(cancellationToken) is not short status) return false;
             await transaction.CommitAsync(cancellationToken);
             agents[agent.Id] = agent with
             {
-                LastHeartbeatAt = now, Status = agent.Status == AgentStatus.Unhealthy ? AgentStatus.Healthy : agent.Status,
+                LastHeartbeatAt = now, Status = (AgentStatus)status,
                 CpuPercent = heartbeat.CpuPercent, RamUsedMb = (long)heartbeat.RamUsedMb,
                 DiskFreeMb = (long)heartbeat.DiskFreeMb, SlotsUsed = (int)heartbeat.SlotsUsed
             };

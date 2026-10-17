@@ -14,7 +14,7 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
     LeaseManager? leadership = null, AgentLossSweeper? losses = null, LogUploadCapabilities? logUploads = null,
     Wf.ControlPlane.Reports.ReportUploadCapabilities? reportUploads = null,
     Wf.ControlPlane.Artifacts.ArtifactUploadCapabilities? artifactUploads = null, ResourceSampleSink? resources = null,
-    ReservationLeaseService? reservations = null)
+    ReservationLeaseService? reservations = null, CalibrationService? calibrations = null)
     : AgentGateway.AgentGatewayBase
 {
     public override async Task Connect(IAsyncStreamReader<AgentMessage> requestStream,
@@ -86,6 +86,11 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                                     throw new RpcException(new Status(StatusCode.Unimplemented, "Reservation persistence is not configured."));
                                 await reservations.ConfirmAsync(session, message.ReservationFenced.ReservationEpoch, token);
                                 break;
+                            case AgentMessage.PayloadOneofCase.CalibrationCompleted:
+                                if (calibrations is null)
+                                    throw new RpcException(new Status(StatusCode.Unimplemented, "Calibration persistence is not configured."));
+                                await calibrations.AcceptAsync(session, message.CalibrationCompleted, token);
+                                break;
                             case AgentMessage.PayloadOneofCase.Ack:
                                 if (message.Ack.Sequence == 0 || message.Ack.Sequence > (ulong)Volatile.Read(ref sequence) ||
                                     message.Ack.LeaderEpoch != epoch)
@@ -107,6 +112,7 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                 var sent = new HashSet<long>();
                 var sentCancels = new HashSet<string>(StringComparer.Ordinal);
                 var sentFences = new HashSet<ulong>();
+                var sentCalibrations = new HashSet<string>(StringComparer.Ordinal);
                 try
                 {
                     while (!token.IsCancellationRequested)
@@ -125,6 +131,14 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                                     {
                                         Sequence = checked((ulong)Interlocked.Increment(ref sequence)),
                                         LeaderEpoch = epoch, ReservationFence = fence
+                                    }, token);
+                        if (calibrations is not null)
+                            foreach (var calibration in await calibrations.PendingAsync(session, token))
+                                if (sentCalibrations.Add(calibration.Id))
+                                    await responseStream.WriteAsync(new ControlMessage
+                                    {
+                                        Sequence = checked((ulong)Interlocked.Increment(ref sequence)),
+                                        LeaderEpoch = epoch, Calibrate = calibration
                                     }, token);
                         if (runs is not null)
                         {

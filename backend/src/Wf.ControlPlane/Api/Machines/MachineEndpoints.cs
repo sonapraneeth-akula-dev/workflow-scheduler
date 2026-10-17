@@ -153,6 +153,7 @@ public static class MachineEndpoints
                 "Manual replaces calibrated capacity only for that canonical profile and clears its calibration timestamp. " +
                 "Omitted fields and other profiles stay unchanged; empty labels clears labels. Overrides survive agent reconnects. " +
                 "Does not interrupt running attempts or release reservations.");
+        CalibrationEndpoints.Map(group);
         return endpoints;
     }
 
