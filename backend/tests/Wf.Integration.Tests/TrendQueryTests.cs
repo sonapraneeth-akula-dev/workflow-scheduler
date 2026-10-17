@@ -223,10 +223,57 @@ public sealed class TrendQueryTests(RollupDatabase database, ITestOutputHelper o
         Assert.True(p95 < 500, $"Trend HTTP p95 {p95:F2}ms must be below 500ms.");
     }
 
-    private async Task<Scope> Registry()
+    [Fact]
+    [Trait("Category", "FrontendBrowser")]
+    public async Task Trends_browser_real_Postgres_signed_Viewer_charts_windows_tables_empty_denial_and_accessibility()
+    {
+        Assert.SkipUnless(Environment.GetEnvironmentVariable("WF_TRENDS_BROWSER") == "true",
+            "Set WF_TRENDS_BROWSER=true and WF_FRONTEND_ROOT with installed browser dependencies.");
+        var frontend = Environment.GetEnvironmentVariable("WF_FRONTEND_ROOT");
+        Assert.True(frontend is not null && File.Exists(System.IO.Path.Combine(frontend, "scripts", "trends-browser.ts")));
+        var scope = await Registry();
+        var empty = await Registry(scope.Group);
+        for (var day = 0; day < 90; day++)
+            await Seed(scope, Today.AddDays(day - 89), (short)(day % 5 == 4 ? 4 : 3), (day + 1) * 1000);
+        await using var api = await MetricsApiServer.Start(database.DataSource, Token, browser: true, timeProvider: new Clock());
+        var viewer = api.Jwt(scope.Group);
+        var foreign = api.Jwt(Guid.NewGuid());
+        var start = new ProcessStartInfo("bun")
+        {
+            WorkingDirectory = frontend, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        start.ArgumentList.Add(System.IO.Path.Combine("scripts", "trends-browser.ts"));
+        start.Environment["WF_TRENDS_API"] = api.Api;
+        start.Environment["WF_TRENDS_FIXTURE"] = JsonSerializer.Serialize(new
+        {
+            seriesId = scope.Series, emptySeriesId = empty.Series, viewerToken = viewer, foreignToken = foreign
+        });
+        using var process = Process.Start(start)!;
+        var stdout = process.StandardOutput.ReadToEndAsync(Token);
+        var stderr = process.StandardError.ReadToEndAsync(Token);
+        try
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(Token);
+            deadline.CancelAfter(TimeSpan.FromMinutes(6));
+            await process.WaitForExitAsync(deadline.Token);
+            Assert.True(process.ExitCode == 0, $"Trends browsers failed.\n{await stdout}\n{await stderr}");
+        }
+        finally
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync(CancellationToken.None);
+            await Task.WhenAll(stdout, stderr);
+        }
+        var logs = await stdout + await stderr;
+        Assert.DoesNotContain(viewer, logs);
+        Assert.DoesNotContain(foreign, logs);
+        output.WriteLine(logs);
+    }
+
+    private async Task<Scope> Registry(Guid? group = null)
     {
         var team = "trends-" + Guid.NewGuid().ToString("N");
-        var scope = new Scope(Guid.CreateVersion7(), Guid.CreateVersion7(), $"{team}/insights/workflow", Guid.NewGuid());
+        var scope = new Scope(Guid.CreateVersion7(), Guid.CreateVersion7(), $"{team}/insights/workflow", group ?? Guid.NewGuid());
         await using var connection = await database.DataSource.OpenConnectionAsync(Token);
         await using var transaction = await connection.BeginTransactionAsync(Token);
         await new RegistryWriter().UpsertAsync(connection, transaction,

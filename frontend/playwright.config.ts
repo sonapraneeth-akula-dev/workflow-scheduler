@@ -8,7 +8,9 @@ const rerunOrigin = process.env.WF_RERUN_ORIGIN
 const rerunExecutionOrigin = process.env.WF_RERUN_EXECUTION_ORIGIN
 const auditOrigin = process.env.WF_AUDIT_ORIGIN
 const machineOrigin = process.env.WF_MACHINE_ORIGIN
+const trendsOrigin = process.env.WF_TRENDS_ORIGIN
 const fixtureOrigin =
+  trendsOrigin ??
   machineOrigin ??
   auditOrigin ??
   rerunExecutionOrigin ??
@@ -22,6 +24,7 @@ const fixtureOrigin =
 export default defineConfig({
   testDir: "./e2e",
   testIgnore: [
+    ...(!trendsOrigin ? ["**/series-trends.spec.ts"] : []),
     ...(!machineOrigin ? ["**/machines.spec.ts"] : []),
     ...(!auditOrigin ? ["**/audit.spec.ts"] : []),
     ...(!rerunExecutionOrigin ? ["**/rerun-execution.spec.ts"] : []),

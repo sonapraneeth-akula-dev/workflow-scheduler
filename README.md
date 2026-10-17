@@ -676,9 +676,22 @@ zero durations. Streaks count the latest contiguous success/failure outcomes in
 the window by UUIDv7 creation order, ignoring active runs and missed/skipped fires.
 No variables, errors, metadata or storage pointers are returned. Invalid
 identities/windows, denial and unavailable storage return explicit no-store
-problems; unknown/duplicate query parameters are rejected. The Trends panel is
-a separate task. Actual signed-JWT HTTP acceptance on 90 days at 2,000 runs/day
+problems; unknown/duplicate query parameters are rejected. Actual signed-JWT HTTP
+acceptance on 90 days at 2,000 runs/day
 measures p95 below 500 ms, including authorization and exact window quantiles.
+
+The series page retains Run history as its default view. Its Trends link opens
+`/series/<uuid>?view=trends`; `trendWindow=7d|30d|90d` persists the selected window
+through reloads and view changes without applying run-history filters to trends.
+Summary counts, success/failure streak and measured-duration quantiles accompany
+the existing uPlot renderer's UTC daily charts and a complete scrollable table
+alternative. Empty windows remain explicitly unmeasured. Current Viewer checks
+gate requests and hide cached charts/tables during revalidation, permission
+errors and failed reads; permission revalidation does not retry-loop a denied
+read. Refresh is explicit. Browser acceptance exercises real signed-JWT API and
+PostgreSQL responses in Chromium, Firefox and WebKit, including 90-day
+response-to-painted-chart/table rendering below 500 ms, URL restoration,
+history navigation, actual denial and desktop-light/mobile-dark accessibility.
 
 Secret variables accept `secret://<store>/<name>` through the existing
 `SecretReference` contract and `.Secret("token", "secret://local/deploy-token")`.

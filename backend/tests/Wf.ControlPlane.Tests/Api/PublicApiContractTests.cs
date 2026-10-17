@@ -48,6 +48,7 @@ public sealed class PublicApiContractTests
         Assert.True(observedUi.SetEquals(ScheduleEditor), "Every schedule-editor action must remain explicitly classified.");
         Assert.True(observedPublic.Count >= 20, "The scan must include all existing catalogue/run/report/version capabilities.");
         foreach (var operation in new[] { ("GET", "/api/v1/permissions/{scope}"), ("GET", "/api/v1/audit"),
+            ("GET", "/api/v1/series/{id}/trends"),
             ("GET", "/api/v1/runs/{id}/reports"), ("POST", "/api/v1/runs/{id}/rerun"),
             ("POST", "/api/v1/workflows/{team}/{type}/{workflow}/versions/{version}/activate") })
             Assert.Contains(operation, observedPublic);
