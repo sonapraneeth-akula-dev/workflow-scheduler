@@ -55,6 +55,12 @@ public sealed class PublicApiContractTests
         foreach (var path in new[] { "/api/v1/schedules", "/api/v1/schedules/{id}",
             "/api/v1/series/{id}/fires", "/api/v1/series/{id}/history" })
             Assert.Contains(("GET", path), publicOperations);
+        foreach (var operation in new[] { ("GET", "/api/v1/subscriptions"), ("POST", "/api/v1/subscriptions"),
+            ("DELETE", "/api/v1/subscriptions/{id}") })
+        {
+            Assert.Contains(operation, publicOperations);
+            Assert.DoesNotContain(operation, uiOperations);
+        }
     }
 
     [Fact]

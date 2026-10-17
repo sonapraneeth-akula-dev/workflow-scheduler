@@ -755,8 +755,8 @@ Conventions:
 | | cpu_max_pct, ram_peak_mb, latest_run_id | double precision, numeric, uuid | Y,Y,N | | scope-specific resource maxima and latest contributing run; null unknown telemetry, measured zero preserved; counts and duration arrays constrained independently |
 | audit_log ⧉ | id, ts | bigint identity, timestamptz | N | PK(ts, id) | 13 monthly partitions (≥ 1 year) |
 | | actor, actor_kind, action, target_kind, target_id, team_id, summary | | N/N/N/N/N/Y/N | idx(target_kind, target_id, ts), idx(actor, ts) | |
-| subscriptions | id, principal_id, scope_kind, scope_id, events, channel, target, secret_ref | | N (secret_ref Y) | PK(id); idx(scope_kind, scope_id) | FR-028 |
-| notification_outbox | id, subscription_id, run_id, payload, attempts, next_attempt_at, delivered_at | | | PK(id); partial idx WHERE delivered_at IS NULL | transactional outbox |
+| subscriptions | id, principal_id, scope_kind, scope_id, type_scope, series_id, events, channel, target, secret_ref, created_at | | N (series_id, secret_ref Y) | PK(id); unique owner/scope/events/channel/destination configuration; owner UUID keyset and scoped lookup indexes | FR-028; 0038; schedule binds retained series; FK cascades type/series deletion |
+| notification_outbox | id, subscription_id, run_day, run_id, payload, created_at, attempts, next_attempt_at, delivered_at, failed_at, last_error | | N (delivered_at, failed_at, last_error Y) | PK(id); unique(subscription_id, run_day, run_id); due index excludes delivered/failed rows | 0038 durable schema; subscription and partitioned-run FK cascades; JSON object payload, nonnegative attempts, bounded sanitized error |
 | leases | name | text | N | PK | `engine` |
 | | holder, epoch, expires_at | text, bigint, timestamptz | N | | fencing epoch |
 | registry_snapshots | id, git_commit, content, registered_at | uuid, text, jsonb, timestamptz | N | PK(id) | team/type registry history |
@@ -844,9 +844,31 @@ agents. Within v1 only additive changes are allowed; breaking changes go to `/ap
 | GET | /api/v1/machines | Viewer | `label, pool, os, status` | machines + reservations | — |
 | PATCH | /api/v1/machines/{id} | Admin | labels, pool, capacity per profile | 200 | 400 |
 | POST | /api/v1/machines/{id}/calibrate · /drain | Admin | profile | 202 | 409 (reserved) |
-| GET/POST/DELETE | /api/v1/subscriptions | User | scope, events, channel | subscriptions | 400 |
+| GET | /api/v1/subscriptions | Owning user + current scoped Viewer | optional paired `scope, scopeId`; `limit=1..100` (default 50), `cursor` | `{items,nextCursor}` | 400, 403, 500, 503 |
+| POST | /api/v1/subscriptions | User + current scoped Viewer | `{scope,scopeId,events,channel,target,secretRef?}` | 201 subscription + Location | 400, 403, 409, 413, 415, 500, 503 |
+| DELETE | /api/v1/subscriptions/{id} | Owning user (also after role revocation) | canonical subscription UUID | 204; queued rows cascade | 400, 404, 500, 503 |
 | GET | /api/v1/audit | Admin / team Author | `actor, target, from, to, cursor` | page | 403 |
 | GET/PUT | /api/v1/admin/retention | Admin | defaults + per-type | config | 400 |
+
+**Completion subscriptions (FR-028)**: scope IDs are plain `team/type/workflow`,
+`team/type` or canonical lowercase schedule UUIDs, not dashboard base64url IDs.
+`Completed` covers every terminal run outcome; `Failed` covers failure, abort and
+timeout. Distinct events are stored in ordinal order. Webhook requires an HTTPS
+URL (loopback HTTP for local use) without credentials, query or fragment and a
+configured signing-secret reference, never a key value. Email accepts one mailbox
+without a display name; Teams accepts a configured destination-secret reference,
+never a credential-bearing connector URL. Email and Teams omit `secretRef`.
+Creation uses strict, bounded 16 KiB JSON, rejecting missing/null/unknown/duplicate
+properties and invalid destinations. An identical owned configuration returns 409.
+Current existing Viewer grants constrain creates and every list page; descending
+UUID keyset pagination returns only the authenticated user's rows. Even global
+Admin cannot inspect or delete another user's subscription. Owners may unsubscribe
+after revocation; missing and foreign IDs share 404. App-only, Agent and Registrar
+identities cannot manage personal subscriptions. Create/delete and safe audit
+records commit atomically; no resolved secret values enter responses or audit.
+All responses are no-store with explicit sanitized failures. Migration 0038 adds
+the durable outbox schema only; terminal production, dispatch, delivery security
+and channel integrations remain tasks 14.1.1.1.2/.3. No new login/logout flow.
 
 **Dashboard reads (FR-047)**: `scope` is `workflow`, `schedule`, `node` or `machine`.
 Workflow and node IDs are canonical unpadded base64url UTF8 of `team/type/workflow`

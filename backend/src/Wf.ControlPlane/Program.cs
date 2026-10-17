@@ -79,6 +79,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunTimelineJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Series.SeriesTrendsJson.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Dashboards.DashboardJson.Default);
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Subscriptions.SubscriptionJson.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, ReportIndexJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, ReportCompareJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.Contracts.Resources.ResourceJsonContext.Default);
@@ -169,6 +170,7 @@ app.MapSchedulesEndpoints();
 app.MapSeriesFiresEndpoints();
 Wf.ControlPlane.Api.Series.TrendsEndpoint.MapTrendsEndpoint(app);
 Wf.ControlPlane.Api.Dashboards.DashboardEndpoints.MapDashboardEndpoints(app);
+Wf.ControlPlane.Api.Subscriptions.SubscriptionEndpoints.MapSubscriptionEndpoints(app);
 app.MapUserSchedulesEndpoints();
 app.MapPermissionsEndpoints();
 app.MapWorkflowOpenApi();

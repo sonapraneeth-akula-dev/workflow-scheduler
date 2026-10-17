@@ -53,6 +53,7 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunTimelineJsonContext.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Series.SeriesTrendsJson.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Dashboards.DashboardJson.Default);
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Subscriptions.SubscriptionJson.Default);
             if (browser)
             {
                 options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunEventsJsonContext.Default);
@@ -81,6 +82,7 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
             app.MapRunTimelineEndpoints();
             Wf.ControlPlane.Api.Series.TrendsEndpoint.MapTrendsEndpoint(app);
             Wf.ControlPlane.Api.Dashboards.DashboardEndpoints.MapDashboardEndpoints(app);
+            Wf.ControlPlane.Api.Subscriptions.SubscriptionEndpoints.MapSubscriptionEndpoints(app);
             if (browser)
             {
                 app.MapRunEventsEndpoints();
@@ -124,11 +126,14 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
             new SigningCredentials(key, SecurityAlgorithms.RsaSha256)));
     }
 
-    public async Task<HttpResponseMessage> Get(string path, string? jwt, CancellationToken token)
+    public Task<HttpResponseMessage> Get(string path, string? jwt, CancellationToken token) =>
+        Send(HttpMethod.Get, path, jwt, null, token);
+
+    public async Task<HttpResponseMessage> Send(HttpMethod method, string path, string? jwt, HttpContent? content, CancellationToken token)
     {
         var uri = new Uri(client.BaseAddress!.ToString().TrimEnd('/') + path,
             new UriCreationOptions { DangerousDisablePathAndQueryCanonicalization = true });
-        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        using var request = new HttpRequestMessage(method, uri) { Content = content };
         if (jwt is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwt);
         return await client.SendAsync(request, token);
     }
