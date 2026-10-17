@@ -27,7 +27,8 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
     private const string Audience = "562b0870-4522-43da-8587-41e9b788f309";
     private const string Issuer = $"https://login.microsoftonline.com/{Tenant}/v2.0";
 
-    public static async Task<MetricsApiServer> Start(NpgsqlDataSource source, CancellationToken token, bool browser = false)
+    public static async Task<MetricsApiServer> Start(NpgsqlDataSource source, CancellationToken token, bool browser = false,
+        TimeProvider? timeProvider = null)
     {
         var rsa = RSA.Create(2048);
         var key = new RsaSecurityKey(rsa) { KeyId = "run-metrics-test" };
@@ -41,15 +42,16 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
         builder.Services.AddTeamAuthorization();
         builder.Services.AddWorkflowOpenApi();
         builder.Services.AddSingleton<RunStore>();
+        builder.Services.AddSingleton(timeProvider ?? TimeProvider.System);
         if (browser)
         {
-            builder.Services.AddSingleton(TimeProvider.System);
             builder.Services.AddWorkflowLive();
         }
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, MetricsJsonContext.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunTimelineJsonContext.Default);
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Series.SeriesTrendsJson.Default);
             if (browser)
             {
                 options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunEventsJsonContext.Default);
@@ -74,6 +76,7 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
             app.UseAuthorization();
             app.MapMetricsEndpoints();
             app.MapRunTimelineEndpoints();
+            Wf.ControlPlane.Api.Series.TrendsEndpoint.MapTrendsEndpoint(app);
             if (browser)
             {
                 app.MapRunEventsEndpoints();

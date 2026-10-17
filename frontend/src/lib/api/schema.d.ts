@@ -3390,6 +3390,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/series/{id}/trends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Fresh Series Viewer authorization. window=7d|30d|90d (default 30d), including the current UTC creation day; from inclusive, to exclusive. Completed runs only; failed includes failed, aborted and timed-out. Success rate is a 0..1 fraction, null without completed runs. Exact interpolated source duration quantiles in milliseconds, never averaged daily quantiles; missing start/end is unobserved, skewed intervals clamp to zero. Daily gaps have zero counts and null measurements. Streak is the latest contiguous success/failure sequence in this window ordered by UUIDv7 creation, ignoring active runs and skipped/missed fires; null outcome and zero runs for an empty window. Retained runs survive schedule deletion. No variables, metadata, errors or storage capabilities. */
+        get: {
+            parameters: {
+                query?: {
+                    window?: "7d" | "30d" | "90d";
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SeriesTrendsResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/schedules": {
         parameters: {
             query?: never;
@@ -4854,6 +4939,28 @@ export interface components {
             items: components["schemas"]["SeriesFireResponse"][];
             nextCursor: null | string;
         };
+        SeriesTrendDay: {
+            /** Format: date */
+            day: string;
+            metrics: components["schemas"]["TrendMetrics"];
+        };
+        SeriesTrendsResponse: {
+            /** Format: uuid */
+            seriesId: string;
+            window: string;
+            /** Format: date */
+            from: string;
+            /** Format: date */
+            to: string;
+            totals: components["schemas"]["TrendMetrics"];
+            streak: components["schemas"]["SeriesTrendStreak"];
+            days: components["schemas"]["SeriesTrendDay"][];
+        };
+        SeriesTrendStreak: {
+            outcome: null | string;
+            /** Format: int64 */
+            runs: number | string;
+        };
         TaskAction: {
             kind: components["schemas"]["TaskActionKind"];
             declaration: string;
@@ -4937,6 +5044,22 @@ export interface components {
             failure: components["schemas"]["FailurePolicy"];
             policy: components["schemas"]["TaskPlanExecutionPolicy"];
             placement: null | components["schemas"]["TaskPlanPlacement"];
+        };
+        TrendMetrics: {
+            /** Format: int64 */
+            runs: number | string;
+            /** Format: int64 */
+            succeeded: number | string;
+            /** Format: int64 */
+            failed: number | string;
+            /** Format: int64 */
+            durationCount: number | string;
+            /** Format: double */
+            successRate: null | number | string;
+            /** Format: double */
+            p50Ms: null | number | string;
+            /** Format: double */
+            p95Ms: null | number | string;
         };
         TriggerRunRequest: {
             workflowId: string;

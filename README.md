@@ -663,7 +663,22 @@ as occurrences but contribute no duration without a recorded start and end;
 `duration_count` exposes that distinction. Clock-skewed measured intervals clamp
 to zero. CPU/RAM retain maxima across every attempt, including failed retries;
 RAM uses MiB. Missing duration/resource observations remain null, not fabricated
-zeros. Series trends and dashboard APIs/UI remain separate work items.
+zeros. Dashboard APIs/UI remain separate work items.
+
+`GET /api/v1/series/{id}/trends?window=7d|30d|90d` uses fresh stored-series
+Viewer access (default `30d`), including retained legacy series and deleted
+schedules. One window selects UTC creation days including today: `from`
+inclusive, `to` exclusive. `totals` and every gap-filled daily row expose completed
+run counts, successes, failures (including aborted/timed-out), observed-duration
+count, success fraction `0..1` and exact interpolated source p50/p95 milliseconds.
+Empty counts have null rates/quantiles; missing timestamps never become observed
+zero durations. Streaks count the latest contiguous success/failure outcomes in
+the window by UUIDv7 creation order, ignoring active runs and missed/skipped fires.
+No variables, errors, metadata or storage pointers are returned. Invalid
+identities/windows, denial and unavailable storage return explicit no-store
+problems; unknown/duplicate query parameters are rejected. The Trends panel is
+a separate task. Actual signed-JWT HTTP acceptance on 90 days at 2,000 runs/day
+measures p95 below 500 ms, including authorization and exact window quantiles.
 
 Secret variables accept `secret://<store>/<name>` through the existing
 `SecretReference` contract and `.Secret("token", "secret://local/deploy-token")`.

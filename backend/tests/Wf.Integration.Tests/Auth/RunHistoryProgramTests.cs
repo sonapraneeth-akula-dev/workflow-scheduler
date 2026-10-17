@@ -68,6 +68,13 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             Assert.False(paths.GetProperty("/api/v1/schedules").TryGetProperty("post", out _));
             Assert.True(paths.GetProperty("/api/v1/permissions/{scope}").TryGetProperty("get", out _));
             Assert.True(paths.GetProperty("/api/v1/series/{id}/fires").TryGetProperty("get", out _));
+            var trends = paths.GetProperty("/api/v1/series/{id}/trends").GetProperty("get");
+            Assert.Equal("#/components/schemas/SeriesTrendsResponse", trends.GetProperty("responses")
+                .GetProperty("200").GetProperty("content").GetProperty("application/json").GetProperty("schema")
+                .GetProperty("$ref").GetString());
+            Assert.Equal(["7d", "30d", "90d"], trends.GetProperty("parameters").EnumerateArray()
+                .Single(parameter => parameter.GetProperty("name").GetString() == "window")
+                .GetProperty("schema").GetProperty("enum").EnumerateArray().Select(value => value.GetString()));
             Assert.False(paths.GetProperty("/api/v1/schedules/{id}").TryGetProperty("put", out _));
             Assert.False(paths.GetProperty("/api/v1/schedules/{id}").TryGetProperty("delete", out _));
             foreach (var path in new[] { "/api/v1/schedules/preview",
@@ -78,6 +85,7 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             using var ui = JsonDocument.Parse(await uiResponse.Content.ReadAsStringAsync(deadline.Token));
             Assert.StartsWith("3.1.", ui.RootElement.GetProperty("openapi").GetString());
             var internalPaths = ui.RootElement.GetProperty("paths");
+            Assert.False(internalPaths.TryGetProperty("/api/v1/series/{id}/trends", out _));
             foreach (var (path, method) in new[] { ("/api/v1/schedules", "post"), ("/api/v1/schedules/{id}", "put"),
                 ("/api/v1/schedules/{id}", "delete"), ("/api/v1/schedules/preview", "post"),
                 ("/api/v1/schedules/{id}/pause", "post"), ("/api/v1/schedules/{id}/resume", "post") })
