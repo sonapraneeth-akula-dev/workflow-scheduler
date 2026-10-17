@@ -11,6 +11,7 @@ public sealed class StageBuilder
     public StageBuilder Retry(int count, BackoffPolicy? backoff = null, IEnumerable<FailureCategory>? on = null)
     { node.Retry(count, backoff, on); return this; }
     public StageBuilder NoAutoRetry() { node.NoAutoRetry(); return this; }
+    public StageBuilder Limits(double cpuCores = 0, ulong ramMb = 0) { node.Limits(cpuCores, ramMb); return this; }
     public StageBuilder RunsOn(params PlacementSelector[] selectors) { node.RunsOn(selectors); return this; }
     public StageBuilder RunsOn(Func<PlacementVariables, PlacementSelector> configure) { node.RunsOn(configure); return this; }
     public StageBuilder Affinity(PlacementAffinity value) { node.Affinity(value); return this; }

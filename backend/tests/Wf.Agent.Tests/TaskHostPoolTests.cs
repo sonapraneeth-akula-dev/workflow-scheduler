@@ -136,7 +136,7 @@ public sealed class TaskHostPoolTests : IDisposable
         var result = await pool.ExecuteAsync(Package, dispatch, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(TaskOutcome.Failed, result.Outcome);
         Assert.Equal(category, result.Error.Category);
-        Assert.Equal(category == "Aborted", result.Error.NonRetryable);
+        Assert.Equal(category is "Aborted" or "ResourceLimit", result.Error.NonRetryable);
     }
 
     [Theory]
@@ -179,16 +179,28 @@ public sealed class TaskHostPoolTests : IDisposable
         await pool.PrewarmAsync(Package, TestContext.Current.CancellationToken);
         await pool.PrewarmAsync(Package, TestContext.Current.CancellationToken);
         var blockedPid = pool.WarmProcessIds[0];
-        var blocked = pool.ExecuteAsync(Package, Dispatch("block", TimeSpan.FromMilliseconds(200)),
-            cancellationGrace: TimeSpan.FromMilliseconds(100), cancellationToken: TestContext.Current.CancellationToken);
-        var sibling = pool.ExecuteAsync(Package, Dispatch(), ByteString.CopyFromUtf8("""{"previous":1}"""),
-            cancellationToken: TestContext.Current.CancellationToken);
-        var results = await Task.WhenAll(blocked, sibling);
-        Assert.Equal(TaskOutcome.TimedOut, results[0].Outcome);
-        Assert.Contains("terminated", results[0].Error.Message);
-        Assert.Equal(TaskOutcome.Succeeded, results[1].Outcome);
-        Assert.Equal(2, pool.ProcessStartCount);
-        AssertStopped(blockedPid);
+        var marker = Path.GetTempFileName();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        try
+        {
+            var dispatch = Dispatch("child");
+            dispatch.InputsJson = ByteString.CopyFromUtf8(JsonSerializer.Serialize(new { source = new { value = marker } }));
+            var blocked = pool.ExecuteAsync(Package, dispatch,
+                cancellationGrace: TimeSpan.FromMilliseconds(100), cancellationToken: cancellation.Token);
+            var sibling = pool.ExecuteAsync(Package, Dispatch(), ByteString.CopyFromUtf8("""{"previous":1}"""),
+                cancellationToken: TestContext.Current.CancellationToken);
+            using var readiness = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            readiness.CancelAfter(TimeSpan.FromSeconds(5));
+            while (new FileInfo(marker).Length == 0) await Task.Delay(10, readiness.Token);
+            await cancellation.CancelAsync();
+            var results = await Task.WhenAll(blocked, sibling);
+            Assert.Equal(TaskOutcome.Cancelled, results[0].Outcome);
+            Assert.Contains("terminated", results[0].Error.Message);
+            Assert.Equal(TaskOutcome.Succeeded, results[1].Outcome);
+            Assert.Equal(2, pool.ProcessStartCount);
+            AssertStopped(blockedPid);
+        }
+        finally { await cancellation.CancelAsync(); File.Delete(marker); }
     }
 
     [Theory]

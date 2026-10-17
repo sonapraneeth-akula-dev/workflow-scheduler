@@ -6,6 +6,11 @@ using Wf.Contracts.Definition;
 using Wf.Sdk;
 using Wf.TaskHost.Fixture;
 
+if (args.Length > 0 && args[0] == "--resource-limit-child")
+    return ResourceLimitFixture.RunChild(args[1..]);
+if (args.Length > 0 && args[0] == "--resource-limit-fixture")
+    return await ResourceLimitFixture.Create().RunAsync(args[1..]);
+
 if (args.Length > 0 && args[0] == "--secret-default-fixture")
     return await SecretFixture.Create(withDefault: true).RunAsync(args[1..]);
 if (args.Length > 0 && args[0] == "--physical-lifetime-fixture")
@@ -156,7 +161,8 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
         ctx.Outputs["sourceKey"] = ctx.TaskKey;
         await ctx.Reports.PublishAsync("text", "Post summary",
             System.Text.Encoding.UTF8.GetBytes("Published by " + ctx.TaskKey), ctx.CancellationToken, ["post", "review"]);
-    }).Task("drain", DrainFixture.ExecuteAsync).Task("remoteOperation", async ctx =>
+    }).Task("resourceMemory", ResourceLimitFixture.ExecutePackagedMemory)
+    .Task("drain", DrainFixture.ExecuteAsync).Task("remoteOperation", async ctx =>
     {
         if (ctx.Var<string>("checkpointMarker") is { Length: > 0 } marker)
         {

@@ -1814,6 +1814,63 @@ private cgroup filesystem; the measured service needs no `CAP_SYS_ADMIN` or
 effective capabilities. Backend CI now contains the same two-distribution gate
 with uploaded logs; remote execution is not claimed.
 
+### CPU/RAM workload limit verification
+
+Task `2.2.2.2.2` supplies optional immutable SDK/manifest policies, durable
+dispatch caps, RAM-aware placement and the historical Task Plan projection.
+Innermost whole-policy replacement includes explicit zero/unlimited overrides.
+Invalid caps fail at authoring and wire admission; standalone in-process local
+execution rejects positive caps rather than pretending to enforce them.
+
+Windows uses nested Job Objects for aggregate CPU hard rates and committed-memory
+limits. Source-generated native interop follows the existing agent convention;
+no CsWin32 dependency was added. CPU conversion uses the OS logical-processor
+count, not runtime overrides, and rejects unsupported processor groups or rates.
+Job memory-denial notifications and SDK first-chance managed OOM detection
+produce nonretryable `ResourceLimit`, including caught managed exceptions.
+**Qualification:** Windows Job completion-port notifications are best-effort.
+An unmanaged allocator that handles denial without a managed exception is still
+hard-capped, but its denial cannot be guaranteed to produce a breach notification.
+
+Linux workers enter their private unlimited cgroup leaf **before exec**; binding
+then applies `cpu.max`, `memory.max`, zero swap and group OOM killing before
+secret resolution or task code. Moving a ready worker into a new cgroup was
+rejected: its existing memory charges would remain outside the new limit.
+The supervisor remains in an unlimited sibling, preserving descendant-reaping
+and physical-exit proof during OOM. Optional accounting observes their common
+parent, so reported RAM includes supervisor overhead outside the workload cap.
+`memory.events` OOM counters identify actual breach; reclaim/`max` events do not.
+The shipped systemd service always delegates CPU/memory; limits need neither BPF
+nor network capabilities. Missing delegation fails closed for limited attempts.
+
+Confirmed breach discards outputs and stops the complete owned process tree
+before result journaling or publication. Limited successful attempts also wait
+for physical exit and the final limit check before journaling. Private readiness
+protocol 6 requires rebuilding SDK packages; public dispatch remains compatible.
+Existing reservation/session fences and unlimited-attempt behavior remain intact.
+
+Actual Windows and capability-free non-root Linux tests exercise aggregate
+0.25-core throttling, direct/descendant/caught-OOM RAM breach, caps below warm
+baseline, sibling isolation, accounting and unavailable-delegation rejection.
+Windows agent regressions pass 141 cases with two Linux-only skips; non-root
+Linux accounting/limit regressions pass 25, and the zero-capability limit suite
+passes 15. Three real HTTP/2 agent/package/SDK/PostgreSQL RAM/replay cases pass
+on each OS. A database lock proves physical cleanup precedes durable completion;
+reconnection replays the journal without another task or retry. Windows Native
+AOT publish and two native heartbeat/installer-registration integrations pass.
+SDK/local/dry-run/manifest regressions pass 110, safe-plan projection units 18,
+and Task Plan frontend cases 30; generated API, strict types, scoped lint and
+production frontend build pass. Existing package-audit warnings are unchanged.
+
+Evidence: `compose-results/limits-agent-final.trx`, `limits-sdk-final.trx`,
+`limits-version-contracts.trx`, `limits-actual-api-final.trx` (19 passed and the
+Windows readiness-marker sharing race corrected by `limits-ram-windows-final.trx`,
+3 passed), `limits-native-windows-final.trx`, and
+`.agent-artifacts/limits-linux-3adec91f/results/linux-Wf.Agent.Tests-{nonroot,without-bpf}.trx`
+and `linux-Wf.Integration.Tests-without-bpf.trx`. Linux uses the shared Docker
+Desktop WSL2 kernel, not a native distribution VM kernel or Azure deployment.
+The reproducible CI gate is configured; remote CI execution is not claimed.
+
 ### R-2 local group-commit spike (October 15, 2026)
 
 PostgreSQL 17 Alpine in Docker on this shared, virtualized machine; .NET SDK

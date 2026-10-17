@@ -211,6 +211,9 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             Assert.Contains(schemas.GetProperty("RunQueryRow").GetProperty("properties").GetProperty("metadata")
                 .GetProperty("oneOf").EnumerateArray(), option => option.TryGetProperty("type", out var type) && type.GetString() == "null");
             output.WriteLine("Actual Program RunQueryRow OpenAPI: " + schemas.GetProperty("RunQueryRow").GetRawText());
+            Assert.True(schemas.GetProperty("TaskPlanExecutionPolicy").GetProperty("properties").TryGetProperty("limits", out _));
+            Assert.True(schemas.GetProperty("TaskResourceLimits").GetProperty("properties").TryGetProperty("cpuCores", out _));
+            Assert.True(schemas.GetProperty("TaskResourceLimits").GetProperty("properties").TryGetProperty("ramMb", out _));
             using var query = await client.GetAsync("/api/v1/runs/history", deadline.Token);
             Assert.Equal(HttpStatusCode.BadRequest, query.StatusCode);
             Assert.True(query.Headers.CacheControl!.NoStore);

@@ -72,6 +72,20 @@ const task = z.object({
   policy: z.object({
     attemptTimeout: z.string(),
     autoRetry: z.boolean(),
+    limits: z
+      .object({
+        cpuCores: z
+          .number()
+          .nonnegative()
+          .max(2147483647)
+          .refine((value) => value === 0 || value >= 0.01),
+        ramMb: z
+          .int()
+          .nonnegative()
+          .max(2 ** 43 - 1),
+      })
+      .nullable()
+      .optional(),
     retry: z.object({
       retries: z.int().nonnegative(),
       on: z.array(categories),

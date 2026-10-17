@@ -7,6 +7,7 @@ using Wf.Agent.Packages;
 using Wf.Agent.Logs;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Reports;
+using Wf.Contracts.Definition;
 
 namespace Wf.Agent;
 
@@ -183,6 +184,7 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
             dispatch.Sha256.Length != 64 || dispatch.Sha256.Any(character => !char.IsAsciiHexDigit(character)))
             throw new InvalidDataException("Dispatch requires a version, deadline, reservation, package URL and SHA-256.");
         _ = dispatch.DeadlineAt.ToDateTimeOffset();
+        if (dispatch.Limits is { } limits) _ = new TaskResourceLimits(limits.CpuCores, limits.RamMb);
         if (dispatch.Grants.Count(grant => grant.Kind == "reports") > 1)
             throw new InvalidDataException("Dispatch contains duplicate report capabilities.");
         if (dispatch.Grants.Count(grant => grant.Kind == "artifacts") > 1)

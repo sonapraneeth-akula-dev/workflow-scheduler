@@ -9,8 +9,17 @@ using Wf.TaskHost.Fixture;
 
 namespace Wf.Agent.Tests;
 
-public sealed class ResourceSamplerTests
+public sealed class ResourceSamplerTests : IDisposable
 {
+    private readonly string lifetimes = Path.GetFullPath(Path.Combine(".agent-artifacts", "sampling-lifetimes",
+        Guid.NewGuid().ToString("N")));
+
+    public void Dispose()
+    {
+        if (Directory.Exists(lifetimes) && !Directory.EnumerateFileSystemEntries(lifetimes).Any())
+            Directory.Delete(lifetimes);
+    }
+
     [Fact]
     public void Native_machine_and_process_counters_are_real_and_process_network_is_unavailable()
     {
@@ -99,7 +108,7 @@ public sealed class ResourceSamplerTests
         using var service = new ResourceSamplingService(ResourceSampler.Create(), TimeProvider.System,
             NullLogger<ResourceSamplingService>.Instance);
         await service.StartAsync(TestContext.Current.CancellationToken);
-        await using var pool = new TaskHostPool(NullLogger<TaskHostPool>.Instance, sampling: service);
+        await using var pool = new TaskHostPool(NullLogger<TaskHostPool>.Instance, sampling: service, containmentDirectory: lifetimes);
         var package = new TaskHostPackage("1.0.0", "dotnet",
             ["exec", "--runtimeconfig", Path.ChangeExtension(typeof(ResourceSamplerTests).Assembly.Location, ".runtimeconfig.json"),
                 "--depsfile", Path.ChangeExtension(typeof(ResourceSamplerTests).Assembly.Location, ".deps.json"), typeof(FixtureMarker).Assembly.Location],

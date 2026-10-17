@@ -46,14 +46,15 @@ export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_USE_MSBUILD_SERVER=0 MSBUILDDISA
 export WF_RESOURCE_TEST_CGROUP_ROOT="$mountpoint/delegated" WF_RESOURCE_TEST_ARTIFACTS="$artifacts/test-files"
 if [[ "${1:-}" == --without-bpf ]]; then
   export WF_RESOURCE_EXPECT_UNAVAILABLE=1
-  export WF_RESOURCE_TEST_FILTER=Native_resource_rights_state_does_not_stop_actual_task
+  export WF_RESOURCE_TEST_FILTER="${WF_RESOURCE_TEST_FILTER:-Native_resource_rights_state_does_not_stop_actual_task}"
 fi
 mode="${1:-root}"
 mode="${mode#--}"
-arguments=(test backend/tests/Wf.Agent.Tests --filter "${WF_RESOURCE_TEST_FILTER:-ResourceSampler}"
+test_project="${WF_RESOURCE_TEST_PROJECT:-backend/tests/Wf.Agent.Tests}"
+arguments=(test "$test_project" --filter "${WF_RESOURCE_TEST_FILTER:-ResourceSampler}"
   --disable-build-servers --artifacts-path "$artifacts" -p:PublishAot=false -p:UseSharedCompilation=false
   '-p:WarningsNotAsErrors=NU1902%3BNU1903'
-  --logger "trx;LogFileName=linux-native-resource-sampler-$mode.trx" --results-directory "$artifacts/results")
+  --logger "trx;LogFileName=linux-${test_project##*/}-$mode.trx" --results-directory "$artifacts/results")
 [[ "${WF_RESOURCE_OFFLINE_RESTORE:-}" != 1 ]] || arguments+=(-p:NuGetAudit=false)
 [[ ! -d /host-nuget ]] || arguments+=(-p:RestoreFallbackFolders=/host-nuget)
 if [[ "${1:-}" == --nonroot || "${1:-}" == --without-bpf ]]; then

@@ -11,6 +11,26 @@ namespace Wf.Agent.Tests;
 public sealed class TaskCommandsTests
 {
     [Theory]
+    [InlineData(double.NaN, 0UL)]
+    [InlineData(-1, 0UL)]
+    [InlineData(0, ulong.MaxValue)]
+    public async Task Invalid_resource_caps_cannot_download_packages_mutate_journal_or_start_tasks(double cpu, ulong ram)
+    {
+        await using var cache = new PackageCacheTests.CacheFixture([]);
+        await using var hosts = new TaskHostPool(NullLogger<TaskHostPool>.Instance);
+        using var outbox = new AgentOutbox();
+        await using var commands = Create(cache, hosts, outbox);
+        var message = Dispatch(cache.Sha);
+        message.Dispatch.Limits = new() { CpuCores = cpu, RamMb = ram };
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await commands.HandleAsync(message, TestContext.Current.CancellationToken));
+        Assert.Empty(commands.Inflight);
+        Assert.Null(outbox.NextAfter(0));
+        Assert.Equal(0, cache.Handler.Count);
+        Assert.Equal(0, hosts.ProcessStartCount);
+    }
+
+    [Theory]
     [InlineData(false, CalibrationOutcome.Unsupported)]
     [InlineData(true, CalibrationOutcome.TimedOut)]
     public async Task Calibration_reports_explicit_terminal_failure_without_fabricating_load_or_capacity(

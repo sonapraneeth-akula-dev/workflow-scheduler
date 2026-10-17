@@ -55,6 +55,7 @@ public sealed class NodeBuilder
     public NodeBuilder Retry(int count, BackoffPolicy? backoff = null, IEnumerable<FailureCategory>? on = null)
     { policy.Retry(count, backoff, on); return this; }
     public NodeBuilder NoAutoRetry() { policy.NoAutoRetry(); return this; }
+    public NodeBuilder Limits(double cpuCores = 0, ulong ramMb = 0) { policy.Limits(cpuCores, ramMb); return this; }
     public NodeBuilder RunsOn(params PlacementSelector[] selectors) { policy.RunsOn(selectors); return this; }
     public NodeBuilder RunsOn(Func<PlacementVariables, PlacementSelector> configure) { policy.RunsOn(configure); return this; }
     public NodeBuilder Affinity(PlacementAffinity value) { policy.Affinity(value); return this; }

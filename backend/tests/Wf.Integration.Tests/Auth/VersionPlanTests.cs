@@ -49,6 +49,8 @@ public sealed partial class AuthorizationMatrixTests
         Assert.Equal(new(TaskActionKind.Http, "POST https://example.com/jobs"), node.Tasks[2].Action);
         Assert.Equal(2, node.Tasks[0].Policy.Retry.Retries);
         Assert.Equal(TimeSpan.FromSeconds(12), node.Tasks[0].Policy.AttemptTimeout);
+        Assert.Equal(new(0.25, 192), node.Tasks[0].Policy.Limits);
+        Assert.Null(node.Tasks[1].Policy.Limits);
         foreach (var secret in new[] { "plan-default-secret", "plan-argument-secret", "plan-header-secret",
             "plan-body-secret", "plan-query-secret", "\"variables\"", "\"inputs\"", "packageUri", "sourceUri" })
             Assert.DoesNotContain(secret, body, StringComparison.Ordinal);
@@ -146,7 +148,7 @@ public sealed partial class AuthorizationMatrixTests
         var version = Guid.CreateVersion7();
         var workflow = Workflow.Define(id, semver, builder => builder.Type(id.Split('/')[1])
             .Variables(variables => variables.String("private", "plan-default-secret"))
-            .Node("work", node => node.Task("sdk", DeclaredPlanTask, policy => policy.Timeout(TimeSpan.FromSeconds(12)).Retry(2))
+            .Node("work", node => node.Task("sdk", DeclaredPlanTask, policy => policy.Timeout(TimeSpan.FromSeconds(12)).Retry(2).Limits(0.25, 192))
                 .Task("command", Tasks.Command("dotnet", "--token plan-argument-secret"))
                 .Task("http", Tasks.Http(HttpMethod.Post, "https://example.com/jobs?token=plan-query-secret",
                     headers: new Dictionary<string, string> { ["X-Token"] = "plan-header-secret" }, body: "plan-body-secret"))));

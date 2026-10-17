@@ -52,14 +52,14 @@ if $validate_only; then echo 'Agent installer inputs valid; no changes made.'; e
 ((EUID == 0)) || { echo 'Run this installer as root' >&2; exit 1; }
 [[ ! -e /etc/systemd/system/wf-agent.service && ! -e /etc/kardia/wf-agent.env && ! -e /opt/kardia/wf-agent/wf-agent ]] ||
   { echo 'Agent installation already exists; refusing to overwrite it' >&2; exit 1; }
+systemd_version="$(systemctl --version)"
+systemd_version="${systemd_version#systemd }"
+systemd_version="${systemd_version%% *}"
+[[ "$systemd_version" =~ ^[0-9]+$ ]] && ((systemd_version >= 254)) ||
+  { echo 'Agent resource limits require systemd >=254 (DelegateSubgroup).' >&2; exit 2; }
 if $native_resource_sampling; then
   [[ -x /usr/bin/setpriv ]] ||
     { echo 'Native resource sampling requires /usr/bin/setpriv (util-linux) to drop task capabilities.' >&2; exit 2; }
-  systemd_version="$(systemctl --version)"
-  systemd_version="${systemd_version#systemd }"
-  systemd_version="${systemd_version%% *}"
-  [[ "$systemd_version" =~ ^[0-9]+$ ]] && ((systemd_version >= 254)) ||
-    { echo 'Native resource sampling profile requires systemd >=254 (DelegateSubgroup).' >&2; exit 2; }
   [[ ! -e /etc/systemd/system/wf-agent.service.d/resources.conf ]] ||
     { echo 'Resource service profile already exists; refusing to overwrite it' >&2; exit 1; }
 fi

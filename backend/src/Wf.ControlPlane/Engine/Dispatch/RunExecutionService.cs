@@ -204,6 +204,8 @@ public sealed class RunExecutionService(NpgsqlDataSource source, RunRecovery rec
                     PackageUri = new Uri(options.ApiEndpoint, "/api/v1/packages/" +
                         downloads.Create(definition.Package, definition.Package.SizeBytes, TimeSpan.FromMinutes(10))).AbsoluteUri,
                     DeadlineAt = Timestamp.FromDateTimeOffset(deadline),
+                    Limits = task.Policy.Limits is { } limits
+                        ? new() { CpuCores = limits.CpuCores, RamMb = limits.RamMb } : null,
                     VariablesJson = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(run.Snapshot.Variables,
                         RunStoreJson.Default.ImmutableDictionaryStringJsonElement)),
                     InputsJson = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(inputs)),
@@ -214,7 +216,8 @@ public sealed class RunExecutionService(NpgsqlDataSource source, RunRecovery rec
                         : ByteString.Empty
                 };
                 var decision = await dispatcher.PrepareAsync(connection, run,
-                    new(run.Snapshot.RunId, node.Key, task.Key, attempt, definition.Package.Sha256, task.Placement),
+                    new(run.Snapshot.RunId, node.Key, task.Key, attempt, definition.Package.Sha256, task.Placement,
+                        RequiredRamMb: checked((long)(task.Policy.Limits?.RamMb ?? 0))),
                     dispatch, task.Policy, platformRetries, authorRetries, token);
                 var queuedAt = run.Snapshot.Metrics!.Tasks[key].QueuedAt ??
                     throw new InvalidDataException("A dispatchable task has no durable queue timestamp.");

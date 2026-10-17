@@ -6,6 +6,22 @@ namespace Wf.Sdk.Tests;
 public sealed class PolicyResolverTests
 {
     [Fact]
+    public void Resource_caps_inherit_as_a_policy_and_explicit_zero_resets_to_unlimited()
+    {
+        var workflow = Workflow.Define("limits", "1", w => w.Type("test")
+            .Defaults(d => d.Limits(cpuCores: 0.5, ramMb: 512))
+            .Node("default", n => n.Task("work", _ => { }))
+            .Node("override", n => n.Limits(cpuCores: 0.25, ramMb: 192)
+                .Task("inherited", _ => { })
+                .Task("unlimited", _ => { }, p => p.Limits()))
+            .PostProcess(p => p.Limits(ramMb: 256).Task("cleanup", _ => { })));
+        Assert.Equal(new(0.5, 512), workflow.Nodes[0].Tasks[0].Policy.Limits);
+        Assert.Equal(new(0.25, 192), workflow.Nodes[1].Tasks[0].Policy.Limits);
+        Assert.Equal(new(0, 0), workflow.Nodes[1].Tasks[1].Policy.Limits);
+        Assert.Equal(new(0, 256), workflow.Nodes[2].Tasks[0].Policy.Limits);
+    }
+
+    [Fact]
     public void DefaultsMatchAttemptRunAndPostStageContracts()
     {
         var workflow = Workflow.Define("defaults", "1", w => w.Type("test")

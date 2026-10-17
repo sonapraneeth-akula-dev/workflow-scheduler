@@ -10,6 +10,8 @@ option csharp_namespace = "Wf.Contracts.Host.V1";
 // until acknowledged; reconnect/re-adoption can extend this protocol later.
 service TaskHost {
   rpc Ready(ReadyRequest) returns (HostReady);
+  // Confirms the Linux worker's pre-exec cgroup before secrets; the supervisor stays outside.
+  rpc ApplyLimits(ApplyLimitsRequest) returns (HostReply);
   // Names only, bound from the immutable workflow and this attempt's variables.
   rpc RequiredSecrets(ExecuteRequest) returns (SecretReferences);
   rpc Execute(ExecuteRequest) returns (wf.agent.v1.TaskCompleted);
@@ -24,6 +26,10 @@ service TaskHost {
 }
 
 message ReadyRequest {}
+
+message ApplyLimitsRequest {
+  string linux_cgroup_path = 1;
+}
 
 message HostReady {
   uint32 protocol_version = 1;

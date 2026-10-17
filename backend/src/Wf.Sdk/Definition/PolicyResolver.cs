@@ -4,7 +4,7 @@ using Wf.Contracts.Definition;
 namespace Wf.Sdk;
 
 public sealed record PolicyOverrides(TimeSpan? Timeout = null, RetryPolicy? Retry = null, bool? AutoRetry = null,
-    PlacementPolicy? Placement = null);
+    PlacementPolicy? Placement = null, TaskResourceLimits? Limits = null);
 
 public sealed class PolicyBuilder
 {
@@ -13,6 +13,13 @@ public sealed class PolicyBuilder
     private bool? autoRetry;
     private PlacementSelector? selector;
     private PlacementAffinity? affinity;
+    private TaskResourceLimits? limits;
+
+    public PolicyBuilder Limits(double cpuCores = 0, ulong ramMb = 0)
+    {
+        limits = new(cpuCores, ramMb);
+        return this;
+    }
 
     public PolicyBuilder RunsOn(params PlacementSelector[] selectors)
     {
@@ -54,7 +61,7 @@ public sealed class PolicyBuilder
     }
 
     internal PolicyOverrides Build() => new(timeout, retry, autoRetry,
-        selector is null && affinity is null ? null : new(selector, affinity));
+        selector is null && affinity is null ? null : new(selector, affinity), limits);
 }
 
 public static class Backoff
@@ -73,6 +80,7 @@ public static class PolicyResolver
         ArgumentNullException.ThrowIfNull(task);
         return new(task.Timeout ?? node.Timeout ?? workflow.Timeout ?? ExecutionPolicy.Default.AttemptTimeout,
             task.Retry ?? node.Retry ?? workflow.Retry ?? ExecutionPolicy.Default.Retry,
-            task.AutoRetry ?? node.AutoRetry ?? workflow.AutoRetry ?? true);
+            task.AutoRetry ?? node.AutoRetry ?? workflow.AutoRetry ?? true,
+            task.Limits ?? node.Limits ?? workflow.Limits);
     }
 }

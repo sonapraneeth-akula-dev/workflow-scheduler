@@ -14,6 +14,21 @@ public sealed class DryRunTests
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task Limited_workflow_dry_run_simulates_resource_failure_without_running_or_mutating_the_original()
+    {
+        var calls = 0;
+        var workflow = Workflow.Define("limited", "1", w => w.Type("test")
+            .Node("node", n => n.Task("work", _ => { calls++; },
+                p => p.Limits(0.25, 192).Retry(3, on: [FailureCategory.ResourceLimit]))));
+        var result = await DryRunHost.ExecuteAsync(workflow,
+            Spec("node/work", new(MockOutcome.Fail, Category: FailureCategory.ResourceLimit)), Token);
+        Assert.Equal(FailureCategory.ResourceLimit, Assert.Single(result.Attempts).Failure);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(0, calls);
+        Assert.Equal(new(0.25, 192), workflow.Nodes[0].Tasks[0].Policy.Limits);
+    }
+
+    [Fact]
     public async Task Explicit_checkpoint_seed_executes_only_the_named_resume_branch_and_preserves_context()
     {
         var at = DateTimeOffset.Parse("2026-10-17T10:00:00Z", System.Globalization.CultureInfo.InvariantCulture);

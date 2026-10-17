@@ -753,7 +753,7 @@ system-assigned identity. No developer/browser/CLI credential fallback.
 `ctx.Secret(ctx.Var<SecretReference>("credential"))` accesses a declared resolved
 value. Missing or unavailable secrets become safe nonretryable `ValidationError`;
 resolved values never enter manifests, dispatches, journals or process arguments.
-Rebuild existing SDK packages: task-host private readiness protocol 5 is required.
+Rebuild existing SDK packages: task-host private readiness protocol 6 is required.
 Provisioning and provider details: [agent secrets](backend/src/Wf.Agent/Secrets/README.md).
 
 `Tasks.HttpOperation(...)` declares an opt-in long-running HTTP operation:
@@ -1664,7 +1664,7 @@ header capability for the exact attempt, assigned agent session and reservation
 epoch. It cannot commit the logical checkpoint pointer or accept user tokens,
 arbitrary object paths or redirect targets. Existing HMAC configuration and
 agent transport are reused; no login/logout flow or public read API is added.
-Private host readiness protocol 5 includes checkpoint and progress streams with
+Private host readiness protocol 6 includes checkpoint and progress streams with
 explicit ACKs (engine durability for checkpoints; agent-journal durability for
 progress).
 Dispatch receive envelopes allow 4 MiB for the existing inputs plus a maximum-size
@@ -2041,7 +2041,9 @@ acknowledged and replay on reconnect or process restart. Production uses an
 owner-only, checksummed result journal under the user's local application data
 `wf\agents\<agent-UUID>\results`; override with `Agent__ResultJournalDirectory`.
 Atomic flushed snapshots retain sequence high-water marks, observed leader epoch
-and unACKed results before send; completion is durable before the task host ACK.
+and unACKed results before send. Unlimited attempts journal before the task host
+ACK; limited attempts first establish physical exit and inspect the final limit
+state, then journal completion so a RAM breach cannot publish success.
 Only a valid current-connection/current-leader ACK removes offered records.
 Limits are 4,096 records, 1 MiB per record and 32 MiB total; corruption, disk
 failure and exhausted capacity fail explicitly rather than dropping results.
@@ -2060,9 +2062,52 @@ The SDK server executes real registry delegates with typed variables, declared
 inputs and bounded outputs; completion waits for acknowledgement before exit.
 Cancellation is cooperative first, then kills that host's process tree after
 grace (default 30 seconds). Workflow hosts use ordinary, untrimmed .NET IL, not
-Native AOT, and require the ASP.NET Core runtime. Resource-limit enforcement and
-live-host re-adoption remain separate backlog items. The sample accepts
+Native AOT, and require the ASP.NET Core runtime. Live-host re-adoption remains
+a separate backlog item. The sample accepts
 `--task-host --socket <path>`; normal local execution is unchanged.
+
+Authored `.Defaults(p => p.Limits(cpuCores: 0.5, ramMb: 512))`, node/stage
+`.Limits(...)`, and per-task `p => p.Limits(...)` configure optional caps.
+The innermost **whole Limits policy** wins; zero means unlimited for that
+resource, and `.Limits()` explicitly clears inherited caps. CPU must be finite
+and either zero or at least 0.01 cores; RAM uses whole MiB. Existing manifests
+omit absent limits and retain unlimited behavior. Caps reach durable dispatch;
+requested RAM participates in placement before dispatch.
+The pinned Task Plan exposes these same optional caps and displays unlimited
+resources explicitly. Standalone in-process local execution rejects positive
+caps instead of ignoring them; run through local/Compose agents to enforce them.
+Dry-run mocks simulate resource outcomes without applying OS limits to the
+simulation process.
+
+Windows uses a nested Job Object CPU hard rate and job-wide committed-memory
+cap (worker plus descendants), independently of optional sampling. CPU conversion
+uses the actual active logical-processor count, not `DOTNET_PROCESSOR_COUNT`;
+multi-processor-group systems and unrepresentable rates fail closed. Native
+source-generated interop reuses the existing approach instead of adding CsWin32.
+Job memory-denial notifications trigger failure; SDK first-chance
+`OutOfMemoryException` tracking also prevents a caught managed OOM from becoming
+success. Windows documents native Job completion-port notifications as
+best-effort: an unmanaged allocator that handles denial without a managed OOM
+cannot provide a guaranteed breach notification, although the hard cap remains
+enforced.
+
+Linux requires delegated cgroups v2 CPU/memory controllers. Each worker joins
+its private unlimited leaf **before exec**, then binds caps on that same leaf
+before secret resolution or task delegates; descendants inherit it. This charges
+the warm worker's existing memory too: migrating a ready process into a new
+cgroup would leave its earlier charges outside the cap. `cpu.max`, `memory.max`,
+zero swap and `memory.oom.group=1` enforce caps. `memory.events` OOM counters,
+not reclaim/`max` events, identify a breach.
+The containment supervisor stays in an **unlimited sibling** so OOM cannot
+destroy its physical-cleanup proof. Optional native accounting remains on the
+parent and includes both supervisor and workload; measured RAM can therefore
+exceed the workload cap by supervisor overhead. Configure
+`Agent__LinuxCgroupRoot` for custom launchers; the shipped systemd unit supplies
+it and delegates both controllers using `DelegateSubgroup=agent` (systemd >=254).
+No BPF or network capability is required for limits. Missing delegation or
+unsupported enforcement fails before task code, never silently runs uncapped.
+Confirmed RAM breach terminates the entire owned tree before journal/result
+publication, discards outputs, and returns nonretryable `ResourceLimit`.
 
 The global warm pool defaults to four unused processes and 200,000,000 bytes
 aggregate RSS, evicting least recently used hosts and emptying after five

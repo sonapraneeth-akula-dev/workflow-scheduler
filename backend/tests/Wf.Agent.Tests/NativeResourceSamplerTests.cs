@@ -13,8 +13,11 @@ using Wf.Agent.ResourceFixture;
 
 namespace Wf.Agent.Tests;
 
-public sealed class NativeResourceSamplerTests
+public sealed class NativeResourceSamplerTests : IDisposable
 {
+    private readonly string lifetimes = Path.GetFullPath(Path.Combine(".agent-artifacts", "native-sampling-lifetimes",
+        Guid.NewGuid().ToString("N")));
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -27,7 +30,7 @@ public sealed class NativeResourceSamplerTests
         using var reader = ResourceSampler.Create(new NativeSamplingOptions(true, delegated));
         using var service = new ResourceSamplingService(reader, TimeProvider.System, NullLogger<ResourceSamplingService>.Instance);
         await service.StartAsync(TestContext.Current.CancellationToken);
-        await using var pool = new TaskHostPool(NullLogger<TaskHostPool>.Instance, sampling: service);
+        await using var pool = new TaskHostPool(NullLogger<TaskHostPool>.Instance, sampling: service, containmentDirectory: lifetimes);
         var root = Path.GetFullPath(Path.Combine(Environment.GetEnvironmentVariable("WF_RESOURCE_TEST_ARTIFACTS") ??
             Path.Combine(".agent-artifacts", "native-resource-tests"), Guid.NewGuid().ToString("N")));
         Directory.CreateDirectory(root);
@@ -62,8 +65,12 @@ public sealed class NativeResourceSamplerTests
             foreach (var task in service.ActiveTasks)
             {
                 var ready = task.RunId == clientDispatch.Task.RunId ? clientReady : serverReady;
-                if (child) Assert.NotEqual(task.ProcessId, ready.ProcessId);
+                if (child || OperatingSystem.IsLinux()) Assert.NotEqual(task.ProcessId, ready.ProcessId);
                 else Assert.Equal(task.ProcessId, ready.ProcessId);
+                if (OperatingSystem.IsLinux() && !child)
+                    Assert.Equal(task.ProcessId, int.Parse(File.ReadLines($"/proc/{ready.ProcessId}/status")
+                        .Single(line => line.StartsWith("PPid:", StringComparison.Ordinal))
+                        .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)[1], CultureInfo.InvariantCulture));
             }
             foreach (var sample in baseline.Values)
             {
@@ -226,10 +233,10 @@ public sealed class NativeResourceSamplerTests
         Assert.Throws<ArgumentException>(() => NativeSamplingOptions.FromConfiguration(configuration));
     }
 
-    private static async Task EchoAsync(ResourceSampler reader, Action<ResourcePoint> verify)
+    private async Task EchoAsync(ResourceSampler reader, Action<ResourcePoint> verify)
     {
         using var service = new ResourceSamplingService(reader, TimeProvider.System, NullLogger<ResourceSamplingService>.Instance);
-        await using var pool = new TaskHostPool(NullLogger<TaskHostPool>.Instance, sampling: service);
+        await using var pool = new TaskHostPool(NullLogger<TaskHostPool>.Instance, sampling: service, containmentDirectory: lifetimes);
         var package = new TaskHostPackage("1.0.0", "dotnet",
             ["exec", "--runtimeconfig", RuntimeConfig, "--depsfile", DepsFile, typeof(ResourceFixtureMarker).Assembly.Location],
             AppContext.BaseDirectory);
@@ -270,6 +277,12 @@ public sealed class NativeResourceSamplerTests
 
     private static string RuntimeConfig => Path.ChangeExtension(typeof(NativeResourceSamplerTests).Assembly.Location, ".runtimeconfig.json");
     private static string DepsFile => Path.ChangeExtension(typeof(NativeResourceSamplerTests).Assembly.Location, ".deps.json");
+
+    public void Dispose()
+    {
+        if (Directory.Exists(lifetimes) && !Directory.EnumerateFileSystemEntries(lifetimes).Any())
+            Directory.Delete(lifetimes);
+    }
 
     private static Dispatch Dispatch(TrafficRequest request) => new()
     {

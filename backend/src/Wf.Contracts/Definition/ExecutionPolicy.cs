@@ -1,9 +1,26 @@
 using System.Collections.Immutable;
+using System.Text.Json.Serialization;
 
 namespace Wf.Contracts.Definition;
 
 public enum FailureCategory { TaskError, Timeout, AgentLost, PlatformError, ValidationError, Aborted, ResourceLimit, Placement }
 public enum BackoffKind { Fixed, Exponential }
+
+public sealed record TaskResourceLimits
+{
+    public double CpuCores { get; }
+    public ulong RamMb { get; }
+
+    public TaskResourceLimits(double cpuCores = 0, ulong ramMb = 0)
+    {
+        if (!double.IsFinite(cpuCores) || cpuCores != 0 && (cpuCores < 0.01 || cpuCores > int.MaxValue))
+            throw new ArgumentOutOfRangeException(nameof(cpuCores), "CPU limit must be zero (unlimited) or at least 0.01 cores.");
+        if (ramMb > long.MaxValue / (1024 * 1024))
+            throw new ArgumentOutOfRangeException(nameof(ramMb), "RAM limit exceeds the supported byte count.");
+        CpuCores = cpuCores;
+        RamMb = ramMb;
+    }
+}
 
 public sealed record BackoffPolicy
 {
@@ -45,9 +62,11 @@ public sealed record ExecutionPolicy
     public TimeSpan AttemptTimeout { get; }
     public RetryPolicy Retry { get; }
     public bool AutoRetry { get; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TaskResourceLimits? Limits { get; }
     public static ExecutionPolicy Default { get; } = new(TimeSpan.FromHours(1), new(), true);
 
-    public ExecutionPolicy(TimeSpan attemptTimeout, RetryPolicy retry, bool autoRetry = true)
+    public ExecutionPolicy(TimeSpan attemptTimeout, RetryPolicy retry, bool autoRetry = true, TaskResourceLimits? limits = null)
     {
         if (attemptTimeout <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(attemptTimeout), "Attempt timeout must be positive.");
@@ -55,5 +74,6 @@ public sealed record ExecutionPolicy
         AttemptTimeout = attemptTimeout;
         Retry = retry;
         AutoRetry = autoRetry;
+        Limits = limits;
     }
 }

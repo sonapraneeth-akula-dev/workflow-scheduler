@@ -26,7 +26,7 @@ public sealed record WorkflowVersionPlan(Guid VersionId, string WorkflowId, stri
                     task.HttpOperation?.SecretReference, task.HttpOperation?.RequestTimeout,
                     task.Failure, new(task.Policy.AttemptTimeout,
                         new(task.Policy.Retry.Retries, task.Policy.Retry.Backoff, task.Policy.Retry.On.ToArray()),
-                        task.Policy.AutoRetry),
+                        task.Policy.AutoRetry, task.Policy.Limits),
                     TaskPlanPlacement.From(PlacementPolicy.Inherit(placement, task.Placement)))).ToArray());
         }).ToArray());
 }
@@ -87,7 +87,8 @@ public sealed record TaskPlanNode(string Key, DependencyDefinition[] Dependencie
     int? MaxParallel, FailurePolicy Failure, TimeSpan? Timeout, TaskPlanPlacement? Placement, TaskPlanTask[] Tasks);
 public sealed record TaskPlanTask(string Key, TaskAction? Action, string? SecretReference, TimeSpan? RequestTimeout,
     FailurePolicy Failure, TaskPlanExecutionPolicy Policy, TaskPlanPlacement? Placement);
-public sealed record TaskPlanExecutionPolicy(TimeSpan AttemptTimeout, TaskPlanRetry Retry, bool AutoRetry);
+public sealed record TaskPlanExecutionPolicy(TimeSpan AttemptTimeout, TaskPlanRetry Retry, bool AutoRetry,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TaskResourceLimits? Limits = null);
 public sealed record TaskPlanRetry(int Retries, BackoffPolicy Backoff, FailureCategory[] On);
 public sealed record TaskPlanSelector(SelectorValue? Os, SelectorValue? Pool, LabelSelector[] Labels,
     SelectorValue[] Machines, Guid[] MachineIds, int? Count);

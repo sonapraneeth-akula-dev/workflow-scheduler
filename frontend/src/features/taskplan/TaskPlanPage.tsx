@@ -133,6 +133,17 @@ export function TaskPlanPage({
                       {task.failure}.
                     </p>
                     <p>
+                      CPU limit:{" "}
+                      {task.policy.limits?.cpuCores
+                        ? `${task.policy.limits.cpuCores} cores`
+                        : "Unlimited"}
+                      ; RAM limit:{" "}
+                      {task.policy.limits?.ramMb
+                        ? `${task.policy.limits.ramMb} MiB`
+                        : "Unlimited"}
+                      .
+                    </p>
+                    <p>
                       Automatic retries:{" "}
                       {task.policy.autoRetry ? "enabled" : "disabled"}; retry
                       budget: {task.policy.retry.retries}; categories:{" "}

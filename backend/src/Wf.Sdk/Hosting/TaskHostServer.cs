@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Threading.Channels;
 using Google.Protobuf;
@@ -59,6 +60,7 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
     private CancellationTokenSource? attemptCancellation;
     private bool timedOut;
     private bool cancelled;
+    private bool limitsApplied;
     private readonly Channel<CheckpointSaved> checkpoints = Channel.CreateBounded<CheckpointSaved>(1);
     private CheckpointSaved? pendingCheckpoint;
     private TaskCompletionSource? checkpointAcknowledgement;
@@ -73,11 +75,26 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
         lock (sync)
             return Task.FromResult(new HostReady
             {
-                ProtocolVersion = 5, ProcessId = uint.TryParse(
+                ProtocolVersion = 6, ProcessId = uint.TryParse(
                     Environment.GetEnvironmentVariable("WF_TASK_HOST_SUPERVISOR_PID"), out var supervisor)
                     ? supervisor : (uint)Environment.ProcessId,
                 WorkflowVersion = workflow.Version, Bound = bound is not null
             });
+    }
+
+    public override Task<HostReply> ApplyLimits(ApplyLimitsRequest request, ServerCallContext context)
+    {
+        lock (sync)
+        {
+            if (bound is not null || limitsApplied)
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Task-host resource limits are already bound."));
+            try { LinuxWorkloadCgroup.Join(request.LinuxCgroupPath); }
+            catch (Exception error) when (error is ArgumentException or InvalidOperationException or IOException or
+                UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+            { throw new RpcException(new Status(StatusCode.FailedPrecondition, "Cannot join workload resource limits: " + error.Message)); }
+            limitsApplied = true;
+            return Task.FromResult(new HostReply());
+        }
     }
 
     public override Task<SecretReferences> RequiredSecrets(ExecuteRequest request, ServerCallContext context)
@@ -306,6 +323,13 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(attemptCancellation!.Token, deadlineCancellation.Token);
         var deadlineTimer = remaining <= TimeSpan.Zero ? Task.CompletedTask : CancelAtDeadlineAsync();
         var result = new TaskCompleted { Task = dispatch.Task.Clone() };
+        var observedOutOfMemory = 0;
+        EventHandler<FirstChanceExceptionEventArgs>? memoryHandler = dispatch.Limits?.RamMb > 0
+            ? (_, args) =>
+            {
+                if (args.Exception is OutOfMemoryException) Interlocked.Exchange(ref observedOutOfMemory, 1);
+            } : null;
+        if (memoryHandler is not null) AppDomain.CurrentDomain.FirstChanceException += memoryHandler;
         try
         {
             var reportGrant = dispatch.Grants.SingleOrDefault(grant => grant.Kind == "reports");
@@ -367,23 +391,33 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
             bool wasCancelled, wasTimedOut;
             lock (sync) { wasCancelled = cancelled; wasTimedOut = timedOut || deadlineCancellation.IsCancellationRequested; }
             result.Outcome = wasTimedOut ? TaskOutcome.TimedOut : wasCancelled ? TaskOutcome.Cancelled : TaskOutcome.Failed;
-            var category = FailureClassifier.Classify(exception, FailureCategory.TaskError,
+            var category = exception is OutOfMemoryException && dispatch.Limits?.RamMb > 0
+                ? FailureCategory.ResourceLimit : FailureClassifier.Classify(exception, FailureCategory.TaskError,
                 timedOut: wasTimedOut, aborted: wasCancelled);
             result.Error = new TaskError
             {
                 Category = category.ToString(), Message = exception.Message,
-                NonRetryable = category == FailureCategory.Aborted || exception is TaskFailureException { Retryable: false }
+                NonRetryable = category is FailureCategory.Aborted or FailureCategory.ResourceLimit ||
+                    exception is TaskFailureException { Retryable: false }
             };
         }
         finally
         {
+            if (memoryHandler is not null) AppDomain.CurrentDomain.FirstChanceException -= memoryHandler;
             checkpoints.Writer.TryComplete();
             progress.Writer.TryComplete();
             await deadlineStop.CancelAsync();
             await deadlineTimer;
         }
-        result.OutputsJson = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(outputs.Values,
-            OutputJsonContext.Default.ImmutableDictionaryStringJsonElement));
+        if (Volatile.Read(ref observedOutOfMemory) != 0)
+        {
+            result.Outcome = TaskOutcome.Failed;
+            result.Error = new TaskError { Category = "ResourceLimit", NonRetryable = true,
+                Message = "Task encountered an out-of-memory exception while executing with a RAM limit." };
+        }
+        result.OutputsJson = result.Error?.Category == "ResourceLimit" ? ByteString.Empty :
+            ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(outputs.Values,
+                OutputJsonContext.Default.ImmutableDictionaryStringJsonElement));
         result.At = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow);
         result.ResourceSummary = new ResourceSummary { ElapsedMs = (ulong)watch.ElapsedMilliseconds };
         return result;

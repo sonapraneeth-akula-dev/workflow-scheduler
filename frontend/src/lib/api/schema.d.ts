@@ -6079,6 +6079,7 @@ export interface components {
             attemptTimeout: string;
             retry: components["schemas"]["TaskPlanRetry"];
             autoRetry: boolean;
+            limits?: null | components["schemas"]["TaskResourceLimits"];
         };
         TaskPlanNode: {
             key: string;
@@ -6118,6 +6119,18 @@ export interface components {
             failure: components["schemas"]["FailurePolicy"];
             policy: components["schemas"]["TaskPlanExecutionPolicy"];
             placement: null | components["schemas"]["TaskPlanPlacement"];
+        };
+        TaskResourceLimits: {
+            /**
+             * Format: double
+             * @default 0
+             */
+            cpuCores: number | string;
+            /**
+             * Format: uint64
+             * @default 0
+             */
+            ramMb: number | string;
         };
         TrendMetrics: {
             /** Format: int64 */

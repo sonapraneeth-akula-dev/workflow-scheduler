@@ -10,6 +10,19 @@ public sealed class LocalEngineTests
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
+    [Theory]
+    [InlineData(0.25, 0UL)]
+    [InlineData(0, 192UL)]
+    public void Real_in_process_execution_rejects_caps_instead_of_silently_ignoring_them(double cpu, ulong ram)
+    {
+        var calls = 0;
+        var workflow = Workflow.Define("limited", "1", w => w.Type("test")
+            .Node("work", n => n.Task("task", _ => { calls++; }, p => p.Limits(cpu, ram))));
+        var error = Assert.Throws<NotSupportedException>(() => new LocalEngine(workflow));
+        Assert.Contains("require agent execution", error.Message);
+        Assert.Equal(0, calls);
+    }
+
     [Fact]
     public async Task StageAndSeriesOrderVariablesMetadataAndOutputsReachAnActualRun()
     {

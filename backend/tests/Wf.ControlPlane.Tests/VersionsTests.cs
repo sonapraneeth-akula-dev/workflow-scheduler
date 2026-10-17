@@ -127,7 +127,7 @@ public sealed class VersionsTests
         var placement = new PlacementPolicy(new(pool: new(variable: "pool"), machineIds: [machine], count: 1));
         var policy = new ExecutionPolicy(TimeSpan.FromSeconds(12), new(2,
             new(BackoffKind.Exponential, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(8)),
-            [FailureCategory.AgentLost]), false);
+            [FailureCategory.AgentLost]), false, new(0.25, 192));
         var task = new TaskDefinition("execute", policy: policy, placement: placement,
             action: new(TaskActionKind.SdkFunction, "Declared.Workflow.Execute"));
         var manifest = new WorkflowManifest("1", "team/type/plan", "1.2.3",
@@ -146,6 +146,9 @@ public sealed class VersionsTests
         Assert.Equal(TimeSpan.FromMinutes(1), node.Timeout);
         Assert.Equal(policy.AttemptTimeout, Assert.Single(node.Tasks).Policy.AttemptTimeout);
         Assert.Equal(policy.Retry.Retries, node.Tasks[0].Policy.Retry.Retries);
+        Assert.Equal(policy.Limits, node.Tasks[0].Policy.Limits);
+        Assert.Equal(192UL, json.RootElement.GetProperty("nodes")[0].GetProperty("tasks")[0]
+            .GetProperty("policy").GetProperty("limits").GetProperty("ramMb").GetUInt64());
         Assert.Equal(policy.Retry.On, node.Tasks[0].Policy.Retry.On);
         Assert.False(node.Tasks[0].Policy.AutoRetry);
         Assert.Equal("pool", node.Tasks[0].Placement!.Selector!.Pool!.Variable);

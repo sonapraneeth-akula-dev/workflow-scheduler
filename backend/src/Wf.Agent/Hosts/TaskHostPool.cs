@@ -18,6 +18,7 @@ using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Host.V1;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Checkpoints;
+using Wf.Agent.Limits;
 
 namespace Wf.Agent.Hosts;
 
@@ -73,6 +74,7 @@ public sealed class TaskHostPool : IAsyncDisposable
     private readonly ResourceSamplingService? sampling;
     private readonly ISecretStore? secretStore;
     private readonly HostRecoveryBarrier recovery;
+    private readonly string? linuxCgroupRoot;
     private Exception? containmentFailure;
     private int processStartCount;
     private bool disposed;
@@ -94,6 +96,7 @@ public sealed class TaskHostPool : IAsyncDisposable
         this.warmIdleTimeout = idle;
         this.sampling = sampling;
         this.secretStore = secretStore;
+        linuxCgroupRoot = options?.LinuxCgroupRoot;
         recovery = new HostRecoveryBarrier(containmentDirectory ?? (options is null ? null :
             Path.Combine(options.ResultJournalDirectory, "host-lifetimes", Guid.Parse(options.Id).ToString("N"))));
         timer = clock.CreateTimer(static state => ((ChannelWriter<byte>)state!).TryWrite(0), wake.Writer,
@@ -160,6 +163,7 @@ public sealed class TaskHostPool : IAsyncDisposable
             throw new ArgumentOutOfRangeException(nameof(cancellationGrace));
         if (dispatch.Task is null || dispatch.DeadlineAt is null || dispatch.Version != package.Version)
             throw new ArgumentException("Dispatch must identify an attempt, deadline and matching package version.", nameof(dispatch));
+        var limits = dispatch.Limits is { } requested ? new TaskResourceLimits(requested.CpuCores, requested.RamMb) : null;
         cancellationToken.ThrowIfCancellationRequested();
         Host host;
         await gate.WaitAsync(cancellationToken);
@@ -173,8 +177,32 @@ public sealed class TaskHostPool : IAsyncDisposable
             else { host = warm[index]; warm.RemoveAt(index); }
         }
         finally { try { ScheduleSweep(); } finally { gate.Release(); } }
+        using var limitStop = new CancellationTokenSource();
+        using var memoryBreach = new CancellationTokenSource();
+        Task limitMonitor = Task.CompletedTask;
         try
         {
+            if (limits is { } && (limits.CpuCores > 0 || limits.RamMb > 0))
+            {
+                lock (host)
+                {
+                    if (host.Release is not null)
+                        throw new InvalidOperationException("Task host was fenced before resource limits could bind.");
+                    host.Limiter = OperatingSystem.IsWindows() ? new JobObjectLimiter(host.Process, limits) :
+                        OperatingSystem.IsLinux() ? host.WorkloadLimiter ??
+                            throw new InvalidOperationException("Task resource limits require Agent:LinuxCgroupRoot delegation before worker startup.") :
+                        throw new PlatformNotSupportedException("Task resource limits require Windows Jobs or Linux cgroups v2.");
+                    host.LimitStop = limitStop;
+                    host.LimitMonitor = limitMonitor = MonitorLimitsAsync();
+                    host.WorkloadLimiter?.Apply(limits);
+                }
+                if (host.Limiter.LinuxCgroupPath is { } path)
+                {
+                    using var binding = host.Client.ApplyLimitsAsync(new ApplyLimitsRequest { LinuxCgroupPath = path },
+                        deadline: DateTime.UtcNow.AddSeconds(5), cancellationToken: cancellationToken);
+                    await binding.ResponseAsync;
+                }
+            }
             using var resourceTracking = sampling?.Track(host.Process, dispatch.Task, host.ResourceScope,
                 host.ResourceUnavailableReason, publishResources, dispatch.ReservationEpoch);
             host.CaptureLog = captureLog;
@@ -183,7 +211,7 @@ public sealed class TaskHostPool : IAsyncDisposable
             var remaining = dispatch.DeadlineAt.ToDateTimeOffset() - DateTimeOffset.UtcNow;
             if (remaining <= TimeSpan.Zero) deadline.Cancel();
             else deadline.CancelAfter(remaining);
-            using var stop = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token, cancellationToken);
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token, cancellationToken, memoryBreach.Token);
             try
             {
                 using var required = host.Client.RequiredSecretsAsync(new ExecuteRequest { Dispatch = dispatch.Clone() },
@@ -215,9 +243,12 @@ public sealed class TaskHostPool : IAsyncDisposable
             { return SecretFailure("Task secret references are invalid."); }
             catch (RpcException error) when (error.StatusCode == StatusCode.Cancelled && stop.IsCancellationRequested)
             {
+                if (memoryBreach.IsCancellationRequested) throw new ResourceLimitException();
                 cancellationToken.ThrowIfCancellationRequested();
                 return SecretFailure("Task secret resolution exceeded the attempt deadline.", timedOut: true);
             }
+            catch (OperationCanceledException) when (memoryBreach.IsCancellationRequested)
+            { throw new ResourceLimitException(); }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
             { return SecretFailure("Task secret resolution exceeded the attempt deadline.", timedOut: true); }
             // Keep manually supplied maskers for existing callers, while always masking real resolved values.
@@ -232,12 +263,21 @@ public sealed class TaskHostPool : IAsyncDisposable
             TaskCompleted result;
             try
             {
-                var first = await Task.WhenAny(call.ResponseAsync, forwarding, progressForwarding).WaitAsync(stop.Token);
+                var first = await (host.Limiter is null
+                    ? Task.WhenAny(call.ResponseAsync, forwarding, progressForwarding)
+                    : Task.WhenAny(call.ResponseAsync, forwarding, progressForwarding, limitMonitor)).WaitAsync(stop.Token);
+                if (first == limitMonitor)
+                {
+                    await limitMonitor;
+                    if (memoryBreach.IsCancellationRequested) throw new ResourceLimitException();
+                    throw new InvalidOperationException("Task-host resource monitor stopped before execution completed.");
+                }
                 if (first != call.ResponseAsync) await first;
                 result = await call.ResponseAsync.WaitAsync(stop.Token);
             }
             catch (OperationCanceledException) when (stop.IsCancellationRequested)
             {
+                if (memoryBreach.IsCancellationRequested) throw new ResourceLimitException();
                 var timedOut = deadline.IsCancellationRequested;
                 using var cancel = host.Client.CancelAsync(new CancelRequest { Task = dispatch.Task, TimedOut = timedOut },
                     deadline: DateTime.UtcNow.AddSeconds(3));
@@ -273,15 +313,24 @@ public sealed class TaskHostPool : IAsyncDisposable
             if (result.Task is null || !result.Task.Equals(dispatch.Task) ||
                 result.Outcome == TaskOutcome.Unspecified || !System.Enum.IsDefined(result.Outcome))
                 throw new InvalidDataException("Task host returned an invalid attempt result.");
+            if (host.Limiter?.MemoryLimitExceeded == true || limits?.RamMb > 0 && result.Error?.Category == "ResourceLimit")
+                throw new ResourceLimitException();
             resourceTracking?.Dispose();
             result = OutputsGuard.Apply(result, host.Masker);
-            journalResult?.Invoke(result);
+            if (host.Limiter is null) journalResult?.Invoke(result);
             using var acknowledgement = host.Client.AcknowledgeAsync(new AcknowledgeRequest { Task = dispatch.Task },
                 deadline: DateTime.UtcNow.AddSeconds(5));
             await acknowledgement.ResponseAsync;
             await host.Process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
             if (host.Process.ExitCode != 0)
                 throw new InvalidOperationException($"Task host exited with code {host.Process.ExitCode}: {host.Diagnostics}");
+            if (host.Limiter is not null)
+            {
+                if (host.Limiter.MemoryLimitExceeded) throw new ResourceLimitException();
+                await StopLimitMonitorAsync();
+                await ReleaseAsync(host);
+                journalResult?.Invoke(result);
+            }
             return result;
 
             async Task ForwardCheckpoints()
@@ -324,9 +373,52 @@ public sealed class TaskHostPool : IAsyncDisposable
                 catch (RpcException error) when (checkpointStop.IsCancellationRequested && error.StatusCode == StatusCode.Cancelled) { }
             }
         }
+        catch (Exception error) when (error is ResourceLimitException ||
+            error is RpcException { StatusCode: StatusCode.Unavailable or StatusCode.Cancelled or StatusCode.Unknown or StatusCode.Internal } &&
+            host.Limiter?.MemoryLimitExceeded == true)
+        {
+            await StopLimitMonitorAsync();
+            await ReleaseAsync(host);
+            var result = new TaskCompleted
+            {
+                Task = dispatch.Task.Clone(), At = Timestamp.FromDateTimeOffset(clock.GetUtcNow()),
+                Outcome = TaskOutcome.Failed,
+                Error = new TaskError { Category = "ResourceLimit", NonRetryable = true,
+                    Message = $"Task exceeded its {limits!.RamMb} MiB RAM limit; its process tree was terminated." }
+            };
+            journalResult?.Invoke(result);
+            return result;
+        }
         catch (Exception error) when (host.HasSecrets && error is RpcException or InvalidOperationException or IOException or TimeoutException)
         { throw new InvalidOperationException(host.Masker.Redact(error.Message)); }
-        finally { await ReleaseAsync(host); }
+        finally
+        {
+            try { await StopLimitMonitorAsync(); }
+            finally { await ReleaseAsync(host); }
+        }
+
+        async Task StopLimitMonitorAsync()
+        {
+            await limitStop.CancelAsync();
+            await limitMonitor;
+        }
+
+        async Task MonitorLimitsAsync()
+        {
+            try
+            {
+                while (!limitStop.IsCancellationRequested)
+                {
+                    if (host.Limiter!.MemoryLimitExceeded)
+                    {
+                        await memoryBreach.CancelAsync();
+                        return;
+                    }
+                    await Task.Delay(25, limitStop.Token);
+                }
+            }
+            catch (OperationCanceledException) when (limitStop.IsCancellationRequested) { }
+        }
 
         TaskCompleted SecretFailure(string message, bool timedOut = false) => new()
         {
@@ -368,12 +460,28 @@ public sealed class TaskHostPool : IAsyncDisposable
         }
         var process = new Process { StartInfo = info };
         var containment = new TaskHostContainment(recovery, info, socketPath);
+        CgroupV2Limiter? workloadLimiter = null;
         var started = false;
         PackageLease? processLease = null;
         Host? host = null;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+            info.Environment.Remove("WF_TASK_HOST_WORKLOAD_CGROUP");
+            if (OperatingSystem.IsLinux() &&
+                ((resourceScope as LinuxTaskResourceScope)?.DirectoryPath ?? linuxCgroupRoot) is { } delegatedRoot)
+            {
+                try
+                {
+                    workloadLimiter = new CgroupV2Limiter(delegatedRoot);
+                    info.Environment["WF_TASK_HOST_WORKLOAD_CGROUP"] = workloadLimiter.LinuxCgroupPath;
+                }
+                catch (Exception error) when (error is InvalidOperationException or ArgumentException or IOException or
+                    UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+                {
+                    logger.LogWarning("Task host cannot prepare workload resource limits: {Reason}", error.Message);
+                }
+            }
             if (resourceScope is null) sampling?.PrepareUnscopedStart(info);
             processLease = startingLease?.Retain();
             // Exit owns the final safety pin even if readiness or process cleanup fails.
@@ -412,7 +520,7 @@ public sealed class TaskHostPool : IAsyncDisposable
                 MaxReceiveMessageSize = 1024 * 1024, MaxSendMessageSize = 4 * 1024 * 1024
             });
             host = new Host(package, directory, socketPath, process, channel, logger, processLease,
-                resourceScope, resourceBound, resourceUnavailable, containment);
+                resourceScope, resourceBound, resourceUnavailable, containment, workloadLimiter);
             live.TryAdd(process.Id, host);
             if (prewarming)
             {
@@ -445,7 +553,7 @@ public sealed class TaskHostPool : IAsyncDisposable
                         if (prewarming && !warm.Contains(host)) return null;
                     }
                     var ready = await call.ResponseAsync;
-                    if (ready.ProtocolVersion != 5 || ready.ProcessId != process.Id || ready.WorkflowVersion != package.Version || ready.Bound)
+                    if (ready.ProtocolVersion != 6 || ready.ProcessId != process.Id || ready.WorkflowVersion != package.Version || ready.Bound)
                         throw new InvalidDataException("Task-host readiness identity, version or state is invalid.");
                     containment.VerifyReady();
                     await TrimWarmAsync(prewarming ? host : null);
@@ -479,6 +587,7 @@ public sealed class TaskHostPool : IAsyncDisposable
                     throw;
                 }
                 process.Dispose();
+                workloadLimiter?.Dispose();
                 DisposeResourceScope(resourceScope);
                 if (File.Exists(socketPath)) File.Delete(socketPath);
                 Directory.Delete(directory);
@@ -505,8 +614,16 @@ public sealed class TaskHostPool : IAsyncDisposable
         host.Channel.Dispose();
         try
         {
-            await host.Containment.StopAsync(host.Process);
-            host.Containment.Complete();
+            try
+            {
+                if (host.LimitStop is not null) await host.LimitStop.CancelAsync();
+                await host.LimitMonitor;
+            }
+            finally
+            {
+                await host.Containment.StopAsync(host.Process);
+                host.Containment.Complete();
+            }
         }
         catch (Exception exception)
         {
@@ -525,9 +642,13 @@ public sealed class TaskHostPool : IAsyncDisposable
             }
             finally
             {
-                host.Process.Dispose();
-                DisposeResourceScope(host.CleanupResourceScope);
-                live.TryRemove(host.Id, out _);
+                try { host.Limiter?.Dispose(); host.WorkloadLimiter?.Dispose(); }
+                finally
+                {
+                    host.Process.Dispose();
+                    DisposeResourceScope(host.CleanupResourceScope);
+                    live.TryRemove(host.Id, out _);
+                }
             }
         }
     }
@@ -667,6 +788,8 @@ public sealed class TaskHostPool : IAsyncDisposable
         finally { gate.Release(); }
     }
 
+    private sealed class ResourceLimitException : Exception;
+
     private sealed class Host
     {
         private readonly ConcurrentQueue<string> diagnostics = new();
@@ -682,6 +805,10 @@ public sealed class TaskHostPool : IAsyncDisposable
         public ITaskResourceScope? ResourceScope { get; }
         public ITaskResourceScope? CleanupResourceScope { get; }
         public TaskHostContainment Containment { get; }
+        public IResourceLimiter? Limiter { get; set; }
+        public CgroupV2Limiter? WorkloadLimiter { get; }
+        public CancellationTokenSource? LimitStop { get; set; }
+        public Task LimitMonitor { get; set; } = Task.CompletedTask;
         public string? ResourceUnavailableReason { get; }
         public int Id { get; }
         public long IdleSince { get; set; }
@@ -694,8 +821,9 @@ public sealed class TaskHostPool : IAsyncDisposable
 
         public Host(TaskHostPackage package, string directory, string socketPath, Process process, GrpcChannel channel,
             ILogger<TaskHostPool> logger, PackageLease? packageLease, ITaskResourceScope? resourceScope,
-            bool resourceBound, string? resourceUnavailableReason, TaskHostContainment containment)
+            bool resourceBound, string? resourceUnavailableReason, TaskHostContainment containment, CgroupV2Limiter? workloadLimiter)
         {
+            WorkloadLimiter = workloadLimiter;
             Containment = containment;
             CleanupResourceScope = resourceScope;
             ResourceScope = resourceBound ? resourceScope : null;
@@ -751,6 +879,7 @@ public sealed class TaskHostPool : IAsyncDisposable
                                 line.Remove(0, count);
                                 fragmented = true;
                             }
+
                         }
                     }
                 }

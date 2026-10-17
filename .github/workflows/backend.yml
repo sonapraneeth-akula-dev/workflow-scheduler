@@ -105,6 +105,49 @@ jobs:
           sudo bash infra/agent/install-agent.sh --executable "$AGENT_BINARY" --engine http://localhost:5000 --name ci-linux
           sudo systemctl is-active --quiet wf-agent.service
       - run: dotnet run --file backend/samples/workflows/scenario-a.cs
+  resource-limits-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify actual non-root CPU and RAM enforcement without BPF
+        run: |
+          set -euo pipefail
+          docker run --rm --privileged --cgroupns=private \
+            --env WF_RESOURCE_ISOLATED_CONTAINER=1 \
+            --env WF_RESOURCE_TEST_FILTER=ResourceLimitTests \
+            --env WF_RESOURCE_ARTIFACTS=/repo/.agent-artifacts/limits-linux \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/repo" --workdir /repo \
+            mcr.microsoft.com/dotnet/sdk:10.0-noble-aot \
+            bash infra/agent/test-resource-sampling.sh --without-bpf
+      - name: Verify real agent RAM failures, physical exit and durable replay
+        run: |
+          set -euo pipefail
+          docker run --rm --privileged --cgroupns=private --network host \
+            --env 'WF_TEST_POSTGRES=Host=127.0.0.1;Username=postgres;Database=postgres' \
+            --env WF_RESOURCE_ISOLATED_CONTAINER=1 \
+            --env WF_RESOURCE_TEST_FILTER=ResourceLimitExecutionTests \
+            --env WF_RESOURCE_TEST_PROJECT=backend/tests/Wf.Integration.Tests \
+            --env WF_RESOURCE_ARTIFACTS=/repo/.agent-artifacts/limits-linux \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/repo" --workdir /repo \
+            mcr.microsoft.com/dotnet/sdk:10.0-noble-aot \
+            bash infra/agent/test-resource-sampling.sh --without-bpf
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resource-limits-linux
+          path: .agent-artifacts/limits-linux/results
+          if-no-files-found: error
   cgroup-delegation:
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -79,6 +79,33 @@ function show(taskKey?: string) {
 describe("immutable task plan boundaries and states", () => {
   beforeEach(() => vi.resetAllMocks())
 
+  it("displays exact authored resource caps and preserves unlimited historical policies", async () => {
+    const capped = structuredClone(plan)
+    capped.nodes[0]!.tasks[0]!.policy.limits = { cpuCores: 0.25, ramMb: 192 }
+    respond(capped)
+    show()
+    expect(
+      await screen.findByText("CPU limit: 0.25 cores; RAM limit: 192 MiB.")
+    ).toBeInTheDocument()
+  })
+
+  it.each([
+    { cpuCores: -1, ramMb: 192 },
+    { cpuCores: 0.001, ramMb: 192 },
+    { cpuCores: Number.POSITIVE_INFINITY, ramMb: 192 },
+    { cpuCores: 1, ramMb: -1 },
+    { cpuCores: 1, ramMb: 1.5 },
+    { cpuCores: 1, ramMb: 2 ** 43 },
+  ])(
+    "rejects invalid resource caps before displaying them: %j",
+    async (limits) => {
+      const invalid = structuredClone(plan)
+      invalid.nodes[0]!.tasks[0]!.policy.limits = limits
+      respond(invalid)
+      await expect(getVersionPlan(workflowId, versionId)).rejects.toThrow()
+    }
+  )
+
   it("requests the exact pinned UUID and strips fields outside the task-plan projection", async () => {
     const registration = {
       gitCommit: "a".repeat(40),

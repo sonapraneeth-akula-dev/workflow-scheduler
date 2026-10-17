@@ -7,6 +7,8 @@ namespace Wf.Agent.Sampling;
 internal sealed class LinuxTaskResourceScope : ITaskResourceScope
 {
     private readonly string directory;
+    private readonly string supervisor;
+    internal string DirectoryPath => directory;
     private readonly LinuxBpfNetworkCounters? network;
     private readonly string? networkUnavailable;
     private NetworkBytes baseline = new(0, 0);
@@ -25,21 +27,29 @@ internal sealed class LinuxTaskResourceScope : ITaskResourceScope
             File.WriteAllText(Path.Combine(delegatedRoot, "cgroup.subtree_control"), "+cpu +memory");
         }
         directory = Path.Combine(delegatedRoot, $"wf-task-{Guid.NewGuid():N}");
+        supervisor = Path.Combine(directory, "supervisor");
         LinuxBpfNetworkCounters.CreateOwnedCgroup(directory);
         try
         {
             if (!File.Exists(Path.Combine(directory, "memory.current")))
                 throw new InvalidOperationException("Delegated cgroup must expose cpu.stat and memory.current.");
+            File.WriteAllText(Path.Combine(directory, "cgroup.subtree_control"), "+cpu +memory");
+            LinuxBpfNetworkCounters.CreateOwnedCgroup(supervisor);
             try { network = new LinuxBpfNetworkCounters(directory); }
             catch (Exception exception) when (exception is Win32Exception or PlatformNotSupportedException)
             {
                 networkUnavailable = exception.Message;
             }
         }
-        catch { Directory.Delete(directory); throw; }
+        catch
+        {
+            if (Directory.Exists(supervisor)) Directory.Delete(supervisor);
+            Directory.Delete(directory);
+            throw;
+        }
     }
 
-    public void PrepareStart(ProcessStartInfo startInfo) => PrepareLaunch(startInfo, directory);
+    public void PrepareStart(ProcessStartInfo startInfo) => PrepareLaunch(startInfo, supervisor);
 
     internal static void PrepareLaunch(ProcessStartInfo startInfo, string? directory)
     {
@@ -70,7 +80,7 @@ internal sealed class LinuxTaskResourceScope : ITaskResourceScope
     public void Bind(Process process)
     {
         var started = Stopwatch.GetTimestamp();
-        while (!File.ReadLines(Path.Combine(directory, "cgroup.procs")).Any(line =>
+        while (!File.ReadLines(Path.Combine(supervisor, "cgroup.procs")).Any(line =>
                    int.TryParse(line, NumberStyles.None, CultureInfo.InvariantCulture, out var pid) && pid == process.Id))
         {
             if (process.HasExited || Stopwatch.GetElapsedTime(started) > TimeSpan.FromSeconds(2))
@@ -103,6 +113,6 @@ internal sealed class LinuxTaskResourceScope : ITaskResourceScope
         if (disposed) return;
         disposed = true;
         try { network?.Dispose(); }
-        finally { Directory.Delete(directory); }
+        finally { Directory.Delete(supervisor); Directory.Delete(directory); }
     }
 }

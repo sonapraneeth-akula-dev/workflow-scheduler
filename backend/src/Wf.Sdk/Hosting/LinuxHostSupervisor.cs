@@ -33,8 +33,18 @@ internal static class LinuxHostSupervisor
         if (commandLine.Length == 0 || commandLine[^1] != '\0')
             throw new InvalidDataException("Task-host command line cannot be safely re-executed.");
         var arguments = commandLine[..^1].Split('\0');
-        var start = new ProcessStartInfo(arguments[0]) { UseShellExecute = false, RedirectStandardInput = true };
-        foreach (var argument in arguments.Skip(1)) start.ArgumentList.Add(argument);
+        var cgroup = Environment.GetEnvironmentVariable("WF_TASK_HOST_WORKLOAD_CGROUP");
+        var start = new ProcessStartInfo(cgroup is null ? arguments[0] : "/bin/sh")
+            { UseShellExecute = false, RedirectStandardInput = true };
+        if (cgroup is not null)
+        {
+            LinuxWorkloadCgroup.ValidatePath(cgroup);
+            foreach (var argument in new[] { "-c", "printf '%s' \"$$\" > \"$1/cgroup.procs\" || exit 125; shift; exec \"$@\"",
+                         "wf-task-worker", cgroup })
+                start.ArgumentList.Add(argument);
+        }
+        foreach (var argument in cgroup is null ? arguments.Skip(1) : arguments)
+            start.ArgumentList.Add(argument);
         start.Environment["WF_TASK_HOST_CONTAINMENT"] = "worker";
         start.Environment["WF_TASK_HOST_SUPERVISOR_PID"] = Environment.ProcessId.ToString(CultureInfo.InvariantCulture);
         using var worker = Process.Start(start) ?? throw new InvalidOperationException("Task-host worker did not start.");

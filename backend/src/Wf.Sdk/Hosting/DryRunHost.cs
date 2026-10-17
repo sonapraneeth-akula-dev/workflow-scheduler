@@ -98,7 +98,14 @@ public static class DryRunHost
                 return Task.CompletedTask;
             });
         }
-        var mocked = new WorkflowDefinition(workflow.Name, workflow.Version, workflow.Nodes, handlers.ToImmutable(),
+        // Resource outcomes are simulated by mocks, not enforced against the dry-run process.
+        var nodes = workflow.Nodes.Select(node => new NodeDefinition(node.Key, node.Dependencies,
+            node.Tasks.Select(task => new TaskDefinition(task.Key, task.Failure,
+                new(task.Policy.AttemptTimeout, task.Policy.Retry, task.Policy.AutoRetry),
+                task.Placement, task.HttpOperation, task.Action)).ToImmutableArray(),
+            node.Mode, node.MaxParallel, node.Failure, node.Inputs, node.Timeout, node.Placement, node.WhenUnavailable))
+            .ToImmutableArray();
+        var mocked = new WorkflowDefinition(workflow.Name, workflow.Version, nodes, handlers.ToImmutable(),
             workflow.Variables, workflow.Metadata, workflow.RunTimeout, workflow.Placement);
         var clock = new DryRunClock();
         foreach (var mock in specified.Values)

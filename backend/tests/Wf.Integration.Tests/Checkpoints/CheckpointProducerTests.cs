@@ -488,11 +488,12 @@ public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IC
         public string Journal { get; }
         private bool stopped;
 
-        public Agent(ReportHost host, Guid id, ISecretStore? secrets = null)
+        public Agent(ReportHost host, Guid id, ISecretStore? secrets = null, string? linuxCgroupRoot = null)
         {
             Journal = Path.Combine(host.Root, "checkpoint-journal-" + id.ToString("N"));
             var options = new AgentOptions([host.GatewayAddress], id.ToString("D"), "checkpoint-" + id.ToString("N"),
-                host.Pool, 1, heartbeatInterval: TimeSpan.FromMilliseconds(50), resultJournalDirectory: Journal);
+                host.Pool, 1, heartbeatInterval: TimeSpan.FromMilliseconds(50), resultJournalDirectory: Journal,
+                linuxCgroupRoot: linuxCgroupRoot);
             packages = new(Path.Combine(host.Root, "checkpoint-packages-" + id.ToString("N")),
                 NullLogger<PackageCache>.Instance);
             Outbox = new(new ResultJournal(Journal, id.ToString("D")));

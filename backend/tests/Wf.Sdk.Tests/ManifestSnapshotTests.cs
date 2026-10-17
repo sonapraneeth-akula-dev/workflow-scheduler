@@ -9,6 +9,30 @@ namespace Wf.Sdk.Tests;
 public sealed class ManifestSnapshotTests
 {
     [Fact]
+    public void Resource_limits_survive_source_generated_manifest_roundtrip_and_omission_stays_compatible()
+    {
+        var workflow = Workflow.Define("caps", "1", w => w.Type("test")
+            .Node("work", n => n.Task("limited", _ => { }, p => p.Limits(cpuCores: 0.25, ramMb: 192))
+                .Task("unlimited", _ => { })));
+        var bytes = ManifestWriter.WriteUtf8(workflow);
+        var manifest = JsonSerializer.Deserialize(bytes, WorkflowManifestJsonContext.Default.WorkflowManifest)!;
+        Assert.Equal(new TaskResourceLimits(0.25, 192), manifest.Nodes[0].Tasks[0].Policy.Limits);
+        Assert.Null(manifest.Nodes[0].Tasks[1].Policy.Limits);
+        Assert.Equal(bytes, JsonSerializer.SerializeToUtf8Bytes(manifest, WorkflowManifestJsonContext.Default.WorkflowManifest));
+        using var document = JsonDocument.Parse(bytes);
+        Assert.False(document.RootElement.GetProperty("nodes")[0].GetProperty("tasks")[1]
+            .GetProperty("policy").TryGetProperty("limits", out _));
+    }
+
+    [Theory]
+    [InlineData("""{"cpuCores":-1,"ramMb":0}""")]
+    [InlineData("""{"cpuCores":0.001,"ramMb":0}""")]
+    [InlineData("""{"cpuCores":0,"ramMb":18446744073709551615}""")]
+    public void Invalid_caps_cannot_bypass_validation_through_manifest_JSON(string json) =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => JsonSerializer.Deserialize(json,
+            WorkflowManifestJsonContext.Default.TaskResourceLimits));
+
+    [Fact]
     public void TwoHundredNodeDescribePreservesEveryNodeTaskAndDependencyWithoutExecution()
     {
         var calls = 0;

@@ -17,11 +17,12 @@ public sealed class AgentOptions
     public string LogSpoolDirectory { get; }
     public long MaxLogBytes { get; }
     public long LogSpoolQuotaBytes { get; }
+    public string? LinuxCgroupRoot { get; }
 
     public AgentOptions(IEnumerable<Uri> engines, string id, string name, string pool, uint maxTasks,
         IReadOnlyDictionary<string, string>? labels = null, TimeSpan? heartbeatInterval = null,
         bool allowInsecureTransport = false, string? resultJournalDirectory = null, string? logSpoolDirectory = null,
-        long maxLogBytes = 2_000_000_000, long logSpoolQuotaBytes = 20_000_000_000)
+        long maxLogBytes = 2_000_000_000, long logSpoolQuotaBytes = 20_000_000_000, string? linuxCgroupRoot = null)
     {
         ArgumentNullException.ThrowIfNull(engines);
         var endpoints = engines.Distinct().ToArray();
@@ -40,6 +41,8 @@ public sealed class AgentOptions
         if (maxTasks == 0) throw new ArgumentOutOfRangeException(nameof(maxTasks));
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxLogBytes);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(logSpoolQuotaBytes);
+        if (linuxCgroupRoot is not null && !Path.IsPathFullyQualified(linuxCgroupRoot))
+            throw new ArgumentException("Agent:LinuxCgroupRoot must be an absolute delegated cgroup-v2 path.", nameof(linuxCgroupRoot));
         var interval = heartbeatInterval ?? TimeSpan.FromSeconds(5);
         if (interval <= TimeSpan.Zero || interval > TimeSpan.FromSeconds(5))
             throw new ArgumentOutOfRangeException(nameof(heartbeatInterval), "Heartbeat interval must be positive and at most 5 seconds.");
@@ -62,6 +65,7 @@ public sealed class AgentOptions
         LogSpoolDirectory = Path.GetFullPath(logSpoolDirectory ?? Path.Combine(Path.GetDirectoryName(ResultJournalDirectory)!, "logs"));
         MaxLogBytes = maxLogBytes;
         LogSpoolQuotaBytes = logSpoolQuotaBytes;
+        LinuxCgroupRoot = linuxCgroupRoot;
     }
 
     internal static bool IsEngineOrigin(Uri? endpoint) => endpoint is { IsAbsoluteUri: true } &&
@@ -86,7 +90,8 @@ public sealed class AgentOptions
             resultJournalDirectory: section["ResultJournalDirectory"],
             logSpoolDirectory: section["LogSpoolDirectory"],
             maxLogBytes: ReadLimit("MaxLogBytes", 2_000_000_000),
-            logSpoolQuotaBytes: ReadLimit("LogSpoolQuotaBytes", 20_000_000_000));
+            logSpoolQuotaBytes: ReadLimit("LogSpoolQuotaBytes", 20_000_000_000),
+            linuxCgroupRoot: section["LinuxCgroupRoot"]);
 
         long ReadLimit(string key, long fallback) => section[key] is not { } value ? fallback :
             long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) && parsed > 0 ? parsed :

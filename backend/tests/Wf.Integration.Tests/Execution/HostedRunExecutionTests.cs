@@ -31,6 +31,33 @@ public sealed partial class HostedRunExecutionTests(HostedExecutionDatabase data
 {
     private CancellationToken Token => TestContext.Current.CancellationToken;
 
+    [Fact]
+    public async Task Authored_resource_caps_reach_durable_dispatch_and_RAM_placement_before_execution()
+    {
+        await using var runtime = await Runtime.Create(database, w => w
+            .Node("work", n => n.Task("task", _ => { }, p => p.Limits(cpuCores: 0.25, ramMb: 192))));
+        await runtime.Tick();
+        var command = Assert.Single(await runtime.Pending());
+        Assert.Equal(0.25, command.Limits.CpuCores);
+        Assert.Equal(192UL, command.Limits.RamMb);
+        await runtime.FreshTick();
+        Assert.Equal(command, Assert.Single(await runtime.Pending()));
+        await runtime.Complete(command, TaskOutcome.Failed, "ResourceLimit", true);
+        await runtime.Finish();
+        Assert.Equal(ExecutionStatus.Failed, (await runtime.Load()).Snapshot.Tasks["work/task"]);
+        Assert.Equal(1L, await runtime.Scalar("SELECT count(*) FROM task_attempts WHERE run_id=$1 AND task_key='work/task'"));
+    }
+
+    [Fact]
+    public async Task RAM_cap_too_large_for_machine_waits_without_sending_an_unsafe_dispatch()
+    {
+        await using var runtime = await Runtime.Create(database, w => w
+            .Node("work", n => n.Task("task", _ => { }, p => p.Limits(ramMb: 32768))));
+        await runtime.Tick();
+        Assert.Empty(await runtime.Pending());
+        Assert.Equal("WaitingForMachine", (await runtime.Load()).Snapshot.TaskWaitReasons["work/task"]);
+    }
+
     [Theory]
     [InlineData("TaskError", false, true, 1, 0)]
     [InlineData("PlatformError", false, true, 0, 1)]

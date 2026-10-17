@@ -73,6 +73,9 @@ public sealed class LocalEngine
         TimeSpan? cancellationGrace = null)
     {
         ArgumentNullException.ThrowIfNull(workflow);
+        if (workflow.Nodes.SelectMany(node => node.Tasks).Any(task =>
+            task.Policy.Limits is { CpuCores: > 0 } or { RamMb: > 0 }))
+            throw new NotSupportedException("Per-task CPU/RAM limits require agent execution; in-process local execution cannot enforce them.");
         this.reports = reports is ReportPublisher publisher ? publisher.ForRun() : reports;
         this.artifacts = artifacts;
         renderer = new(output ?? Console.Out);
