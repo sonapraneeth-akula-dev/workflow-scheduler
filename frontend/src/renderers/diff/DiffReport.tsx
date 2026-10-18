@@ -32,6 +32,9 @@ function Editor({
         editContext: false,
         originalEditable: false,
         automaticLayout: true,
+        fontFamily: getComputedStyle(document.documentElement)
+          .getPropertyValue("--font-mono")
+          .trim(),
         renderSideBySide: true,
         useInlineViewWhenSpaceIsLimited: true,
         minimap: { enabled: false },

@@ -13,6 +13,10 @@ side columns. On smaller screens it occupies its own centered second row,
 without overlapping the brand or account actions.
 Main content fills the remaining viewport width with matching 20 px mobile /
 32 px desktop horizontal padding, rather than a narrow fixed maximum width.
+Headings use Segoe UI Variable Display; body and controls use Segoe UI Variable
+Text. Code, identifiers and the diff editor use Cascadia Code. Fonts are local,
+with Segoe UI/system and Cascadia Mono/Consolas/monospace fallbacks; no font
+downloads are required. The brand retains its distinct wordmark face.
 The right-hand theme action is an accessible sun/moon icon. It follows the
 system theme until explicitly changed, persists the choice in local storage,
 and surfaces unavailable/corrupt preference storage rather than hiding errors.

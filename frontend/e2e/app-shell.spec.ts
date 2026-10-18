@@ -57,6 +57,27 @@ for (const width of [320, 768, 1440, 2000]) {
   })
 }
 
+test("headings, body and run identifiers use their requested local font families", async ({
+  page,
+}) => {
+  await page.goto("/runs")
+  const heading = page.getByRole("heading").first()
+  await expect(heading).toBeVisible()
+  expect(
+    await heading.evaluate((element) => getComputedStyle(element).fontFamily)
+  ).toContain("Segoe UI Variable Display")
+  expect(
+    await page
+      .locator("body")
+      .evaluate((element) => getComputedStyle(element).fontFamily)
+  ).toContain("Segoe UI Variable Text")
+  const identifier = page.locator("main .font-mono").first()
+  await expect(identifier).toBeVisible()
+  expect(
+    await identifier.evaluate((element) => getComputedStyle(element).fontFamily)
+  ).toContain("Cascadia Code")
+})
+
 test("account actions sit after the theme icon and expose verified local profile details", async ({
   page,
 }) => {
