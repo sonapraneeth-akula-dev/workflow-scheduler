@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react"
 import { useMutation, useQuery, type QueryClient } from "@tanstack/react-query"
 import { createRootRouteWithContext, Outlet } from "@tanstack/react-router"
 import { AppHeader } from "@/components/AppHeader"
+import { ThemeToggle } from "@/components/ThemeToggle"
 import { Button } from "@/components/ui/button"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { getSession, signIn, signOut } from "@/lib/auth/session"
+import { useThemePreference } from "@/lib/useThemePreference"
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   {
@@ -32,19 +33,7 @@ function RootLayout() {
       await queryClient.resetQueries({ queryKey: ["session"] })
     },
   })
-  const [theme, setTheme] = useState<"system" | "light" | "dark">("system")
-  useEffect(() => {
-    const media = matchMedia("(prefers-color-scheme: dark)")
-    const apply = () => {
-      document.documentElement.classList.toggle(
-        "dark",
-        theme === "dark" || (theme === "system" && media.matches)
-      )
-    }
-    apply()
-    media.addEventListener("change", apply)
-    return () => media.removeEventListener("change", apply)
-  }, [theme])
+  const theme = useThemePreference()
   return (
     <>
       <a
@@ -54,12 +43,10 @@ function RootLayout() {
         Skip to content
       </a>
       <AppHeader>
-        <Button
-          variant="outline"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-        >
-          {theme === "dark" ? "Light theme" : "Dark theme"}
-        </Button>
+        <ThemeToggle
+          dark={theme.dark}
+          onToggle={() => theme.setPreference(theme.dark ? "light" : "dark")}
+        />
         {session.data ? <span>{session.data.displayName}</span> : null}
         {session.data?.isDevelopment ? (
           <span>Development authentication</span>
@@ -82,6 +69,7 @@ function RootLayout() {
         {authentication.error ? (
           <ErrorNotice error={authentication.error} />
         ) : null}
+        {theme.error ? <ErrorNotice error={theme.error} /> : null}
         {session.isSuccess && session.data ? <Outlet /> : null}
         {session.isSuccess && !session.data ? (
           <p>Sign in to manage workflow schedules.</p>

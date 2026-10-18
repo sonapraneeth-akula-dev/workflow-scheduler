@@ -32,3 +32,26 @@ for (const width of [320, 768, 1440, 2000]) {
     ).toBeLessThanOrEqual(width)
   })
 }
+
+for (const colorScheme of ["light", "dark"] as const) {
+  test(`icon toggle respects the ${colorScheme} system theme and persists the change`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme })
+    await page.goto("/runs")
+    const target = colorScheme === "dark" ? "Light theme" : "Dark theme"
+    const button = page.getByRole("button", { name: target, exact: true })
+    await expect(button).toBeVisible()
+    await expect(button.locator("svg")).toHaveCount(1)
+    expect(await button.innerText()).toBe("")
+    await button.click()
+    const next = colorScheme === "dark" ? "Dark theme" : "Light theme"
+    await expect(
+      page.getByRole("button", { name: next, exact: true })
+    ).toBeVisible()
+    await page.reload()
+    await expect(
+      page.getByRole("button", { name: next, exact: true })
+    ).toBeVisible()
+  })
+}
