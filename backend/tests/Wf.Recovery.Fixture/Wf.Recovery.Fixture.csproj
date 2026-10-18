@@ -3,6 +3,7 @@
     <OutputType>Exe</OutputType>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.Xml" />
     <ProjectReference Include="..\..\src\Wf.ControlPlane\Wf.ControlPlane.csproj" />
   </ItemGroup>
 </Project>

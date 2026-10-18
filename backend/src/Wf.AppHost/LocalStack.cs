@@ -27,6 +27,11 @@ public static class LocalStack
         var external = builder.Configuration.GetConnectionString("wf");
         if (external is not null && string.IsNullOrWhiteSpace(external))
             throw new InvalidOperationException("ConnectionStrings:wf must be a non-empty PostgreSQL connection string.");
+        var monitoring = builder.Configuration.GetValue("Local:Monitoring", external is null);
+        var prometheusPort = Port("Prometheus", 9090);
+        var grafanaPort = Port("Grafana", 3000);
+        if (monitoring && new[] { enginePort, apiPort, uiPort, prometheusPort, grafanaPort }.Distinct().Count() != 5)
+            throw new InvalidOperationException("Local application and monitoring ports must differ.");
         var configuredRoot = builder.Configuration["Local:DataRoot"];
         if (configuredRoot is not null && string.IsNullOrWhiteSpace(configuredRoot))
             throw new InvalidOperationException("Local:DataRoot cannot be empty.");
@@ -34,6 +39,7 @@ public static class LocalStack
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wf"));
         var lan = LanResources.Read(builder.Configuration, root);
         var agents = AgentResources.ReadIdentities(builder.Configuration, root);
+        if (monitoring) MonitoringResources.Add(builder, native: true, prometheusPort, grafanaPort);
 
         IResourceBuilder<IResourceWithConnectionString> database;
         IResourceBuilder<PostgresServerResource>? postgres = null;
@@ -56,6 +62,8 @@ public static class LocalStack
             .WithEnvironment("DOTNET_ENVIRONMENT", "Development")
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
             .WithEnvironment("WF_WORKFLOW_ENVIRONMENT", "dev")
+            .WithEnvironment("Telemetry__Enabled", monitoring ? "true" : "false")
+            .WithEnvironment("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://127.0.0.1:" + prometheusPort + "/api/v1/otlp/v1/metrics")
             .WithEnvironment("Engine__ExecuteRuns", "true")
             .WithEnvironment("Storage__Root", Path.Combine(root, "blobs"))
             .WithEnvironment("Storage__UploadHmacKey", key)

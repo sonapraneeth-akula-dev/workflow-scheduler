@@ -108,6 +108,7 @@ public sealed class RunRecovery(NpgsqlDataSource dataSource, RunStore runs, Leas
                 createdBy = reader.GetString(4);
                 createdAt = reader.GetFieldValue<DateTimeOffset>(5);
             }
+            CommittedRunTelemetry? telemetry = null;
             if (kind == 0)
             {
                 var trigger = CommandInbox.ReadInitial(payload);
@@ -143,12 +144,14 @@ public sealed class RunRecovery(NpgsqlDataSource dataSource, RunStore runs, Leas
                     if (plan.Status is { } status)
                         await RunStore.AppendAsync(connection, run,
                             run.CreateEvent(EventEntity.Run, null, (int)status, at, plan.Record), cancellationToken);
+                    telemetry = await CommittedRunTelemetry.CaptureAsync(connection, run.Snapshot, cancellationToken);
                 }
             }
             else throw new InvalidDataException($"Command '{id}' has unsupported kind '{kind}'.");
             await RunStore.ExecuteAsync(connection, "UPDATE commands SET processed_at=GREATEST(created_at,clock_timestamp()) WHERE id=$1",
                 cancellationToken, id);
             await transaction.CommitAsync(cancellationToken);
+            telemetry?.Emit();
             changed.Add(runId);
         }
     }

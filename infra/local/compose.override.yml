@@ -72,6 +72,22 @@ services:
   compose-dashboard:
     ports:
       - "${KARDIA_BIND_IP:?Use wf local up}:18888:18888"
+  wf-prometheus:
+    ports:
+      - "${KARDIA_BIND_IP:?Use wf local up}:9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  wf-grafana:
+    ports:
+      - "${KARDIA_BIND_IP:?Use wf local up}:3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
 
 networks:
   default:

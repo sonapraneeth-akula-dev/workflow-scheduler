@@ -1,0 +1,9 @@
+apiVersion: 1
+datasources:
+  - name: Workflow Prometheus
+    uid: workflow-prometheus
+    type: prometheus
+    access: proxy
+    url: http://wf-prometheus:9090
+    isDefault: true
+    editable: false

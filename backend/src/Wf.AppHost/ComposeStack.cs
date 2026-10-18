@@ -25,6 +25,7 @@ public static class ComposeStack
                 foreach (var service in file.Services.Values) service.Ports.Clear();
             });
         var password = builder.AddParameter("postgres-password", secret: true);
+        MonitoringResources.Add(builder, native: false);
         var key = builder.AddParameter("storage-key", secret: true);
         var id = builder.AddParameter("agent-id");
         var postgres = builder.AddPostgres("postgres", password: password).WithImageTag("17-alpine")
@@ -63,6 +64,7 @@ public static class ComposeStack
                 .WithEnvironment("LocalCompose__Enabled", "true")
                 .WithEnvironment("LocalCompose__Environment", environment)
                 .WithEnvironment("WF_WORKFLOW_ENVIRONMENT", environment)
+                .WithEnvironment("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://wf-prometheus:9090/api/v1/otlp/v1/metrics")
                 .WithEnvironment("Engine__Enabled", engine ? "true" : "false")
                 .WithEnvironment("Engine__ExecuteRuns", engine ? "true" : "false")
                 .WithEnvironment("Engine__ApiEndpoint", "http://wf-api:8080")

@@ -32,6 +32,7 @@ public sealed class ComposeStackModelTests
             Assert.Equal("true", values["LocalCompose__Enabled"]);
             Assert.Equal(environment, values["LocalCompose__Environment"]);
             Assert.Equal(environment, values["WF_WORKFLOW_ENVIRONMENT"]);
+            Assert.Equal("http://wf-prometheus:9090/api/v1/otlp/v1/metrics", values["OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"]);
             Assert.Equal("http://wf-api:8080", values["Engine__ApiEndpoint"]);
             Assert.Equal(host.Name == "wf-api" ? "http://localhost:8081" : $"http://{host.Name}:8081",
                 values["Engine__PublicEndpoint"]);

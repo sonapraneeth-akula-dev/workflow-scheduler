@@ -1,0 +1,150 @@
+{
+  "uid": "workflow-runs",
+  "title": "Workflow runs",
+  "tags": ["workflows", "opentelemetry"],
+  "schemaVersion": 42,
+  "version": 1,
+  "editable": false,
+  "refresh": "15s",
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "browser",
+  "description": "Automatic runtime metrics after durable completion. Prometheus retains 30 days. PostgreSQL remains authoritative; telemetry is best effort, not a run ledger. Trends begin at collection, with no historical backfill. Timing histograms exclude entities that never started. Resource summaries describe observed task attempts, not host-wide usage.",
+  "templating": {
+    "list": [
+      {
+        "name": "environment", "label": "Environment", "type": "query",
+        "datasource": { "type": "prometheus", "uid": "workflow-prometheus" },
+        "query": "label_values(wf_run_active, deployment_environment_name)",
+        "refresh": 1, "includeAll": true, "allValue": ".*", "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "team", "label": "Team", "type": "query",
+        "datasource": { "type": "prometheus", "uid": "workflow-prometheus" },
+        "query": "label_values(wf_run_active{deployment_environment_name=~\"$environment\"}, team)",
+        "refresh": 1, "includeAll": true, "allValue": ".*", "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "type", "label": "Workflow type", "type": "query",
+        "datasource": { "type": "prometheus", "uid": "workflow-prometheus" },
+        "query": "label_values(wf_run_active{deployment_environment_name=~\"$environment\",team=~\"$team\"}, type)",
+        "refresh": 1, "includeAll": true, "allValue": ".*", "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "workflow", "label": "Workflow", "type": "query",
+        "datasource": { "type": "prometheus", "uid": "workflow-prometheus" },
+        "query": "label_values(wf_run_active{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\"}, workflow)",
+        "refresh": 1, "includeAll": true, "allValue": ".*", "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1, "title": "Current durable runs", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "workflow-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 } },
+      "targets": [
+        { "refId": "A", "expr": "sum by (status) (wf_run_active{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"})", "legendFormat": "{{status}}" }
+      ]
+    },
+    {
+      "id": 2, "title": "Observed completions by outcome (current exporter lifetimes)", "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "workflow-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 } },
+      "targets": [
+        { "refId": "A", "expr": "sum by (status) (wf_run_completed_total{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"})", "legendFormat": "{{status}}", "instant": true }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } }
+    },
+    {
+      "id": 3, "title": "Completion rate by workflow / outcome", "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "workflow-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops", "min": 0 } },
+      "targets": [
+        { "refId": "A", "expr": "sum by (workflow,status) (rate(wf_run_completed_total{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"}[$__rate_interval]))", "legendFormat": "{{workflow}} / {{status}}" }
+      ]
+    },
+    {
+      "id": 4, "title": "Unsuccessful completion rate", "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "workflow-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "targets": [
+        { "refId": "A", "expr": "(sum by (workflow) (rate(wf_run_completed_total{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\",status!=\"Succeeded\"}[$__rate_interval])) or on (workflow) (0 * sum by (workflow) (rate(wf_run_completed_total{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"}[$__rate_interval])))) / sum by (workflow) (rate(wf_run_completed_total{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"}[$__rate_interval]))", "legendFormat": "{{workflow}}" }
+      ]
+    },
+    {
+      "id": 5, "title": "Workflow execution duration p50 / p95 / mean", "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 17 },
+      "datasource": { "type": "prometheus", "uid": "workflow-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 } },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.5, sum by (workflow,le) (rate(wf_run_duration_seconds_bucket{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"}[$__rate_interval])))", "legendFormat": "{{workflow}} p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (workflow,le) (rate(wf_run_duration_seconds_bucket{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"}[$__rate_interval])))", "legendFormat": "{{workflow}} p95" },
+        { "refId": "C", "expr": "sum by (workflow) (rate(wf_run_duration_seconds_sum{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"}[$__rate_interval])) / sum by (workflow) (rate(wf_run_duration_seconds_count{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"}[$__rate_interval]))", "legendFormat": "{{workflow}} mean" }
+      ]
+    },
+    {
+      "id": 6, "title": "Workflow queue wait p50 / p95", "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 17 },
+      "datasource": { "type": "prometheus", "uid": "workflow-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 } },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.5, sum by (workflow,le) (rate(wf_run_queue_duration_seconds_bucket{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"}[$__rate_interval])))", "legendFormat": "{{workflow}} p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (workflow,le) (rate(wf_run_queue_duration_seconds_bucket{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"}[$__rate_interval])))", "legendFormat": "{{workflow}} p95" }
+      ]
+    },
+    {
+      "id": 7, "title": "Retries per second", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
+      "datasource": { "type": "prometheus", "uid": "workflow-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops", "min": 0 } },
+      "targets": [
+        { "refId": "A", "expr": "sum by (workflow) (rate(wf_run_retries_total{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"}[$__rate_interval]))", "legendFormat": "{{workflow}}" }
+      ]
+    },
+    {
+      "id": 8, "title": "Task-attempt execution duration p95", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
+      "datasource": { "type": "prometheus", "uid": "workflow-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 } },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (workflow,node,task,le) (rate(wf_task_attempt_duration_seconds_bucket{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"}[$__rate_interval])))", "legendFormat": "{{workflow}} / {{node}} / {{task}}" }
+      ]
+    },
+    {
+      "id": 9, "title": "Observed task-attempt peak memory p95", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
+      "datasource": { "type": "prometheus", "uid": "workflow-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes", "min": 0 } },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (workflow,node,task,le) (rate(wf_task_memory_peak_bytes_bucket{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"}[$__rate_interval])))", "legendFormat": "{{workflow}} / {{node}} / {{task}}" }
+      ]
+    },
+    {
+      "id": 10, "title": "Observed task-attempt CPU mean", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
+      "datasource": { "type": "prometheus", "uid": "workflow-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0 } },
+      "targets": [
+        { "refId": "A", "expr": "sum by (workflow,node,task) (rate(wf_task_cpu_average_percent_sum{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"}[$__rate_interval])) / sum by (workflow,node,task) (rate(wf_task_cpu_average_percent_count{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"}[$__rate_interval]))", "legendFormat": "{{workflow}} / {{node}} / {{task}}" }
+      ]
+    },
+    {
+      "id": 11, "title": "Observed task network throughput (completion summaries)", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 42 },
+      "datasource": { "type": "prometheus", "uid": "workflow-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "Bps", "min": 0 } },
+      "targets": [
+        { "refId": "A", "expr": "sum by (workflow) (rate(wf_task_network_sent_bytes_total{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"}[$__rate_interval]))", "legendFormat": "{{workflow}} sent" },
+        { "refId": "B", "expr": "sum by (workflow) (rate(wf_task_network_received_bytes_total{deployment_environment_name=~\"$environment\",team=~\"$team\",type=~\"$type\",workflow=~\"$workflow\"}[$__rate_interval]))", "legendFormat": "{{workflow}} received" }
+      ]
+    }
+  ]
+}

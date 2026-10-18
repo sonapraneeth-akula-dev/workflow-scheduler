@@ -3,6 +3,9 @@
     <PackageReference Include="Azure.Storage.Blobs" />
     <PackageReference Include="Grpc.AspNetCore" />
     <PackageReference Include="Npgsql" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" />
     <PackageReference Include="dbup-postgresql" />
     <PackageReference Include="Microsoft.Identity.Web" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />

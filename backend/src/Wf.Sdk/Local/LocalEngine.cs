@@ -6,6 +6,7 @@ using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
 using Wf.Engine.Core;
 using Wf.Engine.Core.Abort;
+using Wf.Engine.Core.Metrics;
 using Wf.Engine.Core.Retries;
 using Wf.Engine.Core.Scheduling;
 using Wf.Engine.Core.Stages;
@@ -139,6 +140,7 @@ public sealed class LocalEngine
                 if (!TransitionTable.IsTerminal(run.Snapshot.Status))
                     await WaitForWorkAsync().ConfigureAwait(false);
             }
+            WorkflowTelemetry.RecordCompletion(new("local", workflow.Metadata.Type, workflow.Name), run.Snapshot);
             return new(run.Snapshot, run.Events, attempts.ToImmutableArray(), outputs.ToImmutableDictionary(
                 p => p.Key, p => p.Value.Values, StringComparer.Ordinal));
         }

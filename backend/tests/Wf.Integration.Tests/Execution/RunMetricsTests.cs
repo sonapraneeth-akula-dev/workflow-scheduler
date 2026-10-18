@@ -421,6 +421,7 @@ public sealed class RunMetricsTests(RunMetricsDatabase database) : IClassFixture
     [Fact]
     public async Task Actual_http_retry_and_local_stages_record_committed_metrics_without_changing_policy()
     {
+        using var telemetry = new TelemetryMeasurements("run-metrics-local");
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         await using var http = builder.Build();
@@ -441,6 +442,9 @@ public sealed class RunMetricsTests(RunMetricsDatabase database) : IClassFixture
         Assert.Equal(1, metrics.Run.RetryCount);
         Assert.Equal(1, metrics.Nodes["node"].RetryCount);
         Assert.Equal(1, metrics.Tasks["node/http"].RetryCount);
+        Assert.Equal([1d], telemetry.Values("wf.run.completed"));
+        Assert.Equal([1d], telemetry.Values("wf.run.retries"));
+        Assert.Equal([metrics.Run.DurationMs / 1000], telemetry.Values("wf.run.duration"));
         Assert.Equal(2, metrics.Tasks["node/http"].Attempts.Length);
         Assert.True(metrics.Tasks["node/http"].Attempts[1].QueueWaitMs >= 20);
         Assert.All(LifecycleStages.Before.Concat(LifecycleStages.After), key =>

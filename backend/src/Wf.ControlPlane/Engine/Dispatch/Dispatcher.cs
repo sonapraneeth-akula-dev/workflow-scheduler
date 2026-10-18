@@ -39,7 +39,10 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             var run = await runs.LoadAsync(connection, runId, true, cancellationToken);
             var sequence = run.Snapshot.LastSequence;
             var decision = await advance(connection, run, cancellationToken);
+            var telemetry = run.Snapshot.LastSequence == sequence ? null :
+                await CommittedRunTelemetry.CaptureAsync(connection, run.Snapshot, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+            telemetry?.Emit();
             if (decision?.Agent is { } agent)
             {
                 placement.Apply(decision);

@@ -137,7 +137,7 @@ public sealed class RunExecutionService(NpgsqlDataSource source, RunRecovery rec
             {
                 if (node.Placement?.Selector is { Count: { } count } selector)
                 {
-                    var result = await reservations.RequestLockedAsync(connection, run.Snapshot.RunId, node.Key,
+                    var result = await reservations.RequestLockedAsync(connection, run, node.Key,
                         count, selector, TimeSpan.FromMinutes(1), node.WhenUnavailable, token);
                     if (result.Disposition != ReservationDisposition.Reserved) return null;
                 }

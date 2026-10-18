@@ -117,6 +117,34 @@ volume. This native profile is a local development launcher, not a deployment
 publisher. It does not install frontend dependencies or erase persistent data.
 The separate Compose profile below uses the same AppHost in publish mode.
 
+The Docker-database profile also starts Prometheus on `127.0.0.1:9090` and
+Grafana on `127.0.0.1:3000`; open `/d/workflow-runs` in Grafana for workflow
+duration and outcome trends. Both bindings are loopback-only. Grafana permits
+anonymous **Viewer** access only, with login forms/basic authentication disabled.
+These are local development services, not an authenticated production monitoring
+deployment. Prometheus retains 30 days in `wf-prometheus-data`; Grafana uses
+`wf-grafana-data`. Stop/restart preserves both volumes.
+
+`Local__Monitoring=false` omits monitoring containers and disables this host's
+exporter. With external PostgreSQL, monitoring defaults off so the fully native
+profile still needs no Docker; opt in with `Local__Monitoring=true`.
+`Local__PrometheusPort` and `Local__GrafanaPort` override the default monitoring
+ports; all enabled application/monitoring ports must differ.
+
+For an already-running native AppHost, start monitoring without restarting its
+database, agents or frontend:
+
+```powershell
+docker compose -p wf-monitoring -f .\infra\monitoring\compose.yml up -d --wait
+```
+
+Restart only the control-plane resource after rebuilding it. Its Development
+configuration exports to the default loopback Prometheus receiver. Before a
+subsequent full AppHost launch, stop these standalone monitoring containers with
+`docker compose -p wf-monitoring -f .\infra\monitoring\compose.yml down`
+(**without** `--volumes`); AppHost then owns monitoring using the same volumes.
+Do not run both owners against the same ports or storage.
+
 ### Isolated local Docker Compose environments
 
 Requires .NET 10, Aspire CLI 13.6 on `PATH`, and Docker with Linux containers
@@ -136,8 +164,10 @@ PostgreSQL 17, an API-only host, two leader-elected engines, one nonroot Linux
 agent, a Caddy gateway containing the built SPA and an anonymous Aspire
 dashboard. `kardia-dev` binds only `127.2.6.2`; `kardia-ppe` binds only
 `127.2.6.7`. Open `http://127.2.6.2` or `http://127.2.6.7` for the UI.
-Gateway port 80, API port 5000, HTTP/2 engine ports 5001/5002 and dashboard
-port 18888 are isolated on those exact addresses. Edge HTTPS domains and
+Gateway port 80, API port 5000, HTTP/2 engine ports 5001/5002, dashboard
+port 18888, Prometheus port 9090 and Grafana port 3000 are isolated on those
+exact addresses. Each environment has its own persistent monitoring volumes
+and the same provisioned workflow-trends dashboard. Edge HTTPS domains and
 nightly deployment checks remain separate tasks.
 
 Both environments are **trusted-local, login-free Development prototypes**,
@@ -847,6 +877,69 @@ Historical attempt failures remain after a later retry succeeds. Responses are
 never cached; malformed identities/queries return 400, denied scopes 403,
 inconsistent persisted data 500 and unavailable storage 503. Legacy metrics-free
 snapshots rebuild from retained original history instead of fabricated zeros.
+
+### OpenTelemetry workflow trends
+
+`Wf.Engine.Core` owns the `Wf.Runtime` meter, consumed automatically by both the
+distributed engine and the SDK's `LocalEngine`. Workflow authors do not implement
+duration/status metrics or call a business-metrics API. The library uses
+`System.Diagnostics.Metrics`; exporter setup belongs to the hosting application,
+not to each workflow.
+
+The control plane captures immutable completion data inside the transaction,
+then emits **after a successful commit**. Projection, failed transactions,
+snapshot restoration and exact group-commit replays never emit completions.
+Node/task/attempt timing, retries and observed resource summaries emit with the
+workflow completion, not on each resource sample. The leader separately samples
+current durable Queued/Running/Aborting counts every 15 seconds, including zeros
+for registered workflows with no active runs. Followers contribute zeros.
+
+| Meter instruments | Meaning |
+| --- | --- |
+| `wf.run.completed`, `wf.node.completed`, `wf.task.completed`, `wf.task.attempt.completed` | Counters partitioned by terminal status and known failure category |
+| `wf.run.duration`, `wf.node.duration`, `wf.task.duration`, `wf.task.attempt.duration` | Execution-duration histograms in **seconds**; no invented duration for work that never started |
+| Corresponding `*.queue.duration` histograms | Queue/placement/retry wait, separate from execution |
+| `wf.run.retries`, `wf.task.retries`, `wf.run.active` | Actual redispatch counters and current durable run-count gauge by status |
+| `wf.task.cpu.average`, `wf.task.cpu.max`, `wf.task.memory.peak` | Observed per-attempt CPU-percent and peak-memory-byte distributions |
+| `wf.task.network.sent`, `wf.task.network.received`, `wf.task.resource.samples`, `wf.task.cpu.observed.duration`, `wf.task.network.observed.duration` | Observed network-byte/sample counters and observation-coverage histograms in seconds |
+
+Labels are restricted to registered team, workflow type, workflow ID, node/task
+keys, status and a known failure category. The exporter adds deployment
+environment and service-instance resource attributes. Run IDs, attempt numbers,
+users, variables, arbitrary metadata, errors and secrets never become metric
+labels. Task resource scopes/availability remain in the existing authorized
+resource API; unavailable CPU/RAM/network values are omitted, not zero-filled.
+Local SDK runs use team `local`, the definition's type and workflow name; an
+embedding host can subscribe its OpenTelemetry provider to `Wf.Runtime`.
+
+Local profiles configure **OTLP/HTTP protobuf -> Prometheus -> Grafana**.
+Prometheus's OTLP receiver is enabled explicitly; no beta Prometheus exporter,
+extra Collector or public application `/metrics` endpoint is required.
+`OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` is the full metrics URL, for example
+`http://127.0.0.1:9090/api/v1/otlp/v1/metrics`. Compose uses
+`http://wf-prometheus:9090/api/v1/otlp/v1/metrics` inside its isolated network.
+`OTEL_METRIC_EXPORT_INTERVAL` overrides the 15000 ms default.
+Production has no default endpoint; configure an authenticated OTLP receiver
+and standard OTLP exporter headers as appropriate. `Telemetry__Enabled=false`
+explicitly disables export, including the Development default receiver.
+
+The provisioned **Workflow runs** dashboard filters environment/team/type/workflow
+and shows current status counts, terminal outcomes, completion/failure-rate
+trends, duration mean/p50/p95, queue wait, retries and observed task resources.
+Prometheus translates dots/units into names such as
+`wf_run_completed_total` and `wf_run_duration_seconds_bucket`. Histogram
+quantiles are bucket estimates, not the exact PostgreSQL-history quantiles.
+
+Prometheus owns metric time series in its persistent volume; Grafana owns
+dashboard state and queries Prometheus. PostgreSQL remains the authoritative
+run/event/attempt history, including individual run IDs and timings; existing
+resource blobs/summaries and authorized history APIs remain unchanged.
+OTLP is best-effort operational telemetry, not an exactly-once audit ledger:
+exporter restarts reset counters, transport outages/crashes can lose samples,
+and an ambiguous committed transaction acknowledged on replay can lack its
+completion sample. No historical backfill or synthetic counter replay occurs.
+Trends begin when collection starts; rate/quantile windows need repeated
+exports and new completions before showing meaningful data.
 
 Migration `0036_daily_rollups.sql` backfills retained terminal runs and adds
 transactional daily workflow/node summaries. Buckets use the immutable UUIDv7

@@ -192,6 +192,7 @@ public sealed class RunRecoveryTests(RecoveryDatabase database) : IClassFixture<
     [InlineData(true)]
     public async Task Pending_abort_preserves_first_identity_and_is_applied_once(bool running)
     {
+        using var telemetry = new TelemetryMeasurements("team/type/test");
         await Reset();
         using var leader = Manager();
         Assert.True(await leader.TryAcquireOrRenewAsync(Token));
@@ -212,6 +213,8 @@ public sealed class RunRecoveryTests(RecoveryDatabase database) : IClassFixture<
         await recovery.RecoverAsync(Token);
         Assert.Equal(sequence, (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot.LastSequence);
         Assert.Equal(running, recovery.RecoveredRuns.ContainsKey(run.Snapshot.RunId));
+        Assert.Equal(running ? [] : new[] { 1d }, telemetry.Values("wf.run.completed"));
+        Assert.Empty(telemetry.Values("wf.run.duration"));
         if (!running) Assert.All(loaded.Snapshot.Tasks.Values, status => Assert.Equal(ExecutionStatus.Skipped, status));
     }
 
@@ -238,6 +241,7 @@ public sealed class RunRecoveryTests(RecoveryDatabase database) : IClassFixture<
     [Fact]
     public async Task Failed_command_commit_rolls_back_events_and_processing_marker_before_retry()
     {
+        using var telemetry = new TelemetryMeasurements("team/type/test");
         await Reset();
         using var leader = Manager();
         Assert.True(await leader.TryAcquireOrRenewAsync(Token));
@@ -253,9 +257,11 @@ public sealed class RunRecoveryTests(RecoveryDatabase database) : IClassFixture<
         Assert.Empty(recovery.RecoveredRuns);
         Assert.Equal(0L, await Scalar("SELECT count(*) FROM commands WHERE processed_at IS NOT NULL"));
         Assert.Equal(0, (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot.LastSequence);
+        Assert.Empty(telemetry.Values("wf.run.completed"));
         await recovery.RecoverAsync(Token);
         Assert.Equal(RunStatus.Aborted, (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot.Status);
         Assert.Equal(1L, await Scalar("SELECT count(*) FROM commands WHERE processed_at IS NOT NULL"));
+        Assert.Equal([1d], telemetry.Values("wf.run.completed"));
     }
 
     [Fact]

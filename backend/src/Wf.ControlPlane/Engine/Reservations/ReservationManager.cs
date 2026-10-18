@@ -9,6 +9,7 @@ using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.Engine.Core.Placement;
+using Wf.Engine.Core;
 
 namespace Wf.ControlPlane.Engine.Reservations;
 
@@ -48,7 +49,11 @@ public sealed class ReservationManager(NpgsqlDataSource dataSource, RunStore run
         await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock($1)", cancellationToken, AllocationLock);
         await PruneAsync(connection, cancellationToken);
         var result = await RequestCoreAsync(connection, runId, nodeKey, count, selector, json, lifetime, policy, cancellationToken);
+        var telemetry = result.Disposition == ReservationDisposition.Rejected
+            ? await CommittedRunTelemetry.CaptureAsync(connection,
+                (await runs.LoadAsync(connection, runId, false, cancellationToken)).Snapshot, cancellationToken) : null;
         await transaction.CommitAsync(cancellationToken);
+        telemetry?.Emit();
         return result;
     }
 
@@ -69,14 +74,14 @@ public sealed class ReservationManager(NpgsqlDataSource dataSource, RunStore run
         return JsonSerializer.Serialize(canonical, ReservationJson.Default.PlacementSelector);
     }
 
-    internal Task<ReservationRequestResult> RequestLockedAsync(NpgsqlConnection connection, Guid runId,
+    internal Task<ReservationRequestResult> RequestLockedAsync(NpgsqlConnection connection, RunState run,
         string nodeKey, int count, PlacementSelector selector, TimeSpan lifetime, WhenUnavailable policy,
-        CancellationToken cancellationToken) => RequestCoreAsync(connection, runId, nodeKey, count, selector,
-            Canonical(runId, nodeKey, count, selector, lifetime), lifetime, policy, cancellationToken);
+        CancellationToken cancellationToken) => RequestCoreAsync(connection, run.Snapshot.RunId, nodeKey, count, selector,
+            Canonical(run.Snapshot.RunId, nodeKey, count, selector, lifetime), lifetime, policy, cancellationToken, run);
 
     private async Task<ReservationRequestResult> RequestCoreAsync(NpgsqlConnection connection, Guid runId,
         string nodeKey, int count, PlacementSelector selector, string json, TimeSpan lifetime, WhenUnavailable? policy,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, RunState? current = null)
     {
         RunPlacement? singleMachine = null;
         await using (var owner = new NpgsqlCommand("""
@@ -175,7 +180,7 @@ public sealed class ReservationManager(NpgsqlDataSource dataSource, RunStore run
         }
         if (singleMachine?.SingleMachine == true)
         {
-            var run = await runs.LoadAsync(connection, runId, true, cancellationToken);
+            var run = current ?? await runs.LoadAsync(connection, runId, true, cancellationToken);
             var nodes = await RunExecutionService.PlacementNodesAsync(connection, run, cancellationToken);
             candidates.RemoveAll(agent => run.Snapshot.PlacementAgentId is { } pin && agent.Id != pin ||
                 !PlacementOverrideValidator.Matches(agent, singleMachine, nodes));
@@ -187,7 +192,7 @@ public sealed class ReservationManager(NpgsqlDataSource dataSource, RunStore run
             if (policy is null) throw new ReservationUnavailableException(runId, nodeKey, count);
             if (disposition == ReservationDisposition.Rejected)
             {
-                var run = await runs.LoadAsync(connection, runId, true, cancellationToken);
+                var run = current ?? await runs.LoadAsync(connection, runId, true, cancellationToken);
                 foreach (var change in ReservationQueue.Reject(run, nodeKey, now))
                     await RunStore.AppendAsync(connection, run, change, cancellationToken);
                 await RunStore.ExecuteAsync(connection, """

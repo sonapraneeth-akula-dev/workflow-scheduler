@@ -59,8 +59,8 @@ if (migrate)
 if (developmentAuth) builder.Configuration["Authentication:Mode"] = "Development";
 builder.Services.AddWorkflowAuthentication(builder.Configuration, builder.Environment);
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
-builder.Services.AddSingleton(new Wf.ControlPlane.Registry.WorkflowEnvironmentPolicy(
-    builder.Configuration["WF_WORKFLOW_ENVIRONMENT"] ?? (developmentAuth ? "dev" : "prod")));
+var workflowEnvironment = builder.Configuration["WF_WORKFLOW_ENVIRONMENT"] ?? (developmentAuth ? "dev" : "prod");
+builder.Services.AddSingleton(new Wf.ControlPlane.Registry.WorkflowEnvironmentPolicy(workflowEnvironment));
 builder.Services.AddTeamAuthorization();
 builder.Services.AddUserSchedules(builder.Configuration);
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -94,6 +94,7 @@ builder.Services.AddWorkflowOpenApi();
 builder.Services.AddWorkflowLive();
 builder.Services.AddWorkflowLiveLogs();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddWorkflowTelemetry(builder.Configuration, engineEnabled, workflowEnvironment);
 builder.Services.AddSingleton(_ => NotificationOptions.Read(builder.Configuration));
 if (engineEnabled) builder.Services.AddHostedService<NotificationDispatcher>();
 builder.Services.AddWorkflowDrain(builder.Configuration, engineEnabled);

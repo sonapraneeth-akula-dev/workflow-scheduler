@@ -70,6 +70,7 @@ public sealed partial class HostedRunExecutionTests(HostedExecutionDatabase data
         await using var runtime = await Runtime.Create(database, w => w
             .Node("work", n => n.Task("task", _ => { }, p => p.Retry(1, Backoff.Fixed(TimeSpan.FromSeconds(1)))))
             .PostProcess(_ => { }));
+        using var telemetry = new TelemetryMeasurements(runtime.Workflow);
         await runtime.Tick();
         var command = Assert.Single(await runtime.Pending());
         await runtime.Complete(command, TaskOutcome.Failed, category, nonRetryable);
@@ -94,6 +95,10 @@ public sealed partial class HostedRunExecutionTests(HostedExecutionDatabase data
         await runtime.Finish();
         Assert.Equal(retry ? RunStatus.Succeeded : RunStatus.Failed, (await runtime.Load()).Snapshot.Status);
         Assert.Equal(ExecutionStatus.Succeeded, (await runtime.Load()).Snapshot.Nodes["$post"]);
+        Assert.Equal([1d], telemetry.Values("wf.run.completed"));
+        Assert.Equal([retry ? 1d : 0d], telemetry.Values("wf.run.retries"));
+        await runtime.FreshTick();
+        Assert.Equal([1d], telemetry.Values("wf.run.completed"));
     }
 
     [Fact]

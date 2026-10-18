@@ -27,6 +27,7 @@ public sealed class LocalStackModelTests : IDisposable
         Assert.Equal("Development", environment["DOTNET_ENVIRONMENT"]);
         Assert.Equal("Development", environment["ASPNETCORE_ENVIRONMENT"]);
         Assert.Equal("dev", environment["WF_WORKFLOW_ENVIRONMENT"]);
+        Assert.Equal("false", environment["Telemetry__Enabled"]);
         Assert.Equal(Path.Combine(root, "blobs"), environment["Storage__Root"]);
         Assert.Equal("Local", environment["Secrets__Provider"]);
         Assert.Equal(Path.Combine(root, "secrets"), environment["Secrets__Root"]);
@@ -66,6 +67,35 @@ public sealed class LocalStackModelTests : IDisposable
         Assert.True(key.Secret);
         Assert.NotNull(key.Default);
         Assert.Equal("UserSecretsParameterDefault", key.Default.GetType().Name);
+    }
+
+    [Fact]
+    public async Task Local_monitoring_has_loopback_bindings_persistent_data_and_the_configured_OTLP_receiver()
+    {
+        var builder = Builder(("Local:Monitoring", "true"), ("Local:PrometheusPort", "19090"),
+            ("Local:GrafanaPort", "13000"), ("ConnectionStrings:wf", "Host=127.0.0.1;Database=workflow"));
+        LocalStack.Configure(builder);
+        await using var app = builder.Build();
+        var prometheus = Assert.Single(builder.Resources.OfType<ContainerResource>(), resource => resource.Name == "wf-prometheus");
+        var grafana = Assert.Single(builder.Resources.OfType<ContainerResource>(), resource => resource.Name == "wf-grafana");
+        Assert.Equal("v3.15.0", Assert.Single(prometheus.Annotations.OfType<ContainerImageAnnotation>()).Tag);
+        Assert.Equal("13.2.4", Assert.Single(grafana.Annotations.OfType<ContainerImageAnnotation>()).Tag);
+        Assert.Contains(prometheus.Annotations.OfType<ContainerMountAnnotation>(), mount =>
+            mount.Type == ContainerMountType.Volume && mount.Source == "wf-prometheus-data");
+        Assert.Contains(grafana.Annotations.OfType<ContainerMountAnnotation>(), mount =>
+            mount.Type == ContainerMountType.Volume && mount.Source == "wf-grafana-data");
+        Assert.All(grafana.Annotations.OfType<ContainerMountAnnotation>().Where(mount => mount.Type == ContainerMountType.BindMount),
+            mount => Assert.True(mount.IsReadOnly));
+        foreach (var (resource, binding) in new[] { (prometheus, "127.0.0.1:19090:9090"), (grafana, "127.0.0.1:13000:3000") })
+        {
+            var arguments = new List<object>();
+            foreach (var annotation in resource.Annotations.OfType<ContainerRuntimeArgsCallbackAnnotation>())
+                await annotation.Callback(new(arguments, TestContext.Current.CancellationToken));
+            Assert.Equal(new object[] { "--publish", binding }, arguments);
+        }
+        var values = (await Configuration(Project(builder, "wf-host"))).EnvironmentVariables.ToDictionary();
+        Assert.Equal("true", values["Telemetry__Enabled"]);
+        Assert.Equal("http://127.0.0.1:19090/api/v1/otlp/v1/metrics", values["OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"]);
     }
 
     [Fact]
@@ -131,6 +161,11 @@ public sealed class LocalStackModelTests : IDisposable
     [InlineData("Local:ApiPort", "not-a-port")]
     [InlineData("Local:EnginePort", "5000")]
     [InlineData("Local:UiPort", "5001")]
+    [InlineData("Local:Monitoring", "not-a-boolean")]
+    [InlineData("Local:PrometheusPort", "0")]
+    [InlineData("Local:GrafanaPort", "65536")]
+    [InlineData("Local:PrometheusPort", "5000")]
+    [InlineData("Local:GrafanaPort", "9090")]
     [InlineData("ConnectionStrings:wf", " ")]
     [InlineData("Local:DataRoot", " ")]
     public void LocalStack_invalid_configuration_fails_before_creating_processes_or_identity(string key, string value)

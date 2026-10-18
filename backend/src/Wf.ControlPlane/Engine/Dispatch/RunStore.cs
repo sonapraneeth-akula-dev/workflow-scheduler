@@ -229,8 +229,10 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
             throw new InvalidOperationException("Run changed since it was loaded.");
         var change = create(durable);
         await AppendAsync(connection, durable, change, cancellationToken);
+        var telemetry = await CommittedRunTelemetry.CaptureAsync(connection, durable.Snapshot, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         run.Apply(change);
+        telemetry?.Emit();
     }
 
     internal static async Task AppendAsync(NpgsqlConnection connection, RunState run, RunEvent change,

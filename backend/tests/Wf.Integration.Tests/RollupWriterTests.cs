@@ -73,6 +73,7 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
     public async Task Actual_run_store_terminal_transaction_updates_workflow_and_node_rollups(RunStatus status)
     {
         var workflow = Workflow();
+        using var telemetry = new TelemetryMeasurements(workflow);
         var run = await Create(workflow);
         var events = Finish(run, status, 12);
         foreach (var change in events) await store.AppendAsync(run, change, Token);
@@ -90,6 +91,10 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
         var dashboard = Assert.Single(await DashboardRows(workflow));
         Assert.Equal((1L, status == RunStatus.Succeeded ? 0L : 1L), (dashboard.Observations, dashboard.Failures));
         Assert.Equal([6000d], dashboard.Durations);
+        Assert.Equal([1d], telemetry.Values("wf.run.completed"));
+        Assert.Equal([12d], telemetry.Values("wf.run.duration"));
+        await store.LoadAsync(run.Snapshot.RunId, Token);
+        Assert.Equal([1d], telemetry.Values("wf.run.completed"));
         Assert.Equal(run.Snapshot.RunId, dashboard.Latest);
     }
 
@@ -117,12 +122,15 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
     public async Task Group_commit_projects_terminal_timestamps_nodes_and_rollups_once_even_on_exact_replay()
     {
         var workflow = Workflow();
+        using var telemetry = new TelemetryMeasurements(workflow);
         var first = await Create(workflow);
         var second = await Create(workflow);
         var changes = Finish(first, RunStatus.Succeeded, 10).Concat(Finish(second, RunStatus.Failed, 30)).ToArray();
         await using var appender = new GroupCommitAppender(database.DataSource, NullLogger<GroupCommitAppender>.Instance);
         await appender.AppendAsync(changes, Token);
         await appender.AppendAsync(changes, Token);
+        Assert.Equal([1d, 1d], telemetry.Values("wf.run.completed"));
+        Assert.Equal([10d, 30d], telemetry.Values("wf.run.duration").Order());
         var rows = await Rows(workflow);
         var total = Assert.Single(rows, row => row.Node == "");
         Assert.Equal((2L, 1L, 2L), (total.Runs, total.Failures, total.Durations));
@@ -155,6 +163,7 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
     public async Task Rollup_failure_rolls_back_terminal_events_snapshots_and_projections_before_acknowledgement(bool grouped, string table)
     {
         var workflow = Workflow();
+        using var telemetry = new TelemetryMeasurements(workflow);
         var run = await Create(workflow);
         var changes = Finish(run, RunStatus.Succeeded, 10);
         if (!grouped)
@@ -181,6 +190,7 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
             Assert.Equal(before.EndedAt, saved.EndedAt);
             Assert.Empty(await Rows(workflow));
             Assert.Empty(await DashboardRows(workflow));
+            Assert.Empty(telemetry.Values("wf.run.completed"));
         }
         finally
         {
@@ -197,6 +207,7 @@ public sealed class RollupWriterTests(RollupDatabase database) : IClassFixture<R
         else await store.AppendAsync(run, changes[^1], Token);
         Assert.Equal(1, Assert.Single(await Rows(workflow), row => row.Node == "").Runs);
         Assert.Equal(1, Assert.Single(await DashboardRows(workflow)).Observations);
+        Assert.Equal([1d], telemetry.Values("wf.run.completed"));
     }
 
     [Fact]

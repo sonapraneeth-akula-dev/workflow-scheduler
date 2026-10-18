@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 15s
+
+storage:
+  tsdb:
+    out_of_order_time_window: 5m
+
+otlp:
+  promote_resource_attributes:
+    - deployment.environment.name
+
+scrape_configs: []

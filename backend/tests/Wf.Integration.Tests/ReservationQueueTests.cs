@@ -14,6 +14,7 @@ public sealed partial class ReservationManagerTests
     [Fact]
     public async Task Rejection_failure_rolls_back_run_events_snapshot_attempts_and_other_node_queue_intent()
     {
+        using var telemetry = new TelemetryMeasurements("tests/perf/reservations");
         var run = await Ready();
         var selector = new PlacementSelector(pool: Guid.NewGuid().ToString("N"));
         await Manager.RequestAsync(run.Snapshot.RunId, "other", 1, selector, Lifetime, cancellationToken: Token);
@@ -32,11 +33,13 @@ public sealed partial class ReservationManagerTests
             Assert.Null(durable.Snapshot.FailureReason);
             Assert.All(durable.Snapshot.Tasks.Values, status => Assert.Equal(ExecutionStatus.Ready, status));
             Assert.Equal(1L, await Scalar("SELECT count(*) FROM reservation_queue WHERE run_id=$1", run.Snapshot.RunId));
+            Assert.Empty(telemetry.Values("wf.run.completed"));
         }
         finally { await Execute("ALTER TABLE runs DROP CONSTRAINT reject_shortage_failure_test"); }
         Assert.Equal(ReservationDisposition.Rejected, (await Manager.RequestAsync(run.Snapshot.RunId,
             "work", 1, selector, Lifetime, WhenUnavailable.Reject, Token)).Disposition);
         Assert.Equal(0L, await Scalar("SELECT count(*) FROM reservation_queue WHERE run_id=$1", run.Snapshot.RunId));
+        Assert.Equal([1d], telemetry.Values("wf.run.completed"));
     }
 
     [Fact]
@@ -84,6 +87,7 @@ public sealed partial class ReservationManagerTests
     [InlineData(true)]
     public async Task Reject_shortage_commits_failed_run_reason_events_and_no_reservation_or_queue(bool queuedRun)
     {
+        using var telemetry = new TelemetryMeasurements("tests/perf/reservations");
         var run = await Ready();
         if (queuedRun)
         {
@@ -105,6 +109,7 @@ public sealed partial class ReservationManagerTests
         Assert.Equal(0, await Count(run.Snapshot.RunId));
         Assert.Equal(0L, await Scalar("SELECT count(*) FROM reservation_queue WHERE run_id=$1", run.Snapshot.RunId));
         Assert.Equal(1L, await Scalar("SELECT count(*) FROM run_events WHERE run_id=$1 AND kind=0 AND payload IS NOT NULL AND seq=(SELECT max(seq) FROM run_events WHERE run_id=$1)", run.Snapshot.RunId));
+        Assert.Equal([1d], telemetry.Values("wf.run.completed"));
     }
 
     [Fact]

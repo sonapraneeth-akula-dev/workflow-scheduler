@@ -193,6 +193,7 @@ public sealed class GroupCommitAppender : IAsyncDisposable
             if (inserted != 0 || (long)(await replay.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) ?? 0L) != entries.Length)
                 throw new InvalidOperationException("Group commit rejected missing, terminal, stale or noncontiguous run events; the entire batch was rolled back.");
         }
+        var telemetry = new List<CommittedRunTelemetry>();
         if (inserted == entries.Length)
         {
             var terminal = RollupWriter.TerminalRunIds(entries.Select(entry => entry.Event));
@@ -201,11 +202,14 @@ public sealed class GroupCommitAppender : IAsyncDisposable
                 var run = await RunStore.LoadAsync(connection, id, false,
                     message => logger.LogWarning("{RunStateError}", message), cancellationToken).ConfigureAwait(false);
                 await RunStore.ProjectTerminalAsync(connection, run, cancellationToken).ConfigureAwait(false);
+                if (await CommittedRunTelemetry.CaptureAsync(connection, run.Snapshot, cancellationToken).ConfigureAwait(false) is { } metric)
+                    telemetry.Add(metric);
             }
             if (terminal.Length != 0)
                 await RollupWriter.RefreshAsync(connection, terminal, cancellationToken).ConfigureAwait(false);
         }
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var metric in telemetry) metric.Emit();
         return new(Interlocked.Increment(ref batchId), entries.Length, Stopwatch.GetElapsedTime(started));
     }
 
