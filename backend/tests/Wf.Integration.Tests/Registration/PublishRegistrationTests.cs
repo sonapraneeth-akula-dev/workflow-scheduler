@@ -19,6 +19,7 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.IdentityModel.Validators;
 using Npgsql;
 using Wf.Contracts.Registry;
+using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Auth;
 using Wf.ControlPlane.Registration;
 using Wf.ControlPlane.Storage;
@@ -28,6 +29,109 @@ namespace Wf.Integration.Tests.Registration;
 public sealed class PublishRegistrationTests(RegistrationDatabase database) : IClassFixture<RegistrationDatabase>
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    [Fact]
+    public async Task Main_branch_merge_runs_template_publication_and_exposes_exact_new_version_through_real_API()
+    {
+        var root = Path.Combine(Repository, ".agent-artifacts", "merge-publication", Guid.NewGuid().ToString("N")[..8]);
+        var checkout = Path.Combine(root, "r");
+        var workflowDirectory = Path.Combine(checkout, "workflow");
+        Directory.CreateDirectory(workflowDirectory);
+        try
+        {
+            await using var server = await PublishServer.Start(database.DataSource, Path.Combine(root, "blobs"));
+            var registrarToken = server.AccessToken();
+            var team = "merge-" + Guid.NewGuid().ToString("N");
+            var identity = team + "/release/workflow";
+            var script = $$"""
+                #:project {{Path.Combine(Repository, "backend", "src", "Wf.Sdk", "Wf.Sdk.csproj")}}
+                #:property PublishAot=false
+                #:property AssemblyName=Merge.Integration.Workflow
+                using Wf.Sdk;
+                var workflow = Workflow.Define("{{identity}}", "1.0.0", w => w.Type("release")
+                    .Node("work", n => n.Task("echo", ctx => ctx.Outputs["answer"] = 42)));
+                return await workflow.RunAsync(args);
+                """;
+            var source = Path.Combine(workflowDirectory, "workflow.cs");
+            await File.WriteAllTextAsync(source, script, new UTF8Encoding(false), Token);
+            await File.WriteAllBytesAsync(Path.Combine(workflowDirectory, "team.json"),
+                JsonSerializer.SerializeToUtf8Bytes(new TeamRegistry(team, [new(team, "release", "Merge fixtures", new([]))]),
+                    TeamRegistryJsonContext.Default.TeamRegistry), Token);
+            await File.WriteAllTextAsync(Path.Combine(checkout, ".gitignore"), "obj/\nbin/\n", Token);
+            await Git("init", "--quiet", "--initial-branch=main");
+            await Git("config", "user.name", "Merge gate fixture");
+            await Git("config", "user.email", "merge-gate@example.invalid");
+            await Git("config", "commit.gpgsign", "false");
+            await Git("add", "--all");
+            await Git("commit", "--quiet", "-m", "test: Initial workflow");
+            var before = (await Git("rev-parse", "HEAD")).Trim();
+            var initial = await Process(["publish", workflowDirectory, "--engine", server.Origin,
+                "--git-commit", before, "--git-author", "Merge gate fixture", "--input", checkout], registrarToken);
+            Assert.True(initial.Exit == 0, initial.Error);
+            await Git("checkout", "--quiet", "-b", "feat/new-version");
+            await File.WriteAllTextAsync(source, script.Replace("\"1.0.0\"", "\"1.0.1\"", StringComparison.Ordinal),
+                new UTF8Encoding(false), Token);
+            await Git("add", "--all");
+            await Git("commit", "--quiet", "-m", "test: New explicit workflow version");
+            await Git("checkout", "--quiet", "main");
+            await Git("merge", "--quiet", "--no-ff", "--no-edit", "feat/new-version");
+            var head = (await Git("rev-parse", "HEAD")).Trim();
+            var helper = Path.Combine(Repository, "backend", "src", "Wf.Templates", "workflows-repo",
+                ".github", "scripts", "register_on_merge.py");
+            // Resolve the installed tool to this build; selection and publication use the unchanged template helper.
+            const string driver = """
+                import subprocess, sys
+                from pathlib import Path
+                helper, cli = sys.argv[1:3]
+                sys.path.insert(0, str(Path(helper).parent))
+                import register_on_merge as gate
+                def built_tool(repository, *arguments):
+                    if arguments[:5] != ("dotnet", "tool", "run", "wf", "--"):
+                        raise ValueError("Unexpected publication command")
+                    subprocess.run(["dotnet", cli, *arguments[5:]], cwd=repository, check=True)
+                gate.run = built_tool
+                sys.argv = [helper, "--publish"]
+                gate.main()
+                """;
+            var result = await External(OperatingSystem.IsWindows() ? "python" : "python3",
+                ["-c", driver, helper, typeof(Wf.Cli.Program).Assembly.Location], checkout, registrarToken,
+                new()
+                {
+                    ["PUBLISH_BASE_SHA"] = before, ["PUBLISH_HEAD_SHA"] = head,
+                    ["GITHUB_SHA"] = head, ["GITHUB_REF"] = "refs/heads/main", ["GITHUB_EVENT_NAME"] = "push",
+                    ["WF_ENGINE_URL"] = server.Origin
+                });
+            Assert.True(result.Exit == 0, result.Error);
+            Assert.Contains("Registered: " + identity + "@1.0.1", result.Output);
+            Assert.DoesNotContain(registrarToken, result.Output + result.Error);
+            using var client = new HttpClient { BaseAddress = new(server.Origin) };
+            client.DefaultRequestHeaders.Authorization = new("Bearer", server.AccessToken("Admin"));
+            using var response = await client.GetAsync($"/api/v1/workflows/{identity}/versions", Token);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var document = JsonDocument.Parse(await response.Content.ReadAsByteArrayAsync(Token));
+            var items = document.RootElement.GetProperty("items").EnumerateArray().ToArray();
+            Assert.Equal(["1.0.1", "1.0.0"], items.Select(item => item.GetProperty("version").GetString()));
+            var version = items[0].GetProperty("versionId").GetGuid();
+            Assert.Equal(version, document.RootElement.GetProperty("activeVersionId").GetGuid());
+            Assert.Equal(head, await Value("SELECT git_commit FROM workflow_versions WHERE id=$1", version));
+
+            async Task<string> Git(params string[] arguments)
+            {
+                var result = await External("git", ["--no-pager", .. arguments], checkout, null);
+                Assert.True(result.Exit == 0, result.Error);
+                return result.Output;
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+                    File.SetAttributes(file, FileAttributes.Normal);
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
 
     [Fact]
     public async Task Publish_actual_cli_signed_jwt_kestrel_postgres_registers_exact_ci_package_source_provenance_and_noop()
@@ -142,14 +246,17 @@ public sealed class PublishRegistrationTests(RegistrationDatabase database) : IC
         return await query.ExecuteScalarAsync(Token);
     }
 
-    private static async Task<(int Exit, string Output, string Error)> Process(string[] arguments, string? token)
+    private static Task<(int Exit, string Output, string Error)> Process(string[] arguments, string? token) =>
+        External("dotnet", [typeof(Wf.Cli.Program).Assembly.Location, .. arguments], Repository, token);
+
+    private static async Task<(int Exit, string Output, string Error)> External(string executable,
+        string[] arguments, string directory, string? token, Dictionary<string, string>? environment = null)
     {
-        var start = new ProcessStartInfo("dotnet")
+        var start = new ProcessStartInfo(executable)
         {
             RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false,
-            WorkingDirectory = Repository
+            WorkingDirectory = directory
         };
-        start.ArgumentList.Add(typeof(Wf.Cli.Program).Assembly.Location);
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         start.Environment["MSBUILDDISABLENODEREUSE"] = "1";
         start.Environment["WarningsNotAsErrors"] = "NU1902;NU1903";
@@ -157,6 +264,7 @@ public sealed class PublishRegistrationTests(RegistrationDatabase database) : IC
         start.Environment["SourceRevisionId"] = new string('a', 40);
         if (token is null) start.Environment.Remove("WF_ACCESS_TOKEN");
         else start.Environment["WF_ACCESS_TOKEN"] = token;
+        foreach (var item in environment ?? []) start.Environment[item.Key] = item.Value;
         using var process = System.Diagnostics.Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync(Token);
         var error = process.StandardError.ReadToEndAsync(Token);
@@ -203,6 +311,7 @@ public sealed class PublishRegistrationTests(RegistrationDatabase database) : IC
             builder.Configuration["Storage:UploadHmacKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
             builder.Configuration["Storage:Root"] = blobRoot;
             builder.Services.AddWorkflowAuthentication(builder.Configuration, builder.Environment);
+            builder.Services.AddTeamAuthorization();
             builder.Services.AddSingleton(data);
             builder.Services.AddWorkflowRegistrations(builder.Configuration);
             var metadata = new OpenIdConnectConfiguration { Issuer = Issuer };
@@ -220,6 +329,7 @@ public sealed class PublishRegistrationTests(RegistrationDatabase database) : IC
             app.UseAuthentication();
             app.UseAuthorization();
             app.MapRegistrationEndpoints();
+            app.MapVersionsEndpoints();
             await app.StartAsync(Token);
             var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
             return new(app, rsa, key, address);

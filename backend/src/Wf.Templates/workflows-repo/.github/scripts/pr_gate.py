@@ -65,6 +65,20 @@ def run(repository, *arguments):
     subprocess.run(arguments, cwd=repository, check=True)
 
 
+def validate_and_test(repository, selected):
+    print("Affected workflows: " + json.dumps(selected), flush=True)
+    if not selected:
+        return
+    run(repository, "dotnet", "tool", "restore", "--tool-manifest",
+        str(repository / ".config" / "dotnet-tools.json"))
+    for relative in selected:
+        directory = repository / relative
+        directory.resolve().relative_to(repository)
+        run(repository, "dotnet", "tool", "run", "wf", "--", "validate",
+            str(directory), "--input", str(repository))
+        run(directory, "dotnet", "test")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true", help="Only emit affected directories as JSON")
@@ -79,17 +93,7 @@ def main():
     if options.list:
         print(json.dumps(selected))
         return
-    print("Affected workflows: " + json.dumps(selected), flush=True)
-    if not selected:
-        return
-    run(repository, "dotnet", "tool", "restore", "--tool-manifest",
-        str(repository / ".config" / "dotnet-tools.json"))
-    for relative in selected:
-        directory = repository / relative
-        directory.resolve().relative_to(repository)
-        run(repository, "dotnet", "tool", "run", "wf", "--", "validate",
-            str(directory), "--input", str(repository))
-        run(directory, "dotnet", "test")
+    validate_and_test(repository, selected)
 
 
 if __name__ == "__main__":

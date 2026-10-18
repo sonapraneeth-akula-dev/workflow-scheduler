@@ -2464,6 +2464,29 @@ Windows MSBuild currently rejects apostrophe/ampersand directory names
 cover Unicode and spaces. Hosted required-check behavior remains unverified
 until a permitted push/PR.
 
+`wf-repo` also includes **Register merged workflows**, triggered only by pushes
+to `main`. Its full before/after range selects every affected workflow (all
+workflows for an initial push or shared-input change), then runs the same
+validation/tests before acquiring credentials. Explicit workflow SemVer must
+be bumped in source; Git commits provide provenance, not generated versions.
+Queued publications use `queue: max` without canceling in-progress runs.
+
+For this optional CI publisher, configure `AZURE_CLIENT_ID` and
+`AZURE_TENANT_ID` as repository secrets and `WF_ENGINE_URL` (HTTPS origin) and
+`WF_API_SCOPE` (the API application ID URI plus `/.default`) as variables.
+The Entra application's federated credential must trust the repository's
+`refs/heads/main` subject with audience `api://AzureADTokenExchange`, and its
+service principal needs the API's application-only `Registrar` role and
+`idtyp=app` claim. No client secret or Azure subscription is required.
+The acquired API token is masked and passed only to the publication process,
+not persisted in `GITHUB_ENV`, arguments or artifacts. The existing PR gate
+remains credential-free; this does not add prototype sign-in/logout.
+An installed local tool runs `register_on_merge.py --validate` and
+`--publish` with `PUBLISH_BASE_SHA`/`PUBLISH_HEAD_SHA`; publication additionally
+requires matching `GITHUB_SHA`, `GITHUB_EVENT_NAME=push`,
+`GITHUB_REF=refs/heads/main`, `WF_ENGINE_URL` and `WF_ACCESS_TOKEN`.
+Failed validation, tests, restore or publication fail the run explicitly.
+
 ## CLI and packages
 
 `wf run` submits a manual run without local task execution or waiting for run

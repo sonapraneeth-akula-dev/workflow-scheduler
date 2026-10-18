@@ -168,6 +168,78 @@ public sealed class RepositoryPrGateTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task MergeGateSelectsFullPushRangeAndInitialPushWithoutPublishingDuringValidation()
+    {
+        using var sample = new Repository();
+        await sample.InitializeAsync();
+        sample.Write("alpha/workflow.cs", "// a");
+        sample.Write("beta/workflow.cs", "// b");
+        var baseline = await sample.CommitAsync();
+        sample.Write("alpha/input.txt", "first pushed commit");
+        await sample.CommitAsync();
+        sample.Write("beta/input.txt", "last pushed commit");
+        var head = await sample.CommitAsync();
+        foreach (var before in new[] { baseline, new string('0', 40) })
+        {
+            var selected = await sample.MergeGateAsync(before, head, "--list");
+            Assert.Equal(0, selected.ExitCode);
+            Assert.Equal(["alpha", "beta"], Assert.IsType<string[]>(JsonSerializer.Deserialize<string[]>(selected.Text.Trim())));
+        }
+        var stale = await sample.MergeGateAsync(baseline, baseline, "--list");
+        Assert.NotEqual(0, stale.ExitCode);
+        Assert.Contains("Checkout does not match", stale.Text);
+        Directory.Delete(sample.File("alpha"), recursive: true);
+        Directory.Delete(sample.File("beta"), recursive: true);
+        var empty = await sample.CommitAsync();
+        var validated = await sample.MergeGateAsync(head, empty, "--validate");
+        Assert.Equal(0, validated.ExitCode);
+        Assert.Contains("Affected workflows: []", validated.Text);
+        Assert.DoesNotContain("\"dotnet\"", validated.Text);
+    }
+
+    [Theory]
+    [InlineData("pull_request", "refs/heads/main", "test-token", "main-branch push")]
+    [InlineData("push", "refs/heads/feature", "test-token", "main-branch push")]
+    [InlineData("push", "refs/heads/main", "", "Registrar app token")]
+    public async Task MergeGateRejectsUntrustedPublicationContextBeforeInvokingTools(
+        string eventName, string reference, string token, string diagnostic)
+    {
+        using var sample = new Repository();
+        await sample.InitializeAsync();
+        sample.Write("alpha/workflow.cs", "// a");
+        var head = await sample.CommitAsync();
+        var result = await sample.MergeGateAsync(new string('0', 40), head, "--publish",
+            new() { ["GITHUB_EVENT_NAME"] = eventName, ["GITHUB_REF"] = reference, ["WF_ACCESS_TOKEN"] = token });
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains(diagnostic, result.Text);
+        Assert.DoesNotContain("\"dotnet\"", result.Text);
+        Assert.DoesNotContain("test-token", result.Text);
+    }
+
+    [Fact]
+    public void MergeGateKeepsPrCredentialFreeAndRequestsFederatedAppIdentityOnlyAfterTests()
+    {
+        var workflow = System.IO.File.ReadAllText(System.IO.Path.Combine(TemplateDirectory,
+            ".github", "workflows", "register-on-merge.yml"));
+        Assert.Contains("branches: [main]", workflow);
+        Assert.Contains("persist-credentials: false", workflow);
+        Assert.Contains("fetch-depth: 0", workflow);
+        Assert.Contains("cancel-in-progress: false", workflow);
+        Assert.Contains("queue: max", workflow);
+        Assert.Contains("id-token: write", workflow);
+        Assert.Contains("allow-no-subscriptions: true", workflow);
+        Assert.Contains("::add-mask::$token", workflow);
+        Assert.Contains("WF_ACCESS_TOKEN=\"$token\" python3", workflow);
+        Assert.Equal(2, workflow.Split("if: steps.validated.outputs.has-workflows == 'true'").Length - 1);
+        Assert.True(workflow.IndexOf("--validate", StringComparison.Ordinal) <
+            workflow.IndexOf("uses: azure/login@", StringComparison.Ordinal));
+        Assert.DoesNotContain("pull_request", workflow);
+        Assert.DoesNotContain("client-secret", workflow);
+        Assert.DoesNotContain("GITHUB_ENV", workflow);
+        Assert.DoesNotContain("continue-on-error", workflow);
+    }
+
+    [Fact]
     public async Task PrGateRunsRealGeneratedWorkflowAndRejectsInvalidDagFailingTestAndRestore()
     {
         using var sample = new Repository();
@@ -228,6 +300,11 @@ public sealed class RepositoryPrGateTests(ITestOutputHelper output)
         Assert.DoesNotContain("CLI_PACKAGE_VERSION", await System.IO.File.ReadAllTextAsync(toolManifest,
             TestContext.Current.CancellationToken));
         output.WriteLine("REAL valid generated PR gate: exit 0; wf validate + exact dotnet test, 4 passing tests.");
+        var mergeValidated = await sample.MergeGateAsync(baseline, valid, "--validate");
+        Assert.True(mergeValidated.ExitCode == 0, mergeValidated.Text);
+        Assert.Contains("Valid: GateSample@1.0.0", mergeValidated.Text);
+        Assert.Matches(@"succeeded:\s+4\b", mergeValidated.Text);
+        output.WriteLine("REAL generated main-push validation: exact shared validator and 4 passing tests, no credentials.");
 
         await System.IO.File.WriteAllTextAsync(scriptPath, script.Replace(".DependsOn(\"prepare\")",
             ".DependsOn(\"missing\")", StringComparison.Ordinal), TestContext.Current.CancellationToken);
@@ -358,6 +435,21 @@ public sealed class RepositoryPrGateTests(ITestOutputHelper output)
                 {
                     ["PR_BASE_SHA"] = baseline, ["PR_HEAD_SHA"] = head, ["PR_CHECKOUT_SHA"] = checkout ?? head
                 });
+        }
+
+        public Task<Result> MergeGateAsync(string before, string head, string mode,
+            Dictionary<string, string>? environment = null)
+        {
+            var values = new Dictionary<string, string>
+            {
+                ["PUBLISH_BASE_SHA"] = before, ["PUBLISH_HEAD_SHA"] = head,
+                ["GITHUB_EVENT_NAME"] = "push", ["GITHUB_REF"] = "refs/heads/main", ["GITHUB_SHA"] = head,
+                ["WF_ACCESS_TOKEN"] = "", ["WF_ENGINE_URL"] = "http://127.0.0.1:1"
+            };
+            foreach (var item in environment ?? []) values[item.Key] = item.Value;
+            return RunAsync(Path, OperatingSystem.IsWindows() ? "python" : "python3",
+                [System.IO.Path.Combine(TemplateDirectory, ".github", "scripts", "register_on_merge.py"), mode],
+                assertSuccess: false, values);
         }
 
         private async Task<Result> RunAsync(string directory, string executable, string[] arguments,
