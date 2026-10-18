@@ -2794,11 +2794,11 @@ The precompiled 200-node description benchmark exports full JSON and fails when
 p95 reaches 1 second or measurements are missing. Workflow construction and
 compilation are outside the measured operation. A local Windows measurement on
 October 15, 2026: mean 0.483 ms, p95 0.524 ms. Generated reports stay under
-`BenchmarkDotNet.Artifacts` and are ignored by git; results depend on the machine.
+`.agent-artifacts\BenchmarkDotNet.Artifacts` and are ignored by git; results depend on the machine.
 
 ```powershell
-dotnet run -c Release --project backend\tests\Wf.Benchmarks -- --filter '*EngineCore*' --metrics BenchmarkDotNet.Artifacts\engine-metrics.json
-dotnet run -c Release --project backend\tests\Wf.Benchmarks -- --compare BenchmarkDotNet.Artifacts\baseline-metrics.json BenchmarkDotNet.Artifacts\engine-metrics.json
+dotnet run -c Release --project backend\tests\Wf.Benchmarks -- --filter '*EngineCore*' --metrics .agent-artifacts\BenchmarkDotNet.Artifacts\engine-metrics.json
+dotnet run -c Release --project backend\tests\Wf.Benchmarks -- --compare .agent-artifacts\BenchmarkDotNet.Artifacts\baseline-metrics.json .agent-artifacts\BenchmarkDotNet.Artifacts\engine-metrics.json
 ```
 
 Execution measures a 200-node no-op chain through the actual local/core engine.
@@ -2837,7 +2837,7 @@ measurements, not cold-cache, concurrent-load, UI-rendering or remote-network
 SLAs. No forced query plans, cache purges or production query/index changes.
 The database contains summary rows rather than complete historical event graphs.
 Reports include dataset, environment, durability settings and per-scenario
-percentiles under ignored `BenchmarkDotNet.Artifacts\run-query\<id>\report.json`.
+percentiles under ignored `.agent-artifacts\BenchmarkDotNet.Artifacts\run-query\<id>\report.json`.
 `WF_TEST_POSTGRES` uses a unique schema; otherwise an isolated PostgreSQL 17
 container is created. Both modes require `fsync`, `full_page_writes` and
 `synchronous_commit` ON and remove their own schema/container afterward.
@@ -2877,7 +2877,7 @@ These are database-plan optimizations, not cached authorization decisions:
 each actual send still performs fresh scope and role checks. The report records
 these settings; the fixture removes only its owned schema/container. JSON reports, including
 failed measurements, remain under
-`BenchmarkDotNet.Artifacts\live-fanout\<id>\report.json`. A reduced actual signed
+`.agent-artifacts\BenchmarkDotNet.Artifacts\live-fanout\<id>\report.json`. A reduced actual signed
 WebSocket smoke and count/latency/durability gate tests run separately; smoke
 cannot satisfy the 500-client acceptance gate. `benchmarks.yml` includes Windows
 and Linux lanes; local results do not imply hosted CI execution.

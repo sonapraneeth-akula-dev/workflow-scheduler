@@ -37,7 +37,7 @@ public static class RunQueryBenchmarks
         {
             var report = await MeasureAsync(timeout.Token);
             var json = JsonSerializer.Serialize(report, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true });
-            var directory = Path.Combine("BenchmarkDotNet.Artifacts", "run-query", Guid.NewGuid().ToString("N"));
+            var directory = Path.Combine(".agent-artifacts", "BenchmarkDotNet.Artifacts", "run-query", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(directory);
             var path = Path.Combine(directory, "report.json");
             await File.WriteAllTextAsync(path, json, timeout.Token);

@@ -291,7 +291,9 @@ and cadence are unchanged.
 Use project-local artifacts (including temporary runtime files):
 
 ```powershell
-$env:TEMP=$PWD.Path; $env:TMP=$PWD.Path
+$scratch = New-Item -ItemType Directory -Force .agent-artifacts\tmp
+$env:TEMP=$scratch.FullName; $env:TMP=$scratch.FullName
+$env:TMPDIR=$scratch.FullName
 dotnet test backend\tests\Wf.Agent.Tests --filter ResourceSampler `
   --artifacts-path .agent-artifacts\wf-resource-sampler-3adec91f `
   '-p:WarningsNotAsErrors=NU1902%3BNU1903'

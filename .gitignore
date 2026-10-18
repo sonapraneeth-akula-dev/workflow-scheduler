@@ -13,6 +13,7 @@ dist/
 .env.*
 !.env.example
 /.wf/
+# All ad hoc tooling, test evidence and temporary files belong here.
 /.agent-artifacts/
 /compose-results/
 /node-compile-cache/

@@ -75,7 +75,7 @@ public static class DispatchLatencyBenchmarks
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(45));
         ConsoleCancelEventHandler cancel = (_, args) => { args.Cancel = true; timeout.Cancel(); };
         Console.CancelKeyPress += cancel;
-        var directory = Path.GetFullPath(Path.Combine("BenchmarkDotNet.Artifacts", "dispatch-latency", Guid.NewGuid().ToString("N")));
+        var directory = Path.GetFullPath(Path.Combine(".agent-artifacts", "BenchmarkDotNet.Artifacts", "dispatch-latency", Guid.NewGuid().ToString("N")));
         Directory.CreateDirectory(directory);
         try
         {

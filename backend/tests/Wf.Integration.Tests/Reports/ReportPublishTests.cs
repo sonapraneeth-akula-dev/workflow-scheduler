@@ -520,7 +520,7 @@ public sealed partial class ReportPublishTests(ReportPublishDatabase database) :
             var project = new DirectoryInfo(Directory.GetCurrentDirectory());
             while (project.Parent is not null && !Directory.Exists(Path.Combine(project.FullName, ".git")))
                 project = project.Parent;
-            var actualRoot = root ?? Path.Combine(project.FullName, ".rr-" + Guid.NewGuid().ToString("N")[..12]);
+            var actualRoot = root ?? Path.Combine(project.FullName, ".agent-artifacts", "tests", "reports", Guid.NewGuid().ToString("N")[..12]);
             var blobs = new FileSystemBlobStore(actualRoot, actualKey);
             var capabilities = new ReportUploadCapabilities(actualKey, TimeProvider.System);
             var registry = new AgentRegistry(source, TimeProvider.System);

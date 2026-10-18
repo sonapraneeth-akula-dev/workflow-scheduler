@@ -41,3 +41,25 @@ you're about to edit: diet trims transport, not understanding.
 that prevents data loss, security, accessibility, anything explicitly requested.
 
 Always on once installed. Deactivate: "stop chisle" / "normal mode".
+
+## Scratch output
+
+Keep generated evidence, builds, browser captures and temporary tooling under
+the gitignored `.agent-artifacts` directory, never loose in the repository root.
+Use `.agent-artifacts\tmp` for `TEMP`, `TMP` and `TMPDIR`; never set these to
+`$PWD`. From the repository root, before running scratch-producing commands:
+
+```powershell
+$scratch = New-Item -ItemType Directory -Force .agent-artifacts\tmp
+$env:TEMP = $scratch.FullName
+$env:TMP = $scratch.FullName
+$env:TMPDIR = $scratch.FullName
+$env:NODE_COMPILE_CACHE = (New-Item -ItemType Directory -Force .agent-artifacts\node-compile-cache).FullName
+```
+
+Put explicit test results under `.agent-artifacts\test-results` and ad hoc
+build output under `.agent-artifacts\builds`. Keep ordinary project `bin`/`obj`
+and frontend `node_modules` in their expected locations. `.wf` contains live
+application state, not disposable scratch; never clean it or database volumes
+as part of artifact cleanup. Preserve useful evidence when relocating old
+output, and check process ownership before removing stale IPC directories.

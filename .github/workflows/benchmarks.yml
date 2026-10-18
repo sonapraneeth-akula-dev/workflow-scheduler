@@ -39,7 +39,8 @@ jobs:
         if: always()
         with:
           name: live-fanout-${{ matrix.os }}
-          path: BenchmarkDotNet.Artifacts/live-fanout
+          path: .agent-artifacts/BenchmarkDotNet.Artifacts/live-fanout
+          include-hidden-files: true
           if-no-files-found: error
   dispatch-latency:
     strategy:
@@ -72,7 +73,8 @@ jobs:
         if: always()
         with:
           name: dispatch-latency-${{ matrix.os }}
-          path: BenchmarkDotNet.Artifacts/dispatch-latency
+          path: .agent-artifacts/BenchmarkDotNet.Artifacts/dispatch-latency
+          include-hidden-files: true
           if-no-files-found: error
   run-query:
     strategy:
@@ -105,7 +107,8 @@ jobs:
         if: always()
         with:
           name: run-query-benchmarks-${{ matrix.os }}
-          path: BenchmarkDotNet.Artifacts/run-query
+          path: .agent-artifacts/BenchmarkDotNet.Artifacts/run-query
+          include-hidden-files: true
           if-no-files-found: error
   regression:
     strategy:

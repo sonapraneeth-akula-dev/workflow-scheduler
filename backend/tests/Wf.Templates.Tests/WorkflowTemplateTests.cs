@@ -14,7 +14,7 @@ public sealed class WorkflowTemplateTests(ITestOutputHelper output)
     public async Task WorkflowTemplatePackageInstallsGeneratesAndRunsProductionWorkflow()
     {
         var repository = FindRepository();
-        var root = Path.Combine(repository, ".wft" + Guid.NewGuid().ToString("N")[..8]);
+        var root = Path.Combine(repository, ".agent-artifacts", "tests", "templates", Guid.NewGuid().ToString("N")[..8]);
         var feed = Path.Combine(root, "f");
         var hive = Path.Combine(root, "h");
         var generated = Path.Combine(root, "g");

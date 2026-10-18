@@ -67,7 +67,7 @@ public static class TriggerApiBench
         string? schema = null;
         var external = Environment.GetEnvironmentVariable("WF_TEST_POSTGRES");
         var databaseMode = external is null ? "isolated postgres:17-alpine container" : "WF_TEST_POSTGRES unique schema";
-        var blobRoot = Path.GetFullPath(Path.Combine("BenchmarkDotNet.Artifacts", $"trigger-api-{Guid.NewGuid():N}"));
+        var blobRoot = Path.GetFullPath(Path.Combine(".agent-artifacts", "BenchmarkDotNet.Artifacts", $"trigger-api-{Guid.NewGuid():N}"));
         try
         {
             if (external is null)

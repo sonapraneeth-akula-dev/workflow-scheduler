@@ -16,7 +16,7 @@ internal sealed class ValidatorFixture : IDisposable
         await ManifestWriter.WriteAsync(workflow, Console.OpenStandardOutput());
         """;
 
-    internal string Root { get; } = Path.Combine(Repository, ".validator-tests", Guid.NewGuid().ToString("N"));
+    internal string Root { get; } = Path.Combine(Repository, ".agent-artifacts", "tests", "validator", Guid.NewGuid().ToString("N"));
     internal string Source => Path.Combine(Root, "workflow");
     internal string Script => Path.Combine(Source, "workflow.cs");
     internal string CacheDirectory => Path.Combine(Root, "cache");

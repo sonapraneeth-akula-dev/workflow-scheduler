@@ -65,7 +65,7 @@ public static class LiveFanoutBench
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         ConsoleCancelEventHandler cancel = (_, args) => { args.Cancel = true; timeout.Cancel(); };
         Console.CancelKeyPress += cancel;
-        var directory = Path.GetFullPath(Path.Combine("BenchmarkDotNet.Artifacts", "live-fanout", Guid.NewGuid().ToString("N")));
+        var directory = Path.GetFullPath(Path.Combine(".agent-artifacts", "BenchmarkDotNet.Artifacts", "live-fanout", Guid.NewGuid().ToString("N")));
         Directory.CreateDirectory(directory);
         try
         {

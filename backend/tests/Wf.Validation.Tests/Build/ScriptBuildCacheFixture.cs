@@ -27,7 +27,7 @@ internal sealed class ScriptBuildCacheFixture : IDisposable
 
     internal string Root { get; } = Path.Combine(
         Environment.GetEnvironmentVariable("WF_SCRIPT_BUILD_TEST_DIRECTORY") ??
-        Path.Combine(FindRepository(), ".script-build-cache-tests"), Guid.NewGuid().ToString("N"));
+        Path.Combine(FindRepository(), ".agent-artifacts", "tests", "script-build-cache"), Guid.NewGuid().ToString("N"));
     internal string Source => Path.Combine(Root, "source");
     internal string Script => Path.Combine(Source, "workflow.cs");
     internal string CacheDirectory => Path.Combine(Root, "cache");

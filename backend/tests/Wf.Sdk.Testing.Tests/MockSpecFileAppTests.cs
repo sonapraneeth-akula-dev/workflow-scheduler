@@ -243,7 +243,7 @@ public sealed class MockSpecFileAppTests(MockSpecFileAppFixture fixture)
 
 public sealed class MockSpecFileAppFixture : IAsyncLifetime
 {
-    public string Root { get; } = Path.Combine(FindRepository(), ".wft42112", Guid.NewGuid().ToString("N"));
+    public string Root { get; } = Path.Combine(FindRepository(), ".agent-artifacts", "tests", "mock-spec", Guid.NewGuid().ToString("N"));
     public string Source => Path.Combine(Root, "source with spaces");
     public string Script => Path.Combine(Source, "mock workflow.cs");
     public ScriptBuildCache Cache => new(Path.Combine(Root, "cache"), Path.Combine(Root, "artifacts"));

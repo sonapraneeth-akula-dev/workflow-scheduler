@@ -1,3 +1,4 @@
+using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Running;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -93,7 +94,8 @@ for (var index = 0; index < args.Length; index++)
     else
         metricsPath = args[index];
 }
-var summaries = BenchmarkSwitcher.FromAssembly(typeof(DescribeBenchmarks).Assembly).Run(benchmarkArgs.ToArray());
+var summaries = BenchmarkSwitcher.FromAssembly(typeof(DescribeBenchmarks).Assembly).Run(benchmarkArgs.ToArray(),
+    DefaultConfig.Instance.WithArtifactsPath(Path.Combine(".agent-artifacts", "BenchmarkDotNet.Artifacts")));
 var reports = summaries.SelectMany(s => s.Reports).ToArray();
 if (reports.Length == 0 || reports.Any(r => r.ResultStatistics is null))
 {
@@ -141,7 +143,7 @@ if (engineReports.Length == 1)
         Console.Error.WriteLine(error);
     passed &= errors.IsEmpty;
     Console.WriteLine($"Node Ready-to-terminal: p95={metrics.NodeP95Nanoseconds / 1_000_000:F3} ms; samples={metrics.NodeSamples}");
-    metricsPath ??= Path.Combine("BenchmarkDotNet.Artifacts", "engine-metrics.json");
+    metricsPath ??= Path.Combine(".agent-artifacts", "BenchmarkDotNet.Artifacts", "engine-metrics.json");
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(metricsPath))!);
     File.WriteAllText(metricsPath, JsonSerializer.Serialize(metrics, new JsonSerializerOptions { WriteIndented = true }));
 }
