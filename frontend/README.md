@@ -293,6 +293,11 @@ instructions available to assistive technology. Selecting a node opens its
 inspector beside the graph on wide screens and below it on smaller screens.
 Status, reconnect/permission failures, placement, queue and lineage information
 remain visible rather than being removed to achieve a denser layout.
+Graph columns are vertically centered; branch/join connections use separate
+ordered attachment points. Skipped-column dependencies travel above the cards
+instead of crossing an intermediate node. High-contrast two-pixel strokes and
+fixed ten-pixel arrowheads end four pixels before the target border, keeping
+the direction visible without clipping under the card.
 
 Graph nodes use a single roving tab stop: Up/Down move within a column, Left/Right
 choose the nearest row in the next column, and Home/End reach the first/last node.

@@ -30,9 +30,60 @@ describe("stable dependency graph layout", () => {
       const from = layout.nodes.find((node) => node.key === edge.from)!
       const to = layout.nodes.find((node) => node.key === edge.to)!
       expect(from.style.left + from.style.width).toBeLessThan(to.style.left)
-      expect(edge.path).toMatch(/^M\d+ \d+ C\d+ \d+ \d+ \d+ \d+ \d+$/)
+      expect(edge.path).toMatch(/^M\d+ \d+ [CH]/)
+      expect(edge.path).not.toMatch(/NaN|Infinity/)
     }
     expect(layoutGraph(input)).toEqual(layout)
+  })
+
+  it("centers branch columns and uses distinct, vertically ordered split/join ports", () => {
+    const layout = layoutGraph([
+      { key: "start", dependencies: [] },
+      { key: "upper", dependencies: [{ node: "start", when: "OnSuccess" }] },
+      { key: "lower", dependencies: [{ node: "start", when: "OnSuccess" }] },
+      {
+        key: "join",
+        dependencies: [
+          { node: "lower", when: "OnSuccess" },
+          { node: "upper", when: "OnSuccess" },
+        ],
+      },
+    ])
+    const [start, upper, lower, join] = layout.nodes
+    expect(start!.style.top).toBe(join!.style.top)
+    expect(start!.style.top).toBe((upper!.style.top + lower!.style.top) / 2)
+    const exits = layout.edges
+      .filter((edge) => edge.from === "start")
+      .map((edge) => Number(/^M\d+ (\d+)/.exec(edge.path)![1]))
+    expect(exits[0]).toBeLessThan(exits[1]!)
+    const arrivals = layout.edges
+      .filter((edge) => edge.to === "join")
+      .map((edge) => Number(/ (\d+)$/.exec(edge.path)![1]))
+    expect(arrivals[0]).toBeGreaterThan(arrivals[1]!)
+    for (const edge of layout.edges) {
+      const target = layout.nodes.find((node) => node.key === edge.to)!
+      expect(edge.path).toMatch(new RegExp(` ${target.style.left - 4} \\d+$`))
+    }
+  })
+
+  it("routes skipped-column dependencies above intermediate cards rather than through them", () => {
+    const layout = layoutGraph([
+      { key: "start", dependencies: [] },
+      { key: "middle", dependencies: [{ node: "start", when: "OnSuccess" }] },
+      {
+        key: "join",
+        dependencies: [
+          { node: "start", when: "Always" },
+          { node: "middle", when: "OnSuccess" },
+        ],
+      },
+    ])
+    const direct = layout.edges.find(
+      (edge) => edge.from === "start" && edge.to === "join"
+    )!
+    expect(direct.path).toMatch(/^M\d+ \d+ H\d+ V8 H\d+ V\d+ H\d+$/)
+    expect(layout.nodes.every((node) => node.style.top >= 16)).toBe(true)
+    expect(layout.edges).toHaveLength(3)
   })
 
   it("positions 200 connected nodes without overlap and includes every edge", () => {

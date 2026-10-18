@@ -77,20 +77,63 @@ export function layoutGraph(definitions: readonly Definition[]): GraphLayout {
       },
     }
   })
+  const tallest = Math.max(0, ...rows.values())
+  for (const node of nodes)
+    node.style.top += (tallest - rows.get(node.rank)!) * 42
   const byKey = new Map(nodes.map((node) => [node.key, node]))
+  function ports(key: string, neighbours: readonly string[]) {
+    const node = byKey.get(key)!
+    return new Map(
+      [...neighbours]
+        .sort((left, right) => {
+          const a = byKey.get(left)!
+          const b = byKey.get(right)!
+          // Skipped-column edges leave/enter at the top before using the outer rail.
+          return (
+            Number(Math.abs(b.rank - node.rank) > 1) -
+              Number(Math.abs(a.rank - node.rank) > 1) ||
+            a.style.top - b.style.top ||
+            a.style.left - b.style.left
+          )
+        })
+        .map((neighbour, index) => [
+          neighbour,
+          Math.round(
+            node.style.top +
+              (node.style.height * (index + 1)) / (neighbours.length + 1)
+          ),
+        ])
+    )
+  }
+  const exits = new Map(
+    nodes.map((node) => [node.key, ports(node.key, children.get(node.key)!)])
+  )
+  const entrances = new Map(
+    definitions.map((node) => [
+      node.key,
+      ports(
+        node.key,
+        node.dependencies.map((dependency) => dependency.node)
+      ),
+    ])
+  )
   const edges = definitions.flatMap((node) =>
     node.dependencies.map((dependency): GraphEdge => {
-      const from = byKey.get(dependency.node)!.style
-      const to = byKey.get(node.key)!.style
-      const x = from.left + from.width,
-        y = from.top + from.height / 2
-      const endX = to.left,
-        endY = to.top + to.height / 2
+      const from = byKey.get(dependency.node)!
+      const to = byKey.get(node.key)!
+      const x = from.style.left + from.style.width,
+        y = exits.get(dependency.node)!.get(node.key)!
+      const endX = to.style.left - 4,
+        endY = entrances.get(node.key)!.get(dependency.node)!
+      const bend = Math.min(24, (endX - x) / 2)
       return {
         from: dependency.node,
         to: node.key,
         when: dependency.when,
-        path: `M${x} ${y} C${x + 24} ${y} ${endX - 24} ${endY} ${endX} ${endY}`,
+        path:
+          to.rank - from.rank > 1
+            ? `M${x} ${y} H${x + 8} V8 H${endX - 12} V${endY} H${endX}`
+            : `M${x} ${y} C${x + bend} ${y} ${endX - bend} ${endY} ${endX} ${endY}`,
       }
     })
   )

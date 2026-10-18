@@ -27,18 +27,20 @@ const GraphEdges = memo(function GraphEdges({
       width={layout.width}
       height={layout.height}
       aria-hidden="true"
-      className="pointer-events-none absolute top-0 left-0 text-muted-foreground will-change-transform"
+      className="pointer-events-none absolute top-0 left-0 text-primary will-change-transform"
     >
       <defs>
         <marker
           id={marker}
-          markerWidth="8"
-          markerHeight="8"
-          refX="7"
-          refY="4"
+          viewBox="0 0 10 10"
+          markerUnits="userSpaceOnUse"
+          markerWidth="10"
+          markerHeight="10"
+          refX="10"
+          refY="5"
           orient="auto"
         >
-          <path d="M0 0 L8 4 L0 8 Z" fill="currentColor" />
+          <path d="M0 0 L10 5 L0 10 Z" fill="currentColor" />
         </marker>
       </defs>
       {layout.edges.map((edge) => (
@@ -48,7 +50,7 @@ const GraphEdges = memo(function GraphEdges({
           d={edge.path}
           fill="none"
           stroke="currentColor"
-          strokeWidth="1.5"
+          strokeWidth="2"
           strokeDasharray={
             edge.when === "Always"
               ? "6 3"

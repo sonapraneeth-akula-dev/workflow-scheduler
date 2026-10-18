@@ -104,6 +104,19 @@ const run: RunSnapshot = {
 describe("live graph rendering", () => {
   beforeEach(() => vi.clearAllMocks())
 
+  it("uses fixed-size, fully aligned arrowheads and stronger semantic strokes", () => {
+    const { container } = render(<RunGraph plan={plan} run={run} />)
+    const marker = container.querySelector("marker")!
+    expect(marker).toHaveAttribute("markerUnits", "userSpaceOnUse")
+    expect(marker).toHaveAttribute("viewBox", "0 0 10 10")
+    expect(marker).toHaveAttribute("refX", "10")
+    expect(marker).toHaveAttribute("markerWidth", "10")
+    const edge = container.querySelector("[data-graph-edge]")!
+    expect(edge).toHaveAttribute("stroke-width", "2")
+    expect(edge).toHaveAttribute("marker-end", `url(#${marker.id})`)
+    expect(edge).toHaveAttribute("stroke-dasharray", "6 3")
+  })
+
   it("preserves layout, edges and node DOM identity across live frame batches", () => {
     const { rerender, container } = render(<RunGraph plan={plan} run={run} />)
     const node = screen.getByRole("button", { name: "finish: Running" })
