@@ -22,6 +22,9 @@ import { QueuedBanner } from "@/features/runs/QueuedBanner"
 import { ReportIndex } from "@/features/reports/ReportIndex"
 import { useRun } from "@/lib/live/useRun"
 
+const runTabClassName =
+  "inline-flex h-10 shrink-0 items-center justify-center border-b-2 border-transparent px-4 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring data-[state=active]:border-primary data-[state=active]:bg-secondary data-[state=active]:font-semibold data-[state=active]:text-secondary-foreground"
+
 export const Route = createFileRoute("/runs/$id")({
   params: { parse: (params) => ({ id: z.uuid().parse(params.id) }) },
   component: RunDetail,
@@ -142,48 +145,30 @@ function RunDetail() {
             active={run.status <= 1}
           />
           <RunLineage run={run} />
-          <Tabs.Root defaultValue="graph" className="min-w-0 space-y-4">
-            <Tabs.List aria-label="Run views" className="flex flex-wrap gap-2">
-              <Tabs.Trigger
-                value="graph"
-                className="rounded border px-3 py-2 data-[state=active]:bg-muted"
-              >
+          <Tabs.Root defaultValue="graph" className="min-w-0 space-y-3">
+            <Tabs.List
+              aria-label="Run views"
+              className="flex w-full min-w-0 flex-nowrap gap-1 overflow-x-auto border-b bg-card p-1"
+            >
+              <Tabs.Trigger value="graph" className={runTabClassName}>
                 Graph
               </Tabs.Trigger>
-              <Tabs.Trigger
-                value="timeline"
-                className="rounded border px-3 py-2 data-[state=active]:bg-muted"
-              >
+              <Tabs.Trigger value="timeline" className={runTabClassName}>
                 Timeline
               </Tabs.Trigger>
-              <Tabs.Trigger
-                value="metrics"
-                className="rounded border px-3 py-2 data-[state=active]:bg-muted"
-              >
+              <Tabs.Trigger value="metrics" className={runTabClassName}>
                 Metrics
               </Tabs.Trigger>
-              <Tabs.Trigger
-                value="logs"
-                className="rounded border px-3 py-2 data-[state=active]:bg-muted"
-              >
+              <Tabs.Trigger value="logs" className={runTabClassName}>
                 Logs
               </Tabs.Trigger>
-              <Tabs.Trigger
-                value="outputs"
-                className="rounded border px-3 py-2 data-[state=active]:bg-muted"
-              >
+              <Tabs.Trigger value="outputs" className={runTabClassName}>
                 Outputs
               </Tabs.Trigger>
-              <Tabs.Trigger
-                value="reports"
-                className="rounded border px-3 py-2 data-[state=active]:bg-muted"
-              >
+              <Tabs.Trigger value="reports" className={runTabClassName}>
                 Reports
               </Tabs.Trigger>
-              <Tabs.Trigger
-                value="events"
-                className="rounded border px-3 py-2 data-[state=active]:bg-muted"
-              >
+              <Tabs.Trigger value="events" className={runTabClassName}>
                 System Events
               </Tabs.Trigger>
             </Tabs.List>

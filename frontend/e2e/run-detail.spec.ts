@@ -1,4 +1,12 @@
+import AxeBuilder from "@axe-core/playwright"
 import { expect, test, type Page } from "@playwright/test"
+
+test.use({
+  launchOptions: {
+    // Preserve native Firefox reload history (microsoft/playwright#22640).
+    firefoxUserPrefs: { "fission.webContentIsolationStrategy": 1 },
+  },
+})
 
 async function openListedRun(page: Page) {
   await page.goto("/runs?status=Succeeded")
@@ -106,6 +114,125 @@ test("direct-entry Back replaces the run with Runs instead of leaving the app or
 })
 
 for (const colorScheme of ["light", "dark"] as const) {
+  for (const width of [320, 2000]) {
+    test(`${colorScheme} run tabs clearly select one square view without wrapping at ${width}px`, async ({
+      page,
+    }, testInfo) => {
+      await page.emulateMedia({ colorScheme })
+      await page.setViewportSize({ width, height: 1000 })
+      await openListedRun(page)
+      const historyIndex = await page.evaluate(() => history.state.__TSR_index)
+      const tabs = page.getByRole("tablist", { name: "Run views" })
+      expect((await tabs.boundingBox())!.height).toBeLessThanOrEqual(70)
+      const rows = await tabs
+        .getByRole("tab")
+        .evaluateAll((elements) =>
+          elements.map((element) => element.getBoundingClientRect().y)
+        )
+      expect(new Set(rows).size).toBe(1)
+      const originalNode = await page
+        .locator("[data-graph-node]")
+        .first()
+        .elementHandle()
+      for (const name of [
+        "Timeline",
+        "Metrics",
+        "Logs",
+        "Outputs",
+        "Reports",
+        "System Events",
+        "Graph",
+      ]) {
+        const tab = tabs.getByRole("tab", { name, exact: true })
+        await tab.click()
+        await expect(tabs.getByRole("tab", { selected: true })).toHaveText(name)
+        await expect(page.getByRole("tabpanel")).toHaveAttribute(
+          "aria-labelledby",
+          (await tab.getAttribute("id"))!
+        )
+        await expect(tab).toHaveCSS("border-bottom-width", "2px")
+        await expect(tab).toHaveCSS("font-weight", "600")
+        await expect(tab).toHaveCSS("border-top-left-radius", "0px")
+        await expect(tab).toHaveCSS("border-bottom-right-radius", "0px")
+      }
+      expect(await originalNode!.evaluate((node) => node.isConnected)).toBe(
+        true
+      )
+      const graphTab = tabs.getByRole("tab", { name: "Graph", exact: true })
+      const inactive = tabs.getByRole("tab", { name: "Timeline", exact: true })
+      expect(
+        await graphTab.evaluate(
+          (element) => getComputedStyle(element).backgroundColor
+        )
+      ).not.toBe(
+        await inactive.evaluate(
+          (element) => getComputedStyle(element).backgroundColor
+        )
+      )
+      await graphTab.focus()
+      await page.keyboard.press("Tab")
+      await page.keyboard.press("Shift+Tab")
+      await expect(graphTab).toBeFocused()
+      await page.keyboard.press("ArrowRight")
+      await expect(inactive).toBeFocused()
+      await expect(inactive).toHaveAttribute("aria-selected", "true")
+      await page.keyboard.press("End")
+      await expect(
+        tabs.getByRole("tab", { name: "System Events", exact: true })
+      ).toBeFocused()
+      await page.keyboard.press("Home")
+      await expect(graphTab).toBeFocused()
+      await expect(graphTab).toHaveAttribute("aria-selected", "true")
+      await expect(graphTab).toHaveCSS("outline-width", "2px")
+      await page.locator("[data-graph-node]").first().click()
+      await expect(
+        page.getByRole("region", { name: /^Selected node / })
+      ).toBeVisible()
+      const rounded = await page.locator("main").evaluate((main) =>
+        Array.from(main.querySelectorAll("*"))
+          .filter((element) => {
+            const style = getComputedStyle(element)
+            return (
+              element.getClientRects().length &&
+              [
+                style.borderTopLeftRadius,
+                style.borderTopRightRadius,
+                style.borderBottomRightRadius,
+                style.borderBottomLeftRadius,
+              ].some((radius) => parseFloat(radius) !== 0)
+            )
+          })
+          .map((element) => `${element.tagName}.${element.className}`)
+      )
+      expect(rounded).toEqual([])
+      const audit = await new AxeBuilder({ page })
+        .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+        .analyze()
+      expect(
+        audit.violations.map(({ id, nodes }) => ({
+          id,
+          nodes: nodes.map(({ target, failureSummary }) => ({
+            target,
+            failureSummary,
+          })),
+        }))
+      ).toEqual([])
+      expect(await page.evaluate(() => history.state.__TSR_index)).toBe(
+        historyIndex
+      )
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth)
+      ).toBeLessThanOrEqual(width)
+      await page.evaluate(() => window.scrollTo(0, 0))
+      await page.screenshot({
+        path: testInfo.outputPath(`run-detail-${colorScheme}-${width}.png`),
+        fullPage: true,
+      })
+      await page.getByRole("button", { name: "Back to previous page" }).click()
+      await expect(page).toHaveURL(/\/runs\?status=Succeeded$/)
+    })
+  }
+
   test(`${colorScheme} dependency arrows stay outside every node and stop before the target border`, async ({
     page,
   }, testInfo) => {

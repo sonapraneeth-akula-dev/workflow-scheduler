@@ -297,6 +297,12 @@ The run header's Back button returns through application history, preserving
 the originating listing/history URL and its filters, including after a reload.
 A direct entry with no previous application location replaces the run with
 Runs instead of sending the user outside the app or creating a return loop.
+Run-view tabs use a single horizontally scrollable rail instead of wrapping
+into multiple rows on narrow screens. The active view has a strong underline,
+tinted background and semibold label; hover and keyboard focus stay distinct
+in both themes. Radix tab semantics, arrow/Home/End navigation and the mounted
+live graph are retained. Tab selection does not add history entries, so Back
+still returns to the page that opened the run. All corners remain square.
 Graph columns are vertically centered; branch/join connections use separate
 ordered attachment points. Skipped-column dependencies travel above the cards
 instead of crossing an intermediate node. High-contrast two-pixel strokes and
