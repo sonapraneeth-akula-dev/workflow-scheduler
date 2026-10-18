@@ -5,7 +5,13 @@ import { ErrorNotice } from "@/components/ErrorNotice"
 import { accessDenied, getTeams } from "./api"
 import type { RunSearch } from "@/features/runs/search"
 
-export function TeamList({ runSearch }: { runSearch?: RunSearch }) {
+export function TeamList({
+  destination = "catalog",
+  search,
+}: {
+  destination?: "catalog" | "runs" | "services"
+  search?: RunSearch
+}) {
   const query = useQuery({
     queryKey: ["catalog", "teams"],
     queryFn: ({ signal }) => getTeams(signal),
@@ -32,24 +38,20 @@ export function TeamList({ runSearch }: { runSearch?: RunSearch }) {
         <ul className="grid gap-4 sm:grid-cols-2">
           {teams.map((team) => (
             <li key={team.team} className="min-w-0 rounded-md border p-4">
-              {runSearch ? (
-                <Link
-                  to="/t/$team/runs"
-                  params={{ team: team.team }}
-                  search={runSearch}
-                  className="break-words underline"
-                >
-                  {team.team}
-                </Link>
-              ) : (
-                <Link
-                  to="/t/$team"
-                  params={{ team: team.team }}
-                  className="break-words underline"
-                >
-                  {team.team}
-                </Link>
-              )}
+              <Link
+                to={
+                  destination === "services"
+                    ? "/t/$team/services"
+                    : destination === "runs"
+                      ? "/t/$team/runs"
+                      : "/t/$team"
+                }
+                params={{ team: team.team }}
+                search={search ?? {}}
+                className="break-words underline"
+              >
+                {team.team}
+              </Link>
               <p>
                 {team.typeCount} permitted{" "}
                 {team.typeCount === 1 ? "type" : "types"}

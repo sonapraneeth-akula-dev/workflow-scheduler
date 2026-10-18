@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
+import { ServiceHistoryNav } from "./ServiceHistoryNav"
 
 export function AppHeader({ children }: { children: ReactNode }) {
   return (
@@ -25,6 +26,7 @@ export function AppHeader({ children }: { children: ReactNode }) {
           >
             Runs
           </Link>
+          <ServiceHistoryNav />
           <Link
             to="/machines"
             className="inline-flex min-h-10 items-center px-2"

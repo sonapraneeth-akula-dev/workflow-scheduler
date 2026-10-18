@@ -10,10 +10,11 @@ using Wf.ControlPlane.Auth;
 
 namespace Wf.ControlPlane.Api;
 
-public static class CatalogEndpoints
+public static partial class CatalogEndpoints
 {
     public static IEndpointRouteBuilder MapCatalogEndpoints(this IEndpointRouteBuilder endpoints)
     {
+        MapServiceHistory(endpoints);
         endpoints.MapGet("/api/v1/teams/{team}/types", ReadTypes).RequireAuthorization()
             .Produces<CatalogType[]>().ProducesProblem(400).ProducesProblem(404)
             .AddOpenApiOperationTransformer((operation, _, _) =>
@@ -106,6 +107,12 @@ public static class CatalogEndpoints
         catch (ArgumentException error) { return Results.Problem(statusCode: 400, title: "Invalid catalogue filter", detail: error.Message); }
         if (filter.UsePresentationDefaults && filter.Team is null)
             return Results.Problem(statusCode: 400, title: "Invalid catalogue filter", detail: "Presentation defaults require an exact team filter.");
+        return Results.Ok(await ReadWorkflowPage(context, source, authorization, filter));
+    }
+
+    private static async Task<CatalogWorkflowPage> ReadWorkflowPage(HttpContext context, NpgsqlDataSource source,
+        IAuthorizationService authorization, CatalogQuery filter)
+    {
         var teams = await VisibleTeams(context, source, authorization, filter.Team);
         var types = teams.SelectMany(team => team.Types
             .Where(type => filter.Type is null || type.Name == filter.Type)
@@ -149,7 +156,7 @@ public static class CatalogEndpoints
         }
         var more = items.Count > filter.Limit;
         if (more) items.RemoveAt(items.Count - 1);
-        return Results.Ok(new CatalogWorkflowPage(items, more ? CatalogQuery.Cursor(items[^1].Id) : null));
+        return new(items, more ? CatalogQuery.Cursor(items[^1].Id) : null);
     }
 
     private static async Task<List<TeamRegistry>> VisibleTeams(HttpContext context, NpgsqlDataSource source,

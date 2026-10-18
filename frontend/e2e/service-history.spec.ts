@@ -1,0 +1,109 @@
+import AxeBuilder from "@axe-core/playwright"
+import { expect, test } from "@playwright/test"
+
+test("navbar discovers team/type service views and restores format, window and daily run drill-down", async ({
+  page,
+}) => {
+  await page.goto("/")
+  await page.getByRole("button", { name: "Service history menu" }).click()
+  const menu = page.getByRole("menu", {
+    name: "Service history teams",
+    exact: true,
+  })
+  const teamItem = menu
+    .locator('[role="menuitem"][aria-haspopup="menu"]')
+    .first()
+  await expect(teamItem).toBeVisible()
+  const team = (await teamItem.textContent())!.trim()
+  await teamItem.focus()
+  await page.keyboard.press("ArrowRight")
+  const types = page.getByRole("menu", {
+    name: `${team} workflow types`,
+    exact: true,
+  })
+  await expect(types).toBeVisible()
+  const typeItem = types
+    .getByRole("menuitem")
+    .filter({
+      hasNotText:
+        /^(All workflow types|Loading types\.\.\.|No workflow types)$/,
+    })
+    .first()
+  await expect(typeItem).toBeVisible()
+  const type = (await typeItem.textContent())!.trim()
+  await typeItem.click()
+  await expect(
+    page.getByRole("heading", { name: `${team} service history`, exact: true })
+  ).toBeVisible()
+  await expect(page.getByLabel("Workflow type")).toHaveValue(type)
+  await page.getByLabel("Health window").selectOption("7d")
+  const group = page.getByRole("region", { name: type, exact: true })
+  await expect(group).toBeVisible()
+  const card = group.locator("ul > li").first()
+  await expect(card.getByRole("link", { name: "Run history" })).toBeVisible()
+  await expect(card.locator("[data-health-day]")).toHaveCount(7)
+  await page.getByRole("radio", { name: "Table format" }).click()
+  await expect(group.getByRole("table")).toBeVisible()
+  expect(new URL(page.url()).searchParams.get("view")).toBe("table")
+  await page.reload()
+  await expect(page.getByLabel("Health window")).toHaveValue("7d")
+  await expect(group.getByRole("table")).toBeVisible()
+  await page.getByLabel("Health window").selectOption("90d")
+  const row = group.getByRole("table").locator("tbody tr").first()
+  await expect(row.locator("[data-health-day]")).toHaveCount(90)
+  await row.getByText("Daily health details").click()
+  await row.locator("details a").first().click()
+  const url = new URL(page.url())
+  expect(url.pathname).toBe(`/t/${encodeURIComponent(team)}/runs`)
+  expect(url.searchParams.get("workflowId")).toMatch(
+    new RegExp(`^${team}/${type}/`)
+  )
+  expect(url.searchParams.get("from")).toMatch(/T00:00:00Z$/)
+  expect(url.searchParams.get("to")).toMatch(/T00:00:00.000Z$/)
+  await expect(
+    page.getByRole("heading", { name: `${team} runs`, exact: true })
+  ).toBeVisible()
+})
+
+for (const width of [320, 768, 2000]) {
+  for (const colorScheme of ["light", "dark"] as const) {
+    test(`${colorScheme} service cards and table remain accessible without page overflow at ${width}px`, async ({
+      page,
+    }, info) => {
+      await page.emulateMedia({ colorScheme })
+      await page.setViewportSize({ width, height: 1000 })
+      await page.goto("/service-history")
+      await page
+        .locator('main a[href^="/t/"][href*="/services"]')
+        .first()
+        .click()
+      await expect(page.getByRole("img").first()).toBeVisible()
+      await page.getByLabel("Health window").selectOption("30d")
+      const bars = page.locator('main [role="img"]')
+      await expect(bars.first().locator("[data-health-day]")).toHaveCount(30)
+      for (const view of ["cards", "table"]) {
+        if (view === "table")
+          await page.getByRole("radio", { name: "Table format" }).click()
+        await expect(
+          page.getByRole("link", { name: "Run history" }).first()
+        ).toBeVisible()
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth)
+        ).toBeLessThanOrEqual(width)
+        const refresh = page.getByRole("button", {
+          name: "Refresh service history",
+        })
+        await expect(refresh).toBeEnabled()
+        await expect(refresh).toHaveCSS("opacity", "1")
+        const audit = await new AxeBuilder({ page })
+          .withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"])
+          .analyze()
+        expect(audit.violations).toEqual([])
+        await page.screenshot({
+          path: info.outputPath(`services-${view}-${colorScheme}-${width}.png`),
+          fullPage: true,
+        })
+      }
+    })
+  }
+}

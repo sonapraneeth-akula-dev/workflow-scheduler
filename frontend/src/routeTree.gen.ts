@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as MachinesRouteImport } from './routes/machines'
+import { Route as ServiceHistoryRouteImport } from './routes/service-history'
 import { Route as AdminAuditRouteImport } from './routes/admin.audit'
 import { Route as MachinesIdRouteImport } from './routes/machines.$id'
 import { Route as RunsIndexRouteImport } from './routes/runs/index'
@@ -23,6 +24,7 @@ import { Route as RunsIdEventsRouteImport } from './routes/runs.$id_.events'
 import { Route as SeriesIdCompareRouteImport } from './routes/series.$id_.compare'
 import { Route as TTeamIndexRouteImport } from './routes/t/$team/index'
 import { Route as TTeamRunsRouteImport } from './routes/t.$team.runs'
+import { Route as TTeamServicesRouteImport } from './routes/t.$team.services'
 import { Route as RunsIdReportsReportIdRouteImport } from './routes/runs.$id_.reports.$reportId'
 import { Route as TTeamTypeIndexRouteImport } from './routes/t/$team/$type/index'
 import { Route as TTeamTypeWWfHistoryRouteImport } from './routes/t.$team.$type.w.$wf.history'
@@ -39,6 +41,11 @@ const IndexRoute = IndexRouteImport.update({
 const MachinesRoute = MachinesRouteImport.update({
   id: '/machines',
   path: '/machines',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ServiceHistoryRoute = ServiceHistoryRouteImport.update({
+  id: '/service-history',
+  path: '/service-history',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminAuditRoute = AdminAuditRouteImport.update({
@@ -101,6 +108,11 @@ const TTeamRunsRoute = TTeamRunsRouteImport.update({
   path: '/t/$team/runs',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TTeamServicesRoute = TTeamServicesRouteImport.update({
+  id: '/t/$team/services',
+  path: '/t/$team/services',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RunsIdReportsReportIdRoute = RunsIdReportsReportIdRouteImport.update({
   id: '/runs/$id_/reports/$reportId',
   path: '/runs/$id/reports/$reportId',
@@ -142,6 +154,7 @@ const TTeamTypeWWfVersionsVTasksTaskKeyRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/machines': typeof MachinesRouteWithChildren
+  '/service-history': typeof ServiceHistoryRoute
   '/admin/audit': typeof AdminAuditRoute
   '/machines/$id': typeof MachinesIdRoute
   '/runs/$id': typeof RunsIdRoute
@@ -153,6 +166,7 @@ export interface FileRoutesByFullPath {
   '/runs/$id/events': typeof RunsIdEventsRoute
   '/series/$id/compare': typeof SeriesIdCompareRoute
   '/t/$team/runs': typeof TTeamRunsRoute
+  '/t/$team/services': typeof TTeamServicesRoute
   '/t/$team/': typeof TTeamIndexRoute
   '/runs/$id/reports/$reportId': typeof RunsIdReportsReportIdRoute
   '/t/$team/$type/': typeof TTeamTypeIndexRoute
@@ -165,6 +179,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/machines': typeof MachinesRouteWithChildren
+  '/service-history': typeof ServiceHistoryRoute
   '/admin/audit': typeof AdminAuditRoute
   '/machines/$id': typeof MachinesIdRoute
   '/runs/$id': typeof RunsIdRoute
@@ -176,6 +191,7 @@ export interface FileRoutesByTo {
   '/runs/$id/events': typeof RunsIdEventsRoute
   '/series/$id/compare': typeof SeriesIdCompareRoute
   '/t/$team/runs': typeof TTeamRunsRoute
+  '/t/$team/services': typeof TTeamServicesRoute
   '/t/$team': typeof TTeamIndexRoute
   '/runs/$id/reports/$reportId': typeof RunsIdReportsReportIdRoute
   '/t/$team/$type': typeof TTeamTypeIndexRoute
@@ -188,6 +204,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/machines': typeof MachinesRouteWithChildren
+  '/service-history': typeof ServiceHistoryRoute
   '/admin/audit': typeof AdminAuditRoute
   '/machines/$id': typeof MachinesIdRoute
   '/runs/$id': typeof RunsIdRoute
@@ -199,6 +216,7 @@ export interface FileRoutesById {
   '/runs/$id_/events': typeof RunsIdEventsRoute
   '/series/$id_/compare': typeof SeriesIdCompareRoute
   '/t/$team/runs': typeof TTeamRunsRoute
+  '/t/$team/services': typeof TTeamServicesRoute
   '/t/$team/': typeof TTeamIndexRoute
   '/runs/$id_/reports/$reportId': typeof RunsIdReportsReportIdRoute
   '/t/$team/$type/': typeof TTeamTypeIndexRoute
@@ -213,6 +231,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/machines'
+    | '/service-history'
     | '/admin/audit'
     | '/machines/$id'
     | '/runs/$id'
@@ -224,6 +243,7 @@ export interface FileRouteTypes {
     | '/runs/$id/events'
     | '/series/$id/compare'
     | '/t/$team/runs'
+    | '/t/$team/services'
     | '/t/$team/'
     | '/runs/$id/reports/$reportId'
     | '/t/$team/$type/'
@@ -236,6 +256,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/machines'
+    | '/service-history'
     | '/admin/audit'
     | '/machines/$id'
     | '/runs/$id'
@@ -247,6 +268,7 @@ export interface FileRouteTypes {
     | '/runs/$id/events'
     | '/series/$id/compare'
     | '/t/$team/runs'
+    | '/t/$team/services'
     | '/t/$team'
     | '/runs/$id/reports/$reportId'
     | '/t/$team/$type'
@@ -258,6 +280,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/machines'
+    | '/service-history'
     | '/admin/audit'
     | '/machines/$id'
     | '/runs/$id'
@@ -269,6 +292,7 @@ export interface FileRouteTypes {
     | '/runs/$id_/events'
     | '/series/$id_/compare'
     | '/t/$team/runs'
+    | '/t/$team/services'
     | '/t/$team/'
     | '/runs/$id_/reports/$reportId'
     | '/t/$team/$type/'
@@ -282,6 +306,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   MachinesRoute: typeof MachinesRouteWithChildren
+  ServiceHistoryRoute: typeof ServiceHistoryRoute
   AdminAuditRoute: typeof AdminAuditRoute
   RunsIdRoute: typeof RunsIdRoute
   SchedulesIdRoute: typeof SchedulesIdRoute
@@ -292,6 +317,7 @@ export interface RootRouteChildren {
   RunsIdEventsRoute: typeof RunsIdEventsRoute
   SeriesIdCompareRoute: typeof SeriesIdCompareRoute
   TTeamRunsRoute: typeof TTeamRunsRoute
+  TTeamServicesRoute: typeof TTeamServicesRoute
   TTeamIndexRoute: typeof TTeamIndexRoute
   RunsIdReportsReportIdRoute: typeof RunsIdReportsReportIdRoute
   TTeamTypeIndexRoute: typeof TTeamTypeIndexRoute
@@ -313,6 +339,13 @@ declare module '@tanstack/react-router' {
       path: '/machines'
       fullPath: '/machines'
       preLoaderRoute: typeof MachinesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/service-history': {
+      id: '/service-history'
+      path: '/service-history'
+      fullPath: '/service-history'
+      preLoaderRoute: typeof ServiceHistoryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/audit': {
@@ -399,6 +432,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TTeamRunsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/t/$team/services': {
+      id: '/t/$team/services'
+      path: '/t/$team/services'
+      fullPath: '/t/$team/services'
+      preLoaderRoute: typeof TTeamServicesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/runs/$id_/reports/$reportId': {
       id: '/runs/$id_/reports/$reportId'
       path: '/runs/$id/reports/$reportId'
@@ -482,6 +522,7 @@ const TTeamTypeWWfVersionsRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   MachinesRoute: MachinesRouteWithChildren,
+  ServiceHistoryRoute: ServiceHistoryRoute,
   AdminAuditRoute: AdminAuditRoute,
   RunsIdRoute: RunsIdRoute,
   SchedulesIdRoute: SchedulesIdRoute,
@@ -492,6 +533,7 @@ const rootRouteChildren: RootRouteChildren = {
   RunsIdEventsRoute: RunsIdEventsRoute,
   SeriesIdCompareRoute: SeriesIdCompareRoute,
   TTeamRunsRoute: TTeamRunsRoute,
+  TTeamServicesRoute: TTeamServicesRoute,
   TTeamIndexRoute: TTeamIndexRoute,
   RunsIdReportsReportIdRoute: RunsIdReportsReportIdRoute,
   TTeamTypeIndexRoute: TTeamTypeIndexRoute,

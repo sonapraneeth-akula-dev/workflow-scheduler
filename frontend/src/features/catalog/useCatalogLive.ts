@@ -15,7 +15,13 @@ export function useCatalogLive(team: string, type: string) {
       queryKey: ["catalog", "team", team],
       predicate: (query) =>
         query.queryKey[3] === "types" ||
-        (query.queryKey[3] === "workflows" && query.queryKey[4] === type),
+        query.queryKey[3] === "filter-types" ||
+        (["workflows", "filter-workflows"].includes(
+          String(query.queryKey[3])
+        ) &&
+          query.queryKey[4] === type) ||
+        (query.queryKey[3] === "service-history" &&
+          (!query.queryKey[4] || query.queryKey[4] === type)),
     })
   }, [client, team, type, delta, resync, error, status])
   return { snapshot, retry }

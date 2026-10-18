@@ -112,7 +112,7 @@ describe("catalogue views", () => {
   })
 
   it("links team run choices to their own scoped listing", async () => {
-    show(<TeamList runSearch={{ status: "Failed" }} />)
+    show(<TeamList destination="runs" search={{ status: "Failed" }} />)
     expect(await screen.findByRole("link", { name: "team" })).toHaveAttribute(
       "href",
       "/t/team/runs"

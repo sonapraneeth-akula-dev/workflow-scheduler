@@ -14,6 +14,7 @@ public sealed class CatalogTests
     [InlineData(typeof(CatalogTeam[]))]
     [InlineData(typeof(CatalogType[]))]
     [InlineData(typeof(CatalogWorkflowPage))]
+    [InlineData(typeof(ServiceHistoryPage))]
     public void Catalog_response_contracts_export_without_optional_immutable_array_defaults(Type type) =>
         Assert.NotNull(JsonSchemaExporter.GetJsonSchemaAsNode(JsonSerializerOptions.Default.GetTypeInfo(type)));
 

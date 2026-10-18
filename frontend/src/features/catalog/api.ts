@@ -61,7 +61,7 @@ const types = z.array(
   })
 )
 const version = z.object({ id: z.uuid(), semVer: z.string().min(1) })
-const workflow = z.object({
+export const catalogWorkflowSchema = z.object({
   id: z.string().min(1),
   team: name,
   type: name,
@@ -83,12 +83,12 @@ const workflow = z.object({
     .nullable(),
 })
 const workflowPage = z.object({
-  items: z.array(workflow).max(50),
+  items: z.array(catalogWorkflowSchema).max(50),
   nextCursor: z.string().min(1).nullable(),
 })
 
 export type CatalogType = z.infer<typeof types>[number]
-export type CatalogWorkflow = z.infer<typeof workflow>
+export type CatalogWorkflow = z.infer<typeof catalogWorkflowSchema>
 export type RunStatus = z.infer<typeof statusSchema>
 export type Presentation = z.infer<typeof presentationSchema>
 

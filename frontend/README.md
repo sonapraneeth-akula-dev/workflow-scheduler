@@ -57,6 +57,26 @@ the existing Entra logout and live-subscription cleanup. Explicit Development
 authentication has no interactive session: sign-out is disabled with an
 explanation rather than pretending to log out the fixed local identity.
 
+## Service history
+
+Service history is available from the navbar's team/type dropdown, populated
+from the authorized catalogue rather than hardcoded team names. `/service-history`
+chooses a team; `/t/<team>/services` restores `type`, `window` and `view` from its
+URL. Workflow cards are grouped by `metadata.type`; a button group switches to
+a striped semantic table without refetching the same health data. Both views
+show name, latest run status/time, retained run history and a daily health bar.
+The shared catalogue's keyset paging, access checks and live invalidation apply.
+
+`GET /api/v1/service-history?team=...&type=...&window=30d` aggregates actual runs
+across every series and manual trigger for each authorized workflow in that
+bounded page. Windows are 7/30/90 UTC run days, including today; empty days
+remain neutral. A failed/timed-out outcome takes precedence over aborted, active
+and succeeded states within a day. Active-only periods never imply success.
+Daily details expose exact status counts and links to the corresponding team
+run listing with explicit inclusive/exclusive UTC boundaries. The success
+percentage counts completed runs only; it is not an uptime measurement.
+Transient failures remain visible with retry; revoked access hides cached data.
+
 ## Run locally
 
 Requires Bun 1.4.2, Node 24 and the running control plane. Start the backend with

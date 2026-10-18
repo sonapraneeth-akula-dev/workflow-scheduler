@@ -34,6 +34,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/service-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Authorized, team-scoped workflow cards and daily run counts across all series and manual runs. window=7d|30d|90d includes the current UTC run day; from inclusive, to exclusive. Each day records all named run statuses; no runs means empty counts, not success. Uses the same exact team/type, keyset cursor and metadata filters as the workflow catalogue. No payloads or capabilities. */
+        get: {
+            parameters: {
+                query: {
+                    team: string;
+                    type?: string;
+                    window?: string;
+                    cursor?: string;
+                    limit?: number;
+                    "meta.*"?: string;
+                    defaults?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ServiceHistoryPage"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/teams/{team}/types": {
         parameters: {
             query?: never;
@@ -6111,6 +6191,21 @@ export interface components {
             /** Format: int64 */
             runs: number | string;
         };
+        ServiceHistoryPage: {
+            team: string;
+            type: null | string;
+            window: string;
+            /** Format: date */
+            from: string;
+            /** Format: date */
+            to: string;
+            items: components["schemas"]["ServiceWorkflow"][];
+            nextCursor: null | string;
+        };
+        ServiceWorkflow: {
+            workflow: components["schemas"]["CatalogWorkflow"];
+            days: components["schemas"]["WorkflowHealthDay"][];
+        };
         SubscriptionPage: {
             items: components["schemas"]["SubscriptionRow"][];
             nextCursor: null | string;
@@ -6315,6 +6410,13 @@ export interface components {
         };
         /** @enum {string} */
         VariableType: "String" | "Int" | "Long" | "Double" | "Bool" | "Enum" | "StringList" | "Duration" | "Secret";
+        WorkflowHealthDay: {
+            /** Format: date */
+            day: string;
+            counts: {
+                [key: string]: number | string;
+            };
+        };
         WorkflowMetadata: {
             type: string;
             values: {

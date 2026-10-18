@@ -28,7 +28,7 @@ function RunSearch() {
       <p>
         Choose a team to see its runs. Teams are never mixed in one listing.
       </p>
-      <TeamList runSearch={search} />
+      <TeamList destination="runs" search={search} />
     </>
   )
 }
