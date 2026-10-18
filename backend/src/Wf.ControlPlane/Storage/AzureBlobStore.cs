@@ -60,6 +60,12 @@ public sealed class AzureBlobStore : IBlobStore
         await BlobStreaming.CopyVerifiedAsync(input, destination, content, maximumBytes, cancellationToken);
     }
 
+    public async Task DeleteLiveLogAsync(string key, CancellationToken cancellationToken = default)
+    {
+        if (!BlobContent.IsLiveLogKey(key)) throw new ArgumentException("Use a canonical ephemeral log key.", nameof(key));
+        await container.DeleteBlobIfExistsAsync(key, DeleteSnapshotsOption.IncludeSnapshots, cancellationToken: cancellationToken);
+    }
+
     public async IAsyncEnumerable<Guid> ResourceRunsAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {

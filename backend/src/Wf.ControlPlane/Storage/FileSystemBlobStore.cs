@@ -59,6 +59,14 @@ public sealed class FileSystemBlobStore
         await BlobStreaming.CopyVerifiedAsync(input, destination, content, maximumBytes, cancellationToken);
     }
 
+    public Task DeleteLiveLogAsync(string key, CancellationToken cancellationToken = default)
+    {
+        if (!BlobContent.IsLiveLogKey(key)) throw new ArgumentException("Use a canonical ephemeral log key.", nameof(key));
+        cancellationToken.ThrowIfCancellationRequested();
+        File.Delete(GetPath(new(BlobKind.Logs, new string('0', 64), 0, key)));
+        return Task.CompletedTask;
+    }
+
     public async IAsyncEnumerable<Guid> ResourceRunsAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {

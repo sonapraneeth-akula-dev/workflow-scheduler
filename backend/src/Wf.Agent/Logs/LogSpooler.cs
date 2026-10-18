@@ -52,6 +52,7 @@ public sealed class LogSpooler : IAsyncDisposable
     public string DirectoryPath { get; }
     public Task TimerCompletion => timer;
     internal bool IsComplete => Volatile.Read(ref index).Complete;
+    internal event Action<long, LogFrame>? Committed;
 
     public LogSpooler(string root, AttemptRef attempt, SecretMasker masker, LogSpoolOptions? options = null,
         TimeProvider? timeProvider = null)
@@ -136,7 +137,8 @@ public sealed class LogSpooler : IAsyncDisposable
             if (hostSequence != 0 && hostSequence <= index.HostRecordSequence) return;
             if (index.Complete) throw new InvalidOperationException("The log attempt has completed.");
             var at = producedAt ?? clock.GetUtcNow();
-            var frame = JsonSerializer.SerializeToUtf8Bytes(new LogFrame(at, stream, level, masker.Redact(text)),
+            var accepted = new LogFrame(at, stream, level, masker.Redact(text));
+            var frame = JsonSerializer.SerializeToUtf8Bytes(accepted,
                 LogJsonContext.Default.LogFrame);
             var bytes = new byte[frame.Length + 1];
             frame.CopyTo(bytes, 0);
@@ -160,6 +162,7 @@ public sealed class LogSpooler : IAsyncDisposable
                 Save();
                 ApplyCap(checkGlobalQuota: index.NextChunk != previousChunk);
                 Save();
+                Committed?.Invoke(index.Lines, accepted);
                 return;
             }
             var offset = 0;
@@ -190,6 +193,7 @@ public sealed class LogSpooler : IAsyncDisposable
                 index.Bytes > Math.Min(options.MaxBytes, options.SpoolQuotaBytes))
                 ApplyCap(checkGlobalQuota: index.NextChunk != previousChunk);
             Save();
+            Committed?.Invoke(index.Lines, accepted);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         { backgroundError = error; throw; }

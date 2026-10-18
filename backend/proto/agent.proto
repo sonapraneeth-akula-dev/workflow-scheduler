@@ -26,6 +26,8 @@ message AgentMessage {
     CheckpointSaved checkpoint_saved = 18;
     TaskProgress task_progress = 19;
     DrainCompleted drain_completed = 20;
+    // Ephemeral, sequence=0; never journaled or cumulatively acknowledged.
+    LiveLogBatch live_logs = 21;
   }
 }
 
@@ -41,6 +43,7 @@ message ControlMessage {
     NotLeader not_leader = 14;
     ReservationFence reservation_fence = 15;
     Calibrate calibrate = 16;
+    MirrorLogs mirror_logs = 17;
   }
 }
 
@@ -59,6 +62,30 @@ message Hello {
   string pool = 12;
   bool supports_calibration_commands = 13;
   bool supports_drain_commands = 14;
+  bool supports_log_mirroring = 15;
+}
+
+message MirrorLogs {
+  AttemptRef task = 1;
+  bool on = 2;
+  uint64 reservation_epoch = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+message LiveLogRecord {
+  uint64 line = 1;
+  google.protobuf.Timestamp at = 2;
+  string stream = 3;
+  string level = 4;
+  string text = 5;
+}
+
+message LiveLogBatch {
+  AttemptRef task = 1;
+  uint64 reservation_epoch = 2;
+  repeated LiveLogRecord records = 3;
+  // Buffer overflow is observable; clients recover from the durable log index.
+  bool gap = 4;
 }
 
 message Calibrate {

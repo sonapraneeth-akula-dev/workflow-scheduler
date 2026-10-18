@@ -1,5 +1,6 @@
 import { z } from "zod"
 import type { components } from "@/lib/api/schema"
+import { logIdentitySchema } from "./logs"
 
 const id = z.uuid()
 const timestamp = z.iso.datetime({ offset: true })
@@ -106,14 +107,25 @@ const summary = z.object({
 
 export const resourceSchema = z
   .object({
-    scope: z.enum(["run", "type", "series", "team", "machines"]),
+    scope: z.enum(["run", "type", "series", "team", "machines", "logs"]),
     id: z
       .string()
       .min(1)
-      .max(1024)
+      .max(2048)
       .regex(/^[^\p{Cc}]+$/u),
   })
   .transform((resource, context) => {
+    if (
+      resource.scope === "logs"
+        ? !logIdentitySchema.safeParse(resource.id).success
+        : resource.id.length > 1024
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Invalid live resource identity.",
+      })
+      return z.NEVER
+    }
     if (resource.scope !== "run" && resource.scope !== "series") return resource
     const parsed = id.safeParse(resource.id)
     if (

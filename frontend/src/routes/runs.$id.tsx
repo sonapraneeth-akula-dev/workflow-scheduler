@@ -10,6 +10,7 @@ import { Timeline } from "@/features/runs/Timeline"
 import { SystemEvents } from "@/features/runs/SystemEvents"
 import { ResourceCharts } from "@/features/runs/ResourceCharts"
 import { TaskOutputs } from "@/features/runs/TaskOutputs"
+import { TaskLogs } from "@/features/runs/TaskLogs"
 import { QueuedBanner } from "@/features/runs/QueuedBanner"
 import { ReportIndex } from "@/features/reports/ReportIndex"
 import { useRun } from "@/lib/live/useRun"
@@ -105,6 +106,12 @@ function RunDetail() {
                 Metrics
               </Tabs.Trigger>
               <Tabs.Trigger
+                value="logs"
+                className="rounded border px-3 py-2 data-[state=active]:bg-muted"
+              >
+                Logs
+              </Tabs.Trigger>
+              <Tabs.Trigger
                 value="outputs"
                 className="rounded border px-3 py-2 data-[state=active]:bg-muted"
               >
@@ -141,6 +148,9 @@ function RunDetail() {
             </Tabs.Content>
             <Tabs.Content value="outputs" className="min-w-0">
               <TaskOutputs key={run.runId} runId={run.runId} />
+            </Tabs.Content>
+            <Tabs.Content value="logs" className="min-w-0">
+              <TaskLogs key={run.runId} runId={run.runId} />
             </Tabs.Content>
             <Tabs.Content value="events" className="min-w-0 space-y-4">
               <Link to="/runs/$id/events" params={{ id: run.runId }}>

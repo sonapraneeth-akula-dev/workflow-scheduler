@@ -99,7 +99,8 @@ public static class LogUploadEndpoints
         catch (Exception error) when (error is JsonException or ArgumentException) { return Results.StatusCode(400); }
     }
 
-    private static async Task<IResult> Upload(HttpContext context, string grant, BlobUploadGrants grants, IBlobStore blobs)
+    private static async Task<IResult> Upload(HttpContext context, string grant, BlobUploadGrants grants, IBlobStore blobs,
+        IServiceProvider services)
     {
         try
         {
@@ -109,6 +110,9 @@ public static class LogUploadEndpoints
             if (context.Request.ContentLength > content.SizeBytes) return Results.StatusCode(413);
             Limit(context, content.SizeBytes);
             await blobs.UploadAsync(content, context.Request.Body, context.RequestAborted);
+            if (content.Key.EndsWith("/index.json", StringComparison.Ordinal) &&
+                services.GetService<Wf.ControlPlane.Live.LiveLogRelay>() is { } logs)
+                await logs.IndexUploadedAsync(content.Key[..^"index.json".Length], context.RequestAborted);
             return Results.StatusCode(201);
         }
         catch (UnauthorizedAccessException) { return Results.StatusCode(403); }

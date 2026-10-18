@@ -68,6 +68,7 @@ builder.Services.AddSingleton<ResourceSamplingService>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<ResourceSamplingService>());
 builder.Services.AddSingleton<TaskHostPool>();
 builder.Services.AddSingleton<AgentLogService>();
+builder.Services.AddSingleton<AgentLogMirror>();
 builder.Services.AddSingleton(provider => new PackageCache(
     Path.GetFullPath(builder.Configuration["Agent:PackageCache"] ??
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wf-agent", "packages")),

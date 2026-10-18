@@ -3,7 +3,7 @@ import { accessToken } from "@/lib/auth/session"
 export interface LiveTransport {
   start(): Promise<void>
   stop(): Promise<void>
-  invoke(method: string, scope: string, id: string): Promise<unknown>
+  invoke(method: string, ...args: unknown[]): Promise<unknown>
   on(method: string, callback: (message: unknown) => unknown): void
   onclose(callback: (error?: Error) => void): void
   onreconnecting(callback: (error?: Error) => void): void

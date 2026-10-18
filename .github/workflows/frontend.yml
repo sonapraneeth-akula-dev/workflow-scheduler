@@ -63,6 +63,11 @@ jobs:
           WF_TRENDS_BROWSER: "true"
           WF_FRONTEND_ROOT: ${{ github.workspace }}/frontend
       - run: bun run test:e2e
+      - name: Check million-line attempt logs against the actual API and Chrome trace
+        run: dotnet test ../backend/tests/Wf.Integration.Tests --configuration Release --filter 'FullyQualifiedName~Logs_Chrome_trace_opens_one_million'
+        env:
+          WF_LOGS_BROWSER: "true"
+          WF_FRONTEND_ROOT: ${{ github.workspace }}/frontend
       - name: Check scoped dashboards and run drill-down against the actual API and PostgreSQL
         run: dotnet test ../backend/tests/Wf.Integration.Tests --configuration Release --filter 'FullyQualifiedName~Dashboard_browser_real_Postgres'
         env:
@@ -84,3 +89,9 @@ jobs:
         with:
           name: frontend-playwright-traces
           path: frontend/test-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-task-log-performance
+          path: .agent-artifacts/task-logs-*
+          if-no-files-found: ignore

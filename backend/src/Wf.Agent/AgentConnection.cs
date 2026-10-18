@@ -69,6 +69,7 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
         using var registration = new CancellationTokenSource(TimeSpan.FromSeconds(10), timeProvider);
         using var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, registration.Token);
         using var call = new AgentGateway.AgentGatewayClient(channel).Connect(cancellationToken: session.Token);
+        (commands as TaskCommands)?.ResetLogMirrors();
         var inventory = telemetry.CreateHello(options);
         var attempts = inventory.Inflight.Concat(outgoing.UnacknowledgedAttempts())
             .DistinctBy(task => (Guid.Parse(task.RunId), task.NodeKey, task.TaskKey, task.Attempt)).ToArray();
@@ -112,6 +113,11 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
                     {
                         outgoing.Enqueue(new AgentMessage { Heartbeat = telemetry.Sample() });
                         nextHeartbeat = timeProvider.GetUtcNow() + options.HeartbeatInterval;
+                        continue;
+                    }
+                    if (outgoing.TakeLogs() is { } logs)
+                    {
+                        await call.RequestStream.WriteAsync(logs, session.Token);
                         continue;
                     }
                     using var wait = CancellationTokenSource.CreateLinkedTokenSource(session.Token);

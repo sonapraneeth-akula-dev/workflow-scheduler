@@ -26,13 +26,15 @@ public sealed class AgentLogService : IAsyncDisposable
     private readonly ConcurrentDictionary<string, Capture> captures = new();
     private Exception? lastFailure;
     private int disposed;
+    private readonly AgentLogMirror? mirror;
 
     public Exception? LastFailure => Volatile.Read(ref lastFailure);
 
     public AgentLogService(AgentOptions options, TimeProvider clock, ILogger<AgentLogService> logger,
-        ILogger<LogChunkUploader> uploadLogger)
+        ILogger<LogChunkUploader> uploadLogger, AgentLogMirror? mirror = null)
     {
         this.options = options; this.clock = clock; this.logger = logger;
+        this.mirror = mirror;
         http.Timeout = TimeSpan.FromSeconds(30);
         uploader = new(http, clock, uploadLogger);
     }
@@ -42,7 +44,11 @@ public sealed class AgentLogService : IAsyncDisposable
         ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
         var directory = Path.Combine(Path.GetFullPath(options.LogSpoolDirectory),
             LogIndex.PrefixFor(dispatch.Task).Replace('/', Path.DirectorySeparatorChar));
-        if (resume && captures.TryGetValue(directory, out var existing)) return existing;
+        if (resume && captures.TryGetValue(directory, out var existing))
+        {
+            existing.ReservationEpoch = dispatch.ReservationEpoch;
+            return existing;
+        }
         var cap = dispatch.Limits?.MaxLogBytes is > 0
             ? (long)Math.Min(dispatch.Limits.MaxLogBytes, (ulong)options.MaxLogBytes) : options.MaxLogBytes;
         var spool = new LogSpooler(options.LogSpoolDirectory, dispatch.Task, new SecretMasker([]),
@@ -52,7 +58,7 @@ public sealed class AgentLogService : IAsyncDisposable
             var grant = dispatch.Grants.SingleOrDefault(grant => grant.Kind == "logs");
             if (grant is not null)
                 LogSpooler.DurableWrite(Path.Combine(spool.DirectoryPath, "upload-grant.pb"), grant.ToByteArray());
-            return Track(spool, grant);
+            return Track(spool, grant, dispatch.Task, dispatch.ReservationEpoch);
         }
         catch { await spool.DisposeAsync(); throw; }
     }
@@ -86,13 +92,19 @@ public sealed class AgentLogService : IAsyncDisposable
             }
             var grantPath = Path.Combine(directory, "upload-grant.pb");
             var grant = File.Exists(grantPath) ? UploadGrant.Parser.ParseFrom(File.ReadAllBytes(grantPath)) : null;
-            Track(spool, grant);
+            Track(spool, grant, attempt, 0);
         }
     }
 
-    private Capture Track(LogSpooler spool, UploadGrant? grant)
+    public void Mirror(MirrorLogs command) =>
+        (mirror ?? throw new NotSupportedException("Live log mirroring is not configured.")).Set(command);
+
+    public void ResetMirrors() => mirror?.Reset();
+
+    private Capture Track(LogSpooler spool, UploadGrant? grant, AttemptRef task, ulong epoch)
     {
-        var capture = new Capture(spool, this);
+        var capture = new Capture(spool, this) { ReservationEpoch = epoch };
+        spool.Committed += (line, frame) => mirror?.Append(task, capture.ReservationEpoch, line, frame);
         if (spool.IsComplete) capture.Closed.TrySetResult();
         if (!captures.TryAdd(spool.DirectoryPath, capture))
             throw new InvalidOperationException("Attempt log capture already exists.");
@@ -147,6 +159,7 @@ public sealed class AgentLogService : IAsyncDisposable
 
     public sealed class Capture(LogSpooler spool, AgentLogService owner)
     {
+        internal ulong ReservationEpoch { get; set; }
         internal LogSpooler Spool { get; } = spool;
         internal TaskCompletionSource Closed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Task Upload { get; internal set; } = Task.CompletedTask;

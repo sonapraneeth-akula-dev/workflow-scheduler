@@ -1,4 +1,5 @@
 import { createConnection, type LiveTransport } from "./connection"
+import { parseLogBatch, type LiveLogBatch, type LiveLogRecord } from "./logs"
 import {
   parseListDelta,
   parseReportAdded,
@@ -22,6 +23,7 @@ export interface LiveSnapshot {
   readonly delta: LiveDelta | null
   readonly resyncVersion: number
   readonly reportVersion: number
+  readonly logDelta?: LiveLogBatch | null
 }
 
 export interface LiveScope {
@@ -39,6 +41,8 @@ interface Entry {
   runEvents: RunDelta["events"]
   items: Map<string, ListDelta["items"][number]>
   pendingDelta: LiveDelta | undefined
+  logRecords: LiveLogRecord[]
+  pendingLogs?: LiveLogBatch
 }
 
 export class LiveSubscriptions {
@@ -108,6 +112,7 @@ export class LiveSubscriptions {
         runEvents: [],
         items: new Map(),
         pendingDelta: undefined,
+        logRecords: [],
       }
       this.entries.set(key, entry)
     }
@@ -222,7 +227,8 @@ export class LiveSubscriptions {
     for (const [key, previous] of this.subscribed) {
       if (this.entries.get(key) !== previous) {
         const { scope, id } = previous.snapshot.resource
-        await connection.invoke("Unsubscribe", scope, id)
+        if (scope === "logs") await connection.invoke("MirrorLogs", id, false)
+        else await connection.invoke("Unsubscribe", scope, id)
         this.subscribed.delete(key)
       }
     }
@@ -230,7 +236,9 @@ export class LiveSubscriptions {
       if (entry.blocked || this.subscribed.get(key) === entry) continue
       const { scope, id } = entry.snapshot.resource
       const error = parseSubscription(
-        await connection.invoke("Subscribe", scope, id)
+        await (scope === "logs"
+          ? connection.invoke("MirrorLogs", id, true)
+          : connection.invoke("Subscribe", scope, id))
       )
       if (generation !== this.generation) return
       if (!error) this.subscribed.set(key, entry)
@@ -249,6 +257,40 @@ export class LiveSubscriptions {
 
   private attach(connection: LiveTransport): void {
     let draining = false
+    connection.on("LogBatch", (value) =>
+      this.receive(connection, () => {
+        const delta = parseLogBatch(value)
+        const entry = this.entries.get(`logs:${delta.id}`)
+        if (!entry || entry.blocked || entry.snapshot.status === "error") return
+        if (
+          entry.logRecords.length + delta.records.length > 1024 ||
+          [...entry.logRecords, ...delta.records].reduce(
+            (bytes, record) => bytes + record.text.length * 2,
+            0
+          ) >
+            2 * 1024 * 1024
+        ) {
+          entry.logRecords = []
+          entry.pendingLogs = undefined
+          this.update(entry, {
+            logDelta: null,
+            resyncVersion: entry.snapshot.resyncVersion + 1,
+          })
+          return
+        }
+        const previous = entry.logRecords.at(-1)
+        entry.logRecords.push(...delta.records)
+        entry.pendingLogs = {
+          ...delta,
+          gap:
+            delta.gap ||
+            entry.pendingLogs?.gap === true ||
+            (previous !== undefined &&
+              delta.records[0]?.line !== previous.line + 1),
+        }
+        this.markDirty(entry)
+      })
+    )
     connection.on("Reconnect", (value) => {
       let acknowledged = false
       this.receive(connection, () => {
@@ -401,6 +443,16 @@ export class LiveSubscriptions {
     entry: Entry,
     patch: Partial<Omit<LiveSnapshot, "resource">>
   ): void {
+    if (
+      patch.delta === null ||
+      patch.status === "error" ||
+      patch.status === "reconnecting" ||
+      patch.status === "disconnected"
+    ) {
+      entry.logRecords = []
+      entry.pendingLogs = undefined
+      patch = { ...patch, logDelta: null }
+    }
     entry.snapshot = { ...entry.snapshot, ...patch }
     this.markDirty(entry)
   }
@@ -412,6 +464,14 @@ export class LiveSubscriptions {
       const pending = [...this.dirty]
       this.dirty.clear()
       for (const current of pending) {
+        if (current.pendingLogs) {
+          current.snapshot = {
+            ...current.snapshot,
+            logDelta: { ...current.pendingLogs, records: current.logRecords },
+          }
+          current.pendingLogs = undefined
+          current.logRecords = []
+        }
         if (current.pendingDelta) {
           const delta = current.pendingDelta
           current.snapshot = {

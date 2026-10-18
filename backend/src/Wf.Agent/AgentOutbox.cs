@@ -17,6 +17,7 @@ public sealed class AgentOutbox : IDisposable
     private ulong reservationEpoch;
     private readonly ResultJournal? journal;
     private readonly Dictionary<ulong, TaskCompletionSource> checkpointWaiters = [];
+    private readonly Channel<LiveLogBatch> logs = Channel.CreateBounded<LiveLogBatch>(32);
     private bool disposed;
 
     public AgentOutbox(ResultJournal? journal = null)
@@ -36,6 +37,7 @@ public sealed class AgentOutbox : IDisposable
         ArgumentNullException.ThrowIfNull(hello);
         lock (gate)
         {
+            while (logs.Reader.TryRead(out _)) { }
             var next = pending.Count == 0 ? checked(sequence + 1) : pending.First().Key - 1;
             if (next > sequence)
             {
@@ -51,6 +53,34 @@ public sealed class AgentOutbox : IDisposable
     }
 
     public void Enqueue(AgentMessage message) => EnqueueCore(message);
+
+    internal bool TryPublishLogs(LiveLogBatch batch)
+    {
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (!logs.Writer.TryWrite(batch.Clone())) return false;
+            changed.Writer.TryWrite(true);
+            return true;
+        }
+    }
+
+    internal AgentMessage? TakeLogs()
+    {
+        lock (gate) return logs.Reader.TryRead(out var batch) ? new() { LiveLogs = batch } : null;
+    }
+
+    internal void DropLogs(AttemptRef? task = null)
+    {
+        lock (gate)
+        {
+            var retained = new List<LiveLogBatch>();
+            while (logs.Reader.TryRead(out var batch))
+                if (task is not null && !batch.Task.Equals(task)) retained.Add(batch);
+            foreach (var batch in retained)
+                if (!logs.Writer.TryWrite(batch)) throw new InvalidOperationException("Cannot restore the bounded live log queue.");
+        }
+    }
 
     public void PublishProgress(TaskProgress progress)
     {

@@ -7,6 +7,8 @@ using Wf.ControlPlane.Engine.Leadership;
 using Wf.ControlPlane.Engine.Reservations;
 using Wf.ControlPlane.Engine.Sweeper;
 using Wf.ControlPlane.Storage;
+using Wf.ControlPlane.Live;
+using Wf.Contracts.Logs;
 
 namespace Wf.ControlPlane.Engine.Agents;
 
@@ -17,7 +19,7 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
     ReservationLeaseService? reservations = null, CalibrationService? calibrations = null,
     Wf.ControlPlane.Engine.Checkpoints.CheckpointApplier? checkpoints = null,
     Wf.ControlPlane.Engine.Checkpoints.CheckpointUploadCapabilities? checkpointUploads = null,
-    AgentDrainService? drains = null)
+    AgentDrainService? drains = null, LiveLogRelay? liveLogs = null, LiveLogSink? logSink = null)
     : AgentGateway.AgentGatewayBase
 {
     public override async Task Connect(IAsyncStreamReader<AgentMessage> requestStream,
@@ -68,6 +70,13 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                     await foreach (var message in requestStream.ReadAllAsync(token))
                     {
                         CheckLeadership();
+                        if (message.LiveLogs is { } logs)
+                        {
+                            if (message.Sequence != 0) throw Invalid("Ephemeral log batches must not use the durable sequence.");
+                            if (logSink is null) throw new RpcException(new Status(StatusCode.Unimplemented, "Live logs are not configured."));
+                            await logSink.AcceptAsync(session, logs, token);
+                            continue;
+                        }
                         if (message.Sequence == 0) throw Invalid("Agent sequence must be positive.");
                         if (message.Sequence <= received)
                         {
@@ -140,6 +149,8 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                 var sentFences = new HashSet<ulong>();
                 var sentCalibrations = new HashSet<string>(StringComparer.Ordinal);
                 var sentDrains = new HashSet<string>(StringComparer.Ordinal);
+                var sentMirrors = new Dictionary<string, MirrorLogs>(StringComparer.Ordinal);
+                var nextMirrors = DateTimeOffset.MinValue;
                 try
                 {
                     while (!token.IsCancellationRequested)
@@ -160,6 +171,21 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                                         Sequence = checked((ulong)Interlocked.Increment(ref sequence)),
                                         LeaderEpoch = epoch, ReservationFence = fence
                                     }, token);
+                        if (first.Hello.SupportsLogMirroring && liveLogs is not null && DateTimeOffset.UtcNow >= nextMirrors)
+                        {
+                            foreach (var mirror in await liveLogs.PendingAsync(session, sentMirrors, token))
+                            {
+                                await responseStream.WriteAsync(new ControlMessage
+                                {
+                                    Sequence = checked((ulong)Interlocked.Increment(ref sequence)),
+                                    LeaderEpoch = epoch, MirrorLogs = mirror
+                                }, token);
+                                var id = LiveLogProtocol.Identity(mirror.Task);
+                                if (mirror.On) sentMirrors[id] = mirror;
+                                else sentMirrors.Remove(id);
+                            }
+                            nextMirrors = DateTimeOffset.UtcNow + LiveLogProtocol.BatchInterval;
+                        }
                         if (calibrations is not null)
                             foreach (var calibration in await calibrations.PendingAsync(session, token))
                                 if (sentCalibrations.Add(calibration.Id))

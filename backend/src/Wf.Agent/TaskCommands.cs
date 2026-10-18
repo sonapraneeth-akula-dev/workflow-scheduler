@@ -30,6 +30,7 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
 
     public IReadOnlyList<AttemptRef> Inflight => active.Values.Select(item => item.Dispatch.Task.Clone()).ToArray();
     public Task Failure => failure.Task;
+    internal void ResetLogMirrors() => logs?.ResetMirrors();
 
     public async Task RecoverAsync(CancellationToken stoppingToken)
     {
@@ -141,6 +142,9 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
     {
         switch (message.PayloadCase)
         {
+            case ControlMessage.PayloadOneofCase.MirrorLogs:
+                (logs ?? throw new NotSupportedException("Log capture is not configured.")).Mirror(message.MirrorLogs);
+                break;
             case ControlMessage.PayloadOneofCase.Dispatch:
                 Accept(message.Dispatch, cancellationToken);
                 break;

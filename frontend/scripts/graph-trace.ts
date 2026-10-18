@@ -19,7 +19,11 @@ const frameSchema = z.object({
   frameSeqId: z.number().int().nonnegative(),
 })
 
-export function analyzeGraphTrace(input: unknown, frameId: string) {
+export function analyzeGraphTrace(
+  input: unknown,
+  frameId: string,
+  prefix = "graph"
+) {
   const { traceEvents: events } = traceSchema.parse(input)
   const mark = (name: string) => {
     const matches = events.filter(
@@ -29,8 +33,8 @@ export function analyzeGraphTrace(input: unknown, frameId: string) {
       throw new Error(`Chrome trace requires exactly one ${name} mark.`)
     return matches[0]!.ts
   }
-  const start = mark("graph-load-start"),
-    end = mark("graph-load-end")
+  const start = mark(`${prefix}-load-start`),
+    end = mark(`${prefix}-load-end`)
   if (end - start < 1_000_000)
     throw new Error("Chrome graph load window is too short.")
   const owners = new Map<string, { pid: number; layerTreeId: number }>()

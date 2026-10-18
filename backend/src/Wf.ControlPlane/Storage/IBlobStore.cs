@@ -73,13 +73,22 @@ public sealed class BlobContent
             parts[2].Length == 64 && parts[2].All(char.IsAsciiHexDigit) &&
             uint.TryParse(parts[3], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var attempt) &&
             attempt is > 0 and <= 32767 && parts[3] == attempt.ToString(System.Globalization.CultureInfo.InvariantCulture) &&
-            (parts[4] == "index.json" || parts[4].Length is >= 13 and <= 17 && parts[4].EndsWith(".log.gz", StringComparison.Ordinal) &&
+            (parts[4] == "index.json" ||
+                parts[4].Length == 76 && parts[4].StartsWith("live-", StringComparison.Ordinal) &&
+                parts[4].EndsWith(".log.gz", StringComparison.Ordinal) && parts[4][5..69].All(char.IsAsciiHexDigit) ||
+                parts[4].Length is >= 13 and <= 17 && parts[4].EndsWith(".log.gz", StringComparison.Ordinal) &&
                 parts[4][..^7].All(char.IsAsciiDigit));
     }
+
+    internal static bool IsLiveLogKey(string? key) =>
+        key is not null && IsLogKey(key) && key[(key.LastIndexOf('/') + 1)..].StartsWith("live-", StringComparison.Ordinal);
 }
 
 public interface IBlobStore
 {
+    Task DeleteLiveLogAsync(string key, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Ephemeral log object cleanup is unsupported.");
+
     IAsyncEnumerable<Guid> RunObjectsAsync(CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("Run object retention is unsupported.");
     Task DeleteRunObjectsAsync(Guid runId, CancellationToken cancellationToken = default) =>

@@ -599,7 +599,11 @@ internal sealed class LogReceiver : IAsyncDisposable
     public string IndexPath(AttemptRef attempt) =>
         Path.Combine(BlobRoot, LogIndex.PrefixFor(attempt).Replace('/', Path.DirectorySeparatorChar), "index.json");
 
-    public LogIndex ReadIndex(AttemptRef attempt) => JsonSerializer.Deserialize(File.ReadAllBytes(IndexPath(attempt)), LogJsonContext.Default.LogIndex)!;
+    public LogIndex ReadIndex(AttemptRef attempt)
+    {
+        using var input = new FileStream(IndexPath(attempt), FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+        return JsonSerializer.Deserialize(input, LogJsonContext.Default.LogIndex)!;
+    }
 
     public async Task<UploadGrantResponse> GrantAsync(UploadGrant cap, string name, byte[] bytes)
     {

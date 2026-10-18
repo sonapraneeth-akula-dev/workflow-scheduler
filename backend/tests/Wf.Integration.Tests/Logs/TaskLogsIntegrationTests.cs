@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Concurrent;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Json;
@@ -23,6 +24,7 @@ using Wf.Contracts.Logs;
 using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Auth;
 using Wf.ControlPlane.Storage;
+using Wf.ControlPlane.Live;
 using Wf.Integration.Tests.Agents;
 
 namespace Wf.Integration.Tests.Logs;
@@ -433,7 +435,8 @@ public sealed class TaskLogsIntegrationTests(TaskLogsDatabase database) : IClass
 public sealed class TaskLogsDatabase : AgentDatabase
 {
     protected override IReadOnlyList<string> Migrations =>
-        ["0002_runs_events.sql", "0003_attempt_timers.sql", "0015_team_type_registry.sql", "0016_role_bindings.sql"];
+        ["0002_runs_events.sql", "0003_attempt_timers.sql", "0010_commands.sql",
+            "0015_team_type_registry.sql", "0016_role_bindings.sql"];
 }
 
 internal sealed class TaskLogsHost : IAsyncDisposable
@@ -442,30 +445,34 @@ internal sealed class TaskLogsHost : IAsyncDisposable
     private readonly string root;
     private readonly SymmetricSecurityKey signing;
     private readonly LogUploadCapabilities capabilities;
+    private readonly ConcurrentQueue<Exception> failures;
     public Guid Group { get; } = Guid.NewGuid();
     public HttpClient Client { get; }
     public TaskLogsStore Store { get; }
+    public IServiceProvider Services => app.Services;
 
     private TaskLogsHost(WebApplication app, string root, TaskLogsStore store, LogUploadCapabilities capabilities,
-        SymmetricSecurityKey signing)
+        SymmetricSecurityKey signing, ConcurrentQueue<Exception> failures)
     {
         this.app = app;
         this.root = root;
         Store = store;
         this.signing = signing;
         this.capabilities = capabilities;
+        this.failures = failures;
         Client = new() { BaseAddress = new(app.Services.GetRequiredService<IServer>().Features
             .Get<IServerAddressesFeature>()!.Addresses.Single()), Timeout = TimeSpan.FromSeconds(60) };
     }
 
-    public static async Task<TaskLogsHost> Start(NpgsqlDataSource source)
+    public static async Task<TaskLogsHost> Start(NpgsqlDataSource source, bool live = false, TaskLogsStore? sharedStore = null)
     {
         var root = Path.Combine(Directory.GetCurrentDirectory(), ".task-logs-work", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        var store = new TaskLogsStore(new FileSystemBlobStore(Path.Combine(root, "blobs"), RandomNumberGenerator.GetBytes(32)));
+        var store = sharedStore ?? new TaskLogsStore(new FileSystemBlobStore(Path.Combine(root, "blobs"), RandomNumberGenerator.GetBytes(32)));
         var capabilities = new LogUploadCapabilities(RandomNumberGenerator.GetBytes(32), TimeProvider.System);
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
+        builder.Logging.AddSimpleConsole().SetMinimumLevel(LogLevel.Warning);
         builder.WebHost.UseKestrel().UseUrls("http://127.0.0.1:0");
         builder.Services.AddSingleton(source);
         builder.Services.AddSingleton<IBlobStore>(store);
@@ -488,14 +495,28 @@ internal sealed class TaskLogsHost : IAsyncDisposable
             };
         });
         builder.Services.AddTeamAuthorization();
+        if (live) builder.Services.AddWorkflowLive().AddWorkflowLiveLogs();
         var app = builder.Build();
+        var failures = new ConcurrentQueue<Exception>();
+        app.Use(async (context, next) =>
+        {
+            try { await next(context); }
+            catch (Exception error) { failures.Enqueue(error); throw; }
+        });
         app.UseAuthentication();
         app.UseAuthorization();
         app.MapTaskLogsEndpoints();
         app.MapLogUploadEndpoints();
         app.MapOpenApi();
+        if (live) app.MapHub<LiveHub>(LiveHub.Path);
         await app.StartAsync(TestContext.Current.CancellationToken);
-        return new(app, root, store, capabilities, key);
+        if (live)
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            while (!app.Services.GetRequiredService<LiveLogRelay>().IsReady) await Task.Delay(10, timeout.Token);
+        }
+        return new(app, root, store, capabilities, key, failures);
     }
 
     public string Jwt(string identity = "user", string? role = null, bool overage = false)
@@ -524,7 +545,17 @@ internal sealed class TaskLogsHost : IAsyncDisposable
         return Send();
         async Task<HttpResponseMessage> Send()
         {
-            using (request) return await Client.SendAsync(request, completion, cancellationToken);
+            using (request)
+            {
+                var response = await Client.SendAsync(request, completion, cancellationToken);
+                if (response.StatusCode == HttpStatusCode.InternalServerError)
+                {
+                    response.Dispose();
+                    throw new InvalidOperationException("Unexpected HTTP 500 in the task log fixture.",
+                        failures.TryDequeue(out var error) ? error : null);
+                }
+                return response;
+            }
         }
     }
 
@@ -563,6 +594,8 @@ internal sealed class TaskLogsStore(FileSystemBlobStore inner) : IBlobStore, IDi
 
     public Task UploadAsync(BlobContent content, Stream source, CancellationToken cancellationToken = default) =>
         inner.UploadAsync(content, source, cancellationToken);
+    public Task DeleteLiveLogAsync(string key, CancellationToken cancellationToken = default) =>
+        inner.DeleteLiveLogAsync(key, cancellationToken);
     public async Task<Stream> OpenLogReadAsync(string key, long maximumBytes, CancellationToken cancellationToken = default)
     {
         Interlocked.Increment(ref Reads);

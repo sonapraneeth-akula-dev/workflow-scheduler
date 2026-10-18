@@ -49,6 +49,7 @@ public sealed class PublicApiContractTests
         Assert.True(observedPublic.Count >= 20, "The scan must include all existing catalogue/run/report/version capabilities.");
         foreach (var operation in new[] { ("GET", "/api/v1/permissions/{scope}"), ("GET", "/api/v1/audit"),
             ("GET", "/api/v1/runs/{id}/system-events"),
+            ("GET", "/api/v1/runs/{id}/tasks/{task}/{attempt}/logs"),
             ("GET", "/api/v1/series/{id}/trends"),
             ("GET", "/api/v1/runs/{id}/reports"), ("POST", "/api/v1/runs/{id}/rerun"),
             ("POST", "/api/v1/runs/placement-options"), ("POST", "/api/v1/runs/{id}/placement-options"),

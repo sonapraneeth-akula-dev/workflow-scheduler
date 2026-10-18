@@ -1,11 +1,12 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Wf.ControlPlane.Auth;
+using Wf.Contracts.Logs;
 
 namespace Wf.ControlPlane.Live;
 
 [Authorize]
-public sealed class LiveHub(IAuthorizationService authorization, LiveSubscriptions subscriptions) : Hub
+public sealed class LiveHub(IAuthorizationService authorization, LiveSubscriptions subscriptions, LiveLogRelay? logs = null) : Hub
 {
     public const string Path = "/hubs/live/v1";
 
@@ -33,12 +34,30 @@ public sealed class LiveHub(IAuthorizationService authorization, LiveSubscriptio
         ? throw new HubException("A supported scope and resource ID are required.")
         : subscriptions.UnsubscribeAsync(Context.ConnectionId, scope, id, Context.ConnectionAborted);
 
+    public async Task<LiveSubscriptionProblem?> MirrorLogs(string id, bool on)
+    {
+        if (logs is null) return new(503, "Live logs unavailable", "Log mirroring is not configured.");
+        if (on)
+        {
+            var problem = await Subscribe("logs", id);
+            if (problem is not null) return problem;
+        }
+        else await Unsubscribe("logs", id);
+        logs.InterestsChanged();
+        return null;
+    }
+
     public static string Group(string scope, string id) => scope + ":" +
         (scope is "run" or "series" && Guid.TryParseExact(id, "D", out var uuid) ? uuid.ToString("D") : id);
 
     private static TeamResource? Resource(string scope, string id)
     {
-        if (string.IsNullOrWhiteSpace(id) || id.Length > 1024 || id.Any(char.IsControl)) return null;
+        if (string.IsNullOrWhiteSpace(id) || id.Length > (scope == "logs" ? 2048 : 1024) || id.Any(char.IsControl)) return null;
+        if (scope == "logs")
+        {
+            try { return new(TeamResourceKind.Run, LiveLogProtocol.Identity(id).RunId); }
+            catch (ArgumentException) { return null; }
+        }
         TeamResourceKind? kind = scope switch
         {
             "team" => TeamResourceKind.Team,

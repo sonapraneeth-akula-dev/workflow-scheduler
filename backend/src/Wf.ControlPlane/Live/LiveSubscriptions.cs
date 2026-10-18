@@ -12,6 +12,9 @@ public sealed class LiveSubscriptions(IHubContext<LiveHub> hub, IServiceScopeFac
     private readonly ConcurrentDictionary<string, Connection> connections = new(StringComparer.Ordinal);
     private int draining;
 
+    public string[] LogInterests => connections.Values.SelectMany(connection => connection.Subscriptions.Values)
+        .Where(subscription => subscription.Scope == "logs").Select(subscription => subscription.Id).Distinct(StringComparer.Ordinal).ToArray();
+
     public bool HasAnySubscribers => !connections.IsEmpty &&
         connections.Values.Any(connection => !connection.Subscriptions.IsEmpty);
 

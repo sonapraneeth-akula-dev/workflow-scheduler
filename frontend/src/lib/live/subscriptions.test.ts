@@ -104,6 +104,72 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe("shared reference-counted live scopes", () => {
+  it("mirrors logs only for retained attempts and batches ordered records on one animation frame", async () => {
+    const { manager, transport } = setup()
+    const id = `${run}/work/task/2`
+    const first = manager.retain({ scope: "logs", id })
+    const second = manager.retain({ scope: "logs", id })
+    const otherScope = manager.retain(target)
+    await vi.waitFor(() => expect(first.getSnapshot().status).toBe("live"))
+    expect(transport.invoke).toHaveBeenCalledWith("MirrorLogs", id, true)
+    frame()
+    const record = (line: number) => ({
+      line,
+      at,
+      stream: "stdout",
+      level: "Information",
+      text: "masked ***",
+    })
+    transport.emit("LogBatch", { id, records: [record(1)], gap: false })
+    transport.emit("LogBatch", { id, records: [record(2)], gap: false })
+    expect(first.getSnapshot().logDelta).toBeUndefined()
+    frame()
+    expect(
+      first.getSnapshot().logDelta?.records.map((row) => row.line)
+    ).toEqual([1, 2])
+    expect(first.getSnapshot().delta).toBeNull()
+    first.release()
+    await Promise.resolve()
+    expect(transport.invoke).not.toHaveBeenCalledWith("MirrorLogs", id, false)
+    second.release()
+    await vi.waitFor(() =>
+      expect(transport.invoke).toHaveBeenCalledWith("MirrorLogs", id, false)
+    )
+    expect(transport.stop).not.toHaveBeenCalled()
+    otherScope.release()
+    await manager.reset()
+  })
+  it("exposes log buffer gaps and clears stale bytes on resync and reconnect", async () => {
+    const { manager, transport } = setup()
+    const id = `${run}/work/task/1`
+    const scope = manager.retain({ scope: "logs", id })
+    await vi.waitFor(() => expect(scope.getSnapshot().status).toBe("live"))
+    frame()
+    const record = (line: number) => ({
+      line,
+      at,
+      stream: "stdout",
+      level: "Information",
+      text: "masked",
+    })
+    transport.emit("LogBatch", { id, records: [record(1)], gap: false })
+    transport.emit("LogBatch", { id, records: [record(3)], gap: false })
+    frame()
+    expect(scope.getSnapshot().logDelta?.gap).toBe(true)
+    transport.emit("Resync", { scope: "logs", id })
+    expect(scope.getSnapshot().logDelta).toBeNull()
+    expect(scope.getSnapshot().resyncVersion).toBe(1)
+    await vi.waitFor(() =>
+      expect(
+        transport.invoke.mock.calls.filter((call) => call[0] === "MirrorLogs")
+      ).toHaveLength(2)
+    )
+    transport.emit("LogBatch", { id, records: [record(4)], gap: false })
+    frame()
+    transport.reconnecting?.()
+    expect(scope.getSnapshot().logDelta).toBeNull()
+    await manager.reset()
+  })
   it("batches report notifications separately without fabricating lifecycle sequence or resync", async () => {
     const { manager, transport } = setup()
     const scope = manager.retain(target)

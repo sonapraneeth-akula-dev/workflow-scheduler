@@ -1602,6 +1602,35 @@ fails `Placement` instead of silently using another worker. Re-run without
 `placement` keeps the source override; `singleMachine: false` explicitly removes
 it. Existing authorization remains unchanged; no login/logout flow is added.
 
+The run's **Logs** tab selects individual task attempts, including earlier
+retries. Masked stdout, stderr and context records load through the public
+Viewer-authorized indexed range API; the virtualized viewport mounts at most
+36 rows and fetches 400-record ranges, never an entire log. Home/End, explicit
+archive refresh, pause/resume and follow-tail controls remain keyboard accessible.
+Committed run transitions and reconnect resync refresh the attempt list without
+timer polling. Authorization failures hide cached log content.
+
+Live logs share the tab's existing MessagePack WebSocket. `MirrorLogs` acquires
+an expiring, attempt-specific interest; hidden, paused and unmounted views release
+it. Agents mirror only durably accepted, already-masked records, batching at
+250 ms with 256-record/512 KiB limits and explicit gap recovery. Live bytes never
+enter PostgreSQL: the engine validates current agent session, assigned attempt
+and physical reservation epoch, uploads a private ephemeral blob, then commits
+only its reference notification for API instances. Blob upload failures request
+archive resynchronization without interrupting durable task-result transport.
+Expired interests stop mirroring; disconnects and bounded queue overruns request
+resynchronization. Ephemeral blobs are retired after 30 seconds; cleanup cannot
+delete archived indexes or chunks and logs retry failures explicitly.
+
+The Chrome acceptance fixture reads one million actual archived records through
+the signed API and PostgreSQL host, requires first rendering below one second,
+and analyzes actual page `DrawFrame` trace events during continuous scrolling
+for at least 60 frames/s. It also checks live delivery within one second,
+attempt isolation, bounded mounted rows and accessibility. CI retains the raw
+trace and measurements; frame-rate uncapping measures rendering capacity rather
+than the machine's display refresh rate. Existing range/search/download contracts
+remain unchanged.
+
 The run's **System Events** tab and `/runs/<run-id>/events` page show durable
 transitions in committed sequence order, including every recorded attempt,
 dispatch/start/outcome, retries, waiting and remote-operation phases. Task logs,
