@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <ProjectReference Include="..\..\src\Wf.ControlPlane\Wf.ControlPlane.csproj" />
+    <ProjectReference Include="..\..\src\Wf.Sdk\Wf.Sdk.csproj" />
+    <ProjectReference Include="..\..\src\Wf.Agent\Wf.Agent.csproj" />
+    <ProjectReference Include="..\Wf.TaskHost.Fixture\Wf.TaskHost.Fixture.csproj" />
+  </ItemGroup>
+</Project>

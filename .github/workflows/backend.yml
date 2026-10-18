@@ -1,0 +1,286 @@
+name: Backend
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: ankane/setup-postgres@v1
+        if: runner.os == 'Windows'
+        with:
+          postgres-version: 17
+      - name: Configure Windows service PostgreSQL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '"WF_TEST_POSTGRES=Host=localhost;Username=postgres;Database=postgres" >> $env:GITHUB_ENV'
+      - run: dotnet build backend/Wf.slnx --configuration Release
+      - name: Publish native agent
+        run: dotnet publish backend/src/Wf.Agent --configuration Release -r ${{ matrix.rid }} -o "${{ runner.temp }}/wf-agent"
+      - name: Configure native executable smoke test
+        shell: pwsh
+        run: |
+          $suffix = if ($IsWindows) { ".exe" } else { "" }
+          "WF_AGENT_EXECUTABLE=${{ runner.temp }}/wf-agent/wf-agent$suffix" >> $env:GITHUB_ENV
+      - run: dotnet test backend/Wf.slnx --configuration Release --no-build --filter "Category!=Nightly&Category!=ChaosSmoke&Category!=Performance&Category!=LocalStackScenario" --collect:"XPlat Code Coverage"
+      - name: Verify retention impact under isolated live API traffic
+        run: dotnet test backend/tests/Wf.Integration.Tests --configuration Release --no-build --filter "FullyQualifiedName~RetentionPurgeTests" --logger "trx;LogFileName=retention-live-api.trx" --results-directory retention-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: retention-live-api-${{ matrix.os }}
+          path: retention-results
+          if-no-files-found: ignore
+      - name: Verify durable remote HTTP fault matrix
+        run: dotnet test backend/tests/Wf.Integration.Tests --configuration Release --no-build --filter "FullyQualifiedName~RemoteOperation" --logger "trx;LogFileName=remote-http.trx" --results-directory remote-http-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: remote-http-${{ matrix.os }}
+          path: remote-http-results
+          if-no-files-found: error
+      - name: Verify physical agent drain and replacement
+        run: dotnet test backend/tests/Wf.Integration.Tests --configuration Release --no-build --filter "FullyQualifiedName~Wf.Integration.Tests.Agents.DrainTests" --logger "trx;LogFileName=agent-drain.trx" --results-directory agent-drain-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-drain-${{ matrix.os }}
+          path: agent-drain-results
+          if-no-files-found: error
+      - name: Verify native Linux API SIGTERM drain
+        if: runner.os == 'Linux'
+        env:
+          WF_API_DRAIN_SIGNAL: "true"
+        run: dotnet test backend/tests/Wf.Integration.Tests --configuration Release --no-build --filter "FullyQualifiedName~ApiDrainTests.Linux_SIGTERM"
+      - name: Verify native agent restart, durable host replay and hard deadlines
+        run: dotnet test backend/tests/Wf.Integration.Tests --configuration Release --no-build --filter "FullyQualifiedName~HostSurvivalTests|FullyQualifiedName~AgentRestartTests" --logger "trx;LogFileName=host-readoption.trx" --results-directory host-readoption-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: host-readoption-${{ matrix.os }}
+          path: host-readoption-results
+          if-no-files-found: error
+      - name: Verify real two-engine two-agent chaos fault tools
+        if: runner.os == 'Linux'
+        run: dotnet test backend/tests/Wf.Chaos.Tests --configuration Release --no-build --filter "FullyQualifiedName~ChaosFixtureTests" --logger "trx;LogFileName=chaos-fixture.trx" --results-directory chaos-fixture-results
+      - uses: actions/upload-artifact@v4
+        if: always() && runner.os == 'Linux'
+        with:
+          name: chaos-fixture-${{ matrix.os }}
+          path: chaos-fixture-results
+          if-no-files-found: error
+      - name: Verify real core fault outcomes and recovery timing
+        if: runner.os == 'Linux'
+        run: dotnet test backend/tests/Wf.Chaos.Tests --configuration Release --no-build --filter "FullyQualifiedName~CoreFaultScenarios" --logger "trx;LogFileName=core-fault-matrix.trx" --results-directory core-fault-results
+      - uses: actions/upload-artifact@v4
+        if: always() && runner.os == 'Linux'
+        with:
+          name: core-fault-matrix-${{ matrix.os }}
+          path: core-fault-results
+          if-no-files-found: error
+      - name: Install and start Windows service
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $name = "wf-agent-ci-${{ github.run_id }}-${{ github.run_attempt }}"
+          $directory = Join-Path $env:ProgramData "Kardia\Agents\$name"
+          if ((Get-Service -Name $name -ErrorAction SilentlyContinue) -or (Test-Path -LiteralPath $directory)) {
+            throw "CI service installation already exists."
+          }
+          try {
+            & .\infra\agent\install-agent.ps1 -Executable $env:WF_AGENT_EXECUTABLE -Engines http://localhost:5000 -ServiceName $name -AgentName $name
+            if ((Get-Service -Name $name).Status -ne 'Running') { throw 'Agent service is not running.' }
+          } finally {
+            if (Get-Service -Name $name -ErrorAction SilentlyContinue) {
+              Stop-Service -Name $name
+              Remove-Service -Name $name
+            }
+            foreach ($file in @('wf-agent.exe', 'appsettings.json')) {
+              $path = Join-Path $directory $file
+              if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path }
+            }
+            if (Test-Path -LiteralPath $directory) { Remove-Item -LiteralPath $directory }
+          }
+      - name: Install and start systemd service
+        if: runner.os == 'Linux'
+        env:
+          AGENT_BINARY: ${{ env.WF_AGENT_EXECUTABLE }}
+        run: |
+          test ! -e /etc/systemd/system/wf-agent.service
+          test ! -e /etc/kardia/wf-agent.env
+          test ! -e /opt/kardia/wf-agent/wf-agent
+          cleanup() {
+            if systemctl cat wf-agent.service >/dev/null 2>&1; then sudo systemctl disable --now wf-agent.service; fi
+            sudo rm -f /etc/systemd/system/wf-agent.service /etc/kardia/wf-agent.env /opt/kardia/wf-agent/wf-agent
+            sudo systemctl daemon-reload
+          }
+          trap cleanup EXIT
+          sudo bash infra/agent/install-agent.sh --executable "$AGENT_BINARY" --engine http://localhost:5000 --name ci-linux
+          sudo systemctl is-active --quiet wf-agent.service
+      - run: dotnet run --file backend/samples/workflows/scenario-a.cs
+  resource-limits-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify non-root CPU/RAM enforcement, independent host lifetimes and re-adoption
+        run: |
+          set -euo pipefail
+          docker run --rm --privileged --cgroupns=private \
+            --env WF_RESOURCE_ISOLATED_CONTAINER=1 \
+            --env 'WF_RESOURCE_TEST_FILTER=ResourceLimitTests|PhysicalHostLifetimeTests|HostReadoptionTests' \
+            --env WF_RESOURCE_ARTIFACTS=/repo/.agent-artifacts/limits-linux \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/repo" --workdir /repo \
+            mcr.microsoft.com/dotnet/sdk:10.0-noble-aot \
+            bash infra/agent/test-resource-sampling.sh --without-bpf
+      - name: Verify actual agent loss, durable host replay, hard deadlines and RAM failures
+        run: |
+          set -euo pipefail
+          docker run --rm --privileged --cgroupns=private --network host \
+            --env 'WF_TEST_POSTGRES=Host=127.0.0.1;Username=postgres;Database=postgres' \
+            --env WF_RESOURCE_ISOLATED_CONTAINER=1 \
+            --env 'WF_RESOURCE_TEST_FILTER=ResourceLimitExecutionTests|HostSurvivalTests|AgentRestartTests' \
+            --env WF_RESOURCE_TEST_PROJECT=backend/tests/Wf.Integration.Tests \
+            --env WF_RESOURCE_ARTIFACTS=/repo/.agent-artifacts/limits-linux \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/repo" --workdir /repo \
+            mcr.microsoft.com/dotnet/sdk:10.0-noble-aot \
+            bash infra/agent/test-resource-sampling.sh --without-bpf
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resource-limits-linux
+          path: .agent-artifacts/limits-linux/results
+          if-no-files-found: error
+  cgroup-delegation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: ubuntu
+            image: mcr.microsoft.com/dotnet/sdk:10.0-noble-aot
+          - distro: azurelinux
+            image: mcr.microsoft.com/azurelinux/base/core:3.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify non-root systemd delegation and scope fallback
+        env:
+          BASE_IMAGE: ${{ matrix.image }}
+          DISTRO: ${{ matrix.distro }}
+        run: |
+          set -euo pipefail
+          mkdir delegation-results
+          name="wf-delegation-$DISTRO-${{ github.run_id }}-${{ github.run_attempt }}"
+          cleanup() {
+            result=$?
+            trap - EXIT
+            if docker container inspect "$name" >/dev/null 2>&1; then
+              docker logs "$name" >> delegation-results/boot.log 2>&1 || result=1
+              docker stop --timeout 15 "$name" && docker rm "$name" || result=1
+            fi
+            exit "$result"
+          }
+          trap cleanup EXIT
+          docker build --build-arg BASE_IMAGE="$BASE_IMAGE" \
+            --file infra/agent/Dockerfile.cgroup-delegation \
+            --tag "wf-delegation:$DISTRO" infra/agent 2>&1 | tee delegation-results/build.log
+          docker run --detach --name "$name" --privileged --cgroupns=private \
+            --tmpfs /run --tmpfs /run/lock --tmpfs /tmp \
+            --env WF_CGROUP_ISOLATED_CONTAINER=1 "wf-delegation:$DISTRO"
+          ready=false
+          for ((attempt=0; attempt<60; attempt++)); do
+            if docker exec "$name" systemctl show --property=Version --value; then ready=true; break; fi
+            sleep 0.5
+          done
+          $ready
+          docker exec "$name" /opt/wf-delegation/test-cgroup-delegation.sh --test \
+            2>&1 | tee delegation-results/actual.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cgroup-delegation-${{ matrix.distro }}
+          path: delegation-results
+          if-no-files-found: error
+  local-stack:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            postgres-image: ""
+          - os: ubuntu-latest
+            postgres-image: postgres:17-alpine
+    runs-on: ${{ matrix.os }}
+    services:
+      postgres:
+        image: ${{ matrix.postgres-image }}
+        env:
+          POSTGRES_PASSWORD: scenario-ci
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: ankane/setup-postgres@v1
+        if: runner.os == 'Windows'
+        with:
+          postgres-version: 17
+      - name: Configure native Windows PostgreSQL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '"WF_TEST_POSTGRES=Host=localhost;Username=postgres;Database=postgres" >> $env:GITHUB_ENV'
+      - name: Configure Linux service PostgreSQL
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: |
+          "WF_TEST_POSTGRES=Host=127.0.0.1;Port=${{ job.services.postgres.ports['5432'] }};Username=postgres;Password=scenario-ci;Database=postgres" >> $env:GITHUB_ENV
+      - name: Install Vite dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+      - name: Build default Debug AppHost and production workflow compiler
+        run: dotnet build backend/src/Wf.Cli "-p:WarningsNotAsErrors=NU1902%3BNU1903" && dotnet build backend/tests/Wf.AppHost.Tests "-p:WarningsNotAsErrors=NU1902%3BNU1903"
+      - name: Execute real local-stack scenario A
+        env:
+          WF_APPHOST_SCENARIO: "true"
+        run: dotnet test backend/tests/Wf.AppHost.Tests --no-build --filter "FullyQualifiedName~LocalStackScenarioTests" --logger "trx;LogFileName=local-stack-scenario.trx"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-stack-scenario-${{ matrix.os }}
+          path: backend/tests/Wf.AppHost.Tests/TestResults
+          if-no-files-found: error

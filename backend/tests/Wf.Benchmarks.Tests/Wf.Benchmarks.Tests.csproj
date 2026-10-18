@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Wf.Benchmarks\Wf.Benchmarks.csproj" />
+  </ItemGroup>
+</Project>

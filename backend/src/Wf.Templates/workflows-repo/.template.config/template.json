@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Workflow Scheduler",
+  "classifications": ["Workflow", "CI"],
+  "identity": "Wf.Templates.Repository",
+  "name": "Workflows repository with PR validation gate",
+  "shortName": "wf-repo",
+  "preferNameDirectory": false,
+  "tags": {
+    "type": "solution"
+  },
+  "symbols": {
+    "cliVersion": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "1.0.0",
+      "description": "Published wf NuGet tool version.",
+      "replaces": "CLI_PACKAGE_VERSION"
+    }
+  }
+}

@@ -1,0 +1,55 @@
+name: Register merged workflows
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: register-${{ github.repository }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PUBLISH_BASE_SHA: ${{ github.event.before }}
+      PUBLISH_HEAD_SHA: ${{ github.sha }}
+      AZURE_CORE_OUTPUT: none
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Validate and test before requesting credentials
+        id: validated
+        run: python3 .github/scripts/register_on_merge.py --validate
+      - name: Acquire federated Registrar identity
+        if: steps.validated.outputs.has-workflows == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      - name: Publish validated workflows
+        if: steps.validated.outputs.has-workflows == 'true'
+        shell: bash
+        env:
+          WF_ENGINE_URL: ${{ vars.WF_ENGINE_URL }}
+          WF_API_SCOPE: ${{ vars.WF_API_SCOPE }}
+        run: |
+          set -euo pipefail
+          token=$(az account get-access-token --scope "$WF_API_SCOPE" --query accessToken --output tsv)
+          test -n "$token"
+          echo "::add-mask::$token"
+          WF_ACCESS_TOKEN="$token" python3 .github/scripts/register_on_merge.py --publish

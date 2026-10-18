@@ -1,0 +1,17 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.6.0">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <UserSecretsId>workflow-scheduler-local-apphost</UserSecretsId>
+    <!-- Keep the documented dotnet-run path independent of an installed Aspire CLI bundle. -->
+    <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" />
+    <PackageReference Include="Aspire.Hosting.Docker" />
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+    <PackageReference Include="MessagePack" />
+    <ProjectReference Include="..\Wf.ControlPlane\Wf.ControlPlane.csproj" />
+    <ProjectReference Include="..\Wf.Agent\Wf.Agent.csproj" />
+  </ItemGroup>
+</Project>

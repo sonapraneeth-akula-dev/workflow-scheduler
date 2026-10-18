@@ -1,0 +1,80 @@
+x-control-plane-build: &control-plane-build
+  context: "${KARDIA_REPOSITORY_ROOT:?Use wf local up}/backend"
+  dockerfile: src/Wf.ControlPlane/Dockerfile
+  args:
+    NUGET_SOURCE: "${KARDIA_NUGET_SOURCE:-https://api.nuget.org/v3/index.json}"
+x-control-plane-health: &control-plane-health
+  test: ["CMD", "curl", "--fail", "--silent", "--max-time", "3", "http://127.0.0.1:8080/healthz/ready"]
+  interval: 2s
+  timeout: 5s
+  retries: 60
+  start_period: 10s
+
+services:
+  postgres:
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d workflow"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+  wf-migrations:
+    image: "kardia-control-plane:${KARDIA_ENVIRONMENT:?Use wf local up}"
+    build: *control-plane-build
+    depends_on:
+      postgres:
+        condition: service_healthy
+  wf-api:
+    image: "kardia-control-plane:${KARDIA_ENVIRONMENT:?Use wf local up}"
+    build: *control-plane-build
+    stop_grace_period: 45s
+    healthcheck: *control-plane-health
+    ports:
+      - "${KARDIA_BIND_IP:?Use wf local up}:5000:8080"
+  wf-engine-a:
+    image: "kardia-control-plane:${KARDIA_ENVIRONMENT:?Use wf local up}"
+    build: *control-plane-build
+    healthcheck: *control-plane-health
+    ports:
+      - "${KARDIA_BIND_IP:?Use wf local up}:5001:8081"
+  wf-engine-b:
+    image: "kardia-control-plane:${KARDIA_ENVIRONMENT:?Use wf local up}"
+    build: *control-plane-build
+    healthcheck: *control-plane-health
+    ports:
+      - "${KARDIA_BIND_IP:?Use wf local up}:5002:8081"
+  wf-agent-linux:
+    image: "kardia-agent:${KARDIA_ENVIRONMENT:?Use wf local up}"
+    build:
+      context: "${KARDIA_REPOSITORY_ROOT:?Use wf local up}/backend"
+      dockerfile: src/Wf.Agent/Dockerfile
+  wf-gateway:
+    image: "kardia-gateway:${KARDIA_ENVIRONMENT:?Use wf local up}"
+    build:
+      context: "${KARDIA_REPOSITORY_ROOT:?Use wf local up}"
+      dockerfile: infra/local/gateway.Dockerfile
+      args:
+        PREVIOUS_GATEWAY_IMAGE: "${KARDIA_PREVIOUS_GATEWAY_IMAGE:-caddy:2.11.6-alpine}"
+    depends_on:
+      wf-api:
+        condition: service_healthy
+      wf-engine-a:
+        condition: service_healthy
+      wf-engine-b:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz/ready"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    ports:
+      - "${KARDIA_BIND_IP:?Use wf local up}:80:8080"
+  compose-dashboard:
+    ports:
+      - "${KARDIA_BIND_IP:?Use wf local up}:18888:18888"
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: "${KARDIA_SUBNET:?Use wf local up}"

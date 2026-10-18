@@ -1,0 +1,28 @@
+{
+  "$schema": "../../src/Wf.Contracts/Schemas/schedules.schema.json",
+  "defaults": {
+    "deployment": {
+      "env": "dev"
+    }
+  },
+  "instances": [
+    {
+      "id": "daily-dev",
+      "cron": "0 9 * * *",
+      "timezone": "America/New_York",
+      "overlap": "Skip",
+      "catchUp": "Latest"
+    },
+    {
+      "id": "ppe-smoke",
+      "interval": "00:15:00",
+      "timezone": "Etc/UTC",
+      "versionPin": "1.0.0",
+      "overlap": "Queue",
+      "catchUp": "None",
+      "variables": {
+        "env": "ppe"
+      }
+    }
+  ]
+}

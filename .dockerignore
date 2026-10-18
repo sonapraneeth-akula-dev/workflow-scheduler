@@ -1,0 +1,16 @@
+.git
+.github
+.wf
+.agent-artifacts
+backend
+docs
+node-compile-cache
+wf-h-*
+**/node_modules
+**/dist
+**/bin
+**/obj
+**/TestResults
+**/.env
+**/.env.*
+**/*.log

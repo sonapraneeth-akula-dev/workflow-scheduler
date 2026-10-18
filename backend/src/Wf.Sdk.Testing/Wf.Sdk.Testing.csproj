@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Wf.Validation\Wf.Validation.csproj" />
+    <ProjectReference Include="..\Wf.Sdk\Wf.Sdk.csproj" />
+  </ItemGroup>
+</Project>

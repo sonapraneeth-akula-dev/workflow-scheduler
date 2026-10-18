@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" />
+    <ProjectReference Include="..\..\src\Wf.Sdk\Wf.Sdk.csproj" />
+    <ProjectReference Include="..\..\src\Wf.ControlPlane\Wf.ControlPlane.csproj" />
+    <ProjectReference Include="..\..\src\Wf.Agent\Wf.Agent.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Wf.Integration.Tests\Seed\RunSeeder.cs" Link="Seed\RunSeeder.cs" />
+    <Compile Include="..\Wf.Integration.Tests\Seed\RunQueryServer.cs" Link="Seed\RunQueryServer.cs" />
+    <None Include="..\..\db\migrations\0002_runs_events.sql" Link="Migrations\0002_runs_events.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\db\migrations\0003_attempt_timers.sql" Link="Migrations\0003_attempt_timers.sql" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

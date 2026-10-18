@@ -1,0 +1,32 @@
+# ─────────────────────────────────────────────────────────────────
+# Kardia (workflow scheduler), Sonapraneeth app ID 6
+# Source copy: personal/workflow-scheduler infra/local/edge/
+#
+# Each environment's compose stack publishes a gateway Caddy on
+# 127.2.6.<env>:80 (plain HTTP / h2c). Only dev and ppe are supported.
+# ─────────────────────────────────────────────────────────────────
+
+(kardia_site) {
+    bind {$EDGE_BIND_IP}
+    tls {$EDGE_CERTS_DIR}/accounts.local.pem {$EDGE_CERTS_DIR}/accounts.local-key.pem
+    @untrusted not remote_ip 127.0.0.1/32 ::1/128 {$EDGE_BIND_IP} {$EDGE_TRUSTED_CIDRS:127.0.0.1/32}
+    respond @untrusted 403
+
+    # gRPC (agents to engine leader) needs an h2c upstream; stream without buffering.
+    @grpc header Content-Type application/grpc*
+    reverse_proxy @grpc http://{args[0]}:80 {
+        transport http {
+            versions h2c
+        }
+        flush_interval -1
+    }
+    reverse_proxy http://{args[0]}:80
+}
+
+dev.kardia.sonapraneeth.in {
+    import kardia_site 127.2.6.2
+}
+
+ppe.kardia.sonapraneeth.in {
+    import kardia_site 127.2.6.7
+}

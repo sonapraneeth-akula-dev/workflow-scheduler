@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Grpc.AspNetCore" />
+    <PackageReference Include="Grpc.Net.Client" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" />
+    <ProjectReference Include="..\..\src\Wf.Sdk\Wf.Sdk.csproj" />
+    <ProjectReference Include="..\..\src\Wf.Cli\Wf.Cli.csproj" />
+    <ProjectReference Include="..\..\src\Wf.Validation\Wf.Validation.csproj" />
+    <ProjectReference Include="..\..\src\Wf.Engine.Core\Wf.Engine.Core.csproj" />
+    <ProjectReference Include="..\..\src\Wf.Agent\Wf.Agent.csproj" />
+    <ProjectReference Include="..\..\src\Wf.ControlPlane\Wf.ControlPlane.csproj" />
+    <ProjectReference Include="..\Wf.TaskHost.Fixture\Wf.TaskHost.Fixture.csproj" />
+    <ProjectReference Include="..\Wf.Recovery.Fixture\Wf.Recovery.Fixture.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Wf.Validation.Tests\ValidatorFixture.cs" Link="Registration\ValidatorFixture.cs" />
+    <Compile Include="..\Wf.Sdk.Tests\ManualTimeProvider.cs" Link="Live\ManualTimeProvider.cs" />
+    <None Include="..\..\db\migrations\*.sql" Link="Migrations\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="LocalRun\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,26 @@
+name: Schedule exactly-once chaos
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  schedule-exactly-once:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      WF_CHAOS_RESULTS: ${{ github.workspace }}/TestResults/schedule-chaos
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Run real one-hour durable PostgreSQL 17 gate
+        run: dotnet test backend/tests/Wf.Chaos.Tests --configuration Release --filter ScheduleExactlyOnce --logger "trx;LogFileName=schedule-chaos.trx" --results-directory TestResults
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: schedule-exactly-once-${{ github.run_id }}
+          path: TestResults/
+          retention-days: 14

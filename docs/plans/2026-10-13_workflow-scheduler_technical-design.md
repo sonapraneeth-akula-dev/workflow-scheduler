@@ -120,7 +120,7 @@ graph TD
 | **api** | REST API (reads, commands, registration), SignalR hub (subscribe/negotiate), auth/RBAC, serves SPA static files | ≥ 2, stateless, rolling/blue-green | None (DB) |
 | **engine** | Run orchestration (single writer), scheduler, agent gateway (gRPC), reservations, live-event publisher, retention purger | 1 active + 1 hot standby (lease) | Active runs in memory, durable in PG |
 | **agent** | Machine registration, heartbeat, task-host pool, resource limits & sampling, log shipping, secret resolution, local result journal | 1 per machine | Local journal (results until acked) |
-| **task host** | The compiled workflow in `--task-host` mode: executes stage/task delegates, SDK services (reports, artifacts, outputs), phase 2 libraries (load, parity, hooks) | Globally capped warm pool per agent; one shared host per run per agent, except hook-invoking tasks, which get a dedicated host per task attempt (AD-012) | Attempt-local files: persisted deadline, PID/start time/socket metadata, unacknowledged output/log state; no database access |
+| **task host** | The compiled workflow in `--task-host` mode: executes stage/task delegates, SDK services (reports, artifacts, outputs), phase 2 libraries (load, parity, hooks) | Globally capped warm pool per agent; a never-used host binds to one task attempt, including hook-invoking tasks (AD-012) | Attempt-local files: persisted deadline, PID/start time/socket metadata, unacknowledged output/log state; no database access |
 | **CLI (`wf`)** | `validate`, `test`, `publish`, `clone`, `baseline`, `run [--single-machine]`, `abort`, `local up/down/init-secrets/doctor`, `install --standalone`, `reset` | Dev/CI | — |
 | **SDK** | Authoring API, local embedded engine, dry-run harness, describe mode | In workflow process | — |
 
@@ -177,6 +177,18 @@ graph LR
 - **Recovery**: on leadership acquisition, the engine loads active runs (`status in (Queued, Running, Aborting)`) from snapshot tables plus events after `snapshot_seq`, applies unprocessed commands (pending triggers and aborts), re-arms timers, and applies the same per-attempt agent-loss deadline as in normal operation (no separate blanket wait): attempts of an agent that has not reconnected stay reclaimable until 30 s after its last heartbeat (`agents.last_heartbeat_at`), then become `AgentLost`; attempts a reconnected agent does not list in `Hello.inflight` end `AgentLost` at once.
 - **Leader lease**: row in `leases` (`engine`, holder, expires_at), renewed every 3 s, TTL 10 s. Fencing: every engine write includes the lease epoch (`WHERE epoch = $current`) so a paused ex-leader cannot write. Agents find the leader as follows. On ACA, the standby's readiness probe fails until it holds the lease, so ingress routes agents only to the leader. Self-hosted agents hold an endpoint list; a standby answers `NotLeader{leaderHint}` and closes the stream.
 
+**Agent-loss timing decision (October 16, 2026):** the owner approved retaining
+the full 30 s absolute reclaim deadline and separating classification,
+replacement start and task completion. The previous requirement to replace and
+complete within those same 30 s was contradictory. With healthy storage, an
+active leader and eligible spare capacity, the replacement-start acceptance
+budget is an additional 30 s after reclaim expiry, including classification,
+dispatch and host startup; completion follows the workload's configured
+deadlines. This is not a second reclaim grace or a 30 s total-recovery claim.
+Functional virtual-clock evidence remains distinct from real wall-clock
+verification. See the [blocker and accepted decision](../decisions/2026-10-16_agent-loss-recovery-timing.md).
+Engine-leader and DB failover NFR-033 targets are unchanged.
+
 ### Crash and restart recovery (NFR-033, FR-061–FR-064)
 Tasks execute on agents, never inside the engine or api, so control-plane failures do not stop work.
 
@@ -185,10 +197,83 @@ Tasks execute on agents, never inside the engine or api, so control-plane failur
 | Engine leader crash, restart or deploy | All tasks on agents; agents journal results and perf samples to disk | Standby takes the lease ≤ 10 s (planned handover ≤ 3 s), rebuilds run actors from PG, re-arms `deadline_at` / `retry_at` / schedules; agents reconnect, report in-flight attempts and replay their journals (idempotent) | None. Load continues; live charts pause and resync |
 | api node crash or deploy | Everything (api is stateless) | Clients reconnect to another node and resync from `afterSeq` | None |
 | DB failover | Agents keep executing and journalling; engine buffers and retries commits | Commits resume when the new primary is up; runs resume ≤ DB failover time + 30 s (NFR-033; Patroni ≈ 10–20 s, PG Flexible zone-redundant HA ≈ 60–120 s, R-1). Windows-only self-hosted sites: manual DB failover (§9.3, R-11) | None |
-| Agent process crash, restart or update | **Task hosts keep running** (they are not children that die with the agent, see below) and spool results, logs and perf samples in the attempt directory | Restarted agent re-adopts live hosts within 10 s and reports them in `Hello.inflight`; the engine keeps the attempts `Running`. Agent-loss timeline from the last heartbeat: 15 s → agent `Unhealthy` (no new dispatch); attempts stay `Running` and reclaimable until 30 s → then `AgentLost` (category `AgentLost`) and re-placed per retry policy. Re-adoption (≤ 10 s) fits well inside the 30 s window, so runs resume ≤ 30 s (NFR-033) | None |
+| Agent process crash, restart or update | **Task hosts keep running** (they are not children that die with the agent, see below) and spool results, logs and perf samples in the attempt directory | Restarted agent re-adopts live hosts within 10 s and reports them in `Hello.inflight`; the engine keeps the attempts `Running`. Agent-loss timeline from the last heartbeat: 15 s → agent `Unhealthy` (no new dispatch); attempts stay `Running` and reclaimable until 30 s → then `AgentLost` and replacement per retry policy. Re-adoption (≤ 10 s) fits inside reclaim grace. If the agent does not return, replacement starts within a separate ≤ 30 s after reclaim expiry, conditional on healthy DB/leader and eligible spare capacity; task completion follows workload deadlines, not a ≤ 30 s total bound | None when hosts are re-adopted; unrecoverable loss follows task retry/checkpoint policy |
 | Task host crash, machine reboot, machine lost | Other tasks and shards | Attempt ends `AgentLost`/`TaskError` → platform or author retry; the new attempt resumes from the task's **last checkpoint** | The shard resumes from its last checkpoint (≤ 10 s of load lost); the gap is shown in the report |
 
 **Task hosts outlive the agent.** On Windows each host is in its own named job object (limits applied, no kill-on-close tied to the agent); on Linux each host has its own cgroup under the agent's delegated slice and the unit uses `KillMode=process`, so restarting the agent stops only the agent process. Each attempt directory holds `attempt.json` (pid, process start time, socket path, last acked seq). On start, the agent scans attempt directories, verifies pid + start time (guards against pid reuse), reconnects to the host's socket, and resumes forwarding from the last acked seq. Because hosts survive, agent binary updates do not need a drain; drain is only for machine maintenance or an incompatible agent ↔ task-host protocol migration.
+
+Implementation staging for task `2.3.2.2.1`: independent named Windows Jobs and
+Linux supervisor lifetimes now survive agent-only termination. Explicit job
+termination/empty accounting and Linux subreaper/pidfd cleanup still gate normal
+release. The owner-only lifetime directory stores flushed atomic `attempt.json`
+with boot ID, PID, creation identity, diagnostic UTC start, socket/job, package
+paths, attempt, reservation epoch, deadline and caps. Creation identity is
+captured once before readiness: Windows creation FILETIME or Linux boot-relative
+`/proc/<pid>/stat` start counter. Cross-process Linux `Process.StartTime`
+reconstruction differed by roughly a millisecond in the actual test and is
+therefore not used as the adoption identity.
+
+Task `2.3.2.2.2` now claims existing lifetime locks exclusively in a bounded
+1,024-record startup scan and validates native identity before adoption. SDK
+hosts retain their own named Windows lifetime and resource Job handles; merely
+having processes in a Job does not preserve its reopenable name after the last
+handle closes. The new agent verifies Job membership and unchanged CPU/RAM
+limits, or Linux delegated cgroup caps. Token-authenticated private IPC checks
+the actual bound attempt and machine epoch; `Resume` requires the exact
+persisted dispatch and observes the existing execution, never another delegate
+invocation. Original secrets remain host-memory-only and cross authenticated
+IPC to restore masking without substituting rotated values. All verified
+package pins and active attempt inventory are restored before Hello/admission.
+Pending checkpoint/progress acknowledgements reattach, and the last complete
+resource observation is durably saved before journaling, replayed identically,
+then followed by its next ordinal. Windows prior IOCP notifications and native
+network counter baselines cannot be replayed and are not claimed as continuous.
+
+Linux adopted cleanup uses a separate authenticated supervisor control socket,
+stable process exit and a flushed final descendant-quiescence certificate.
+Dead or mismatched hosts report AgentLost, but unverifiable descendants retain
+quarantine. A missing named Windows Job after root death is not physical proof:
+closing the last handle can make its name inaccessible while processes survive.
+No uncertain lifetime can acknowledge a reservation fence or admit new hosts.
+Whole-machine reboot remains the fallback for unprovable physical cleanup.
+Task `2.3.2.2.3` adds private readiness protocol 9; older SDK packages must be
+rebuilt. Each production SDK host owns its stdout/stderr OS pipes, including
+native-child output. The shared streaming redactor runs before durable protobuf
+records reach disk. Logs retain their original timestamps; progress and native
+agent resource observations enter the same producer sequence. Resource sample
+ordinals are independently assigned by the host. `spool/ack` atomically commits
+the acknowledged producer prefix before deletion; the initial metadata cursor
+is not the authoritative stream cursor. Agent log indexing atomically commits
+each whole frame and its host ordinal, trimming an uncommitted raw suffix on
+restart and suppressing duplicate replay. Surviving captures resume; genuinely
+interrupted captures remain explicitly marked.
+
+The SDK flushes masked `spool/result.pb` before returning. The agent stops native
+sampling, stores its final observation and explicitly seals the producer stream;
+acknowledgement waits for all records, including this final sample.
+A local agent log failure retains unacknowledged host
+records without changing the outcome: explicit physical cleanup and a flushed
+token-bound receipt permit admission/fencing while keeping the spool for later
+replay. Host spool exhaustion is an explicit storage error (20 GB or one million
+unacknowledged records), not silent truncation or successful capture.
+Production progress can continue after durable host journaling without waiting
+for a disconnected agent's three-second legacy IPC handshake. After two seconds
+without native samples, the SDK emits one-second process-only CPU/RSS samples;
+descendant scope, machine and native network accounting are explicitly
+unavailable rather than fabricated. Reconnection preserves sample ordinals,
+not continuity of old native counter baselines.
+
+The Linux supervisor and an independent Windows sibling guard enforce the
+absolute attempt deadline plus exactly 30 seconds of cancellation grace without
+the agent. The Windows guard is outside the lifetime/workload Job, never uses
+breakaway, and retains a query/termination handle after authenticating the target
+PID creation identity and Job membership. It terminates the Job, waits for zero
+active processes, then flushes its token-bound physical certificate. Guard RSS
+counts toward the warm budget. A first-writer-wins result file prevents a racing
+deadline from overwriting an already completed result. Re-adoption imports a
+dead host's spool only after exact physical proof and never runs its delegate
+again. Whole-machine reboot and native network continuity are not claimed by
+this agent-only recovery implementation.
 
 **Checkpoints for long tasks.** `await ctx.Checkpoint.SaveAsync(state)` serialises JSON state (≤ 1 MB, at most once per 5 s); the task host uploads it to blob, then the agent journals `CheckpointSaved{run, taskKey, attempt, seq, uri, sha256}` until the engine acks it, like results. The engine applies it idempotently to `task_checkpoints` (keyed by run + task), keeping the highest `seq`, so neither an agent nor an engine crash loses or regresses a checkpoint. A later attempt of the same task gets it from `ctx.Checkpoint.TryLoad<T>()`, and `ctx.Attempt.ResumedFrom` says from when. Without checkpoints a retried task starts from the beginning. Built-in long tasks checkpoint automatically:
 - **Load shard**: every 10 s: position in the load shape, request-source offset, cumulative counts. Resume rejoins the shape at the current time (the ramp is not replayed); the missing interval is recorded and shown in the perf report.
@@ -228,11 +313,13 @@ Data between tasks flows through outputs (≤ 64 KB via the engine) and artifact
 
 **Placement algorithm (in memory, O(agents))**:
 1. Filter: Healthy, not draining, matches selector/OS, not reserved by another run, free slot available (`max_tasks`, default = cores), RAM headroom ≥ the task's memory limit.
-2. Prefer an agent that already has a **warm task host for this run** (no cold start), then the least-loaded agent (slots used / max), then round-robin.
+2. Prefer an agent that already has an **unbound warm task host for this workflow package** (no cold start), then the least-loaded agent (slots used / max), then round-robin.
 3. No candidate → the task stays Ready with reason `WaitingForMachine` (visible live in the UI). After `placementTimeout` (default 10 min) it fails with category `Placement` and its failure policy applies.
 4. Retry after `AgentLost` → re-placed (platform retry, see "Retries and timeouts"). For `Node`/`Run` affinity the pin moves to the new machine unless the task is `.NoAutoRetry()`.
 
-**Warm hosts**: each agent keeps one globally bounded LRU pool of pre-spawned, unbound task hosts, prewarming only versions with queued or recent work on that agent. The pool is capped in process count (default 4) and total RSS (default 200 MB) and is emptied after 5 min without work, so the idle footprint stays within NFR-032. The first dispatch of a run to an agent binds one, with no process start. Hook-invoking tasks always get a dedicated host per attempt (AD-012). An empty pool costs one cold start (≈ 150–300 ms) and is counted in `wf_task_queue_wait_ms`.
+**Warm hosts**: each agent keeps one globally bounded LRU pool of pre-spawned, unbound task hosts, prewarming only versions with queued or recent work on that agent. The pool is capped in process count (default 4) and total RSS (default 200 MB) and is emptied after 5 min without work, so the idle footprint stays within NFR-032. A dispatch binds one host to exactly one task attempt, with no process start; it is never rebound or shared with sibling attempts. Hook-invoking tasks use the same isolation boundary (AD-012). An empty pool costs one cold start (≈ 150–300 ms) and is counted in `wf_task_queue_wait_ms`.
+
+**Isolation decision (October 15, 2026)**: per-attempt hosts replace the original shared-per-run host decision. Concurrent managed tasks in one process share an address space: OS process memory limits and terminating an uncooperative task cannot isolate siblings there. A prewarmed process per attempt preserves independent CPU/RAM enforcement and hard cancellation without sacrificing parallelism or compiling per attempt. Variables and declared input/output snapshots cross the existing agent IPC contract; cross-task state must use outputs/artifacts or explicit machine affinity, not shared process memory. A finished host exits after its result is accepted by the agent; durable result forwarding and re-adoption retain their existing requirements.
 
 For the run's System Events view (FR-018), the committed `Dispatched` event records the chosen agent, selection time and placement reason (selector/affinity or warm-host/least-loaded choice) for that attempt. Subsequent start, retry, completion and failure events retain the task key and attempt number; `WaitingForMachine` records why no agent was available. These are engine-owned run events, not task stdout/stderr or user-authored commands.
 
@@ -405,6 +492,52 @@ sequenceDiagram
 Workflow versions and schedule configs are registered independently: a schedule-file-only change inserts a `schedule_config_versions` row and updates code schedules, with no workflow SemVer bump and no new workflow version. The response is `201 { workflowVersion?, scheduleConfigVersion?, registrySnapshot? }`, listing only what changed; a schedule-only change returns `scheduleConfigVersion` and leaves the active workflow version unchanged.
 
 ### 4.2 Trigger and execute (NFR-028 ≤ 50 ms dispatch, NFR-029 ≤ 1 s start, NFR-030 ≤ 10 ms/node)
+
+Implemented acceptance (`3.1.1.1.1`): `POST /api/v1/runs` uses the shared strict
+request/response contract, scoped Operator authorization (or scoped/global
+Admin), authenticated actor object ID, and shared JSON variable resolution
+including workflow defaults. Active selections use the hosted cache; explicit
+SemVer/build-independent keys or version UUIDs are restricted to the same
+undeleted workflow. Cache unavailability returns 503. Each accepted request
+captures a UUIDv7, immutable initial snapshot and run-timeout deadline, then
+inserts the command and `pg_notify('commands', runId)` in one PostgreSQL
+statement; no API-side run row is created. Invalid values return structured
+400 errors with variable paths/hints; JSON bodies are capped at 1 MiB.
+Idempotency enforcement (`3.1.1.1.2`) adds an inner endpoint filter after fresh
+scoped authorization. Optional visible-ASCII keys are limited to 200 characters
+and scoped by authenticated principal plus route. Canonical JSON fingerprints
+normalize object ordering, whitespace and omitted request defaults, while
+preserving array order and supplied values. A changed request under a live key
+returns 409; a matching retry returns the original response, without reselecting
+the active version. PostgreSQL key insertion/row locking serializes concurrent
+hosts, and the key, command, response and NOTIFY share one transaction.
+Unsuccessful acceptance rolls back the reservation; exact 24-hour expiry allows
+reuse. Cache outages do not invalidate an already accepted response, but revoked
+scope access prevents replay. Expiry is logical on lookup; physical expired-row
+purging remains part of maintenance. Placement overrides, pending-command
+reads and full execution dispatch below remain their dependent tasks.
+
+Implemented run-now (`3.1.1.2.1`): public
+`POST /api/v1/schedules/{id}/run-now` accepts no body or an empty object, with
+fresh scoped Operator/Admin authorization. Both origins and paused instances
+are supported; deleted instances reject new submissions. The existing trigger
+handler captures effective instance variables, the selected immutable version
+and permanent `run_series.id`; the optional series UUID survives the command
+and fenced recovery into `runs.series_id`, with `trigger=0` (Manual).
+No scheduled-fire row, pause change, overlap decision or cursor advance occurs.
+The original instance UUID, not its editable configuration, fingerprints keyed
+retries; edits/removal therefore preserve replay while another instance under
+the same principal/route/key conflicts.
+
+Schedule pins support exact UUID/SemVer or a bounded (256-character) range
+grammar: full-version `=`, `>`, `>=`, `<`, `<=` comparisons joined by spaces,
+`||` alternatives, and `*`, `major.*`, `major.minor.*` wildcards. Ranges select
+the highest eligible same-workflow published version, independent of the
+active pointer; omitted pins use the active cache. Prereleases require an
+explicit same-core prerelease comparison. Shared WFV026 validates syntax
+offline and at registration; no integer-size limit is imposed on components.
+Caret/tilde/npm shorthand is deliberately unsupported rather than guessed.
+
 ```mermaid
 sequenceDiagram
   participant U as Browser
@@ -592,11 +725,13 @@ Conventions:
 | workflows | id | text | N | PK | `team/type/name` |
 | | type_id | text | N | FK, idx | |
 | | active_version_id | uuid | Y | FK | hot-swap pointer (FR-053) |
+| | latest_version_id | uuid | Y | same-workflow FK | latest registration baseline; unchanged by a manual active-version rollback |
+| | active_schedule_config_id | uuid | Y | same-workflow FK | active independently versioned code schedule file; known-content reverts reuse historical config IDs |
 | | cloned_from_version_id | uuid | Y | FK | lineage (FR-044) |
 | | deleted_at | timestamptz | Y | | soft delete |
 | workflow_versions | id | uuid | N | PK | |
-| | workflow_id | text | N | UQ(workflow_id, major, minor, patch) | |
-| | major, minor, patch | int | N | | SemVer |
+| | workflow_id | text | N | UQ(workflow_id, semver_key) | |
+| | semver, semver_key | text | N | | Full SemVer and generated identity without build metadata; 256-character API/storage bound preserves prereleases and arbitrary-size numeric components supported by the shared validator |
 | | manifest | jsonb | N | | DAG, variables, policies, hook package refs |
 | | package_uri, package_sha256 | text, bytea | N | | content-addressed zip |
 | | source_uri | text | N | | script source for diff |
@@ -606,6 +741,7 @@ Conventions:
 | schedule_config_versions | id | uuid | N | PK | one row per registered schedule-file content |
 | | workflow_id | text | N | UQ(workflow_id, content_sha256) | |
 | | source_path, git_commit, content_sha256 | text, text, bytea | N | | registered independently of workflow versions (FR-053/054) |
+| | content | text | Y (legacy only) | SHA-256 check | exact UTF-8 JSON retained for revalidation against new workflow variables/defaults; new registrations require 1 byte to 1 MiB |
 | | git_author, registered_by, registered_at | text, text, timestamptz | N | | |
 | schedules | id | uuid | N | PK | |
 | | workflow_id | text | N | FK | |
@@ -613,9 +749,9 @@ Conventions:
 | | code_key | text | Y | UQ(workflow_id, code_key) WHERE origin=Code | instance ID from schedule file |
 | | config_version_id | uuid | Y | FK | Code: current `schedule_config_versions` row (source path, commit, hash); null for User |
 | | name, timezone | text | N | | |
-| | cron / interval_s | text / int | Y | CHECK exactly one | |
+| | cron / interval_s | text / int | Y | CHECK exactly one | file/registration intervals require positive whole seconds, at most 2,147,483,647; no rounding |
 | | variables | jsonb | N | | effective (defaults ← overrides) |
-| | version_pin | text | Y | | SemVer range or exact |
+| | version_pin | text | Y | | Exact UUID/SemVer or comparison/wildcard range; null selects active |
 | | overlap_policy, catchup_policy | smallint | N | | skip/queue/concurrent · none/latest |
 | | paused | bool | N | | |
 | | next_fire_at | timestamptz | Y | idx WHERE NOT paused AND deleted_at IS NULL | scheduler heap source |
@@ -684,12 +820,16 @@ Conventions:
 | parity_results ⧉ | run_day, run_id, node_key | | N | PK | |
 | | total, matched, parity_pct | bigint, bigint, numeric(6,3) | N | | |
 | | categories, noise_paths, samples_uri | jsonb, jsonb, text | N,Y,N | | |
-| daily_rollups | day, workflow_id, node_key | date, text, text | N | PK | trends/dashboards (FR-024/047) |
-| | runs, failures, soft_failures, p50_ms, p95_ms, cpu_max_pct, ram_peak_mb | | N | | incremental, refreshed every 5 min |
+| daily_rollups | day, workflow_id, node_key | date, text, text | N | PK | trends/dashboards (FR-024/047); UUIDv7 UTC creation day, empty node key = workflow total |
+| | runs, failures, soft_failures, duration_count | bigint | N | | refreshed atomically in each run terminal transaction; ordered bucket locks, idempotent exact source aggregation; retained terminal history backfilled by 0036 |
+| | p50_ms, p95_ms, cpu_max_pct, ram_peak_mb | double precision (RAM numeric) | Y | | exact interpolated duration quantiles, never averaged across days; null when unobserved; resource maxima include failed/retried attempts; RAM in MiB |
+| dashboard_rollups | scope, scope_id, workflow_id, node_key, day | text, uuid, text, text, date | N | PK; idx(day, workflow_id) | workflow (zero UUID), schedule (retained series UUID), machine (agent UUID); node scope selects the workflow projection |
+| | observations, failures, soft_failures, duration_count, durations_ms | bigint, double precision[] | N | | 0037 backfills retained terminal history; same ordered bucket lock and terminal transaction as daily_rollups; exact observed source durations, never averaged daily quantiles or approximate sketches |
+| | cpu_max_pct, ram_peak_mb, latest_run_id | double precision, numeric, uuid | Y,Y,N | | scope-specific resource maxima and latest contributing run; null unknown telemetry, measured zero preserved; counts and duration arrays constrained independently |
 | audit_log ⧉ | id, ts | bigint identity, timestamptz | N | PK(ts, id) | 13 monthly partitions (≥ 1 year) |
 | | actor, actor_kind, action, target_kind, target_id, team_id, summary | | N/N/N/N/N/Y/N | idx(target_kind, target_id, ts), idx(actor, ts) | |
-| subscriptions | id, principal_id, scope_kind, scope_id, events, channel, target, secret_ref | | N (secret_ref Y) | PK(id); idx(scope_kind, scope_id) | FR-028 |
-| notification_outbox | id, subscription_id, run_id, payload, attempts, next_attempt_at, delivered_at | | | PK(id); partial idx WHERE delivered_at IS NULL | transactional outbox |
+| subscriptions | id, principal_id, scope_kind, scope_id, type_scope, series_id, events, channel, target, secret_ref, created_at | | N (series_id, secret_ref Y) | PK(id); unique owner/scope/events/channel/destination configuration; owner UUID keyset and scoped lookup indexes | FR-028; 0038; schedule binds retained series; FK cascades type/series deletion |
+| notification_outbox | id, subscription_id, run_day, run_id, payload, created_at, attempts, next_attempt_at, delivered_at, failed_at, last_error | | N (delivered_at, failed_at, last_error Y) | PK(id); unique(subscription_id, run_day, run_id); due index excludes delivered/failed rows | 0038 durable schema; subscription and partitioned-run FK cascades; JSON object payload, nonnegative attempts, bounded sanitized error |
 | leases | name | text | N | PK | `engine` |
 | | holder, epoch, expires_at | text, bigint, timestamptz | N | | fencing epoch |
 | registry_snapshots | id, git_commit, content, registered_at | uuid, text, jsonb, timestamptz | N | PK(id) | team/type registry history |
@@ -711,7 +851,7 @@ Node runs and task attempts come to about 40 M rows each. Logs, reports, artifac
 | Prefix | Path | Pointer column | Writer | Deleted |
 |---|---|---|---|---|
 | packages | `packages/{sha256}.zip` | `workflow_versions.package_uri` | CI (`wf publish`) via api upload grant on register | never (content-addressed) |
-| sources | `sources/{versionId}.zip` | `workflow_versions.source_uri` | api on register | never |
+| sources | `sources/{sha256}` | `workflow_versions.source_uri` + hash/size | api on register; immutable single-file source ZIP | never |
 | logs | `logs/{runId}/{taskKey}/{attempt}/{n:D6}.log.gz` + `index.json` | `task_attempts.log_uri` (prefix) | agent (§4.7) | with the run |
 | resources | `resources/{runId}/{taskKey}/{attempt}.bin` | `task_attempts.resource_series_uri` | agent | with the run |
 | checkpoints | `checkpoints/{runId}/{taskKey}/{seq}.json` | `task_checkpoints.blob_uri` | task host via SDK | with the run |
@@ -728,6 +868,86 @@ Writers (§4.5, §4.7): the agent writes `logs/` and `resources/`; the task host
 - **Partitions**: the engine's maintenance loop pre-creates next month's partitions. Retention drops whole partitions older than the global maximum. Per-type shorter retention deletes in batches of ≤ 5,000 rows off-peak (`FR-030`).
 - **Event payload versioning**: protobuf with additive fields only; `kind` values are never reused.
 - **Manifest versioning**: `manifest.schemaVersion`. The validator and engine support the current and previous schema versions.
+
+#### Retention configuration
+
+`GET/PUT /api/v1/admin/retention` reuse the existing global Admin policy, including local Development
+access; no separate login or authentication flow. Migration `0040_retention_config.sql` seeds the
+singleton defaults; existing nullable `workflow_types.retention_days` stores exact per-type overrides.
+The JSON contract is `{"default_days":90,"audit_days":365,"per_type":{"team/type":30}}`.
+Defaults and overrides accept integer days from 1 to 36,500; audit accepts 365 to 36,500 independently
+of run retention. Overrides must name registered workflow types (at most 256). Run-owned events, logs,
+reports, artifacts and metrics share run retention; an absent override inherits `default_days`.
+
+PUT is a full replacement: omitted override entries revert to inheritance. All three JSON properties
+are required; unknown, duplicate, null and mistyped members, query parameters, invalid day ranges and
+unknown types return 400. Requests are bounded to 64 KiB, including chunked bodies (413); non-JSON is
+415. Both routes require a nonempty audit-principal UUID and return no-store responses. One PostgreSQL
+statement reads a consistent configuration snapshot. PUT locks the singleton to serialize writers,
+locks referenced types, replaces defaults/overrides and appends `retention.update` with complete
+before/after configuration in the same transaction. Last committed replacement wins; an audit failure
+rolls everything back. Missing/inconsistent persisted configuration is 500, not a fabricated default;
+database failures are logged and sanitized as 503. Configuration changes alone do not launch a purge.
+The live-load purge gate is exercised separately from the functional maintenance regressions by
+`RetentionPurgeTests`, tagged `Performance` and run alone in both backend CI OS jobs. It seeds 5,000
+expired full-graph runs with 20,000 real filesystem objects under a 14-day override, plus 150 retained
+runs under default, shorter and longer policies. Four additional active runs use real `RunStore`
+snapshots/events. Four steady HTTP lanes offer 200 requests/second to production metrics/timeline
+routes using RSA-signed Viewer JWTs, consume entire responses and verify unchanged committed answers.
+After warmup, 6,000 baseline samples are compared with every sample overlapping actual maintenance;
+the row-deletion subset is independently gated. Both p95 increases must be strictly below 10%:
+no artificial latency floor, discarded outliers, HTTP retry or mocked transport. The fixture drains
+shared bounded blob batches continuously, more aggressively than the hosted ten-second tick.
+Local evidence `compose-results/retention-purge-live-paced-blobs.trx` records baseline p95 33.965 ms,
+132,021 maintenance samples at 28.075 ms and 21,897 row-deletion samples at 30.623 ms. All expired
+rows, report locators and blobs disappear; all retained child rows/blobs and active runs survive.
+Earlier unpaced work exceeded the gate, motivating smaller row transactions and paced blob batches;
+the original lease fence and the workload/threshold were not weakened. This is measured local
+evidence, not a guarantee on every shared host or a claim that remote CI has run.
+
+`RetentionService` runs only in the engine host. The current database-fenced leader pre-creates this
+month and next month's complete run/audit partition families daily. Policy deletion runs only from
+02:00 inclusive to 04:00 exclusive UTC. A sweep removes at most 5,000 runs, in transactions of at most
+25 runs with 250 ms pacing; each transaction reacquires the current policy and engine lease fence.
+The smaller transactions preserve the existing one-second database fence: actual 5,001-run testing
+exposed roughly 7.5 seconds of PostgreSQL foreign-key checking for one monolithic 5,000-run DELETE.
+Neither constraints nor the lease timeout are disabled or relaxed. SQL lock waits are bounded to
+100 ms; failed work rolls back and retries on a later ten-second tick.
+
+Both creation and terminal completion must be older than the applicable default/type cutoff. Active
+runs, unfinished nodes/attempts, unreleased physical reservations (even if expired), pending reservation
+queues, dispatches, commands and unexpired artifact grants are retained. Run and attempt deadlines
+must also be more than 24 hours 15 minutes old, preserving offline log recovery capabilities and their
+last short-lived upload grants. These conservative safety guards can retain data longer than its
+configured minimum; they never turn expiry into a physical-work acknowledgement.
+
+Each transaction explicitly removes run-owned FK children, report-ID locators and processed commands,
+refreshes affected daily/dashboard metric buckets under their existing ordered aggregate locks, and
+durably queues blob deletion before removing the run. Schedule-fire and rerun lineage references
+intentionally outlive the run; reused outputs are already copied into the child. Audit has a separate
+5,000-row batch and its independent minimum-one-year cutoff, retaining the exact boundary timestamp.
+Whole monthly partitions are detached and dropped only after every table in an expired run family
+is empty and its upper bound is past the maximum default/type retention. Audit families use the audit
+cutoff independently. Schema, inheritance, canonical names and actual partition bounds are checked;
+NOWAIT locks plus a second emptiness check protect readers and concurrent writers. No `CASCADE` is
+used, no child of a still-retained run month is removed, and one family is dropped per transaction.
+
+Migration `0041_retention_blob_deletions.sql` makes DB-to-blob cleanup restart-durable. Workers use
+SKIP LOCKED tombstones, ten-second cancellable deletions and sanitized one-minute-to-one-hour retry
+backoff. Each maintenance tick processes at most 32 tombstones with 25 ms between committed jobs;
+the shared bounded batch also prevents catch-up workers from monopolizing storage. Blob IO does not
+hold the one-second logical engine lease fence; already-deleted run ownership,
+tombstone row locks and fresh reference checks provide its authority. Filesystem and Azure adapters
+delete only the exact run's logs, resources, checkpoints, reports, perf and parity prefixes. Packages,
+source and other runs are untouched; canonical ID/hash validation and filesystem reparse-point rejection
+apply before deletion. The existing orphan-run sweeper now covers all six run prefixes, so a late
+capability upload cannot become a permanent orphan.
+
+Artifact bytes are content-addressed and may be shared. GC acquires the same hash-specific transaction
+lock as actual artifact publication, checks both artifact and grant references, and deletes only when
+none remain. Busy publishers defer their tombstone for ten seconds without consuming failure retries
+or starving other queued work. An off-peak inventory also queues unreferenced artifact hashes left by
+failed/expired publications. Cancellation leaves unacknowledged tombstones for idempotent retry.
 
 ## 6. API Design
 **Style**: REST + JSON over HTTPS for queries and commands (`/api/v1`), SignalR (MessagePack) for push, gRPC for
@@ -773,13 +993,190 @@ agents. Within v1 only additive changes are allowed; breaking changes go to `/ap
 | POST | /api/v1/schedules/{id}/run-now | Operator | — | 202 `{runId}` (series derived from the schedule's `run_series`) | 404 |
 | DELETE | /api/v1/schedules/{id} | Operator · **UI-only, not part of public API** | If-Match | 204 | 409 (code), 412 |
 | GET | /api/v1/series/{id}/runs · /trends | Viewer | `window=7d,30d,90d` | runs · trend series (rollups) | 404 |
-| GET | /api/v1/dashboards/{scope}/{id} | Viewer | `window` | top-N slow/flaky/heavy | 404 |
+| GET | /api/v1/dashboards/{scope}/{id} | Viewer | `window=7d,30d,90d`, `top=1..50` | node rankings: exact p95, hard-failure fraction, max CPU and RAM; contributing run links | 400, 403, 500, 503 |
 | GET | /api/v1/machines | Viewer | `label, pool, os, status` | machines + reservations | — |
 | PATCH | /api/v1/machines/{id} | Admin | labels, pool, capacity per profile | 200 | 400 |
 | POST | /api/v1/machines/{id}/calibrate · /drain | Admin | profile | 202 | 409 (reserved) |
-| GET/POST/DELETE | /api/v1/subscriptions | User | scope, events, channel | subscriptions | 400 |
+| GET | /api/v1/subscriptions | Owning user + current scoped Viewer | optional paired `scope, scopeId`; `limit=1..100` (default 50), `cursor` | `{items,nextCursor}` | 400, 403, 500, 503 |
+| POST | /api/v1/subscriptions | User + current scoped Viewer | `{scope,scopeId,events,channel,target,secretRef?}` | 201 subscription + Location | 400, 403, 409, 413, 415, 500, 503 |
+| DELETE | /api/v1/subscriptions/{id} | Owning user (also after role revocation) | canonical subscription UUID | 204; queued rows cascade | 400, 404, 500, 503 |
 | GET | /api/v1/audit | Admin / team Author | `actor, target, from, to, cursor` | page | 403 |
 | GET/PUT | /api/v1/admin/retention | Admin | defaults + per-type | config | 400 |
+
+**Completion subscriptions (FR-028)**: scope IDs are plain `team/type/workflow`,
+`team/type` or canonical lowercase schedule UUIDs, not dashboard base64url IDs.
+`Completed` covers every terminal run outcome; `Failed` covers failure, abort and
+timeout. Distinct events are stored in ordinal order. Webhook requires an HTTPS
+URL (loopback HTTP for local use) without credentials, query or fragment and a
+configured signing-secret reference, never a key value. Email accepts one mailbox
+without a display name; Teams accepts a configured destination-secret reference,
+never a credential-bearing connector URL. Email and Teams omit `secretRef`.
+Creation uses strict, bounded 16 KiB JSON, rejecting missing/null/unknown/duplicate
+properties and invalid destinations. An identical owned configuration returns 409.
+Current existing Viewer grants constrain creates and every list page; descending
+UUID keyset pagination returns only the authenticated user's rows. Even global
+Admin cannot inspect or delete another user's subscription. Owners may unsubscribe
+after revocation; missing and foreign IDs share 404. App-only, Agent and Registrar
+identities cannot manage personal subscriptions. Create/delete and safe audit
+records commit atomically; no resolved secret values enter responses or audit.
+All responses are no-store with explicit sanitized failures. Migration 0038 adds
+the durable outbox schema; 0039 enqueues completion notifications atomically.
+No new login/logout flow.
+
+**Subscribe controls**: workflow history/version pages, type catalogue and
+schedule details share an inline, keyboard-accessible Subscribe panel. The
+existing Viewer role is sufficient; neither Operator nor Admin is needed.
+Email accepts a mailbox, Teams a configured destination reference, and webhook
+an HTTPS URL plus signing reference. Users choose all terminal outcomes or
+failures/timeouts/aborts only. No resolved secrets or private Teams URLs belong
+in these fields. Saving creates a durable subscription, not a test delivery.
+The panel shows only the signed-in user's exact-scope subscriptions, with
+bounded descending keyset pagination, explicit refresh, failure states and
+unsubscribe. Current access/list revalidation hides cached destinations and
+create controls; query enablement uses stable grants, not a transient fetching
+flag. Previously loaded owner IDs remain available for unsubscribe after a
+denied read or revocation, without exposing their cached destinations. Existing
+session transitions cancel and clear personal query caches. Resource changes
+reset draft/receipt state; in-scope failures preserve the draft. No automatic
+mutation retries or new authentication flow are introduced.
+
+**Terminal outbox and notification dispatch**: the 0039 row trigger runs in the
+terminal transaction, including ordinary RunStore and grouped commits. Grouped
+status publication precedes the terminal snapshot, so enqueue waits for terminal
+status plus `ended_at`. Existing completed history is not backfilled; future run
+partitions inherit the trigger. Workflow/schedule/type matching uses exact owning
+type, workflow ID and retained series ID. One row per subscription/run survives
+exact replay; outbox failure rolls back terminal events, snapshot and projections.
+CloudEvents structured JSON uses `specversion=1.0`, `source=urn:kardia:runs`, run
+UUID as `id`, workflow ID as `subject`, UTC terminal `time` and
+`datacontenttype=application/json`. Type is `io.kardia.run.completed` for success,
+otherwise `io.kardia.run.failed`. Data contains only run/workflow/version/series
+IDs, terminal status and UTC end time: never variables, outputs, metadata, abort
+reasons, destinations or secrets. The dispatcher rejects oversized, foreign or
+expanded persisted payloads rather than forwarding extra fields.
+
+Delivery is opt-in on engine hosts, default `Notifications:Enabled=false`.
+Rows remain durable while disabled; configure approved destinations before enabling.
+Each `Notifications:Webhooks:N` entry requires exact `TypeScope`, `Target`,
+`SecretRef`, `Addresses` (1-8 canonical literal IPs) and `SigningKeyBase64`
+(32-128 decoded bytes). Supply keys through external secret-backed configuration,
+for example `Notifications__Webhooks__0__SigningKeyBase64` in the engine process
+environment; never commit them to source, put them in a subscription, or reuse an
+upload/agent authentication key. Reference names match this operator-managed
+configuration; this is not an implementation of agent DPAPI or Key Vault lookup.
+At most 64 distinct destinations across Webhooks, Emails and Teams are accepted.
+HTTPS certificate and hostname
+verification remain enabled; loopback HTTP requires loopback pins. The client
+connects only to approved IPs while preserving the original HTTP/TLS hostname,
+without DNS re-resolution, proxies, redirects, cookies or ambient credentials.
+Metadata, link-local, multicast and wildcard addresses are rejected; private
+unicast addresses require explicit operator pins. Address/key changes require
+engine configuration update and restart. Unapproved type/URL/reference tuples
+fail permanently without sending. Email mailbox and Teams reference approvals
+also match the exact owning type. This is a durable subscription to an
+operator-approved type-scoped sink, not an indefinitely retained bearer token:
+no JWT, group claims or user membership snapshot is stored or replayed.
+Role revocation blocks interactive create/list; stop existing institutional-sink
+delivery by unsubscribing or removing its approved destination.
+
+The hosted dispatcher locks subscription before outbox with `SKIP LOCKED`, matching
+unsubscribe's cascade order and allowing independent instances without concurrent
+duplicate sends. One claim holds a transaction through a bounded 10-second
+attempt; stop/cancellation rolls it back. Success is HTTP 2xx. HTTP 5xx, 408, 429,
+transport failure and timeout retry after 1, 2, 4, 8, 16, 32 and 60 seconds, with
+eight total attempts. Other responses, including redirects, fail permanently.
+Only bounded reason codes/status numbers persist and are logged, never remote
+bodies, credential URLs, SMTP replies or resolved keys.
+
+`Notifications:Emails:N` requires `TypeScope`, `Target` (one approved recipient
+mailbox), `Host` (operator-managed SMTP relay) and `From` (one sender mailbox).
+`Port` defaults to 587 and `EnableSsl` defaults to true: standard .NET SMTP
+STARTTLS with normal certificate/hostname verification, never implicit SMTPS.
+Optional `Username` and `Password` must be supplied together through external
+secret-backed configuration; ambient/default credentials are disabled.
+Plain SMTP is permitted only to a literal loopback IP and without credentials,
+for local mocks/relays, never a remote host or `localhost` DNS name.
+Each attempt creates its own SMTP client, sends UTF-8 plain text containing
+only the validated event facts, and uses `<run UUID@notifications.kardia>` as
+the stable Message-ID. SMTP 4xx and network failures retry; 5xx fail permanently.
+Missing STARTTLS never downgrades to plaintext. Ten-second deadlines and host
+cancellation apply to SMTP as well as HTTP; remote details are not persisted.
+
+`Notifications:Teams:N` requires `TypeScope`, `Target` (a safe configured
+destination reference such as `secret://notifications/teams`), private external
+`Url`, and `Addresses` pins with the same HTTP network policy as webhooks.
+Only the reference enters subscription storage/API/audit; the resolved URL
+may contain its provider-issued signature query but no userinfo or fragment,
+and must never be committed or logged. Use a Teams **Workflows** incoming
+webhook configured for **Anyone**; tenant-token triggers are unsupported in
+this prototype, with no new OAuth/login flow. Assign workflow co-owners to
+avoid an orphaned sink. The request is `application/json`, `type=message`,
+with one `application/vnd.microsoft.card.adaptive` attachment, null `contentUrl`
+and Adaptive Card 1.2 containing only safe run facts. It is not the generic
+CloudEvent envelope or the deprecated Office connector MessageCard payload.
+Teams reuses webhook HTTP retry, TLS, no-redirect/no-cookie and pinned-IP rules.
+Operator-managed pins require updates when provider addresses change.
+
+HTTP 2xx and SMTP acceptance record delivery to the configured relay, not a
+guarantee of inbox arrival or downstream Teams workflow completion. Every channel
+is at-least-once: a crash/storage failure after remote acceptance can replay the
+same event/Message-ID; receiver deduplication remains necessary.
+
+Webhook wire profile: POST `application/cloudevents+json` with
+`X-Kardia-Timestamp` (canonical Unix seconds) and
+`X-Kardia-Signature: sha256=<lowercase hex HMAC-SHA256>`. Sign ASCII
+`timestamp + "."` followed by the **exact transmitted UTF-8 body bytes**.
+Receivers must require one of each header, enforce a short timestamp tolerance
+(for example five minutes), verify the HMAC in constant time, then deduplicate
+`source + id`. This timestamp/HMAC profile is Kardia-specific, not a CloudEvents
+signature standard. Delivery is **at least once**, not exactly once: remote
+success followed by database/commit failure or cancellation can resend identical
+event bytes/ID with a fresh signature timestamp. Removing a subscription cascades
+queued rows and waits for an already-running bounded attempt; it cannot retract a
+request already received. Eight exhausted attempts remain explicitly failed for
+operator inspection; no automatic replay API is claimed.
+
+**Dashboard reads (FR-047)**: `scope` is `workflow`, `schedule`, `node` or `machine`.
+Workflow and node IDs are canonical unpadded base64url UTF8 of `team/type/workflow`
+and `team/type/workflow/node`; schedule and machine IDs are canonical lowercase UUIDs.
+Default window is 30 days including the current UTC creation day, with inclusive
+`from` and exclusive `to`; default `top` is 10. Each ranking groups by exact
+workflow/node, uses descending metric and ordinal identity tie-breaks, and links
+to the latest contributing run (not a claimed percentile exemplar). Slowest means
+exact interpolated source p95, never averaged daily percentiles. Terminal runs
+only; workflow/schedule/node observations are terminal node occurrences.
+Machine observations are terminal task attempts on that exact agent, not complete
+node durations or other agents' measurements. Failure fraction counts hard failure,
+timeout and cancellation; soft failures remain separate. Skipped/reused observations
+count without invented duration. Unknown CPU/RAM/duration remain null and are
+excluded from the corresponding ranking; real zero is retained, CPU may exceed
+100%, and RAM is MiB. Durable `dashboard_rollups` preserve scope-specific daily
+counts, resource maxima, latest contributing IDs and arrays of observed source
+durations. Migration 0037 backfills retained history and extends the existing
+terminal refresh function in place: both projections commit or roll back with
+the terminal events/snapshot, on normal and group-commit paths. Dashboard reads
+sum counts separately from unnested durations, then use PostgreSQL's native
+interpolation over the selected source durations for exact cross-day quantiles.
+No raw run/node/attempt scan supplies rankings, no daily quantiles are averaged,
+and no request cache or per-request planner setting is required.
+Fresh existing Viewer grants apply on every request, including deleted-schedule
+history. Machine analytics filter to currently granted workflow types and disclose
+no global machine inventory metadata; inventory itself remains global Admin-only.
+Unknown and ungranted resources share 403; responses are `no-store` and failures
+are sanitized. No additional login/logout flow.
+
+**Dashboard UI**: `/dashboards/$scope/$id` validates canonical scope identities and
+persists `window` and `top` in the URL. Existing charts display each ranking with
+an always-visible linked table alternative, explicit observed-duration and
+hard/soft-failure counts, null/zero semantics and CPU/RAM units. Workflow history,
+schedule detail and machine detail link to their dashboards; ranked rows link to
+the corresponding node dashboard. Node links search runs by exact workflow and
+UTC creation window across schedules/machines; the separate latest-contribution
+link identifies an actual run from the selected dashboard scope. The scoped
+dashboard read itself checks current Viewer authority, so machine analytics do
+not demand broader inventory access. Fetching/error states hide cached rankings;
+refresh, focus and remount recheck access without a permission-triggered retry
+loop or new polling/authentication flow.
 
 **UI-only routes** (FR-035): user-defined schedule mutations (create, edit, pause, resume, delete) serve only the Kardia UI. They are left out of the public `/openapi/v1.json` contract, the SDK/public client and the CLI (a separate internal document generates the SPA client), and accept only delegated user tokens issued to the Kardia SPA client (`azp` check); app-only and other-client tokens get 403. This is a product/contract boundary, not a security boundary: a user scripting the UI's token can do nothing beyond what their role already allows in the UI. Code-defined schedules and registration never create or modify user-defined schedules. Schedule reads and `run-now` stay public.
 
@@ -818,6 +1215,7 @@ Keepalive pings run every 20 s (below the ACA ingress idle timeout).
 using Wf.Sdk;
 
 return await Workflow.Define("payments/release-validation/deploy-check", "1.4.0", w => w
+    .Type("release-validation")
     .Metadata("area", "checkout")
     .RunsOn(Pool("default"))                                   // workflow-level selector; nodes/tasks may override
     .RunTimeout(4.Hours())
@@ -951,7 +1349,11 @@ Status colours always pair with an icon and label (never colour alone). Typograp
 - **Authorisation**:
   - Global roles are Entra app roles (Admin, Registrar, Agent).
   - Team/type roles (Author/Operator/Viewer) come from `team.json` → Entra group mappings, synced into `role_bindings` on registration.
+  - Author and Operator independently include Viewer; neither includes the other. Scoped Admin includes all roles within its exact team/type scope. Team grants inherit to their types, never in reverse. Only the exact Entra `Admin` app role is global; database global bindings do not substitute for it.
+  - User-scoped grants require a delegated user identity and match user `oid` or complete `groups` claims. App-only Agent/Registrar identities cannot inherit them; malformed/overage group claims fail closed without Graph expansion. Resource ownership comes from stored registry/run data, not submitted team metadata.
   - Policy checks are made per request on resource scope, including on SignalR subscribe. Teams never see other teams' data unless granted (FR-021 isolation).
+  - Catalogue teams/types/workflow lists use those same current policies. Type-only grants expose a team container with only visible types and omit team-wide presentation; team grants expose presentation, while only global Admin retains role/group maps. Lists are `no-store`; unknown/ungranted teams produce 404 or empty data. The initial workflow catalogue accepts exact team/type filters (type requires team), canonical opaque ordinal-identity cursors, and limits 1-100 (default 50). It returns active/latest version identities, active metadata and deterministic latest durable-run summaries, not variables, manifests or blob capabilities. Latest-status counts count one latest run per non-deleted workflow, including `NeverRun`. Full-text/metadata/status search follows in the search task; unsupported filters currently return explicit 400 Problem Details.
+  - Authenticated internal `GET /api/v1/permissions/{scope}?id=...` reads use those same policies for stored team/type/run/series ownership (or global machines). The response names the exact resource and four independent role booleans, is never cached, and returns 403 for absent/ungranted resources. The SPA's shared `usePermissions`/`Can` layer hides unpermitted actions, refreshes on focus and every 30 seconds, and fails closed during loading, refresh, offline pause or error without unmounting unsaved forms. Mutation endpoints still enforce current authority; schedule mutations and previews require Operator, not Author.
 - **Secrets**: references only (`secret://<store>/name`). The store is Key Vault, HashiCorp Vault, or a protected file (DPAPI on Windows, 0600 on Linux), chosen per profile. An agent resolves secrets at task start using its own identity. Values never enter the DB, events or the manifest. The log masker redacts resolved values (exact + base64 forms).
 - **Report content**:
   - Streamed by the api from blob on the app's own hostname (no extra hostname) with `Content-Security-Policy: sandbox allow-scripts; frame-ancestors 'self'; default-src 'none'; script-src 'unsafe-inline'; img-src 'self' data:; style-src 'unsafe-inline'` (no `allow-same-origin`, so the document gets an opaque origin even when the content URL is opened directly) and `X-Content-Type-Options: nosniff`. This route omits `X-Frame-Options DENY` so the SPA can frame it; every other response keeps `DENY`.
@@ -1272,6 +1674,73 @@ Alerts fire on:
 | Placement | Unit (engine core) + integration (3 simulated agents) | Selectors, affinity pins, reservation exclusion, warm-host preference, `Ready(reason=WaitingForMachine)` → `Failed(category=Placement)` on timeout, re-placement after agent loss | PR |
 | Deployment profiles | Local: `aspire run` smoke on Windows + Linux; `wf local up --env dev` on a Linux runner (no edge: clients call the gateway at `127.2.6.2:80` directly) runs scenario A, then kills the engine leader; a second step starts `ppe` beside it and checks both answer on their own addresses. Self-hosted: 2 VMs + 3-node Patroni lab, `deploy/selfhosted.ps1` under load. PaaS: revision deploy under load | Deploy + rollback with 100 active runs and 200 clients: 0 failed runs, 0 HTTP 5xx; Patroni failover → runs resume ≤ failover time + 30 s | Local: PR. Self-hosted/PaaS: nightly + pre-release |
 
+### Dispatch and run-start performance probe
+
+`dotnet run --project backend\tests\Wf.Benchmarks -- --dispatch-latency-bench`
+uses an isolated PostgreSQL 17 container, or a unique schema on `WF_TEST_POSTGRES`.
+All migrations and synchronous durability (`fsync`, `full_page_writes`,
+`synchronous_commit` ON), the renewing leader lease and production write fences
+remain enabled. CI runs the same strict gate on Windows and Linux.
+
+The dispatcher wakes the assigned agent's gateway stream only **after** the
+initial, hosted-execution or re-placement transaction commits. Per-stream
+bounded hints coalesce, share the ACK wake path and are detached on disconnect;
+they never carry commands or replace the durable outbox. Each scan reads
+dispatches and cancellations under one current lease fence/transaction. The
+unchanged 25 ms fallback still recovers missing hints and reconnects, with
+existing session checks and sent-command deduplication intact.
+Placement metadata, reservations and pending capacity use a single protocol
+batch of separate SQL statements. Run locking and snapshot reads likewise use
+separate batched statements, not a joined `FOR UPDATE`: the snapshot read must
+see the committed state after a concurrent lock holder releases. These batches
+remove transport round trips without removing locks or write fences.
+An already-current metrics snapshot does not reread its empty event tail;
+older snapshots and legacy metrics still replay history. Dispatch inserts the
+new attempt once, without first sending an update for a row not yet inserted.
+
+Local Windows x64/.NET 10.0.13 with Docker PostgreSQL 17.11, final report
+`BenchmarkDotNet.Artifacts/dispatch-latency/a22f8f935fa0436fabeaa5a2a8012481`:
+10,000 dispatches p95 **48.9340 ms**, p99 **57.9094 ms**; 100 HTTP-to-SDK
+starts p95 **842.2918 ms**. All raw samples are retained, including a trigger
+maximum of 1,184.7569 ms; the run-start requirement is p95, not maximum.
+Earlier full dispatch failures at p95 56.2904 and 52.0075 ms remain available
+in reports `73610a6c49414f39bb5f0561369126ea` and
+`6d4196289a414960b60b75109db2f974`. No threshold was relaxed or outlier removed.
+These are local observations, not Linux/remote-CI or production SLA results.
+
+Dispatch latency covers the call to `Dispatcher.DispatchAsync`, its durable
+transaction/outbox, real loopback Kestrel HTTP/2 and `AgentConnection`, ending at
+the agent command-handler receipt. The earlier committed Ready event is outside
+this interval. Exactly 10,000 sequential dispatches follow 100 explicit warmups;
+nearest-rank p95 must be <= 50 ms and p99 <= 200 ms. The dispatch-only handler
+sends synthetic start/completion protocol replies **after** receipt to drain
+the isolated outbox; these are transport measurements, not SDK execution proof.
+Ready-state fixture creation uses eight workers in 32-run batches with 10 ms
+gaps before the strictly sequential timed phase, never concurrently with
+dispatch measurement. The gaps let the exclusive lease renewal acquire between
+shared write fences without extending the production lease. Protocol-only
+fixture workflows intentionally remain Running after their synthetic task
+replies; the real SDK workflows alone are driven to terminal success. Finishing
+10,100 simulated workflows and their historical rollups is not dispatch proof
+and is unnecessary before removing the isolated schema.
+
+Run-start latency independently covers a real Development-authenticated HTTP
+trigger, durable command inbox, hosted 100 ms recovery and 25 ms execution loops,
+gRPC, host IPC and the **actual SDK delegate's** monotonic start timestamp.
+Exactly 100 triggers follow 10 warmups, with p95 <= 1 second. Each trigger gets
+a freshly prewarmed **one-shot** process before timing; its PID must match the
+delegate output, and exactly 110 processes must start. Cold-start provisioning,
+WAN latency, sustained offered-rate saturation and production JWT overhead are
+not measured by this probe. Physical isolation is not relaxed to reuse a host.
+
+All samples must be finite and positive; missing/extra samples fail the gate.
+No measured samples are dropped or retried. Completion polling stays outside
+the timed intervals. Exact durable run/version/agent/attempt counts, processed
+commands and an empty outbox are checked. Machine-readable reports and both raw
+sample arrays persist under `BenchmarkDotNet.Artifacts\dispatch-latency\<id>`.
+Temporary host/cache/blob directories, the unique schema and owned container
+are removed even when the probe fails.
+
 ## 11. Code Organization
 ```
 workflow-scheduler/
@@ -1338,7 +1807,7 @@ teams/<team>/<type>/<workflow>/tests/*.cs    # workflow tests (xUnit + Wf.Sdk.Te
 | AD-009 | Workflow tests | Out-of-process dry-run of the compiled script | Referencing script from test csproj | CS9298 blocks `#:` directives in project builds (verified on SDK 10.0.401); out-of-proc also tests the shipped artifact. |
 | AD-010 | Workflow publish | `PublishAot=false`, framework-dependent IL, content-addressed zip | Native AOT per workflow | File-based publish defaults to AOT; AOT is slow to build, per-RID and breaks reflection-heavy user code. |
 | AD-011 | Agent build | Native AOT | Framework-dependent | Idle RSS ≤ 100 MB (NFR-032), fast start, no runtime install on test machines. |
-| AD-012 | Task isolation | Per-run warm task-host processes; tasks that invoke service-team hooks (request/response hooks, phase 2 load/parity tasks) get a dedicated task-host process per task attempt | Per-task process for everything; in-agent AssemblyLoadContext | Warm dispatch without cross-run leakage; a crashing hook kills only its own attempt's host (task `Failed`, category `TaskError`, code `HookError`), never other tasks of the run (NFR-013); ALC unloading is unreliable with user code. |
+| AD-012 | Task isolation | Prewarmed task-host process per task attempt, never shared or rebound; compilation remains once per workflow version | Shared per-run host with dedicated hook hosts (superseded October 15, 2026); in-agent AssemblyLoadContext | Warm IPC dispatch without process startup; per-attempt address spaces make CPU/RAM limits and hard cancellation independent of sibling attempts. A crashing hook kills only its own attempt's host (task `Failed`, category `TaskError`, code `HookError`), never other tasks of the run (NFR-013); ALC unloading is unreliable with user code. |
 | AD-013 | Hosting | Three profiles (§9.1): Local (`wf-host`, or per-environment Docker Compose), Self-hosted (OS services on bare metal / Azure VMs), Azure PaaS (ACA multiple-revision mode). First build: Local on this single machine | AKS, App Service, containers-only everywhere | Same artefacts everywhere (NFR-017). ACA gives revision traffic splitting with least ops. Self-hosted needs no container runtime (Windows test labs, Autopilot-style fleets) and reaches zero downtime through rolling deploys plus lease handover. AKS is unnecessary at this scale. |
 | AD-014 | Deployables | `api` + `engine` from one codebase; `wf-host` = both locally | Single process; microservices | Stateless API scales independently; engine is a singleton; same code locally. |
 | AD-015 | Local blob | Filesystem `IBlobStore` | Azurite | One fewer container; Azurite still supported via config. |
@@ -1360,8 +1829,8 @@ teams/<team>/<type>/<workflow>/tests/*.cs    # workflow tests (xUnit + Wf.Sdk.Te
 | # | Risk / question | Impact | Mitigation / spike |
 |---|-----------------|--------|--------------------|
 | R-1 | Azure PaaS: PG Flexible zone-redundant HA failover takes ~60–120 s, so runs resume up to ~150 s after a DB failover (NFR-033: DB failover time + ≤ 30 s). Self-hosted Patroni ≈ 10–20 s | Engine pauses commits during failover | Agents keep executing and journalling; the engine retries; runs resume ≤ 30 s after the new primary accepts writes. The chaos suite measures it per profile. |
-| R-2 | Group-commit latency with synchronous zone-redundant commit may exceed 4 ms | NFR-030 (≤ 10 ms/node) | Spike in M-002.1: benchmark on D4ds HA; fall back to larger batches with async ack of non-critical events. |
-| R-3 | cgroups v2 delegation on Linux agents | Per-task limits unavailable | systemd `Delegate=yes`; spike on Ubuntu 24.04 + Azure Linux; fall back to `systemd-run --scope`. |
+| R-2 | Group-commit latency with synchronous zone-redundant commit may exceed 4 ms | NFR-030 (≤ 10 ms/node) | Local spike completed in task 2.2.2.1.3; measurements below. Keep synchronous critical acknowledgements and bounded batches, immediate collection by default. Local storage misses the latency target; D4ds HA validation remains open. Never acknowledge critical effects before COMMIT. |
+| R-3 | cgroups v2 delegation on Linux agents | Per-task limits unavailable | Non-root delegation and administrator-provisioned `systemd-run --scope` verified on Ubuntu 24.04 and Azure Linux 3.0 userspaces under real systemd; measured result and kernel qualification below. Use `Delegate=cpu memory` with `DelegateSubgroup=agent`. |
 | R-4 | Bond packages from the Microsoft-internal feed on .NET 10 | Phase 2 Bond codec | Isolated in `Wf.Codec.Bond`; spike early; nuget.org exact version as restore fallback; JSON codec first, and JSON over HTTP if Bond proves unusable. |
 | R-5 | File-based script compile time | NFR-022 (validate < 10 s) | Cache build output by content hash; `wf validate` reuses it. |
 | R-6 | GitHub-hosted runner latency noise | Benchmark gate flakiness (NFR-027/030) | Run macro benchmarks on self-hosted reference runner; use relative comparisons. |
@@ -1374,6 +1843,155 @@ teams/<team>/<type>/<workflow>/tests/*.cs    # workflow tests (xUnit + Wf.Sdk.Te
 | R-13 | Unvalidated assumptions: ≥ 1,000 definitions and ≥ 200 concurrent tasks (NFR-003), Entra ID tenant available (NFR-007), Bond packages available from the internal feed (R-4) | Sizing, auth, phase 2 codec | Validation task: confirm with stakeholders and size-test before M-011.1. |
 | R-14 | Remote API idempotency/status retention may be shorter than the task's retry window, or many waiting jobs may exhaust agent slots | Duplicate external side effects or queued work | Require a service contract covering the deadline/retry window, or disable automatic retries and mark uncertain outcomes for operator reconciliation; measure slot occupancy before considering durable suspension. |
 | Q-2 | Which profile is production first (Autopilot fleet vs Azure PaaS)? | Order of M-011.2 work and infrastructure | All profiles share code; only deploy tooling differs. Decided for the first build: Local (pure local + Docker Compose) on this single machine, which is not bare metal. Self-hosted next (matches test-lab machines; code kept portable and lab-verified meanwhile), PaaS after. |
+
+### R-3 non-root cgroup delegation spike (October 18, 2026)
+
+Task `2.2.2.2.1`: **supported on both tested distributions**. The reproducible
+`infra/agent/Dockerfile.cgroup-delegation` and `test-cgroup-delegation.sh`
+boot real systemd as PID 1 in explicitly opted-in disposable containers with
+private cgroup namespaces and no host cgroup bind mounts.
+
+| Userspace | Installed systemd | Service identity | Service / scope result |
+|-----------|-------------------|------------------|------------------------|
+| Ubuntu 24.04.5 LTS | 255.4-1ubuntu8.18 | `wf-agent`, UID 997, zero effective capabilities | Both pass |
+| Azure Linux 3.0.20260923 | 255-34.azl3 | `wf-agent`, UID 999, zero effective capabilities | Both pass |
+
+The service probe retains the shipped unit's user, no-new-privileges and filesystem
+hardening, adding the existing profile's `Delegate=cpu memory` and
+`DelegateSubgroup=agent` without its optional BPF capabilities. Its empty parent
+can enable both controllers. The non-root agent creates a private task cgroup,
+sets `cpu.max=25000 100000`, `memory.max=67108864`, `memory.swap.max=0`, moves a
+real child into it, reads its accounting, waits for exit and removes the group.
+These are delegation/configuration assertions, not CPU-throughput or OOM-kill
+measurements; workload limit enforcement remains task `2.2.2.2.2`.
+
+The fallback also passes: an administrator creates a system scope with
+`systemd-run --scope --property="Delegate=cpu memory"`, moves its supervisor to
+an `agent` child, delegates the necessary ancestor files to `wf-agent`, then
+drops all capabilities before the identical non-root probe. This is an explicit
+installation fallback, **not** an unprivileged system-bus/polkit bypass or an
+automatic runtime fallback. Prefer the service profile on systemd >=254.
+
+Both actual installers validate, install, enable, reach ready and stop using a
+notification stub (not the agent binary). Azure Linux exposed missing `hostname`
+and `awk` commands and no `systemd` executable on PATH; installer detection now
+reads the kernel hostname and parses `systemctl --version` with Bash built-ins.
+The test image installs `gawk` only for the probe's diagnostic parsing.
+
+Evidence: `compose-results/delegation-ubuntu-actual.log` and
+`delegation-azurelinux-actual.log`. Both use Docker Desktop's shared
+`6.18.33.2-microsoft-standard-WSL2` kernel; native Ubuntu/Azure Linux VM kernels,
+Azure-hosted deployment and BPF permissions are **not** verified by this spike.
+The harness requires container-only privileged setup to boot systemd/remount its
+private cgroup filesystem; the measured service needs no `CAP_SYS_ADMIN` or
+effective capabilities. Backend CI now contains the same two-distribution gate
+with uploaded logs; remote execution is not claimed.
+
+### CPU/RAM workload limit verification
+
+Task `2.2.2.2.2` supplies optional immutable SDK/manifest policies, durable
+dispatch caps, RAM-aware placement and the historical Task Plan projection.
+Innermost whole-policy replacement includes explicit zero/unlimited overrides.
+Invalid caps fail at authoring and wire admission; standalone in-process local
+execution rejects positive caps rather than pretending to enforce them.
+
+Windows uses nested Job Objects for aggregate CPU hard rates and committed-memory
+limits. Source-generated native interop follows the existing agent convention;
+no CsWin32 dependency was added. CPU conversion uses the OS logical-processor
+count, not runtime overrides, and rejects unsupported processor groups or rates.
+Job memory-denial notifications and SDK first-chance managed OOM detection
+produce nonretryable `ResourceLimit`, including caught managed exceptions.
+**Qualification:** Windows Job completion-port notifications are best-effort.
+An unmanaged allocator that handles denial without a managed exception is still
+hard-capped, but its denial cannot be guaranteed to produce a breach notification.
+
+Linux workers enter their private unlimited cgroup leaf **before exec**; binding
+then applies `cpu.max`, `memory.max`, zero swap and group OOM killing before
+secret resolution or task code. Moving a ready worker into a new cgroup was
+rejected: its existing memory charges would remain outside the new limit.
+The supervisor remains in an unlimited sibling, preserving descendant-reaping
+and physical-exit proof during OOM. Optional accounting observes their common
+parent, so reported RAM includes supervisor overhead outside the workload cap.
+`memory.events` OOM counters identify actual breach; reclaim/`max` events do not.
+The shipped systemd service always delegates CPU/memory; limits need neither BPF
+nor network capabilities. Missing delegation fails closed for limited attempts.
+
+Confirmed breach discards outputs and stops the complete owned process tree
+before result journaling or publication. Limited successful attempts also wait
+for physical exit and the final limit check before journaling. Private readiness
+protocol 6 requires rebuilding SDK packages; public dispatch remains compatible.
+Existing reservation/session fences and unlimited-attempt behavior remain intact.
+
+Actual Windows and capability-free non-root Linux tests exercise aggregate
+0.25-core throttling, direct/descendant/caught-OOM RAM breach, caps below warm
+baseline, sibling isolation, accounting and unavailable-delegation rejection.
+Windows agent regressions pass 141 cases with two Linux-only skips; non-root
+Linux accounting/limit regressions pass 25, and the zero-capability limit suite
+passes 15. Three real HTTP/2 agent/package/SDK/PostgreSQL RAM/replay cases pass
+on each OS. A database lock proves physical cleanup precedes durable completion;
+reconnection replays the journal without another task or retry. Windows Native
+AOT publish and two native heartbeat/installer-registration integrations pass.
+SDK/local/dry-run/manifest regressions pass 110, safe-plan projection units 18,
+and Task Plan frontend cases 30; generated API, strict types, scoped lint and
+production frontend build pass. Existing package-audit warnings are unchanged.
+
+Evidence: `compose-results/limits-agent-final.trx`, `limits-sdk-final.trx`,
+`limits-version-contracts.trx`, `limits-actual-api-final.trx` (19 passed and the
+Windows readiness-marker sharing race corrected by `limits-ram-windows-final.trx`,
+3 passed), `limits-native-windows-final.trx`, and
+`.agent-artifacts/limits-linux-3adec91f/results/linux-Wf.Agent.Tests-{nonroot,without-bpf}.trx`
+and `linux-Wf.Integration.Tests-without-bpf.trx`. Linux uses the shared Docker
+Desktop WSL2 kernel, not a native distribution VM kernel or Azure deployment.
+The reproducible CI gate is configured; remote CI execution is not claimed.
+
+### R-2 local group-commit spike (October 15, 2026)
+
+PostgreSQL 17 Alpine in Docker on this shared, virtualized machine; .NET SDK
+10.0.402/runtime 10.0.13, x64. Windows client crosses Docker's published port;
+Linux client shares the PostgreSQL container network. These are separate local
+profiles, not an isolated OS comparison or a zone-redundant HA measurement.
+`fsync` and `full_page_writes` are explicitly enabled and checked; every measured
+transaction forces `synchronous_commit=on`. Testcontainers' faster defaults were
+rejected by the benchmark guard before collecting accepted results.
+
+BenchmarkDotNet covers six configurations; a separate 1,024-event probe per
+configuration measures enqueue-to-durable-ack and database persistence (connection,
+transaction, statements and COMMIT), then reconstructs the acknowledged core state
+from the PostgreSQL snapshot/event tail.
+
+| Client | Actors | Strategy | Commits | Events/commit | Ack p95 / p99 (ms) | Persistence p95 / p99 (ms) |
+|--------|--------|----------|---------|---------------|-------------------|---------------------------|
+| Windows | 1 | Per-event | 1024 | 1.00 | 14.958 / 20.710 | 14.870 / 20.647 |
+| Windows | 1 | Immediate batch | 1024 | 1.00 | 14.119 / 17.050 | 14.035 / 16.984 |
+| Windows | 1 | Requested 2 ms batch | 1024 | 1.00 | 29.613 / 33.761 | 14.972 / 18.797 |
+| Windows | 32 | Per-event | 1024 | 1.00 | 361.420 / 434.287 | 15.626 / 20.402 |
+| Windows | 32 | Immediate batch | 62 | 16.52 | 46.723 / 56.484 | 28.517 / 41.032 |
+| Windows | 32 | Requested 2 ms batch | 32 | 32.00 | 42.298 / 46.244 | 29.231 / 29.564 |
+| Linux | 1 | Per-event | 1024 | 1.00 | 10.461 / 13.856 | 10.213 / 13.612 |
+| Linux | 1 | Immediate batch | 1024 | 1.00 | 9.794 / 11.912 | 9.645 / 11.745 |
+| Linux | 1 | Requested 2 ms batch | 1024 | 1.00 | 14.438 / 17.323 | 10.322 / 12.653 |
+| Linux | 32 | Per-event | 1024 | 1.00 | 238.477 / 290.524 | 10.726 / 13.685 |
+| Linux | 32 | Immediate batch | 62 | 16.52 | 36.628 / 38.251 | 26.886 / 28.521 |
+| Linux | 32 | Requested 2 ms batch | 32 | 32.00 | 27.715 / 32.026 | 25.146 / 29.515 |
+
+**Decision:** keep synchronous batching, default to immediate coalescing to avoid
+intentional low-load delay; allow an explicitly selected collection window up to
+2 ms for bursts. Bound groups to 512 events and backpressure the queue.
+Requested timer duration is not a real-time OS scheduling guarantee: queueing,
+scheduling and database time remain visible in the measured acknowledgement.
+Do not use asynchronous acknowledgement for Ready, Dispatched, results or other
+critical effects. Larger groups amortize commits but do not remove the measured
+storage floor. Neither local profile meets the 4 ms persistence target; this
+spike does not sign off NFR-030 or establish Azure HA performance.
+
+The event-only prototype validates contiguous sequences atomically and returns
+receipts only after commit. It is not substituted for the dispatch/result
+transactions, which must continue to include attempt/outbox/projection writes.
+Production actor integration and reference-environment tuning remain later work.
+Reproduce with `dotnet run -c Release --project backend\tests\Wf.Benchmarks --
+--filter '*GroupCommit*'`; optional `WF_TEST_POSTGRES` uses isolated schemas on an
+external test server. JSON receipts/latencies are exported alongside BDN reports;
+missing measurements or disabled durability fail the command.
 
 ## 14. Glossary
 | Term | Meaning |

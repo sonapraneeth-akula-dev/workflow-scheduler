@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package wf.host.v1;
+
+import "agent.proto";
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Wf.Contracts.Host.V1";
+
+// One prewarmed process executes exactly one attempt. A result remains available
+// until acknowledged. Resume never invokes the delegate a second time.
+service TaskHost {
+  rpc Ready(ReadyRequest) returns (HostReady);
+  // Confirms the Linux worker's pre-exec cgroup before secrets; the supervisor stays outside.
+  rpc ApplyLimits(ApplyLimitsRequest) returns (HostReply);
+  // Names only, bound from the immutable workflow and this attempt's variables.
+  rpc RequiredSecrets(ExecuteRequest) returns (SecretReferences);
+  rpc Execute(ExecuteRequest) returns (wf.agent.v1.TaskCompleted);
+  rpc Resume(ExecuteRequest) returns (wf.agent.v1.TaskCompleted);
+  rpc Checkpoints(ReadyRequest) returns (stream wf.agent.v1.CheckpointSaved);
+  // Agent confirms only after its journal and the engine's durable index acknowledge.
+  rpc ConfirmCheckpoint(wf.agent.v1.CheckpointSaved) returns (HostReply);
+  rpc Progress(ReadyRequest) returns (stream wf.agent.v1.TaskProgress);
+  // Progress needs durable agent journaling, not engine connectivity.
+  rpc ConfirmProgress(wf.agent.v1.TaskProgress) returns (HostReply);
+  // Producer-owned, durable and replayable until the agent commits each record.
+  rpc Records(RecordCursor) returns (stream AttemptRecord);
+  rpc ConfirmRecords(RecordCursor) returns (HostReply);
+  // Native agent counters and offline host counters share one sample sequence.
+  rpc StoreResource(wf.agent.v1.ResourceSample) returns (HostReply);
+  // Final native sample precedes sealing the record stream and result acknowledgement.
+  rpc SealRecords(RecordCursor) returns (HostReply);
+  rpc Cancel(CancelRequest) returns (HostReply);
+  rpc Acknowledge(AcknowledgeRequest) returns (HostReply);
+}
+
+message ReadyRequest {}
+
+message ApplyLimitsRequest {
+  string linux_cgroup_path = 1;
+  string windows_job_name = 2;
+}
+
+message HostReady {
+  uint32 protocol_version = 1;
+  uint32 process_id = 2;
+  string workflow_version = 3;
+  bool bound = 4;
+  wf.agent.v1.AttemptRef attempt = 5;
+  uint64 reservation_epoch = 6;
+}
+
+message ExecuteRequest {
+  wf.agent.v1.Dispatch dispatch = 1;
+  // Outputs already committed for this node (series tasks/retries).
+  bytes node_outputs_json = 2;
+  // Ephemeral private UDS only. Never copy into Dispatch, logs or a durable journal.
+  map<string, string> resolved_secrets = 3;
+  // Additional caller-provided masks have the same memory-only IPC lifetime.
+  repeated string redaction_values = 4;
+}
+
+message SecretReferences {
+  repeated string names = 1;
+  // Re-adoption only: original values retained in host memory, over authenticated private IPC.
+  // Never persist these values or substitute a rotated secret into a running attempt.
+  map<string, string> recovered_values = 2;
+  repeated string recovered_redaction_values = 3;
+}
+
+message CancelRequest {
+  wf.agent.v1.AttemptRef task = 1;
+  bool timed_out = 2;
+}
+
+message AcknowledgeRequest {
+  wf.agent.v1.AttemptRef task = 1;
+}
+
+message HostReply {}
+
+message RecordCursor {
+  wf.agent.v1.AttemptRef task = 1;
+  uint64 sequence = 2;
+}
+
+message AttemptRecord {
+  uint64 sequence = 1;
+  wf.agent.v1.AttemptRef task = 2;
+  uint64 reservation_epoch = 3;
+  oneof payload {
+    HostLog log = 4;
+    wf.agent.v1.ResourceSample resource = 5;
+    wf.agent.v1.TaskProgress progress = 6;
+  }
+}
+
+message HostLog {
+  google.protobuf.Timestamp at = 1;
+  string stream = 2;
+  string text = 3;
+}

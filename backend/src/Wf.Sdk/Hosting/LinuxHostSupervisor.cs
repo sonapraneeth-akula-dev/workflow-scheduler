@@ -1,0 +1,176 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Net.Sockets;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+
+namespace Wf.Sdk.Hosting;
+
+internal static class LinuxHostSupervisor
+{
+    public static bool Required => OperatingSystem.IsLinux() &&
+        Environment.GetEnvironmentVariable("WF_TASK_HOST_CONTAINMENT") == "1";
+
+    public static async Task<int> RunAsync(string socketPath, CancellationToken cancellationToken)
+    {
+        if (IntPtr.Size != 8)
+            throw new PlatformNotSupportedException("Linux task-host pidfd containment requires a 64-bit process.");
+        if (Prctl(36, 1, 0, 0, 0) != 0)
+            throw new Win32Exception(Marshal.GetLastPInvokeError(), "Task-host child-subreaper containment is unavailable.");
+        // Probe before starting workflow code. Older kernels/seccomp policies must fail closed.
+        using (var self = OpenPid(Environment.ProcessId))
+            if (SyscallSignal(424, self.DangerousGetHandle().ToInt32(), 0, 0, 0) != 0)
+                throw new Win32Exception(Marshal.GetLastPInvokeError(), "Task-host containment requires pidfd_send_signal.");
+        var token = Environment.GetEnvironmentVariable("WF_TASK_HOST_CONTAINMENT_TOKEN");
+        if (!Guid.TryParseExact(token, "N", out _))
+            throw new InvalidOperationException("Task-host containment receipt token is unavailable.");
+        using (var receipt = new FileStream(socketPath + ".lifetime", FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+        {
+            receipt.Write(System.Text.Encoding.UTF8.GetBytes(token));
+            receipt.Flush(flushToDisk: true);
+        }
+        using var control = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        control.Bind(new UnixDomainSocketEndPoint(socketPath + ".control"));
+        control.Listen(1);
+        using var controlStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var requestedStop = ReceiveStopAsync();
+        var commandLine = System.Text.Encoding.UTF8.GetString(File.ReadAllBytes("/proc/self/cmdline"));
+        if (commandLine.Length == 0 || commandLine[^1] != '\0')
+            throw new InvalidDataException("Task-host command line cannot be safely re-executed.");
+        var arguments = commandLine[..^1].Split('\0');
+        var cgroup = Environment.GetEnvironmentVariable("WF_TASK_HOST_WORKLOAD_CGROUP");
+        var start = new ProcessStartInfo(cgroup is null ? arguments[0] : "/bin/sh")
+            { UseShellExecute = false, RedirectStandardInput = true };
+        if (cgroup is not null)
+        {
+            LinuxWorkloadCgroup.ValidatePath(cgroup);
+            foreach (var argument in new[] { "-c", "printf '%s' \"$$\" > \"$1/cgroup.procs\" || exit 125; shift; exec \"$@\"",
+                         "wf-task-worker", cgroup })
+                start.ArgumentList.Add(argument);
+        }
+        foreach (var argument in cgroup is null ? arguments.Skip(1) : arguments)
+            start.ArgumentList.Add(argument);
+        start.Environment["WF_TASK_HOST_CONTAINMENT"] = "worker";
+        start.Environment["WF_TASK_HOST_SUPERVISOR_PID"] = Environment.ProcessId.ToString(CultureInfo.InvariantCulture);
+        using var worker = Process.Start(start) ?? throw new InvalidOperationException("Task-host worker did not start.");
+        worker.StandardInput.Close();
+        var exited = worker.WaitForExitAsync();
+        var deadline = WatchDeadlineAsync();
+        var parentGone = Task.Run(() => Console.OpenStandardInput().ReadByte());
+        var stop = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        var completed = await Task.WhenAny(exited, parentGone, requestedStop, stop, deadline);
+        if (completed == parentGone && await parentGone == -1)
+            completed = await Task.WhenAny(exited, requestedStop, stop, deadline);
+        if (completed == deadline) await deadline;
+        var forced = completed != exited;
+        if (forced) KillChildren();
+        await exited;
+        var watch = Stopwatch.StartNew();
+        while (true)
+        {
+            KillChildren();
+            while (WaitPid(-1, out _, 1) > 0) { }
+            if (Children().Length == 0) break;
+            if (watch.Elapsed > TimeSpan.FromSeconds(8))
+                throw new TimeoutException("Task-host descendant cleanup could not establish physical quiescence.");
+            await Task.Delay(10, CancellationToken.None);
+        }
+        await controlStop.CancelAsync();
+        try { await deadline; }
+        catch (OperationCanceledException) when (controlStop.IsCancellationRequested) { }
+        try { await requestedStop; }
+        catch (OperationCanceledException) when (controlStop.IsCancellationRequested) { }
+        using (var certificate = new FileStream(socketPath + ".exited", FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+        {
+            certificate.Write(Encoding.ASCII.GetBytes(token));
+            certificate.Flush(flushToDisk: true);
+        }
+        // Zero is the supervisor's physical-quiescence certificate, not the workflow's exit status.
+        return 0;
+
+        async Task WatchDeadlineAsync()
+        {
+            var directory = Environment.GetEnvironmentVariable("WF_TASK_HOST_ATTEMPT_DIRECTORY");
+            if (directory is null)
+                await Task.Delay(Timeout.InfiniteTimeSpan, controlStop.Token);
+            while (true)
+            {
+                var dispatch = HostDeadline.ReadDispatch(directory!);
+                if (dispatch is not null && HostDeadline.Expired(dispatch))
+                {
+                    HostDeadline.SaveTimeout(directory!, dispatch);
+                    return;
+                }
+                await Task.Delay(100, controlStop.Token);
+            }
+        }
+
+        async Task ReceiveStopAsync()
+        {
+            var expected = Encoding.ASCII.GetBytes(token);
+            while (true)
+            {
+                using var client = await control.AcceptAsync(controlStop.Token);
+                using var stream = new NetworkStream(client, ownsSocket: false);
+                var supplied = new byte[expected.Length];
+                using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(controlStop.Token);
+                requestStop.CancelAfter(TimeSpan.FromSeconds(1));
+                try { await stream.ReadExactlyAsync(supplied, requestStop.Token); }
+                catch (EndOfStreamException) { continue; }
+                catch (IOException) { continue; }
+                catch (OperationCanceledException) when (!controlStop.IsCancellationRequested) { continue; }
+                if (System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(expected, supplied)) return;
+            }
+        }
+    }
+
+    private static int[] Children()
+    {
+        var children = new HashSet<int>();
+        foreach (var thread in Directory.EnumerateDirectories("/proc/self/task"))
+        {
+            try
+            {
+                foreach (var value in File.ReadAllText(Path.Combine(thread, "children"))
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                    children.Add(int.Parse(value, CultureInfo.InvariantCulture));
+            }
+            catch (FileNotFoundException) { }
+            catch (DirectoryNotFoundException) { }
+        }
+        return children.ToArray();
+    }
+
+    private static void KillChildren()
+    {
+        foreach (var pid in Children())
+        {
+            using var handle = OpenPid(pid);
+            if (handle.IsInvalid) continue;
+            // Recheck after opening a stable pidfd: never signal a PID reused by an unrelated process.
+            if (!Children().Contains(pid)) continue;
+            if (SyscallSignal(424, handle.DangerousGetHandle().ToInt32(), 9, 0, 0) != 0 &&
+                Marshal.GetLastPInvokeError() != 3)
+                throw new Win32Exception(Marshal.GetLastPInvokeError(), "Terminate owned task-host descendant failed.");
+        }
+    }
+
+    private static SafeFileHandle OpenPid(int pid)
+    {
+        var fd = SyscallOpen(434, pid, 0);
+        if (fd < 0 && Marshal.GetLastPInvokeError() != 3)
+            throw new Win32Exception(Marshal.GetLastPInvokeError(), "Task-host containment requires pidfd_open.");
+        return new SafeFileHandle((nint)fd, ownsHandle: true);
+    }
+
+    [DllImport("libc", EntryPoint = "prctl", SetLastError = true)]
+    private static extern int Prctl(int option, nuint value, nuint arg3, nuint arg4, nuint arg5);
+    [DllImport("libc", EntryPoint = "syscall", SetLastError = true)]
+    private static extern long SyscallOpen(long number, int pid, uint flags);
+    [DllImport("libc", EntryPoint = "syscall", SetLastError = true)]
+    private static extern long SyscallSignal(long number, int fd, int signal, nint info, uint flags);
+    [DllImport("libc", EntryPoint = "waitpid", SetLastError = true)]
+    private static extern int WaitPid(int pid, out int status, int options);
+}

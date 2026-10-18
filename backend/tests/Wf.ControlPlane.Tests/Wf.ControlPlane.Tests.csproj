@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Wf.ControlPlane\Wf.ControlPlane.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\..\frontend\src\**\*.ts;..\..\..\frontend\src\**\*.tsx"
+          Exclude="..\..\..\frontend\src\**\*.test.ts;..\..\..\frontend\src\**\*.test.tsx"
+          Link="Frontend\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

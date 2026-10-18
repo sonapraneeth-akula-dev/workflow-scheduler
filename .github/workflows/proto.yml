@@ -1,0 +1,28 @@
+name: Protobuf compatibility
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+          version: "1.73.0"
+      - run: buf lint backend/proto && buf format backend/proto --diff --exit-code
+      - name: Keep the original v1 contract compatible
+        run: buf breaking backend/proto --against backend/proto/compatibility.binpb
+      - name: Compare with pull request base
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git cat-file -e "${BASE_SHA}:backend/proto/buf.yaml" 2>/dev/null; then
+            buf breaking backend/proto --against ".git#format=git,commit=${BASE_SHA},subdir=backend/proto"
+          fi

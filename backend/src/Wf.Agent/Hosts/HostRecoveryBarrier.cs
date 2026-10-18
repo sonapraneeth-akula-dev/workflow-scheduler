@@ -1,0 +1,212 @@
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
+
+namespace Wf.Agent.Hosts;
+
+internal sealed partial class HostRecoveryBarrier
+{
+    private static readonly HashSet<string> held = new(StringComparer.Ordinal);
+    private static readonly object sync = new();
+    private readonly string directory;
+    private readonly string boot;
+
+    public HostRecoveryBarrier(string? directory)
+    {
+        directory ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData,
+            Environment.SpecialFolderOption.DoNotVerify), "wf-agent", "host-lifetimes");
+        if (!Path.IsPathFullyQualified(directory))
+            throw new InvalidOperationException("Task-host containment requires a stable absolute per-user data directory.");
+        this.directory = Path.GetFullPath(directory);
+        TaskHostPool.CreatePrivateDirectory(this.directory);
+        boot = BootIdentity();
+    }
+
+    public void AssertSafe(bool allowActive = true)
+    {
+        lock (sync) AssertSafeCore(allowActive);
+    }
+
+    private void AssertSafeCore(bool allowActive)
+    {
+        foreach (var path in Directory.EnumerateFiles(directory, "*.pending"))
+        {
+            if (held.Contains(path))
+            {
+                if (allowActive) continue;
+                throw new InvalidOperationException("Task-host reservation fencing is blocked by another active owned host lifetime.");
+            }
+            string recordedBoot;
+            try
+            {
+                using var record = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                using var reader = new StreamReader(record, Encoding.UTF8, leaveOpen: true);
+                recordedBoot = reader.ReadToEnd();
+            }
+            catch (FileNotFoundException) { continue; }
+            catch (IOException error)
+            { throw new InvalidOperationException("Task-host containment is quarantined: another agent owns an unfinished host lifetime.", error); }
+            if (recordedBoot == boot && HasPhysicalAcknowledgement(path, recordedBoot)) continue;
+            if (recordedBoot == boot)
+                throw new InvalidOperationException(
+                    "Task-host containment is quarantined after an unclean agent/host shutdown. " +
+                    "No reservation fence can be acknowledged and no new work can start. " +
+                    "Reboot this machine (not merely the agent) to guarantee orphan termination; do not delete lifetime records.");
+            if (!Guid.TryParse(recordedBoot, out _))
+                throw new InvalidDataException("Task-host containment recovery record is invalid; physical quiescence cannot be established.");
+            RemoveAttemptMetadata(path);
+            File.Delete(path);
+        }
+    }
+
+    private static void RemoveAttemptMetadata(string path)
+    {
+        var directory = path[..^".pending".Length];
+        if (!Directory.Exists(directory)) return;
+        var spool = Path.Combine(directory, "spool");
+        if (Directory.Exists(spool))
+        {
+            if ((File.GetAttributes(spool) & FileAttributes.ReparsePoint) != 0)
+                throw new IOException("Task-host spool cleanup cannot traverse a reparse point.");
+            foreach (var file in Directory.EnumerateFiles(spool))
+            {
+                if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0)
+                    throw new IOException("Task-host spool cleanup cannot follow a link.");
+                File.Delete(file);
+            }
+            Directory.Delete(spool);
+        }
+        File.Delete(Path.Combine(directory, "attempt.json.next"));
+        File.Delete(Path.Combine(directory, "attempt.json"));
+        File.Delete(Path.Combine(directory, "guard-ready"));
+        File.Delete(Path.Combine(directory, "host-exited"));
+        File.Delete(Path.Combine(directory, "physical-ack"));
+        Directory.Delete(directory);
+    }
+
+    private static bool HasPhysicalAcknowledgement(string path, string boot)
+    {
+        var directory = path[..^".pending".Length];
+        var receipt = Path.Combine(directory, "physical-ack");
+        if (!File.Exists(receipt)) return false;
+        Wf.Agent.Logs.LogSpooler.RejectLinks(receipt);
+        var metadata = Path.Combine(directory, "attempt.json");
+        Wf.Agent.Logs.LogSpooler.RejectLinks(metadata);
+        using var file = new FileStream(metadata, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+        if (file.Length is <= 0 or > 8 * 1024 * 1024)
+            throw new InvalidDataException("Physically closed host metadata is invalid.");
+        var record = JsonSerializer.Deserialize(file, TaskHostAttemptJson.Default.TaskHostAttempt) ??
+            throw new InvalidDataException("Physically closed host metadata is missing.");
+        return record.FormatVersion == 1 && record.BootId == boot && record.Pid > 0 && record.StartIdentity > 0 &&
+            Guid.TryParseExact(record.ReceiptToken, "N", out _) &&
+            TaskHostContainment.HasAgentPhysicalAcknowledgement(directory, record.ReceiptToken);
+    }
+
+    public Lease Begin()
+    {
+        lock (sync)
+        {
+            AssertSafeCore(allowActive: true);
+            var path = Path.Combine(directory, $"{Guid.NewGuid():N}.pending");
+            var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough);
+            try
+            {
+                stream.Write(Encoding.UTF8.GetBytes(boot));
+                stream.Flush(flushToDisk: true);
+                held.Add(path);
+                return new Lease(path, stream, boot);
+            }
+            catch { stream.Dispose(); throw; }
+        }
+    }
+
+    public IReadOnlyList<Lease> Claim(IReadOnlySet<string> owned)
+    {
+        lock (sync)
+        {
+            var claims = new List<Lease>();
+            try
+            {
+                var scanned = 0;
+                foreach (var path in Directory.EnumerateFiles(directory, "*.pending"))
+                {
+                    if (++scanned > 1024)
+                        throw new InvalidDataException("Task-host recovery exceeds the 1024 lifetime scan limit.");
+                    if (owned.Contains(path)) continue;
+                    if (held.Contains(path))
+                        throw new InvalidOperationException("Another task-host pool already owns this lifetime.");
+                    var stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None,
+                        4096, FileOptions.WriteThrough);
+                    try
+                    {
+                        if (stream.Length != 36)
+                            throw new InvalidDataException("Task-host boot record is invalid.");
+                        using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
+                        var recordedBoot = reader.ReadToEnd();
+                        if (!Guid.TryParseExact(recordedBoot, "D", out _))
+                            throw new InvalidDataException("Task-host boot record is invalid.");
+                        var lease = new Lease(path, stream, recordedBoot);
+                        if (recordedBoot != boot) lease.Complete();
+                        else
+                        {
+                            held.Add(path);
+                            claims.Add(lease);
+                        }
+                    }
+                    catch { stream.Dispose(); throw; }
+                }
+                return claims;
+            }
+            catch
+            {
+                foreach (var lease in claims) lease.Abandon();
+                throw;
+            }
+        }
+    }
+
+    internal sealed class Lease(string path, FileStream stream, string boot)
+    {
+        public string LifetimePath => path;
+        public string BootId => boot;
+        public string AttemptDirectory => path[..^".pending".Length];
+
+        public void Complete()
+        {
+            lock (sync)
+            {
+                RemoveAttemptMetadata(path);
+                stream.Dispose();
+                File.Delete(path);
+                held.Remove(path);
+            }
+        }
+
+        public void Abandon()
+        {
+            lock (sync)
+            {
+                stream.Dispose();
+                held.Remove(path);
+            }
+        }
+    }
+
+    private static string BootIdentity()
+    {
+        if (OperatingSystem.IsLinux())
+            return Guid.Parse(File.ReadAllText("/proc/sys/kernel/random/boot_id").Trim()).ToString("D");
+        if (OperatingSystem.IsWindows())
+        {
+            var data = new byte[32];
+            var result = NtQuerySystemInformation(90, data, data.Length, out _);
+            if (result != 0) throw new Win32Exception($"Cannot establish Windows boot identity (NTSTATUS 0x{result:x8}).");
+            return new Guid(data.AsSpan(0, 16)).ToString("D");
+        }
+        throw new PlatformNotSupportedException("Physical task-host containment requires Windows or Linux.");
+    }
+
+    [LibraryImport("ntdll.dll")]
+    private static partial int NtQuerySystemInformation(int informationClass, byte[] data, int length, out int returned);
+}

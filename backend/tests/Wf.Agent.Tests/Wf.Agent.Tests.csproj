@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Wf.Agent\Wf.Agent.csproj" />
+    <ProjectReference Include="..\Wf.TaskHost.Fixture\Wf.TaskHost.Fixture.csproj" />
+    <ProjectReference Include="..\Wf.ResourceSampler.Fixture\Wf.ResourceSampler.Fixture.csproj" />
+  </ItemGroup>
+</Project>

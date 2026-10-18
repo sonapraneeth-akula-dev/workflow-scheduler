@@ -1,0 +1,361 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { act, render, screen, waitFor } from "@testing-library/react"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { ApiError } from "@/lib/api/client"
+import { getVersionPlan, type VersionPlan } from "./api"
+import { describePlacement, TaskPlanPage } from "./TaskPlanPage"
+
+const { get } = vi.hoisted(() => ({ get: vi.fn() }))
+vi.mock("@/lib/api/client", async (original) => ({
+  ...(await original<typeof import("@/lib/api/client")>()),
+  publicApi: { GET: get },
+}))
+
+const workflowId = "team/type/workflow"
+const versionId = "019ed132-2f44-7000-8000-000000000001"
+const plan: VersionPlan = {
+  versionId,
+  workflowId,
+  version: "1.0.0",
+  runTimeout: "01:00:00",
+  stages: [],
+  placement: null,
+  nodes: [
+    {
+      key: "work",
+      dependencies: [],
+      mode: "Parallel",
+      maxParallel: 2,
+      failure: "Soft",
+      timeout: "00:01:00",
+      placement: null,
+      tasks: [
+        {
+          key: "sdk",
+          action: {
+            kind: "SdkFunction",
+            declaration: "Example.Workflow.Execute",
+          },
+          secretReference: null,
+          requestTimeout: null,
+          failure: "Hard",
+          placement: null,
+          policy: {
+            attemptTimeout: "00:00:12",
+            autoRetry: true,
+            retry: {
+              retries: 2,
+              on: ["Timeout"],
+              backoff: {
+                kind: "Exponential",
+                delay: "00:00:01",
+                maxDelay: "00:00:08",
+              },
+            },
+          },
+        },
+      ],
+    },
+  ],
+}
+const respond = (data: unknown) =>
+  get.mockResolvedValue({ data, response: new Response() })
+function show(taskKey?: string) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <TaskPlanPage
+        workflowId={workflowId}
+        versionId={versionId}
+        taskKey={taskKey}
+      />
+    </QueryClientProvider>
+  )
+  return client
+}
+
+describe("immutable task plan boundaries and states", () => {
+  beforeEach(() => vi.resetAllMocks())
+
+  it("displays exact authored resource caps and preserves unlimited historical policies", async () => {
+    const capped = structuredClone(plan)
+    capped.nodes[0]!.tasks[0]!.policy.limits = { cpuCores: 0.25, ramMb: 192 }
+    respond(capped)
+    show()
+    expect(
+      await screen.findByText("CPU limit: 0.25 cores; RAM limit: 192 MiB.")
+    ).toBeInTheDocument()
+  })
+
+  it.each([
+    { cpuCores: -1, ramMb: 192 },
+    { cpuCores: 0.001, ramMb: 192 },
+    { cpuCores: Number.POSITIVE_INFINITY, ramMb: 192 },
+    { cpuCores: 1, ramMb: -1 },
+    { cpuCores: 1, ramMb: 1.5 },
+    { cpuCores: 1, ramMb: 2 ** 43 },
+  ])(
+    "rejects invalid resource caps before displaying them: %j",
+    async (limits) => {
+      const invalid = structuredClone(plan)
+      invalid.nodes[0]!.tasks[0]!.policy.limits = limits
+      respond(invalid)
+      await expect(getVersionPlan(workflowId, versionId)).rejects.toThrow()
+    }
+  )
+
+  it("requests the exact pinned UUID and strips fields outside the task-plan projection", async () => {
+    const registration = {
+      gitCommit: "a".repeat(40),
+      gitAuthor: "Git author",
+      registeredBy: "Registering principal",
+      changeNote: null,
+      sdkVersion: "1.0.0",
+      registeredAt: "2026-10-16T12:00:00Z",
+    }
+    respond({
+      ...plan,
+      registration,
+      variables: { password: "private-value" },
+      source: "private-source",
+    })
+    const signal = new AbortController().signal
+    expect(await getVersionPlan(workflowId, versionId, signal)).toEqual({
+      ...plan,
+      registration,
+    })
+    expect(get).toHaveBeenCalledWith(
+      "/api/v1/workflows/{team}/{type}/{workflow}/versions/{version}",
+      {
+        params: {
+          path: {
+            team: "team",
+            type: "type",
+            workflow: "workflow",
+            version: versionId,
+          },
+        },
+        signal,
+      }
+    )
+  })
+
+  it("renders immutable registration provenance as text without exposing non-plan fields", async () => {
+    respond({
+      ...plan,
+      registration: {
+        gitCommit: "a".repeat(40),
+        gitAuthor: "<script>Git author</script>",
+        registeredBy: "Registering identity",
+        changeNote: "Release <img src=x>",
+        sdkVersion: "1.2.3",
+        registeredAt: "2026-10-16T12:00:00Z",
+      },
+      source: "private-source",
+      variables: { token: "private-value" },
+    })
+    show()
+    expect(
+      await screen.findByText("<script>Git author</script>")
+    ).toBeInTheDocument()
+    expect(screen.getByText("Release <img src=x>")).toBeInTheDocument()
+    expect(screen.getByText("Registering identity")).toBeInTheDocument()
+    expect(document.querySelector("script, img")).toBeNull()
+    expect(document.body).not.toHaveTextContent("private-source")
+    expect(document.body).not.toHaveTextContent("private-value")
+  })
+
+  it.each([
+    { ...plan, versionId: "019ed132-2f44-7000-8000-000000000002" },
+    { ...plan, workflowId: "other/type/workflow" },
+    { ...plan, nodes: [plan.nodes[0], plan.nodes[0]] },
+    { ...plan, stages: ["absent"] },
+    {
+      ...plan,
+      nodes: [
+        {
+          ...plan.nodes[0],
+          dependencies: [{ node: "absent", when: "OnSuccess" }],
+        },
+      ],
+    },
+    {
+      ...plan,
+      nodes: [
+        {
+          ...plan.nodes[0],
+          tasks: [plan.nodes[0]!.tasks[0], plan.nodes[0]!.tasks[0]],
+        },
+      ],
+    },
+    {
+      ...plan,
+      placement: {
+        selector: {
+          os: { literal: null, variable: null },
+          pool: null,
+          labels: [],
+          machines: [],
+        },
+        affinity: null,
+      },
+    },
+  ])(
+    "rejects mismatched identities and inconsistent graph/placement data",
+    async (body) => {
+      respond(body)
+      await expect(getVersionPlan(workflowId, versionId)).rejects.toThrow()
+    }
+  )
+
+  it.each(["team/type", "team/type/name/extra", "team/type/invalid\\name"])(
+    "rejects invalid workflow identity before sending %s",
+    async (workflow) => {
+      await expect(getVersionPlan(workflow, versionId)).rejects.toThrow()
+      expect(get).not.toHaveBeenCalled()
+    }
+  )
+
+  it("announces loading then shows ordered actions, effective policies and selected task", async () => {
+    respond(plan)
+    show("work/sdk")
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Loading historical task plan"
+    )
+    expect(
+      await screen.findByText("SdkFunction: Example.Workflow.Execute")
+    ).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Node work" })).toHaveTextContent(
+      "Parallel task order; concurrency: 2"
+    )
+    expect(screen.getByRole("listitem")).toHaveAttribute("aria-current", "true")
+    expect(screen.getByRole("listitem")).toHaveTextContent("retry budget: 2")
+    expect(screen.getByRole("listitem")).toHaveTextContent(
+      "Attempt timeout: 00:00:12"
+    )
+  })
+
+  it("does not invent a function declaration for older manifests or an absent selected task", async () => {
+    respond({
+      ...plan,
+      nodes: [
+        {
+          ...plan.nodes[0],
+          tasks: [{ ...plan.nodes[0]!.tasks[0], action: null }],
+        },
+      ],
+    })
+    show("work/missing")
+    expect(
+      await screen.findByText(
+        "Declaration unavailable in this historical manifest."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This task is not part of the pinned version"
+    )
+    expect(
+      screen.queryByText("SdkFunction: Example.Workflow.Execute")
+    ).not.toBeInTheDocument()
+  })
+
+  it("surfaces an authorized read failure without claiming an empty plan", async () => {
+    get.mockResolvedValue({
+      response: new Response(null, { status: 403 }),
+      error: { title: "Forbidden" },
+    })
+    await expect(getVersionPlan(workflowId, versionId)).rejects.toBeInstanceOf(
+      ApiError
+    )
+    show()
+    expect(await screen.findByRole("alert")).toHaveTextContent("Forbidden")
+    expect(screen.queryByText("No declared nodes.")).not.toBeInTheDocument()
+  })
+
+  it("removes a previously loaded plan when authorization is revoked on refetch", async () => {
+    respond(plan)
+    const client = show()
+    await screen.findByText("SdkFunction: Example.Workflow.Execute")
+    get.mockResolvedValue({
+      response: new Response(null, { status: 403 }),
+      error: { title: "Access revoked" },
+    })
+    await act(async () =>
+      client.invalidateQueries({
+        queryKey: ["version-plan", workflowId, versionId],
+      })
+    )
+    await waitFor(() =>
+      expect(
+        screen.queryByText("SdkFunction: Example.Workflow.Execute")
+      ).not.toBeInTheDocument()
+    )
+    expect(screen.getByRole("alert")).toHaveTextContent("Access revoked")
+  })
+
+  it("describes literals, unbound variable references, labels, machine list and affinity without resolving values", () => {
+    expect(
+      describePlacement({
+        selector: {
+          os: { literal: "linux", variable: null },
+          pool: { literal: null, variable: "pool" },
+          labels: [
+            { key: "gpu", value: null },
+            { key: "region", value: { literal: "west", variable: null } },
+          ],
+          machines: [{ literal: null, variable: "target" }],
+        },
+        affinity: { kind: "SameMachineAs", nodeKey: "prepare" },
+      })
+    ).toBe(
+      "OS: linux; Pool: variable(pool); Label: gpu; Label: region=west; Machines: variable(target); Affinity: SameMachineAs (prepare)"
+    )
+  })
+
+  it("decodes and renders immutable machine IDs and requested machine count", async () => {
+    const id = "019ed132-2f44-7000-8000-000000000003"
+    const placement = {
+      selector: {
+        os: { literal: "linux", variable: null },
+        pool: null,
+        labels: [],
+        machines: [],
+        machineIds: [id],
+        count: 1,
+      },
+      affinity: null,
+    }
+    respond({ ...plan, placement })
+    expect((await getVersionPlan(workflowId, versionId)).placement).toEqual(
+      placement
+    )
+    expect(describePlacement(placement)).toBe(
+      `OS: linux; Machine IDs: ${id}; Machine count: 1`
+    )
+  })
+
+  it.each([
+    { machineIds: ["invalid"], count: 1 },
+    { machineIds: ["00000000-0000-0000-0000-000000000000"], count: 1 },
+    { machineIds: [], count: 0 },
+    { machineIds: [], count: -1 },
+    { machineIds: [], count: 1.5 },
+  ])("rejects malformed machine IDs or counts: %j", async (fields) => {
+    respond({
+      ...plan,
+      placement: {
+        selector: {
+          os: null,
+          pool: null,
+          labels: [],
+          machines: [],
+          ...fields,
+        },
+        affinity: null,
+      },
+    })
+    await expect(getVersionPlan(workflowId, versionId)).rejects.toThrow()
+  })
+})

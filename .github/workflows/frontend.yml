@@ -1,0 +1,97 @@
+name: Frontend
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  gateway-assets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bunx playwright install --with-deps chromium firefox webkit
+      - run: bun run scripts/gateway-assets-acceptance.ts
+  schedule-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run build
+      - run: bun run test
+      - run: dotnet build ../backend/src/Wf.ControlPlane --configuration Release
+      - name: Check generated public and UI API contracts against the actual host
+        run: |
+          dotnet test ../backend/tests/Wf.Integration.Tests --configuration Release --filter 'FullyQualifiedName~RunHistory_and_RunNow_actual_Program'
+          dotnet test ../backend/tests/Wf.ControlPlane.Tests --configuration Release --filter PublicApiContract
+        env:
+          WF_FRONTEND_API_CHECK: ${{ github.workspace }}/frontend
+      - run: bunx playwright install --with-deps chromium firefox webkit
+      - run: dotnet test ../backend/tests/Wf.Integration.Tests --configuration Release --filter 'FullyQualifiedName~AuthorizationMatrixTests|FullyQualifiedName~LiveResyncTests'
+        env:
+          WF_PERMISSION_BROWSER: "true"
+          WF_LIVE_BROWSER: "true"
+          WF_LIVE_RESYNC_BROWSER: "true"
+          WF_GRAPH_BROWSER: "true"
+          WF_AUDIT_BROWSER: "true"
+          WF_MACHINE_BROWSER: "true"
+          WF_FRONTEND_ROOT: ${{ github.workspace }}/frontend
+      - name: Check accessible series trends against the actual API and PostgreSQL
+        run: dotnet test ../backend/tests/Wf.Integration.Tests --configuration Release --filter 'FullyQualifiedName~Trends_browser_real_Postgres'
+        env:
+          WF_TRENDS_BROWSER: "true"
+          WF_FRONTEND_ROOT: ${{ github.workspace }}/frontend
+      - run: bun run test:e2e
+      - name: Check million-line attempt logs against the actual API and Chrome trace
+        run: dotnet test ../backend/tests/Wf.Integration.Tests --configuration Release --filter 'FullyQualifiedName~Logs_Chrome_trace_opens_one_million'
+        env:
+          WF_LOGS_BROWSER: "true"
+          WF_FRONTEND_ROOT: ${{ github.workspace }}/frontend
+      - name: Check scoped dashboards and run drill-down against the actual API and PostgreSQL
+        run: dotnet test ../backend/tests/Wf.Integration.Tests --configuration Release --filter 'FullyQualifiedName~Dashboard_browser_real_Postgres'
+        env:
+          WF_DASHBOARD_BROWSER: "true"
+          WF_FRONTEND_ROOT: ${{ github.workspace }}/frontend
+      - name: Check accessible personal subscriptions against the actual API and PostgreSQL
+        run: dotnet test ../backend/tests/Wf.Integration.Tests --configuration Release --filter 'FullyQualifiedName~Subscriptions_browser_real_Postgres'
+        env:
+          WF_SUBSCRIPTION_BROWSER: "true"
+          WF_FRONTEND_ROOT: ${{ github.workspace }}/frontend
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-graph-performance
+          path: .agent-artifacts/run-graph-*
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: frontend-playwright-traces
+          path: frontend/test-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-task-log-performance
+          path: .agent-artifacts/task-logs-*
+          if-no-files-found: ignore

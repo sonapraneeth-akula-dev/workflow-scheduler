@@ -1,0 +1,199 @@
+name: Engine benchmarks
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/benchmarks.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  live-fanout:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: ankane/setup-postgres@v1
+        if: runner.os == 'Windows'
+        with:
+          postgres-version: 17
+      - name: Use isolated schema on Windows PostgreSQL
+        if: runner.os == 'Windows'
+        run: '"WF_TEST_POSTGRES=Host=localhost;Username=postgres;Database=postgres" >> $env:GITHUB_ENV'
+      - name: Verify exact counts, inclusive gates and actual signed WebSocket smoke
+        run: dotnet test backend/tests/Wf.Benchmarks.Tests --configuration Release -p:ServerGarbageCollection=true --filter FullyQualifiedName~LiveFanout
+      - name: Require 500 clients at 10000 events per second without lost coverage
+        run: dotnet run --project backend/tests/Wf.Benchmarks --configuration Release --no-build -- --live-fanout-bench
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-fanout-${{ matrix.os }}
+          path: BenchmarkDotNet.Artifacts/live-fanout
+          if-no-files-found: error
+  dispatch-latency:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 55
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: ankane/setup-postgres@v1
+        if: runner.os == 'Windows'
+        with:
+          postgres-version: 17
+      - name: Use isolated schema on Windows PostgreSQL
+        if: runner.os == 'Windows'
+        run: '"WF_TEST_POSTGRES=Host=localhost;Username=postgres;Database=postgres" >> $env:GITHUB_ENV'
+      - name: Verify exact counts, inclusive thresholds and invalid sample rejection
+        run: dotnet test backend/tests/Wf.Benchmarks.Tests --configuration Release --filter FullyQualifiedName~DispatchLatencyGate
+      - name: Require 10000 durable dispatches and real warm-host SDK run starts within budget
+        run: dotnet run --project backend/tests/Wf.Benchmarks --configuration Release --no-build -- --dispatch-latency-bench
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dispatch-latency-${{ matrix.os }}
+          path: BenchmarkDotNet.Artifacts/dispatch-latency
+          if-no-files-found: error
+  run-query:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: ankane/setup-postgres@v1
+        if: runner.os == 'Windows'
+        with:
+          postgres-version: 17
+      - name: Use isolated schema on Windows PostgreSQL
+        if: runner.os == 'Windows'
+        run: '"WF_TEST_POSTGRES=Host=localhost;Username=postgres;Database=postgres" >> $env:GITHUB_ENV'
+      - name: Verify strict gates and the real 100k-run fixture
+        run: dotnet test backend/tests/Wf.Benchmarks.Tests --configuration Release --filter FullyQualifiedName~RunQuery
+      - name: Require every signed HTTP list and filter p95 below 300 ms
+        run: dotnet run --project backend/tests/Wf.Benchmarks --configuration Release --no-build -- --run-query-bench
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: run-query-benchmarks-${{ matrix.os }}
+          path: BenchmarkDotNet.Artifacts/run-query
+          if-no-files-found: error
+  regression:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Read approved baseline revision
+        id: baseline
+        run: |
+          $config = Get-Content (Join-Path 'backend' 'tests' 'Wf.Benchmarks' 'baseline.json') -Raw | ConvertFrom-Json
+          if ($config.codeRevision -cnotmatch '^[0-9a-f]{40}$') { throw 'A full immutable baseline revision is required.' }
+          "revision=$($config.codeRevision)" >> $env:GITHUB_OUTPUT
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.baseline.outputs.revision }}
+          path: .benchmark-baseline
+          persist-credentials: false
+      - name: Use identical engine measurement harness for both code revisions
+        run: |
+          $source = Join-Path 'backend' 'tests' 'Wf.Benchmarks'
+          $destination = Join-Path '.benchmark-baseline' 'backend' 'tests' 'Wf.Benchmarks'
+          foreach ($file in @('Program.cs', 'DescribeBenchmarks.cs', 'EngineCoreBenchmarks.cs', 'PerformanceGate.cs')) {
+            Copy-Item -LiteralPath (Join-Path $source $file) -Destination $destination
+          }
+          @(
+            '<Project>'
+            '  <Import Project="..\..\Directory.Build.props" />'
+            '  <PropertyGroup><DefineConstants>$(DefineConstants);ENGINE_BASELINE</DefineConstants></PropertyGroup>'
+            '</Project>'
+          ) | Set-Content -LiteralPath (Join-Path $destination 'Directory.Build.props')
+      - name: Measure approved baseline on this runner
+        working-directory: .benchmark-baseline/backend/tests/Wf.Benchmarks
+        run: |
+          $results = Join-Path $env:GITHUB_WORKSPACE 'benchmark-results'
+          dotnet run -c Release -- --filter '*EngineCore*' --artifacts (Join-Path $results 'baseline') --metrics (Join-Path $results 'baseline.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Measure current code on the same runner
+        working-directory: backend/tests/Wf.Benchmarks
+        run: |
+          $results = Join-Path $env:GITHUB_WORKSPACE 'benchmark-results'
+          dotnet run -c Release -- --filter '*EngineCore*' --artifacts (Join-Path $results 'current') --metrics (Join-Path $results 'current.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Reject absolute threshold failures and regressions above 10 percent
+        working-directory: backend/tests/Wf.Benchmarks
+        run: |
+          $results = Join-Path $env:GITHUB_WORKSPACE 'benchmark-results'
+          dotnet run -c Release --no-build -- --compare (Join-Path $results 'baseline.json') (Join-Path $results 'current.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine-benchmarks-${{ matrix.os }}
+          path: benchmark-results
+          if-no-files-found: error
+  validator:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Require cached full validation mean below two seconds
+        run: |
+          dotnet run -c Release --project backend/tests/Wf.Benchmarks -- --filter '*Validator*' --artifacts validator-benchmark-results
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validator-benchmarks-${{ matrix.os }}
+          path: validator-benchmark-results
+          if-no-files-found: error

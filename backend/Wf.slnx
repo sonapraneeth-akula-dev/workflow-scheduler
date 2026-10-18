@@ -1,0 +1,32 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Wf.Agent/Wf.Agent.csproj" />
+    <Project Path="src/Wf.AppHost/Wf.AppHost.csproj" />
+    <Project Path="src/Wf.Cli/Wf.Cli.csproj" />
+    <Project Path="src/Wf.Contracts/Wf.Contracts.csproj" />
+    <Project Path="src/Wf.ControlPlane/Wf.ControlPlane.csproj" />
+    <Project Path="src/Wf.Engine.Core/Wf.Engine.Core.csproj" />
+    <Project Path="src/Wf.Sdk.Testing/Wf.Sdk.Testing.csproj" />
+    <Project Path="src/Wf.Sdk/Wf.Sdk.csproj" />
+    <Project Path="src/Wf.Templates/Wf.Templates.csproj" />
+    <Project Path="src/Wf.Validation/Wf.Validation.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Wf.Agent.Tests/Wf.Agent.Tests.csproj" />
+    <Project Path="tests/Wf.TaskHost.Fixture/Wf.TaskHost.Fixture.csproj" />
+    <Project Path="tests/Wf.Cli.Tests/Wf.Cli.Tests.csproj" />
+    <Project Path="tests/Wf.Contracts.Tests/Wf.Contracts.Tests.csproj" />
+    <Project Path="tests/Wf.ControlPlane.Tests/Wf.ControlPlane.Tests.csproj" />
+    <Project Path="tests/Wf.Chaos.Tests/Wf.Chaos.Tests.csproj" />
+    <Project Path="tests/Wf.AppHost.Tests/Wf.AppHost.Tests.csproj" />
+    <Project Path="tests/Wf.Benchmarks.Tests/Wf.Benchmarks.Tests.csproj" />
+    <Project Path="tests/Wf.Benchmarks/Wf.Benchmarks.csproj" />
+    <Project Path="tests/Wf.Engine.Core.Tests/Wf.Engine.Core.Tests.csproj" />
+    <Project Path="tests/Wf.Integration.Tests/Wf.Integration.Tests.csproj" />
+    <Project Path="tests/Wf.Recovery.Fixture/Wf.Recovery.Fixture.csproj" />
+    <Project Path="tests/Wf.Sdk.Testing.Tests/Wf.Sdk.Testing.Tests.csproj" />
+    <Project Path="tests/Wf.Sdk.Tests/Wf.Sdk.Tests.csproj" />
+    <Project Path="tests/Wf.Templates.Tests/Wf.Templates.Tests.csproj" />
+    <Project Path="tests/Wf.Validation.Tests/Wf.Validation.Tests.csproj" />
+  </Folder>
+</Solution>

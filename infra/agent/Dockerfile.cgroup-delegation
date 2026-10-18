@@ -1,0 +1,13 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+RUN if command -v apt-get >/dev/null; then \
+      apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd systemd-sysv dbus util-linux; \
+    else \
+      tdnf install -y systemd dbus util-linux shadow-utils gawk; \
+    fi
+COPY wf-agent.service wf-agent-resources.conf install-agent.sh test-cgroup-delegation.sh /opt/wf-delegation/
+RUN chmod 0755 /opt/wf-delegation/test-cgroup-delegation.sh && \
+    useradd --system --home-dir /var/lib/wf-agent --shell /usr/sbin/nologin wf-agent
+ENV container=docker
+STOPSIGNAL SIGRTMIN+3
+CMD ["/opt/wf-delegation/test-cgroup-delegation.sh", "--boot"]

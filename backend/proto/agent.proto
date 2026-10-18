@@ -1,0 +1,294 @@
+syntax = "proto3";
+
+package wf.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Wf.Contracts.Agent.V1";
+
+service AgentGateway {
+  rpc Connect(stream AgentMessage) returns (stream ControlMessage);
+}
+
+// Sequence numbers are positive and ordered within a sender's journal.
+// Results retain their original sequence on reconnect; receivers deduplicate.
+message AgentMessage {
+  uint64 sequence = 1;
+  oneof payload {
+    Hello hello = 10;
+    Heartbeat heartbeat = 11;
+    TaskStarted task_started = 12;
+    TaskCompleted task_completed = 13;
+    Ack ack = 14;
+    ResourceSample resource_sample = 15;
+    ReservationFenced reservation_fenced = 16;
+    CalibrationCompleted calibration_completed = 17;
+    CheckpointSaved checkpoint_saved = 18;
+    TaskProgress task_progress = 19;
+    DrainCompleted drain_completed = 20;
+    // Ephemeral, sequence=0; never journaled or cumulatively acknowledged.
+    LiveLogBatch live_logs = 21;
+  }
+}
+
+message ControlMessage {
+  uint64 sequence = 1;
+  // Fences commands and acknowledgements from a previous leader.
+  uint64 leader_epoch = 2;
+  oneof payload {
+    Dispatch dispatch = 10;
+    Cancel cancel = 11;
+    Drain drain = 12;
+    Ack ack = 13;
+    NotLeader not_leader = 14;
+    ReservationFence reservation_fence = 15;
+    Calibrate calibrate = 16;
+    MirrorLogs mirror_logs = 17;
+  }
+}
+
+message Hello {
+  string id = 1;
+  string name = 2;
+  string os = 3;
+  string arch = 4;
+  uint32 cores = 5;
+  uint64 ram_mb = 6;
+  uint32 max_tasks = 7;
+  map<string, string> labels = 8;
+  string version = 9;
+  repeated AttemptRef inflight = 10;
+  uint32 protocol_version = 11;
+  string pool = 12;
+  bool supports_calibration_commands = 13;
+  bool supports_drain_commands = 14;
+  bool supports_log_mirroring = 15;
+}
+
+message MirrorLogs {
+  AttemptRef task = 1;
+  bool on = 2;
+  uint64 reservation_epoch = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+message LiveLogRecord {
+  uint64 line = 1;
+  google.protobuf.Timestamp at = 2;
+  string stream = 3;
+  string level = 4;
+  string text = 5;
+}
+
+message LiveLogBatch {
+  AttemptRef task = 1;
+  uint64 reservation_epoch = 2;
+  repeated LiveLogRecord records = 3;
+  // Buffer overflow is observable; clients recover from the durable log index.
+  bool gap = 4;
+}
+
+message Calibrate {
+  string id = 1;
+  string profile_json = 2;
+  google.protobuf.Timestamp deadline_at = 3;
+  uint64 reservation_epoch = 4;
+}
+
+message CalibrationCompleted {
+  string id = 1;
+  google.protobuf.Timestamp at = 2;
+  uint64 reservation_epoch = 3;
+  CalibrationOutcome outcome = 4;
+  int32 capacity_rps = 5;
+}
+
+enum CalibrationOutcome {
+  CALIBRATION_OUTCOME_UNSPECIFIED = 0;
+  CALIBRATION_OUTCOME_SUCCEEDED = 1;
+  CALIBRATION_OUTCOME_UNSUPPORTED = 2;
+  CALIBRATION_OUTCOME_TIMED_OUT = 3;
+  CALIBRATION_OUTCOME_BUSY = 4;
+  CALIBRATION_OUTCOME_FAILED = 5;
+}
+
+message Heartbeat {
+  google.protobuf.Timestamp at = 1;
+  double cpu_percent = 2;
+  uint64 ram_used_mb = 3;
+  uint64 disk_free_mb = 4;
+  uint32 slots_used = 5;
+}
+
+// The idempotency key is (run_id, node_key, task_key, attempt).
+message AttemptRef {
+  string run_id = 1;
+  string node_key = 2;
+  string task_key = 3;
+  uint32 attempt = 4;
+}
+
+message Dispatch {
+  AttemptRef task = 1;
+  string version = 2;
+  string package_uri = 3;
+  string sha256 = 4;
+  google.protobuf.Timestamp deadline_at = 5;
+  uint64 reservation_epoch = 6;
+  // UTF-8 JSON objects, parsed using the workflow's declared variable/input types.
+  bytes inputs_json = 7;
+  ResourceLimits limits = 8;
+  repeated string secret_refs = 9;
+  repeated UploadGrant grants = 10;
+  bytes variables_json = 11;
+  // Outputs already committed by this node, keyed by declared output name.
+  bytes node_outputs_json = 12;
+  // The original accepted abort record for bounded post/always cleanup.
+  bytes abort_json = 13;
+  // Verified latest logical-task checkpoint, supplied only by the engine.
+  CheckpointSeed checkpoint = 14;
+}
+
+message CheckpointSeed {
+  CheckpointSaved reference = 1;
+  bytes state_json = 2;
+}
+
+message ResourceLimits {
+  // Zero means no task-specific limit.
+  double cpu_cores = 1;
+  uint64 ram_mb = 2;
+  // Uncompressed per-attempt log cap; zero uses the agent's configured ceiling.
+  uint64 max_log_bytes = 3;
+}
+
+message UploadGrant {
+  string kind = 1;
+  string upload_uri = 2;
+  uint64 max_bytes = 3;
+  google.protobuf.Timestamp expires_at = 4;
+  // Optional header capability; keep credentials out of report request URLs.
+  string bearer_token = 5;
+}
+
+message Cancel {
+  AttemptRef task = 1;
+  uint32 grace_ms = 2;
+  string reason = 3;
+}
+
+message Drain {
+  google.protobuf.Timestamp deadline_at = 1;
+  string reason = 2;
+  string id = 3;
+  uint64 reservation_epoch = 4;
+}
+
+// All attempts and task-host process trees have physically exited.
+message DrainCompleted {
+  string id = 1;
+  uint64 reservation_epoch = 2;
+}
+
+// Agent must durably advance the fence, cancel and drain all older work before replying.
+message ReservationFence {
+  uint64 reservation_epoch = 1;
+  string reason = 2;
+}
+
+message ReservationFenced {
+  uint64 reservation_epoch = 1;
+}
+
+// Cumulative: all messages through sequence were durably accepted.
+// Ack-only messages must not themselves trigger an Ack.
+message Ack {
+  uint64 sequence = 1;
+  // For agent acknowledgements of control messages; zero in the other direction.
+  uint64 leader_epoch = 2;
+}
+
+message NotLeader {
+  string leader_hint = 1;
+}
+
+message TaskStarted {
+  AttemptRef task = 1;
+  google.protobuf.Timestamp at = 2;
+  uint64 reservation_epoch = 3;
+}
+
+message TaskCompleted {
+  AttemptRef task = 1;
+  google.protobuf.Timestamp at = 2;
+  TaskOutcome outcome = 3;
+  bytes outputs_json = 4;
+  TaskError error = 5;
+  ResourceSummary resource_summary = 6;
+  uint64 reservation_epoch = 7;
+}
+
+enum TaskOutcome {
+  TASK_OUTCOME_UNSPECIFIED = 0;
+  TASK_OUTCOME_SUCCEEDED = 1;
+  TASK_OUTCOME_FAILED = 2;
+  TASK_OUTCOME_CANCELLED = 3;
+  TASK_OUTCOME_TIMED_OUT = 4;
+}
+
+message TaskError {
+  string category = 1;
+  string message = 2;
+  bool non_retryable = 3;
+}
+
+message ResourceSummary {
+  uint64 peak_ram_mb = 1;
+  uint64 cpu_time_ms = 2;
+  uint64 elapsed_ms = 3;
+}
+
+// Journaled before TaskCompleted, including the final pre-Ack process read.
+// sample_json is the strict Wf.Contracts.Resources.ResourceObservation contract,
+// never task inputs, outputs, secrets, packet data or arbitrary telemetry.
+message ResourceSample {
+  AttemptRef task = 1;
+  uint64 reservation_epoch = 2;
+  uint64 sample_sequence = 3;
+  bytes sample_json = 4;
+}
+
+// The immutable JSON blob is uploaded before this record is journaled.
+// Sequence is monotonic for the logical run/task, including later attempts.
+message CheckpointSaved {
+  AttemptRef task = 1;
+  uint64 reservation_epoch = 2;
+  uint64 checkpoint_sequence = 3;
+  google.protobuf.Timestamp saved_at = 4;
+  string blob_key = 5;
+  string sha256 = 6;
+  uint64 size_bytes = 7;
+}
+
+// Fixed remote lifecycle transitions only. URLs, payloads, credentials and poll
+// diagnostics never belong in this journaled System Events channel.
+message TaskProgress {
+  AttemptRef task = 1;
+  uint64 reservation_epoch = 2;
+  uint32 progress_sequence = 3;
+  google.protobuf.Timestamp at = 4;
+  RemoteOperationPhase phase = 5;
+}
+
+enum RemoteOperationPhase {
+  REMOTE_OPERATION_PHASE_UNSPECIFIED = 0;
+  REMOTE_OPERATION_PHASE_SUBMISSION_PENDING = 1;
+  REMOTE_OPERATION_PHASE_SUBMITTED = 2;
+  REMOTE_OPERATION_PHASE_WAITING = 3;
+  REMOTE_OPERATION_PHASE_SUCCEEDED = 4;
+  REMOTE_OPERATION_PHASE_FAILED = 5;
+  REMOTE_OPERATION_PHASE_CANCEL_REQUESTED = 6;
+  REMOTE_OPERATION_PHASE_CANCEL_CONFIRMED = 7;
+  REMOTE_OPERATION_PHASE_OUTCOME_UNKNOWN = 8;
+  REMOTE_OPERATION_PHASE_RESUMING = 9;
+}
