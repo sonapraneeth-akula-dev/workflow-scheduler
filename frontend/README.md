@@ -8,6 +8,9 @@ commit generated route changes with their source routes.
 
 The Kardia wordmark is an independent home link at the viewport's padded left
 edge, using Bahnschrift with local Segoe fallbacks rather than navigation text.
+Primary navigation stays geometrically centered between equal-width desktop
+side columns. On smaller screens it occupies its own centered second row,
+without overlapping the brand or account actions.
 
 ## Run locally
 
