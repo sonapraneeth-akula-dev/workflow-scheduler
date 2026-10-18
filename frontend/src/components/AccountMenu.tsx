@@ -19,7 +19,7 @@ import type { Session } from "@/lib/auth/session"
 import type { ThemePreference } from "@/lib/useThemePreference"
 
 const menuItem =
-  "flex cursor-default items-center gap-2 px-3 py-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:size-4"
+  "flex cursor-pointer items-center gap-2 px-3 py-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-50 [&_svg]:size-4"
 
 function ProfileDetails({ session }: { session: Session }) {
   const query = useQuery({

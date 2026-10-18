@@ -40,6 +40,10 @@ Single-value dropdowns share the native select component across filters,
 forms and report/table controls. Selected text has dedicated chevron clearance
 and trailing padding; controls keep native keyboard behavior, bounded widths,
 visible focus and disabled states in both themes.
+Enabled actions use pointer cursors consistently: tabs, profile/menu actions,
+buttons, links, dropdowns, expandable summaries and checkbox/radio controls
+and their labels. Native, ARIA and Radix disabled states remain non-actionable;
+text fields keep their text cursor and ordinary headings are not clickable.
 The right-hand theme action is an accessible sun/moon icon. It follows the
 system theme until explicitly changed, persists the choice in local storage,
 and surfaces unavailable/corrupt preference storage rather than hiding errors.

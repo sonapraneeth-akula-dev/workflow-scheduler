@@ -128,6 +128,25 @@
   input, select, textarea {
     @apply border-input;
     }
+  :is(
+    a[href],
+    button,
+    select,
+    summary,
+    [role="button"],
+    [role="tab"],
+    [role^="menuitem"],
+    input:is([type="button"], [type="submit"], [type="reset"], [type="checkbox"], [type="radio"], [type="file"])
+  ):not(:disabled):not([aria-disabled="true"]):not([data-disabled]),
+  label:has(input:is([type="checkbox"], [type="radio"]):enabled) {
+    cursor: pointer;
+  }
+  :disabled, [aria-disabled="true"], [data-disabled] {
+    cursor: not-allowed;
+  }
+  input[type="file"]:enabled::file-selector-button {
+    cursor: pointer;
+  }
 
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {

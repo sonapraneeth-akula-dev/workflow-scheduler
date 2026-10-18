@@ -368,6 +368,107 @@ for (const colorScheme of ["light", "dark"] as const) {
     await expect(status).toHaveAttribute("data-slot", "native-select")
   })
 
+  test(`${colorScheme} enabled actions use pointer cursors without making disabled controls or text fields clickable`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme })
+    await openListedRun(page)
+    const graphTab = page.getByRole("tab", { name: "Graph", exact: true })
+    await graphTab.hover()
+    await expect(graphTab).toHaveCSS("cursor", "pointer")
+    await page.mouse.down()
+    await expect(graphTab).toHaveCSS("cursor", "pointer")
+    await page.mouse.up()
+    await expect(page.locator("[data-graph-node]").first()).toHaveCSS(
+      "cursor",
+      "pointer"
+    )
+    const summary = page.getByText("Node list", { exact: true })
+    await expect(summary).toHaveCSS("cursor", "pointer")
+    await summary.click()
+    const table = page.getByRole("table", { name: "Run nodes" })
+    await expect(table.getByRole("button").first()).toHaveCSS(
+      "cursor",
+      "pointer"
+    )
+    await expect(table.getByRole("columnheader").first()).not.toHaveCSS(
+      "cursor",
+      "pointer"
+    )
+    await page.getByRole("tab", { name: "Metrics", exact: true }).click()
+    const newer = page.getByRole("button", {
+      name: "Newer samples",
+      exact: true,
+    })
+    await expect(newer).toBeDisabled()
+    await expect(newer).toHaveCSS("cursor", "not-allowed")
+    await page.getByRole("tab", { name: "Reports", exact: true }).click()
+    await expect(
+      page.getByRole("combobox", { name: "Report kind", exact: true })
+    ).toHaveCSS("cursor", "pointer")
+    const account = page.getByRole("button", { name: /Account menu for / })
+    await account.hover()
+    await expect(account).toHaveCSS("cursor", "pointer")
+    await expect(account.getByRole("img")).toHaveCSS("cursor", "pointer")
+    await account.click()
+    const menu = page.getByRole("menu")
+    await expect(
+      menu.getByRole("menuitem", { name: "Profile details", exact: true })
+    ).toHaveCSS("cursor", "pointer")
+    await expect(
+      menu.getByRole("menuitem", { name: "Settings", exact: true })
+    ).toHaveCSS("cursor", "pointer")
+    await expect(
+      menu.getByRole("menuitem", { name: "Sign out", exact: true })
+    ).toHaveCSS("cursor", "not-allowed")
+    await expect(
+      menu.getByText("Development authentication", { exact: true })
+    ).not.toHaveCSS("cursor", "pointer")
+    await menu.getByRole("menuitem", { name: "Settings", exact: true }).click()
+    const settings = page.getByRole("dialog", { name: "Settings", exact: true })
+    await expect(
+      settings.getByRole("radio", { name: "Dark", exact: true })
+    ).toHaveCSS("cursor", "pointer")
+    await settings.getByRole("button", { name: "Close account dialog" }).click()
+    await page
+      .getByRole("link", { name: "Task Plan for this run", exact: true })
+      .click()
+    await page.getByRole("button", { name: "Trigger run", exact: true }).click()
+    const trigger = page.getByRole("dialog", {
+      name: "Trigger workflow run",
+      exact: true,
+    })
+    const checkbox = trigger.getByRole("checkbox", {
+      name: "Run on a single machine",
+    })
+    await expect(checkbox).toHaveCSS("cursor", "pointer")
+    await expect(checkbox.locator("..")).toHaveCSS("cursor", "pointer")
+    await checkbox.click()
+    await expect(checkbox).toBeChecked()
+    await trigger.getByRole("button", { name: "Close", exact: true }).click()
+    await page.goto("/runs?status=Succeeded")
+    await expect(page.getByRole("textbox").first()).not.toHaveCSS(
+      "cursor",
+      "pointer"
+    )
+    const missing = await page
+      .locator(
+        ':is(a[href],button,select,summary,[role="button"],[role="tab"],[role^="menuitem"]):not(:disabled):not([aria-disabled="true"]):not([data-disabled])'
+      )
+      .evaluateAll((elements) =>
+        elements
+          .filter(
+            (element) =>
+              element.getClientRects().length &&
+              getComputedStyle(element).cursor !== "pointer"
+          )
+          .map(
+            (element) => `${element.tagName}: ${element.textContent?.trim()}`
+          )
+      )
+    expect(missing).toEqual([])
+  })
+
   test(`${colorScheme} dependency arrows stay outside every node and stop before the target border`, async ({
     page,
   }, testInfo) => {
