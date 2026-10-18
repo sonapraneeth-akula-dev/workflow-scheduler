@@ -204,6 +204,50 @@ public sealed class LeaseTests(LeaseDatabase database) : IClassFixture<LeaseData
         Assert.Equal(0L, await count.ExecuteScalarAsync(Token));
     }
 
+    [Fact]
+    public async Task LeaseFencedGroupCommitRetainsUnacknowledgedEventsAcrossActualTransactionTimeout()
+    {
+        await Reset();
+        using var leader = Manager(5100);
+        Assert.True(await leader.TryAcquireOrRenewAsync(Token));
+        var store = new RunStore(database.DataSource, NullLogger<RunStore>.Instance, leader);
+        var run = NewRun();
+        await store.CreateAsync(run, "tests/transaction-timeout", Guid.CreateVersion7(),
+            DateTimeOffset.UtcNow.AddHours(1), Token);
+        await using var appender = new GroupCommitAppender(database.DataSource,
+            NullLogger<GroupCommitAppender>.Instance, leadership: leader);
+        Task<GroupCommitReceipt> pending;
+        await using (var connection = await database.DataSource.OpenConnectionAsync(Token))
+        await using (var transaction = await connection.BeginTransactionAsync(Token))
+        {
+            await using (var block = new NpgsqlCommand("LOCK TABLE run_events IN ACCESS EXCLUSIVE MODE", connection))
+                await block.ExecuteNonQueryAsync(Token);
+            pending = appender.AppendAsync(run.CreateEvent(EventEntity.Run, null,
+                (int)RunStatus.Running, DateTimeOffset.UtcNow), Token);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(5));
+            while (true)
+            {
+                await using var query = database.DataSource.CreateCommand("""
+                    SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database()
+                        AND wait_event_type='Lock' AND query LIKE '%INSERT INTO run_events%')
+                    """);
+                if (Equals(true, await query.ExecuteScalarAsync(timeout.Token))) break;
+                await Task.Delay(10, timeout.Token);
+            }
+            // The production fence terminates a blocked transaction after at most one second.
+            await Task.Delay(TimeSpan.FromMilliseconds(1500), Token);
+            Assert.False(pending.IsCompleted);
+            await transaction.CommitAsync(Token);
+        }
+        Assert.Equal(1, (await pending.WaitAsync(TimeSpan.FromSeconds(5), Token)).EventCount);
+        Assert.Equal(1, (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot.LastSequence);
+        await using var count = database.DataSource.CreateCommand("SELECT count(*) FROM run_events WHERE run_id=$1");
+        count.Parameters.AddWithValue(run.Snapshot.RunId);
+        Assert.Equal(1L, await count.ExecuteScalarAsync(Token));
+        await leader.ReleaseAsync(Token);
+    }
+
     [Theory]
     [InlineData("create")]
     [InlineData("append")]

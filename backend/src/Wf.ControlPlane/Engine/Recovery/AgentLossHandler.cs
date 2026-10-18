@@ -45,7 +45,8 @@ public sealed class AgentLossHandler(NpgsqlDataSource dataSource, Dispatcher dis
                 if (!leadership.IsLeader) continue;
                 try { await ProcessAsync(stoppingToken); }
                 catch (NotLeaderException) { logger.LogInformation("Agent-loss re-placement paused after losing leadership."); }
-                catch (Exception exception) when (exception is NpgsqlException { IsTransient: true } or TimeoutException or IOException)
+                catch (Exception exception) when (exception is NpgsqlException { IsTransient: true } or
+                    PostgresException { SqlState: "25P04" } or TimeoutException or IOException)
                 {
                     logger.LogError(exception, "Agent-loss re-placement will retry when durable storage is available.");
                 }

@@ -111,7 +111,8 @@ public sealed class AgentLossSweeper(NpgsqlDataSource dataSource, AgentRegistry 
                 if (leadership is not null && !leadership.IsLeader) continue;
                 try { await SweepAsync(stoppingToken); }
                 catch (NotLeaderException) { logger.LogInformation("Agent-loss sweeper paused after losing leadership."); }
-                catch (Exception exception) when (exception is NpgsqlException { IsTransient: true } or TimeoutException or IOException)
+                catch (Exception exception) when (exception is NpgsqlException { IsTransient: true } or
+                    PostgresException { SqlState: "25P04" } or TimeoutException or IOException)
                 {
                     logger.LogError(exception, "Agent-loss classification will retry when durable storage is available.");
                 }

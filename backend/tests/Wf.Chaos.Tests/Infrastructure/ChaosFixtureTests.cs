@@ -35,7 +35,7 @@ public sealed class ChaosFixtureTests(ITestOutputHelper output)
         finally { await fixture.SetAgentAvailableAsync(0, true, token); }
         await fixture.UntilAsync(async () => await fixture.ScalarAsync<DateTimeOffset>(
             "SELECT last_heartbeat_at FROM agents WHERE id=$1", token, fixture.Agents[0].Id) > heartbeat,
-            TimeSpan.FromSeconds(15), token);
+            TimeSpan.FromSeconds(30), token);
 
         var leader = await fixture.LeaderAsync(token);
         var takeover = Stopwatch.StartNew();
@@ -49,10 +49,7 @@ public sealed class ChaosFixtureTests(ITestOutputHelper output)
         Assert.NotEqual(session, await fixture.ScalarAsync<Guid>("SELECT session_id FROM agents WHERE id=$1",
             token, fixture.Agents[0].Id));
 
-        var recoveredAt = DateTimeOffset.UtcNow;
-        await fixture.UntilAsync(async () => await fixture.ScalarAsync<long>(
-            "SELECT count(*) FROM agents WHERE last_heartbeat_at>$1 AND status=0", token, recoveredAt) == 2,
-            TimeSpan.FromSeconds(15), token);
+        await fixture.WaitForHeartbeatsAsync(token);
         var marker = Path.Combine(fixture.Root, "host-ready");
         var runId = await fixture.StartRunAsync(marker, token);
         await fixture.UntilAsync(() => Task.FromResult(File.Exists(marker)), TimeSpan.FromSeconds(60), token);

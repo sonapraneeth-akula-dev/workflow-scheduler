@@ -82,6 +82,15 @@ jobs:
           name: chaos-fixture-${{ matrix.os }}
           path: chaos-fixture-results
           if-no-files-found: error
+      - name: Verify real core fault outcomes and recovery timing
+        if: runner.os == 'Linux'
+        run: dotnet test backend/tests/Wf.Chaos.Tests --configuration Release --no-build --filter "FullyQualifiedName~CoreFaultScenarios" --logger "trx;LogFileName=core-fault-matrix.trx" --results-directory core-fault-results
+      - uses: actions/upload-artifact@v4
+        if: always() && runner.os == 'Linux'
+        with:
+          name: core-fault-matrix-${{ matrix.os }}
+          path: core-fault-results
+          if-no-files-found: error
       - name: Install and start Windows service
         if: runner.os == 'Windows'
         shell: pwsh

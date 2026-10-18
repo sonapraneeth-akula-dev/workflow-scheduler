@@ -87,7 +87,8 @@ public sealed class ResourceSampleSink(NpgsqlDataSource source, RunStore runs, I
             }
         }
         if (status is not (2 or 3 or 4) || sample.SampleSequence != checked((ulong)count + 1))
-            throw new ArgumentException("Resource sample is out of order or the attempt is terminal.");
+            throw new ArgumentException($"Resource sample {sample.SampleSequence} is out of order (expected {count + 1}) " +
+                $"or the attempt is terminal (status {status}).");
         var point = observation.Task;
         if (previous is null && (point.IntervalSeconds is not null || point.CpuPercent is not null || point.NetworkSentDeltaBytes is not null))
             throw new ArgumentException("The first resource sample must establish a baseline, not invent rates.");

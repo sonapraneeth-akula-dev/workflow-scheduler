@@ -36,7 +36,8 @@ public sealed class DrainTests(ReportPublishDatabase database, ITestOutputHelper
         int mode, bool blockEngine, bool reconnect)
     {
         await using var host = await ReportHost.Start(database.DataSource,
-            configureServices: builder => builder.Services.AddSingleton<AgentDrainService>());
+            configureServices: builder => builder.Services.AddSingleton<AgentDrainService>()
+                .AddSingleton<Wf.ControlPlane.Engine.ResourceSampleSink>());
         var archive = await ReportPublishTests.Package();
         host.App.MapGet("/drain-package.zip", () => Results.Bytes(archive, "application/zip"));
         var hash = Convert.ToHexStringLower(SHA256.HashData(archive));

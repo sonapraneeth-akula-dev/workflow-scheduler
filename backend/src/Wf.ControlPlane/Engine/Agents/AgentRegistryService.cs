@@ -1,3 +1,4 @@
+using Npgsql;
 using Wf.ControlPlane.Engine.Leadership;
 
 namespace Wf.ControlPlane.Engine.Agents;
@@ -38,6 +39,11 @@ public sealed class AgentRegistryService(AgentRegistry registry, TimeProvider ti
                 catch (NotLeaderException)
                 {
                     logger.LogInformation("Agent sweeper paused after losing leadership.");
+                }
+                catch (Exception exception) when (exception is NpgsqlException { IsTransient: true } or
+                    PostgresException { SqlState: "25P04" } or TimeoutException or IOException)
+                {
+                    logger.LogError(exception, "Agent registry will retry when durable storage is available.");
                 }
             }
         }

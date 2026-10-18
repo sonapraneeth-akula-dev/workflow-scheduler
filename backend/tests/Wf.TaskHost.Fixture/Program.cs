@@ -22,7 +22,7 @@ if (args.Length > 0 && args[0] == "--physical-empty-argument-fixture")
 
 var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test")
     .Variables(v => v.Int("amount", 10).Secret("credential").String("checkpointMarker", "").String("remoteUrl", "")
-        .String("remoteContract", "dedup").Int("remoteRetentionSeconds", 3600).Int("remoteCancel", 1))
+        .String("remoteContract", "dedup").Int("remoteRetentionSeconds", 3600).Int("remoteCancel", 1).String("chaosPadding", ""))
     .Node("source", n => n.Task("noop", ctx => ctx.Outputs["value"] = 7))
     .Node("work", n => n.DependsOn("source").Input("source", "value")
         .Task("echo", ctx =>

@@ -130,7 +130,8 @@ public sealed class GroupCommitAppender : IAsyncDisposable
                 var receipt = await PersistAsync(entries, lease).ConfigureAwait(false);
                 return receipt with { PersistenceTime = Stopwatch.GetElapsedTime(started) };
             }
-            catch (Exception exception) when (exception is NpgsqlException { IsTransient: true } or TimeoutException or IOException)
+            catch (Exception exception) when (exception is NpgsqlException { IsTransient: true } or
+                PostgresException { SqlState: "25P04" } or TimeoutException or IOException)
             {
                 logger.LogWarning(exception, "Durable group commit is unavailable; retaining {EventCount} events and retrying in {Delay}.",
                     entries.Length, delay);

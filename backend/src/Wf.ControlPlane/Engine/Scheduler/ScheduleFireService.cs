@@ -233,7 +233,8 @@ public sealed class ScheduleFireService(NpgsqlDataSource source, LeaseManager le
                     await Task.Delay(TimeSpan.FromSeconds(1), time, stoppingToken);
                 }
                 catch (Exception error) when (error is not InvalidDataException &&
-                    error is NpgsqlException { IsTransient: true } or TimeoutException or IOException)
+                    error is NpgsqlException { IsTransient: true } or
+                        PostgresException { SqlState: "25P04" } or TimeoutException or IOException)
                 {
                     Volatile.Write(ref readyLease, null);
                     logger.LogError(error, "Schedule firing will reconnect and reload durable cursors.");

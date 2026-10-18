@@ -43,7 +43,8 @@ public sealed class RunExecutionService(NpgsqlDataSource source, RunRecovery rec
                     if (recovery.IsReady) await TickAsync(stoppingToken);
                 }
                 catch (NotLeaderException) { logger.LogInformation("Run execution paused after losing leadership."); }
-                catch (Exception error) when (error is NpgsqlException { IsTransient: true } or IOException or TimeoutException)
+                catch (Exception error) when (error is NpgsqlException { IsTransient: true } or
+                    PostgresException { SqlState: "25P04" } or IOException or TimeoutException)
                 { logger.LogError(error, "Run execution paused until durable storage is available."); }
                 await Task.Delay(TimeSpan.FromMilliseconds(25), time, stoppingToken);
             }

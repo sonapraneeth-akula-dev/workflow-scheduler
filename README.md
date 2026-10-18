@@ -2326,6 +2326,35 @@ require a valid Hello acknowledgement within ten seconds before keeping that
 engine connection. An accepting but silent proxy cannot indefinitely block
 failover to the next configured engine.
 
+`Scenarios/CoreFaultScenarios.cs` exercises held SDK work under eight real
+faults: leader kill, isolated agent partition, database partition, agent-only
+restart, unrecoverable agent/tree kill, SDK host kill, physical PostgreSQL
+standby promotion and database snapshot-volume exhaustion. Every scenario
+checks the original committed event prefix, contiguous unique lifecycle
+transitions, one terminal run result, expected attempt count and an empty
+dispatch outbox. Temporary partitions and agent restart retain the original
+attempt; host/tree loss uses the existing bounded platform replacement policy.
+Run `dotnet test backend\tests\Wf.Chaos.Tests --filter FullyQualifiedName~CoreFaultScenarios`;
+Linux CI runs it separately from the default solution lane.
+
+Leader recovery has a 30-second wall-clock gate. Database recovery has an
+additional 30 seconds after storage becomes available or the promoted standby
+is writable and routed. Unrecoverable agent loss preserves the complete
+30-second last-heartbeat reclaim interval, then requires replacement execution
+and short-fixture success within a further 30 seconds, with completion also
+bounded by persisted deadlines. Successful short-fixture completion is an
+upper bound on SDK-body startup, not a pre-host `TaskStarted` timestamp.
+The standby uses a real base backup and synchronous WAL flushing; promotion
+changes database processes, not merely a TCP endpoint. The disk scenario puts
+only the isolated run-snapshot partition in an **8 MiB PostgreSQL tmpfs
+tablespace**, fills it, completes the SDK body while persistence is blocked,
+then frees its single filler and verifies durable result replay. Incompressible
+fixture variables require fresh snapshot/TOAST pages; host disks and Windows
+agent volumes are never filled. Fenced background work logs and retries
+transient storage failures and PostgreSQL `25P04` transaction timeouts rather
+than stopping the engine. Each retry reacquires the normal database fence;
+the one-second transaction bound and leadership checks remain unchanged.
+
 The nightly/manual `schedule-chaos.yml` lane runs the actual one-hour
 `ScheduleExactlyOnce` gate against PostgreSQL 17 with durability enabled:
 1,000 minutely schedules, uniformly phased 60 ms apart across each minute,

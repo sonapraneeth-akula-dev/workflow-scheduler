@@ -235,7 +235,8 @@ public sealed class RunRecovery(NpgsqlDataSource dataSource, RunStore runs, Leas
                     }
                 }
                 catch (NotLeaderException) { logger.LogInformation("Run recovery paused after losing leadership."); }
-                catch (Exception exception) when (exception is NpgsqlException { IsTransient: true } or TimeoutException or IOException)
+                catch (Exception exception) when (exception is NpgsqlException { IsTransient: true } or
+                    PostgresException { SqlState: "25P04" } or TimeoutException or IOException)
                 {
                     Volatile.Write(ref state, new(null, ImmutableDictionary<Guid, RecoveredRun>.Empty));
                     logger.LogError(exception, "Run recovery will retry when durable storage is available.");

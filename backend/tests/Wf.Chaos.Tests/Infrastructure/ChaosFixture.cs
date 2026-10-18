@@ -31,9 +31,13 @@ internal sealed class ChaosFixture : IAsyncDisposable
     private readonly INetwork network = new NetworkBuilder().Build();
     private readonly List<ChaosAgent> agents = [];
     private readonly List<EngineProcess> engines = [];
+    private readonly Dictionary<Guid, string> markers = [];
     private readonly byte[] storageKey = RandomNumberGenerator.GetBytes(32);
     private IContainer? proxy;
     private IContainer? disk;
+    private IContainer? standby;
+    private NpgsqlDataSource? standbySource;
+    private bool promoted;
     private HttpClient? proxyApi;
     private ChaosDatabase? database;
     private string proxiedDatabase = "";
@@ -44,7 +48,7 @@ internal sealed class ChaosFixture : IAsyncDisposable
     internal string Pool { get; } = "chaos-" + Guid.NewGuid().ToString("N");
     internal IReadOnlyList<EngineProcess> Engines => engines;
     internal IReadOnlyList<ChaosAgent> Agents => agents;
-    internal NpgsqlDataSource Source => database!.Source;
+    internal NpgsqlDataSource Source => promoted ? standbySource! : database!.Source;
     internal RunStore Store => new(Source, NullLogger<RunStore>.Instance);
 
     internal static async Task<ChaosFixture> StartAsync(CancellationToken token)
@@ -137,7 +141,8 @@ internal sealed class ChaosFixture : IAsyncDisposable
         if (!Equals(1, await query.ExecuteScalarAsync(token))) throw new InvalidDataException("Database proxy probe returned no row.");
     }
 
-    internal async Task KillAgentAsync(int index, CancellationToken token) => await agents[index].KillAsync(token);
+    internal async Task KillAgentAsync(int index, CancellationToken token, bool entireProcessTree = false) =>
+        await agents[index].KillAsync(token, entireProcessTree);
 
     internal async Task RestartAgentAsync(int index, CancellationToken token)
     {
@@ -151,37 +156,51 @@ internal sealed class ChaosFixture : IAsyncDisposable
             TimeSpan.FromSeconds(20), token);
     }
 
-    internal async Task<Guid> StartRunAsync(string marker, CancellationToken token)
+    internal async Task WaitForHeartbeatsAsync(CancellationToken token)
+    {
+        var first = await ScalarAsync<DateTimeOffset>("SELECT last_heartbeat_at FROM agents WHERE id=$1", token, agents[0].Id);
+        var second = await ScalarAsync<DateTimeOffset>("SELECT last_heartbeat_at FROM agents WHERE id=$1", token, agents[1].Id);
+        await UntilAsync(async () => await ScalarAsync<long>("""
+            SELECT count(*) FROM agents WHERE status=0 AND
+                ((id=$1 AND last_heartbeat_at<>$2) OR (id=$3 AND last_heartbeat_at<>$4))
+            """, token, agents[0].Id, first, agents[1].Id, second) == 2, TimeSpan.FromSeconds(15), token);
+    }
+
+    internal async Task<Guid> StartRunAsync(string marker, CancellationToken token, bool padSnapshots = false)
     {
         var variables = new Dictionary<string, JsonElement>
         {
             ["checkpointMarker"] = JsonSerializer.SerializeToElement(marker),
-            ["amount"] = JsonSerializer.SerializeToElement(0)
+            ["amount"] = JsonSerializer.SerializeToElement(0),
+            ["chaosPadding"] = JsonSerializer.SerializeToElement(
+                padSnapshots ? Convert.ToBase64String(RandomNumberGenerator.GetBytes(64 * 1024)) : "")
         }.ToImmutableSortedDictionary(StringComparer.Ordinal);
         var run = new RunState(Guid.CreateVersion7(), definition.Nodes, definition.Metadata,
             message => throw new InvalidOperationException(message), variables: variables);
         await new CommandInbox(Source, TimeProvider.System).TriggerAsync(
             new(run.Snapshot, definition.Name, version, DateTimeOffset.UtcNow.AddMinutes(4)), "chaos-fixture", token);
+        markers.Add(run.Snapshot.RunId, marker);
         return run.Snapshot.RunId;
     }
 
-    internal async Task<(int Agent, int Pid, string MetadataPath)> HostAsync(Guid runId, CancellationToken token)
+    internal async Task<(int Agent, int Pid, string MetadataPath, ulong StartIdentity)> HostAsync(Guid runId, CancellationToken token)
     {
-        (int Agent, int Pid, string MetadataPath)? found = null;
+        (int Agent, int Pid, string MetadataPath, ulong StartIdentity)? found = null;
         await UntilAsync(async () =>
         {
+            if (!File.Exists(markers[runId])) return false;
+            using var marker = JsonDocument.Parse(await File.ReadAllBytesAsync(markers[runId], token));
             for (var index = 0; index < agents.Count; index++)
             {
                 var lifetimes = Path.Combine(agents[index].DirectoryPath, "results", "host-lifetimes", agents[index].Id.ToString("N"));
                 if (!Directory.Exists(lifetimes)) continue;
-                foreach (var path in Directory.EnumerateFiles(lifetimes, "attempt.json", SearchOption.AllDirectories))
+                foreach (var path in Directory.EnumerateFiles(lifetimes, "dispatch.pb", SearchOption.AllDirectories))
                 {
-                    await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
-                    using var record = await JsonDocument.ParseAsync(input, cancellationToken: token);
-                    var root = record.RootElement;
-                    if (root.GetProperty("Attempt").ValueKind != JsonValueKind.Object ||
-                        root.GetProperty("Attempt").GetProperty("RunId").GetString() != runId.ToString("D")) continue;
-                    found = (index, root.GetProperty("Pid").GetInt32(), path);
+                    var dispatch = Wf.Contracts.Agent.V1.Dispatch.Parser.ParseFrom(await File.ReadAllBytesAsync(path, token));
+                    if (dispatch.Task?.RunId != runId.ToString("D")) continue;
+                    found = (index, marker.RootElement.GetProperty("pid").GetInt32(),
+                        Path.Combine(Directory.GetParent(Path.GetDirectoryName(path)!)!.FullName, "attempt.json"),
+                        marker.RootElement.GetProperty("startIdentity").GetUInt64());
                     return true;
                 }
             }
@@ -193,7 +212,7 @@ internal sealed class ChaosFixture : IAsyncDisposable
     internal async Task KillHostAsync(Guid runId, CancellationToken token)
     {
         var host = await HostAsync(runId, token);
-        StopRecordedHost(host.MetadataPath);
+        StopHost(host.Pid, host.StartIdentity);
     }
 
     private static void StopRecordedHost(string path)
@@ -201,8 +220,13 @@ internal sealed class ChaosFixture : IAsyncDisposable
         using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
         using var record = JsonDocument.Parse(input);
         var root = record.RootElement;
+        StopHost(root.GetProperty("Pid").GetInt32(), root.GetProperty("StartIdentity").GetUInt64());
+    }
+
+    private static void StopHost(int pid, ulong expectedIdentity)
+    {
         Process process;
-        try { process = Process.GetProcessById(root.GetProperty("Pid").GetInt32()); }
+        try { process = Process.GetProcessById(pid); }
         catch (ArgumentException) { return; }
         using (process)
         {
@@ -215,7 +239,7 @@ internal sealed class ChaosFixture : IAsyncDisposable
                 identity = ulong.Parse(stat[(stat.LastIndexOf(')') + 1)..]
                     .Split(' ', StringSplitOptions.RemoveEmptyEntries)[19], CultureInfo.InvariantCulture);
             }
-            if (identity != root.GetProperty("StartIdentity").GetUInt64())
+            if (identity != expectedIdentity)
                 throw new InvalidOperationException("Chaos fixture refuses to kill a reused task-host PID.");
             process.Kill(entireProcessTree: true);
             if (!process.WaitForExit(5_000)) throw new TimeoutException("Owned SDK host did not exit after fault injection.");
@@ -234,6 +258,94 @@ internal sealed class ChaosFixture : IAsyncDisposable
     {
         var result = await disk!.ExecAsync(["sh", "-c", "rm -f /fault/fill; printf recovered > /fault/probe; test \"$(cat /fault/probe)\" = recovered"], token);
         if (result.ExitCode != 0) throw new IOException($"Bounded disk did not recover: {result.Stderr}");
+    }
+
+    internal async Task PrepareStandbyAsync(CancellationToken token)
+    {
+        if (standby is not null) throw new InvalidOperationException("The owned standby is already configured.");
+        var hba = await database!.Container.ExecAsync(["sh", "-c",
+            "printf '\\nhost replication all all scram-sha-256\\n' >> \"$PGDATA/pg_hba.conf\""], token);
+        if (hba.ExitCode != 0) throw new IOException($"Cannot enable owned standby replication: {hba.Stderr}");
+        await ExecuteAsync("SELECT pg_reload_conf()", token);
+        var settings = new NpgsqlConnectionStringBuilder(database.ConnectionString);
+        standby = new ContainerBuilder("postgres:17-alpine").WithNetwork(network).WithNetworkAliases("postgres-standby")
+            .WithPortBinding(5432, true).WithCreateParameterModifier(parameters => parameters.User = "postgres")
+            .WithEnvironment("PGDATA", "/var/lib/postgresql/data/standby")
+            .WithEnvironment("PGUSER", settings.Username!)
+            .WithEnvironment("PGPASSWORD", settings.Password!)
+            .WithEntrypoint("sh", "-c").WithCommand(
+                """pg_basebackup --dbname='host=postgres application_name=wf_chaos_standby' --username="$PGUSER" --pgdata="$PGDATA" --write-recovery-conf --checkpoint=fast && exec postgres -D "$PGDATA" -c max_connections=200 -c track_commit_timestamp=on -c synchronous_standby_names=''""")
+            .WithWaitStrategy(Wait.ForUnixContainer().UntilCommandIsCompleted(
+                "pg_isready", "-U", settings.Username!, "-d", settings.Database!)).Build();
+        await standby.StartAsync(token);
+        settings.Host = standby.Hostname;
+        settings.Port = standby.GetMappedPublicPort(5432);
+        settings.Timeout = 2;
+        settings.CommandTimeout = 3;
+        standbySource = NpgsqlDataSource.Create(settings.ConnectionString);
+        await using (var recovery = standbySource.CreateCommand("SELECT pg_is_in_recovery()"))
+            if (!Equals(true, await recovery.ExecuteScalarAsync(token)))
+                throw new InvalidDataException("The owned database replica did not start as a physical standby.");
+        await UntilAsync(async () => await ScalarAsync<long>("""
+            SELECT count(*) FROM pg_stat_replication
+            WHERE application_name='wf_chaos_standby' AND state='streaming'
+            """, token) == 1, TimeSpan.FromSeconds(15), token);
+        await ExecuteAsync("ALTER SYSTEM SET synchronous_standby_names='FIRST 1 (wf_chaos_standby)'", token);
+        await ExecuteAsync("SELECT pg_reload_conf()", token);
+        await UntilAsync(async () => await ScalarAsync<long>("""
+            SELECT count(*) FROM pg_stat_replication
+            WHERE application_name='wf_chaos_standby' AND sync_state='sync'
+            """, token) == 1, TimeSpan.FromSeconds(15), token);
+    }
+
+    internal async Task PromoteStandbyAsync(CancellationToken token)
+    {
+        if (standbySource is null || promoted) throw new InvalidOperationException("Prepare an owned standby before promotion.");
+        await SetDatabaseAvailableAsync(false, token);
+        await database!.Container.StopAsync(token);
+        await using (var promote = standbySource.CreateCommand("SELECT pg_promote(true,10)"))
+        {
+            promote.CommandTimeout = 15;
+            if (!Equals(true, await promote.ExecuteScalarAsync(token)))
+                throw new InvalidDataException("The owned standby did not become writable.");
+        }
+        promoted = true;
+        using var response = await proxyApi!.PostAsJsonAsync("/proxies/database",
+            new { upstream = "postgres-standby:5432", enabled = false }, token);
+        response.EnsureSuccessStatusCode();
+        await SetDatabaseAvailableAsync(true, token);
+        if (await ScalarAsync<bool>("SELECT pg_is_in_recovery()", token))
+            throw new InvalidDataException("The promoted database still reports standby recovery.");
+    }
+
+    internal async Task PrepareSnapshotDiskFaultAsync(Guid runId, CancellationToken token)
+    {
+        var directory = await database!.Container.ExecAsync(["sh", "-c",
+            "mkdir /fault/tablespace && chown postgres:postgres /fault/tablespace"], token);
+        if (directory.ExitCode != 0) throw new IOException($"Cannot prepare bounded database tablespace: {directory.Stderr}");
+        await ExecuteAsync("CREATE TABLESPACE chaos_fault LOCATION '/fault/tablespace'", token);
+        var day = await ScalarAsync<DateOnly>("SELECT run_day FROM runs WHERE id=$1", token, runId);
+        await ExecuteAsync($"ALTER TABLE run_snapshots_{day.ToString("yyyyMM", CultureInfo.InvariantCulture)} SET TABLESPACE chaos_fault", token);
+    }
+
+    internal async Task FillSnapshotDiskAsync(CancellationToken token)
+    {
+        var result = await database!.Container.ExecAsync(
+            ["sh", "-c", "LC_ALL=C dd if=/dev/zero of=/fault/fill bs=1048576 count=9"], token);
+        if (result.ExitCode == 0 || !result.Stderr.Contains("No space left on device", StringComparison.Ordinal))
+            throw new IOException($"Database snapshot disk did not produce ENOSPC: {result.ExitCode}; {result.Stderr}");
+    }
+
+    internal async Task RecoverSnapshotDiskAsync(CancellationToken token)
+    {
+        var result = await database!.Container.ExecAsync(["rm", "-f", "/fault/fill"], token);
+        if (result.ExitCode != 0) throw new IOException($"Cannot recover owned snapshot disk: {result.Stderr}");
+    }
+
+    private async Task ExecuteAsync(string sql, CancellationToken token)
+    {
+        await using var command = Source.CreateCommand(sql);
+        await command.ExecuteNonQueryAsync(token);
     }
 
     internal async Task<T> ScalarAsync<T>(string sql, CancellationToken token, params object[] values)
@@ -255,7 +367,8 @@ internal sealed class ChaosFixture : IAsyncDisposable
             while (!await condition())
             {
                 foreach (var engine in engines.Where(engine => !engine.Killed))
-                    if (engine.HasExited) throw new InvalidOperationException($"Engine {engine.Id} exited; {engine.LogPath}");
+                    if (engine.HasExited)
+                        throw new InvalidOperationException($"Engine {engine.Id} exited. {await CaptureDiagnosticsAsync()}");
                 foreach (var agent in agents.Where(agent => !agent.Killed))
                     if (agent.HasExited) throw new InvalidOperationException($"Agent {agent.Id} exited: {agent.Diagnostics}");
                 await Task.Delay(25, timeout.Token);
@@ -263,8 +376,14 @@ internal sealed class ChaosFixture : IAsyncDisposable
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested)
         {
-            var diagnostics = new List<string>(agents.Select(agent => $"Agent {agent.Id}: {agent.Diagnostics}"));
-            diagnostics.Add(await ScalarAsync<string>("""
+            throw new TimeoutException($"Chaos observation exceeded {budget}. {await CaptureDiagnosticsAsync()}");
+        }
+    }
+
+    private async Task<string> CaptureDiagnosticsAsync()
+    {
+        var diagnostics = new List<string>(agents.Select(agent => $"Agent {agent.Id}: {agent.Diagnostics}"));
+        diagnostics.Add(await ScalarAsync<string>("""
                 SELECT json_build_object('now',clock_timestamp(),
                     'agents',(SELECT json_agg(row_to_json(a)) FROM
                         (SELECT id,session_id,last_heartbeat_at,status FROM agents) a),
@@ -274,18 +393,17 @@ internal sealed class ChaosFixture : IAsyncDisposable
                         (SELECT run_id,task_key,attempt,agent_id,status,error FROM task_attempts LIMIT 20) t),
                     'lease',(SELECT json_agg(row_to_json(l)) FROM
                         (SELECT holder,epoch,expires_at FROM leases) l))::text
-                """, CancellationToken.None));
-            foreach (var engine in engines)
+            """, CancellationToken.None));
+        foreach (var engine in engines)
+        {
+            await engine.KillAsync();
+            foreach (var path in new[] { engine.LogPath, engine.LogPath + ".stderr" })
             {
-                await engine.KillAsync();
-                foreach (var path in new[] { engine.LogPath, engine.LogPath + ".stderr" })
-                {
-                    var text = await File.ReadAllTextAsync(path, CancellationToken.None);
-                    diagnostics.Add(text.Length > 12_000 ? text[^12_000..] : text);
-                }
+                var text = await File.ReadAllTextAsync(path, CancellationToken.None);
+                diagnostics.Add(text.Length > 12_000 ? text[^12_000..] : text);
             }
-            throw new TimeoutException($"Chaos observation exceeded {budget}. {string.Join(Environment.NewLine, diagnostics)}");
         }
+        return string.Join(Environment.NewLine, diagnostics);
     }
 
     private ChaosAgent StartAgent(int index, Guid id) => new(id, Path.Combine(Root, $"agent-{index}"), Pool,
@@ -310,7 +428,7 @@ internal sealed class ChaosFixture : IAsyncDisposable
     {
         await SeedAsync(Source, token, schedules: 0);
         definition = Workflow.Define("chaos/release/workflow", "1.0.0", workflow => workflow.Type("release")
-            .Variables(variables => variables.String("checkpointMarker", "").Int("amount", 0))
+            .Variables(variables => variables.String("checkpointMarker", "").Int("amount", 0).String("chaosPadding", ""))
             .RunsOn(new PlacementSelector(pool: Pool)).PostProcess(stage => stage.Task("drain", _ => { })));
         using var buffer = new MemoryStream();
         using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
@@ -354,6 +472,8 @@ internal sealed class ChaosFixture : IAsyncDisposable
         proxyApi?.Dispose();
         if (disk is not null) await disk.DisposeAsync();
         if (proxy is not null) await proxy.DisposeAsync();
+        if (standbySource is not null) await standbySource.DisposeAsync();
+        if (standby is not null) await standby.DisposeAsync();
         if (database is not null) await database.DisposeAsync();
         await network.DisposeAsync();
         if (Directory.Exists(Root)) Directory.Delete(Root, recursive: true);
@@ -411,11 +531,11 @@ internal sealed class ChaosAgent : IAsyncDisposable
         while (diagnostics.Count > 100) diagnostics.TryDequeue(out _);
     }
 
-    internal Task KillAsync(CancellationToken token)
+    internal Task KillAsync(CancellationToken token, bool entireProcessTree = false)
     {
         token.ThrowIfCancellationRequested();
         Killed = true;
-        if (!process.HasExited) process.Kill(entireProcessTree: false);
+        if (!process.HasExited) process.Kill(entireProcessTree);
         if (!process.WaitForExit(5_000)) throw new TimeoutException("Owned chaos agent did not exit.");
         return Task.CompletedTask;
     }

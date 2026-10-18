@@ -211,7 +211,8 @@ public sealed class ReservationLeaseService(NpgsqlDataSource dataSource, RunStor
             {
                 try { await SweepAsync(stoppingToken); }
                 catch (NotLeaderException) { logger.LogDebug("Reservation maintenance paused because this engine is not leader."); }
-                catch (Exception exception) when (exception is NpgsqlException { IsTransient: true } or TimeoutException or IOException)
+                catch (Exception exception) when (exception is NpgsqlException { IsTransient: true } or
+                    PostgresException { SqlState: "25P04" } or TimeoutException or IOException)
                 {
                     logger.LogError(exception, "Reservation maintenance will retry when durable storage is available.");
                 }

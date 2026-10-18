@@ -485,10 +485,19 @@ public sealed class ResourceMetricsTests(ResourceMetricsDatabase database, ITest
     private static async Task Wait(Func<Task<bool>> predicate, Process agent, Task<string> stdout, Task<string> stderr)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-        while (!await predicate())
+        try
         {
-            if (agent.HasExited) Assert.Fail($"Actual agent exited: {await stdout} {await stderr}");
-            await Task.Delay(25, timeout.Token);
+            while (!await predicate())
+            {
+                if (agent.HasExited) Assert.Fail($"Actual agent exited: {await stdout} {await stderr}");
+                await Task.Delay(25, timeout.Token);
+            }
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            if (!agent.HasExited) agent.Kill(entireProcessTree: true);
+            await agent.WaitForExitAsync(CancellationToken.None);
+            throw new TimeoutException($"Resource observation exceeded 45 seconds. {await stdout} {await stderr}");
         }
     }
 
@@ -511,7 +520,7 @@ public sealed class ResourceMetricsTests(ResourceMetricsDatabase database, ITest
         public static async Task<ResourceHost> Start(NpgsqlDataSource source)
         {
             var root = Path.GetFullPath(Path.Combine(Environment.GetEnvironmentVariable("WF_RESOURCE_TEST_ARTIFACTS") ??
-                Path.Combine(".agent-artifacts", "resource-shipping-3adec91f"), "tests", Guid.NewGuid().ToString("N")[..12]));
+                Path.Combine(Path.GetTempPath(), "wf-resources"), "tests", Guid.NewGuid().ToString("N")[..12]));
             var key = RandomNumberGenerator.GetBytes(32);
             var blobs = new FileSystemBlobStore(Path.Combine(root, "blobs"), key);
             var runs = new RunStore(source, NullLogger<RunStore>.Instance);

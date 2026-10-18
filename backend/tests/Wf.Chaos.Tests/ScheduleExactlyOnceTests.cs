@@ -251,6 +251,7 @@ public sealed class ScheduleExactlyOnceTests(ITestOutputHelper output)
 
     internal sealed class EngineProcess : IAsyncDisposable
     {
+        private static readonly HashSet<int> gatewayPorts = [];
         private readonly Process process;
         private readonly HttpClient client;
         private readonly Task logging;
@@ -278,6 +279,16 @@ public sealed class ScheduleExactlyOnceTests(ITestOutputHelper output)
             engine.Start();
             var port = ((IPEndPoint)api.LocalEndpoint).Port;
             var enginePort = ((IPEndPoint)engine.LocalEndpoint).Port;
+            lock (gatewayPorts)
+            {
+                // Testcontainers' shared SSH forwarder retains exposed ports until the test process exits.
+                while (!gatewayPorts.Add(enginePort))
+                {
+                    engine.Stop();
+                    engine.Start();
+                    enginePort = ((IPEndPoint)engine.LocalEndpoint).Port;
+                }
+            }
             var start = new ProcessStartInfo("dotnet")
             {
                 UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
@@ -342,6 +353,8 @@ public sealed class ScheduleExactlyOnceTests(ITestOutputHelper output)
         public string ConnectionString { get; private set; } = "";
         public NpgsqlDataSource Source { get; private set; } = null!;
         public Dictionary<string, string> Settings { get; } = [];
+        internal PostgreSqlContainer Container => container ??
+            throw new InvalidOperationException("Fault injection cannot operate on a shared external database.");
 
         public static async Task<ChaosDatabase> StartAsync(CancellationToken token, bool requireCommitTimestamps = true,
             DotNet.Testcontainers.Networks.INetwork? network = null)
@@ -355,7 +368,10 @@ public sealed class ScheduleExactlyOnceTests(ITestOutputHelper output)
                     var builder = new PostgreSqlBuilder("postgres:17-alpine")
                         .WithCommand("-c", "fsync=on", "-c", "full_page_writes=on", "-c", "synchronous_commit=on",
                             "-c", "track_commit_timestamp=on", "-c", "max_connections=200");
-                    if (network is not null) builder = builder.WithNetwork(network).WithNetworkAliases("postgres");
+                    if (network is not null)
+                        builder = builder.WithNetwork(network).WithNetworkAliases("postgres")
+                            .WithCreateParameterModifier(parameters => (parameters.HostConfig ??= new()).Tmpfs =
+                                new Dictionary<string, string> { ["/fault"] = "rw,noexec,nosuid,size=8388608" });
                     database.container = builder.Build();
                     await database.container.StartAsync(token);
                     database.ConnectionString = database.container.GetConnectionString();
