@@ -8,9 +8,11 @@ import { runSearchSchema, type RunSearch } from "@/features/runs/search"
 export function FilterBar({
   filters,
   onChange,
+  team,
 }: {
   filters: RunSearch
   onChange: (filters: RunSearch) => void
+  team?: string
 }) {
   const [error, setError] = useState<string | null>(null)
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -34,6 +36,7 @@ export function FilterBar({
     })
     const parsed = runSearchSchema.safeParse({
       ...fields,
+      ...(team ? { team } : {}),
       metadata,
     })
     if (!parsed.success) {
@@ -59,6 +62,7 @@ export function FilterBar({
         with AND. Times require an explicit offset; the end is exclusive.
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
+        {team ? <input type="hidden" name="team" value={team} /> : null}
         {(
           [
             ["team", "Team"],
@@ -68,16 +72,18 @@ export function FilterBar({
             ["from", "Created from (inclusive RFC3339)"],
             ["to", "Created before (exclusive RFC3339)"],
           ] as const
-        ).map(([name, label]) => (
-          <label key={name} className="flex min-w-0 flex-col gap-1">
-            {label}
-            <Input
-              name={name}
-              defaultValue={filters[name] ?? ""}
-              autoComplete="off"
-            />
-          </label>
-        ))}
+        )
+          .filter(([name]) => name !== "team" || !team)
+          .map(([name, label]) => (
+            <label key={name} className="flex min-w-0 flex-col gap-1">
+              {label}
+              <Input
+                name={name}
+                defaultValue={filters[name] ?? ""}
+                autoComplete="off"
+              />
+            </label>
+          ))}
         <label className="flex min-w-0 flex-col gap-1">
           Run status
           <NativeSelect name="status" defaultValue={filters.status ?? ""}>
@@ -123,7 +129,11 @@ export function FilterBar({
       {error ? <p role="alert">{error}</p> : null}
       <div className="flex flex-wrap gap-2">
         <Button type="submit">Search runs</Button>
-        <Button type="button" variant="outline" onClick={() => onChange({})}>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => onChange(team ? { team } : {})}
+        >
           Clear filters
         </Button>
       </div>

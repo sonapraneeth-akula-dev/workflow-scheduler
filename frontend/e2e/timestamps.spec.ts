@@ -1,4 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test"
+import { openTeamRunList } from "./team-runs"
 
 async function expectLocalTimes(scope: Locator, locale: string) {
   await expect(scope.locator("time[datetime]").first()).toBeVisible()
@@ -49,7 +50,7 @@ for (const [timezoneId, locale] of [
     test("run lists, attempts, events and history show local milliseconds while retaining exact timestamps", async ({
       page,
     }) => {
-      await page.goto("/runs?status=Succeeded")
+      await openTeamRunList(page)
       const main = page.locator("main")
       await expectLocalTimes(main, locale)
       await main.locator('a[href^="/runs/"]').first().click()

@@ -71,7 +71,7 @@ export function TypeWorkflows({ team, type }: { team: string; type: string }) {
             ? "Live updates unavailable. Refresh workflows or retry."
             : "Connecting live updates..."}
       </p>
-      <Link to="/runs" search={{ team, type }}>
+      <Link to="/t/$team/runs" params={{ team }} search={{ type }}>
         Search runs in this type
       </Link>
       <SubscribeMenu scope="type" scopeId={`${team}/${type}`} />

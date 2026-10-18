@@ -57,10 +57,9 @@ test("keyboard run filters, metadata grouping and virtualized results survive a 
   await page.goto("/")
   await page.getByRole("link", { name: "Runs", exact: true }).focus()
   await page.keyboard.press("Enter")
+  await page.getByRole("link", { name: "filter-tests", exact: true }).click()
   const form = page.getByRole("form", { name: "Run filters" })
-  await form.getByLabel("Team", { exact: true }).focus()
-  await page.keyboard.type("filter-tests")
-  await page.keyboard.press("Tab")
+  await form.getByLabel("Type", { exact: true }).focus()
   await expect(form.getByLabel("Type", { exact: true })).toBeFocused()
   await page.keyboard.type("search")
   await page.keyboard.press("Tab")
@@ -94,7 +93,7 @@ test("keyboard run filters, metadata grouping and virtualized results survive a 
   )
   const copied = page.url()
   const url = new URL(copied)
-  expect(url.searchParams.get("team")).toBe("filter-tests")
+  expect(url.pathname).toBe("/t/filter-tests/runs")
   expect(url.searchParams.get("workflowId")).toBe(workflowId)
   expect(url.searchParams.get("groupBy")).toBe("metadata")
   expect(url.searchParams.get("groupKey")).toBe("component")
@@ -114,9 +113,7 @@ test("keyboard run filters, metadata grouping and virtualized results survive a 
     `/runs/${ids[0]}`
   )
   await page.goto(copied)
-  await expect(form.getByLabel("Team", { exact: true })).toHaveValue(
-    "filter-tests"
-  )
+  expect(new URL(page.url()).pathname).toBe("/t/filter-tests/runs")
   await expect(form.getByLabel("Type", { exact: true })).toHaveValue("search")
   await expect(form.getByLabel("Run status")).toHaveValue(status)
   await expect(form.getByLabel("Group loaded runs by")).toHaveValue("metadata")

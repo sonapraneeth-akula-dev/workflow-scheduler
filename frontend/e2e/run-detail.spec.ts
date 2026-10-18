@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright"
 import { expect, test, type Page } from "@playwright/test"
+import { openTeamRunList } from "./team-runs"
 
 test.use({
   launchOptions: {
@@ -9,7 +10,7 @@ test.use({
 })
 
 async function openListedRun(page: Page) {
-  await page.goto("/runs?status=Succeeded")
+  await openTeamRunList(page)
   const link = page.locator('main a[href^="/runs/"]').first()
   await expect(link).toBeVisible()
   const href = await link.getAttribute("href")
@@ -71,9 +72,9 @@ test("Back returns to the exact filtered run listing, including after reload", a
   await openListedRun(page)
   await page.reload()
   await page.getByRole("button", { name: "Back to previous page" }).click()
-  await expect(page).toHaveURL(/\/runs\?status=Succeeded$/)
+  await expect(page).toHaveURL(/\/t\/[^/]+\/runs\?status=Succeeded$/)
   await expect(
-    page.getByRole("heading", { name: "Runs", exact: true })
+    page.getByRole("heading", { name: / runs$/, exact: true })
   ).toBeVisible()
 })
 
@@ -229,7 +230,7 @@ for (const colorScheme of ["light", "dark"] as const) {
         fullPage: true,
       })
       await page.getByRole("button", { name: "Back to previous page" }).click()
-      await expect(page).toHaveURL(/\/runs\?status=Succeeded$/)
+      await expect(page).toHaveURL(/\/t\/[^/]+\/runs\?status=Succeeded$/)
     })
   }
 
@@ -358,7 +359,7 @@ for (const colorScheme of ["light", "dark"] as const) {
         path: testInfo.outputPath(`dropdowns-${colorScheme}-${width}.png`),
       })
     }
-    await page.goto("/runs?status=Succeeded")
+    await openTeamRunList(page)
     const status = page.getByRole("combobox", {
       name: "Run status",
       exact: true,
@@ -446,7 +447,7 @@ for (const colorScheme of ["light", "dark"] as const) {
     await checkbox.click()
     await expect(checkbox).toBeChecked()
     await trigger.getByRole("button", { name: "Close", exact: true }).click()
-    await page.goto("/runs?status=Succeeded")
+    await openTeamRunList(page)
     await expect(page.getByRole("textbox").first()).not.toHaveCSS(
       "cursor",
       "pointer"

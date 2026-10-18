@@ -89,7 +89,7 @@ test("workflow rankings have exact accessible charts/tables and a slow node open
   await expect(table.locator("tbody")).toContainText("96,500 ms")
   await table.getByRole("link", { name: "alpha", exact: true }).click()
   await expect(
-    page.getByRole("heading", { name: "Runs", exact: true })
+    page.getByRole("heading", { name: / runs$/, exact: true })
   ).toBeVisible()
   const search = new URL(page.url()).searchParams
   expect(search.get("workflowId")).toBe(fixture.workflow)

@@ -167,6 +167,25 @@ describe("filtered run list", () => {
 })
 
 describe("run filter form", () => {
+  it("keeps its route team when searching and clearing filters", async () => {
+    const change = vi.fn()
+    render(
+      <FilterBar
+        team="team"
+        filters={{ team: "team", status: "Failed" }}
+        onChange={change}
+      />
+    )
+    expect(screen.queryByLabelText("Team")).not.toBeInTheDocument()
+    fireEvent.submit(screen.getByRole("form", { name: "Run filters" }))
+    expect(change).toHaveBeenLastCalledWith({
+      team: "team",
+      status: "Failed",
+      groupBy: "none",
+    })
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }))
+    expect(change).toHaveBeenLastCalledWith({ team: "team" })
+  })
   it("submits keyboard-entered exact filters and grouping with a clear reset", async () => {
     const user = userEvent.setup()
     const change = vi.fn()

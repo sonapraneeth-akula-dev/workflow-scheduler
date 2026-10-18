@@ -3,8 +3,9 @@ import { Link } from "@tanstack/react-router"
 import { Button } from "@/components/ui/button"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { accessDenied, getTeams } from "./api"
+import type { RunSearch } from "@/features/runs/search"
 
-export function TeamList() {
+export function TeamList({ runSearch }: { runSearch?: RunSearch }) {
   const query = useQuery({
     queryKey: ["catalog", "teams"],
     queryFn: ({ signal }) => getTeams(signal),
@@ -31,13 +32,24 @@ export function TeamList() {
         <ul className="grid gap-4 sm:grid-cols-2">
           {teams.map((team) => (
             <li key={team.team} className="min-w-0 rounded-md border p-4">
-              <Link
-                to="/t/$team"
-                params={{ team: team.team }}
-                className="break-words underline"
-              >
-                {team.team}
-              </Link>
+              {runSearch ? (
+                <Link
+                  to="/t/$team/runs"
+                  params={{ team: team.team }}
+                  search={runSearch}
+                  className="break-words underline"
+                >
+                  {team.team}
+                </Link>
+              ) : (
+                <Link
+                  to="/t/$team"
+                  params={{ team: team.team }}
+                  className="break-words underline"
+                >
+                  {team.team}
+                </Link>
+              )}
               <p>
                 {team.typeCount} permitted{" "}
                 {team.typeCount === 1 ? "type" : "types"}

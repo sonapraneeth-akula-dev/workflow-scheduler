@@ -37,7 +37,12 @@ export function TeamArea({ team }: { team: string }) {
           Refresh types
         </Button>
       </div>
-      <p>Types and latest workflow status in this team.</p>
+      <div className="flex flex-wrap items-center gap-4">
+        <p>Types and latest workflow status in this team.</p>
+        <Link to="/t/$team/runs" params={{ team }} className="underline">
+          Search runs in this team
+        </Link>
+      </div>
       <PresentationFilters config={presentation.data ?? null} />
       {query.isPending ? <p role="status">Loading types...</p> : null}
       {query.error ? <ErrorNotice error={query.error} /> : null}

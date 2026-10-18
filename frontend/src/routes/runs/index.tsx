@@ -1,25 +1,34 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { FilterBar } from "@/features/catalog/FilterBar"
-import { RunList } from "@/features/runs/RunList"
+import { createFileRoute, redirect } from "@tanstack/react-router"
+import { TeamList } from "@/features/catalog/TeamList"
 import { runSearchSchema } from "@/features/runs/search"
 
 export const Route = createFileRoute("/runs/")({
   validateSearch: runSearchSchema,
+  beforeLoad: ({ search }) => {
+    const team = search.team ?? search.workflowId?.split("/")[0]
+    if (team) {
+      const next = { ...search }
+      delete next.team
+      throw redirect({
+        to: "/t/$team/runs",
+        params: { team },
+        search: next,
+        replace: true,
+      })
+    }
+  },
   component: RunSearch,
 })
 
 function RunSearch() {
   const search = Route.useSearch()
-  const navigate = Route.useNavigate()
   return (
     <>
       <h1 className="text-2xl font-semibold">Runs</h1>
-      <FilterBar
-        key={JSON.stringify(search)}
-        filters={search}
-        onChange={(next) => void navigate({ search: next })}
-      />
-      <RunList search={search} />
+      <p>
+        Choose a team to see its runs. Teams are never mixed in one listing.
+      </p>
+      <TeamList runSearch={search} />
     </>
   )
 }

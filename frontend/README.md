@@ -413,9 +413,13 @@ The catch-up run has a Catch-up badge while its retained source outcome remains
 Missed. Paging validates resource identity, filter matches and strict
 timestamp/UUID/kind ordering, including microsecond ties. Trends remain separate.
 
-The main navigation's Runs view (`/runs`) searches authorized durable run
-summaries by exact team, type, workflow, series, named status, created-time range
-and copied metadata. Type views provide a prefiltered entry. All filters combine
+The main navigation's Runs view (`/runs`) shows an authorized team chooser, never
+a mixed-team listing. Each team's durable run summaries live at
+`/t/<team>/runs`; the route fixes the team scope when searching, clearing filters,
+refreshing and paging. Type views and dashboard drill-downs link directly to that
+team's listing. Legacy `/runs?team=...` and workflow-specific links redirect to
+the scoped URL without dropping their filters. Search supports exact type,
+workflow, series, named status, created-time range and copied metadata. All filters combine
 with AND; times require an explicit RFC3339 offset, with inclusive start and
 exclusive end, preserving up to microsecond precision. Metadata filters are a
 JSON object of exact strings, including empty values and significant whitespace.

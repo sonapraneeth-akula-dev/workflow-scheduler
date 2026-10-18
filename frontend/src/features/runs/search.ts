@@ -60,14 +60,14 @@ export const runFilterSchema = z.object({
   to: instantSchema.optional(),
   metadata: metadata.optional(),
 })
-export const runSearchSchema = runFilterSchema
-  .extend({
-    groupBy: z
-      .enum(["none", "team", "type", "workflow", "status", "metadata"])
-      .optional(),
-    groupKey: z.string().min(1).max(128).optional(),
-  })
-  .superRefine((filters, context) => {
+export const runSearchFieldsSchema = runFilterSchema.extend({
+  groupBy: z
+    .enum(["none", "team", "type", "workflow", "status", "metadata"])
+    .optional(),
+  groupKey: z.string().min(1).max(128).optional(),
+})
+export const runSearchSchema = runSearchFieldsSchema.superRefine(
+  (filters, context) => {
     if (filters.type && !filters.team)
       context.addIssue({
         code: "custom",
@@ -102,7 +102,8 @@ export const runSearchSchema = runFilterSchema
           message: "The workflow must belong to the filtered team and type.",
         })
     }
-  })
+  }
+)
 
 export type RunFilters = z.infer<typeof runFilterSchema>
 export type RunSearch = z.infer<typeof runSearchSchema>

@@ -111,6 +111,14 @@ describe("catalogue views", () => {
     ).toBeInTheDocument()
   })
 
+  it("links team run choices to their own scoped listing", async () => {
+    show(<TeamList runSearch={{ status: "Failed" }} />)
+    expect(await screen.findByRole("link", { name: "team" })).toHaveAttribute(
+      "href",
+      "/t/team/runs"
+    )
+  })
+
   it("preserves cached rows for transient errors but hides them after access denial", async () => {
     vi.mocked(getTeams).mockResolvedValue([
       { team: "team", typeCount: 1, presentation: null },
@@ -215,7 +223,12 @@ describe("catalogue views", () => {
     show(<TeamArea team="team" />)
     await screen.findByRole("link", { name: "team / perf" })
     const links = screen.getAllByRole("link").map((link) => link.textContent)
-    expect(links).toEqual(["Teams", "team / perf", "team / release"])
+    expect(links).toEqual([
+      "Teams",
+      "Search runs in this team",
+      "team / perf",
+      "team / release",
+    ])
     expect(getTypes).toHaveBeenCalledWith(
       "team",
       expect.any(AbortSignal),

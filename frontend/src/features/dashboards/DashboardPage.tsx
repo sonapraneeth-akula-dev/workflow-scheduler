@@ -183,7 +183,10 @@ export function DashboardPage({
                               <td className="p-3">{index + 1}</td>
                               <th scope="row" className="p-3 font-normal">
                                 <Link
-                                  to="/runs"
+                                  to="/t/$team/runs"
+                                  params={{
+                                    team: row.workflowId.split("/")[0]!,
+                                  }}
                                   search={{
                                     workflowId: row.workflowId,
                                     from: `${data.from}T00:00:00Z`,

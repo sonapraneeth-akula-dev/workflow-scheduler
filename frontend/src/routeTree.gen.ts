@@ -22,6 +22,7 @@ import { Route as DashboardsScopeIdRouteImport } from './routes/dashboards.$scop
 import { Route as RunsIdEventsRouteImport } from './routes/runs.$id_.events'
 import { Route as SeriesIdCompareRouteImport } from './routes/series.$id_.compare'
 import { Route as TTeamIndexRouteImport } from './routes/t/$team/index'
+import { Route as TTeamRunsRouteImport } from './routes/t.$team.runs'
 import { Route as RunsIdReportsReportIdRouteImport } from './routes/runs.$id_.reports.$reportId'
 import { Route as TTeamTypeIndexRouteImport } from './routes/t/$team/$type/index'
 import { Route as TTeamTypeWWfHistoryRouteImport } from './routes/t.$team.$type.w.$wf.history'
@@ -95,6 +96,11 @@ const TTeamIndexRoute = TTeamIndexRouteImport.update({
   path: '/t/$team/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TTeamRunsRoute = TTeamRunsRouteImport.update({
+  id: '/t/$team/runs',
+  path: '/t/$team/runs',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RunsIdReportsReportIdRoute = RunsIdReportsReportIdRouteImport.update({
   id: '/runs/$id_/reports/$reportId',
   path: '/runs/$id/reports/$reportId',
@@ -146,6 +152,7 @@ export interface FileRoutesByFullPath {
   '/dashboards/$scope/$id': typeof DashboardsScopeIdRoute
   '/runs/$id/events': typeof RunsIdEventsRoute
   '/series/$id/compare': typeof SeriesIdCompareRoute
+  '/t/$team/runs': typeof TTeamRunsRoute
   '/t/$team/': typeof TTeamIndexRoute
   '/runs/$id/reports/$reportId': typeof RunsIdReportsReportIdRoute
   '/t/$team/$type/': typeof TTeamTypeIndexRoute
@@ -168,6 +175,7 @@ export interface FileRoutesByTo {
   '/dashboards/$scope/$id': typeof DashboardsScopeIdRoute
   '/runs/$id/events': typeof RunsIdEventsRoute
   '/series/$id/compare': typeof SeriesIdCompareRoute
+  '/t/$team/runs': typeof TTeamRunsRoute
   '/t/$team': typeof TTeamIndexRoute
   '/runs/$id/reports/$reportId': typeof RunsIdReportsReportIdRoute
   '/t/$team/$type': typeof TTeamTypeIndexRoute
@@ -190,6 +198,7 @@ export interface FileRoutesById {
   '/dashboards/$scope/$id': typeof DashboardsScopeIdRoute
   '/runs/$id_/events': typeof RunsIdEventsRoute
   '/series/$id_/compare': typeof SeriesIdCompareRoute
+  '/t/$team/runs': typeof TTeamRunsRoute
   '/t/$team/': typeof TTeamIndexRoute
   '/runs/$id_/reports/$reportId': typeof RunsIdReportsReportIdRoute
   '/t/$team/$type/': typeof TTeamTypeIndexRoute
@@ -214,6 +223,7 @@ export interface FileRouteTypes {
     | '/dashboards/$scope/$id'
     | '/runs/$id/events'
     | '/series/$id/compare'
+    | '/t/$team/runs'
     | '/t/$team/'
     | '/runs/$id/reports/$reportId'
     | '/t/$team/$type/'
@@ -236,6 +246,7 @@ export interface FileRouteTypes {
     | '/dashboards/$scope/$id'
     | '/runs/$id/events'
     | '/series/$id/compare'
+    | '/t/$team/runs'
     | '/t/$team'
     | '/runs/$id/reports/$reportId'
     | '/t/$team/$type'
@@ -257,6 +268,7 @@ export interface FileRouteTypes {
     | '/dashboards/$scope/$id'
     | '/runs/$id_/events'
     | '/series/$id_/compare'
+    | '/t/$team/runs'
     | '/t/$team/'
     | '/runs/$id_/reports/$reportId'
     | '/t/$team/$type/'
@@ -279,6 +291,7 @@ export interface RootRouteChildren {
   DashboardsScopeIdRoute: typeof DashboardsScopeIdRoute
   RunsIdEventsRoute: typeof RunsIdEventsRoute
   SeriesIdCompareRoute: typeof SeriesIdCompareRoute
+  TTeamRunsRoute: typeof TTeamRunsRoute
   TTeamIndexRoute: typeof TTeamIndexRoute
   RunsIdReportsReportIdRoute: typeof RunsIdReportsReportIdRoute
   TTeamTypeIndexRoute: typeof TTeamTypeIndexRoute
@@ -379,6 +392,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TTeamIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/t/$team/runs': {
+      id: '/t/$team/runs'
+      path: '/t/$team/runs'
+      fullPath: '/t/$team/runs'
+      preLoaderRoute: typeof TTeamRunsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/runs/$id_/reports/$reportId': {
       id: '/runs/$id_/reports/$reportId'
       path: '/runs/$id/reports/$reportId'
@@ -471,6 +491,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardsScopeIdRoute: DashboardsScopeIdRoute,
   RunsIdEventsRoute: RunsIdEventsRoute,
   SeriesIdCompareRoute: SeriesIdCompareRoute,
+  TTeamRunsRoute: TTeamRunsRoute,
   TTeamIndexRoute: TTeamIndexRoute,
   RunsIdReportsReportIdRoute: RunsIdReportsReportIdRoute,
   TTeamTypeIndexRoute: TTeamTypeIndexRoute,
