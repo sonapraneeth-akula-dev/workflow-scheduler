@@ -17,6 +17,30 @@ test("brand stays at the padded left edge on wide screens", async ({
 })
 
 for (const width of [320, 768, 1440, 2000]) {
+  test(`main content uses the available width at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.goto("/runs")
+    const main = page.getByRole("main")
+    await expect(main).toBeVisible()
+    const content = await main.evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      const style = getComputedStyle(element)
+      return {
+        width: bounds.width,
+        left: parseFloat(style.paddingLeft),
+        right: parseFloat(style.paddingRight),
+      }
+    })
+    expect(content.width).toBe(width)
+    expect(content.left).toBe(width < 640 ? 20 : 32)
+    expect(content.right).toBe(content.left)
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth)
+    ).toBeLessThanOrEqual(width)
+  })
+
   test(`navigation remains centered at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.goto("/runs")

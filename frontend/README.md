@@ -11,6 +11,8 @@ edge, using Bahnschrift with local Segoe fallbacks rather than navigation text.
 Primary navigation stays geometrically centered between equal-width desktop
 side columns. On smaller screens it occupies its own centered second row,
 without overlapping the brand or account actions.
+Main content fills the remaining viewport width with matching 20 px mobile /
+32 px desktop horizontal padding, rather than a narrow fixed maximum width.
 The right-hand theme action is an accessible sun/moon icon. It follows the
 system theme until explicitly changed, persists the choice in local storage,
 and surfaces unavailable/corrupt preference storage rather than hiding errors.

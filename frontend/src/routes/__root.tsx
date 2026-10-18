@@ -69,7 +69,7 @@ function RootLayout() {
       <main
         id="main"
         tabIndex={-1}
-        className="mx-auto flex max-w-5xl flex-col gap-6 p-5"
+        className="flex w-full min-w-0 flex-col gap-6 px-5 py-6 sm:px-8 sm:py-8"
       >
         {session.isPending ? <p role="status">Loading session...</p> : null}
         {session.error ? <ErrorNotice error={session.error} /> : null}
