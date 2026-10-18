@@ -4,6 +4,11 @@ React 19, TypeScript 5, Vite, Bun, TanStack Router/Query, Tailwind CSS 4 and own
 shadcn/Radix primitives. File routes are generated into `src\routeTree.gen.ts`;
 commit generated route changes with their source routes.
 
+## Application shell
+
+The Kardia wordmark is an independent home link at the viewport's padded left
+edge, using Bahnschrift with local Segoe fallbacks rather than navigation text.
+
 ## Run locally
 
 Requires Bun 1.4.2, Node 24 and the running control plane. Start the backend with
