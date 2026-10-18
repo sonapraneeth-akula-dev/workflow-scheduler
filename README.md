@@ -657,7 +657,7 @@ service PostgreSQL on Windows.
 ```powershell
 dotnet build backend\Wf.slnx
 dotnet test backend\Wf.slnx --collect:"XPlat Code Coverage"
-dotnet run --file backend\samples\workflows\scenario-a.cs -- --var env=dev
+dotnet run --file backend\samples\workflows\demo\scenario-a.cs -- --var env=dev
 ```
 
 The sample executes scenario A's four-node DAG, a real command, illustrative
@@ -667,6 +667,118 @@ timeouts and aborts return 1. Ctrl+C requests an abort and allows cleanup.
 `LocalVariables.Parse` accepts repeated `--var key=value` pairs; strings, enums,
 durations and secret-reference names use plain text, other types use JSON.
 All policies and variables validate before tasks start.
+
+### Five-minute .NET 10 dataflow demo
+
+`backend\samples\workflows\demo\teams\demo\release\five-minute-demo\workflow.cs`
+is a file-based .NET 10 workflow with four nodes and eight real SDK tasks:
+`order` (load, validate) feeds independent `pricing` (subtotal, discount) and
+`shipping` (select-service, quote) branches, which join at `invoice` (total,
+publish-report). It performs only local arithmetic and report publication:
+no deployment, external request, credential or business-system side effect.
+
+Each task records explicit `inputs` and `outputs` objects under its task name.
+Those records are the actual node outputs passed through declared `.Input`
+bindings, not fabricated UI fixtures. Same-node tasks read the preceding task's
+committed outputs. Money uses integer cents; the default order is
+3 x 1250 = 3750, less 375 discount, plus 500 shipping = **3875 cents (USD)**.
+The validation task bounds customer length, quantity, price and discount.
+
+Run it directly without a server:
+
+```powershell
+dotnet run --file .\backend\samples\workflows\demo\teams\demo\release\five-minute-demo\workflow.cs
+```
+
+For the running local AppHost, publish the script and its adjacent
+`schedules.json` together from the repository root:
+
+```powershell
+# Placeholder accepted only by the explicit loopback Development backend.
+# A normally authenticated engine requires a real Registrar application token.
+$env:WF_ACCESS_TOKEN = 'local-development'
+$commit = git rev-parse HEAD
+dotnet run --project .\backend\src\Wf.Cli -- publish `
+  .\backend\samples\workflows\demo\teams\demo\release\five-minute-demo `
+  --engine http://127.0.0.1:5000 --git-commit $commit --git-author 'Local development' `
+  --change-note 'Local five-minute dataflow demo; source retained with registration' `
+  --schedule-source-path backend/samples/workflows/demo/teams/demo/release/five-minute-demo/schedules.json `
+  --input .\backend\src\Wf.Sdk --input .\backend\src\Wf.Contracts `
+  --input .\backend\src\Wf.Engine.Core --input .\backend\src\Wf.Validation `
+  --work-directory .\.wf\five-minute-demo-publish
+Remove-Item Env:\WF_ACCESS_TOKEN
+```
+
+The supplied Git hash identifies the source checkout; commit the sample first
+if exact Git provenance is required for your publication. Registration also
+retains the exact script and schedule bytes. The code schedule fires at UTC
+minutes 00, 05, 10, etc., uses `Skip` to prevent overlapping runs, and remains
+stored in PostgreSQL across restarts. The AppHost/engine and agent must remain
+running for execution; this is the scheduler's own schedule, not a terminal job.
+
+Open `http://127.0.0.1:5173/t/demo/release/w/five-minute-demo/history`.
+The schedule detail page is `/schedules/<schedule-id>`; obtain its ID from
+`GET /api/v1/schedules?workflowId=demo/release/five-minute-demo`.
+That page shows the recurrence and offers **Run now**. Open a run:
+**Graph** shows the nodes and their task lists; **Outputs** selects an exact
+task attempt and displays its recorded input/output JSON; **Reports** opens
+**Node and task inputs / outputs**, a table with four node-level aggregate rows
+and eight task-level rows. **Logs** also contain each task's input/output trace.
+The direct, serverless script prints the same report JSON instead of uploading
+it, because that mode has no configured report storage.
+
+### Environment-separated workflow sources
+
+Publishable sources use
+`backend\samples\workflows\<demo|production>\teams\<team>\<type>\<workflow>\workflow.cs`;
+each team's `team.json` declares its types, metadata schema and explicit
+`deployment` (`Demo` or `Production`). Navigation discovers registered teams and
+types from these registries; source-folder changes alone do not publish code.
+The standalone `demo\scenario-a.*` files remain validation/dry-run fixtures.
+
+Set backend `WF_WORKFLOW_ENVIRONMENT` to `demo`, `dev` or `test` to admit only
+`Demo` teams, or `prod`/`ppe` for only `Production` teams. Unknown values stop
+startup. Default: `prod`, except the explicit native `--dev` launch selects
+`dev`. Native AppHost sets `dev`; Compose forwards its selected `dev`/`ppe`
+environment. This setting is independent of authentication and ASP.NET's
+hosting environment. Existing registries without `deployment` are classified
+as `Production`; explicitly classify existing demo teams when upgrading.
+Registrations (including manifest-only and schedule-only updates), resource
+authorization and scheduler fires enforce the class server-side. Even a global
+Admin cannot browse or trigger the other class. Environment changes do not
+cancel already accepted runs or alter stored schedule definitions.
+
+The demo tree includes `platform` (release, maintenance) and `commerce`
+(validation, data), with two workflows per type. They use only local synthetic
+data. `commerce/validation/payment-guard` intentionally fails by default so the
+history shows a real failed run; rerun with `simulateFailure=false` for success.
+No history is backdated or fabricated. Days without runs remain neutral.
+The production tree contains side-effect-free `operations` readiness and
+maintenance templates, not live deployments.
+
+Publish and trigger the eight new unscheduled demos against the local backend:
+
+```powershell
+$env:WF_ACCESS_TOKEN = 'local-development' # explicit loopback --dev backend only
+.\backend\samples\workflows\publish-samples.ps1 `
+  -Environment dev -Engine http://127.0.0.1:5000 -Team platform,commerce -RunOnce
+Remove-Item Env:\WF_ACCESS_TOKEN
+```
+
+The loader discovers team/type/workflow directories, checks classification and
+uses the existing CLI's shared validation, package upload and registration.
+`-RunOnce` triggers real runs. For normal authentication, use a Registrar
+application token in `WF_ACCESS_TOKEN` and a user token with workflow Operator
+permission in `WF_RUN_ACCESS_TOKEN`; a Registrar-only token cannot trigger runs.
+The explicit local development backend accepts the placeholder above for both.
+Without `-RunOnce`, publication executes no tasks.
+Scheduled sources are skipped with a warning unless `-IncludeSchedules` is
+explicitly supplied. Existing five-minute schedules are therefore untouched by
+the default loader. The relocated five-minute source is version `1.0.1`;
+previously accepted `1.0.0` packages/source remain immutable and keep running
+until a deliberate republish. Use `-Environment ppe -Team operations` to select
+only the production tree against a matching backend; never publish demo
+registries into `prod`/`ppe`.
 
 `Wf.Engine.Core.FailureClassifier` reuses the existing `FailureCategory` contract:
 TaskError, Timeout, Aborted, AgentLost, ResourceLimit, ValidationError, Placement
@@ -1280,7 +1392,7 @@ Dry-run executes the same core using explicit task mocks, without invoking any
 original task delegate or external service:
 
 ```powershell
-dotnet run --file backend\samples\workflows\scenario-a.cs -- --dry-run backend\samples\workflows\scenario-a.mocks.json --var env=ppe
+dotnet run --file backend\samples\workflows\demo\scenario-a.cs -- --dry-run backend\samples\workflows\demo\scenario-a.mocks.json --var env=ppe
 ```
 
 Dry-run stdout contains one source-generated JSON event log, including snapshot, outputs,
@@ -1316,7 +1428,7 @@ throw `RunAssertionException`, rather than silently passing.
 
 Code-defined schedule files use the published editor schema at
 `backend/src/Wf.Contracts/Schemas/schedules.schema.json`; see
-`backend/samples/workflows/scenario-a.schedules.json`. `ScheduleFileSchema.Export()`
+`backend/samples/workflows/demo/scenario-a.schedules.json`. `ScheduleFileSchema.Export()`
 generates it from the same strict, source-generated contracts used by the server.
 `defaults` groups variable values by category; each instance supplies a stable
 `id`, exactly one `cron` or positive whole-second constant-format `interval`
@@ -1365,7 +1477,7 @@ allowed for standalone workflows; registration supplies its authoritative scope.
 
 The editor contract lives at
 `backend/src/Wf.Validation/Schemas/team.schema.json`, with a complete sample at
-`backend/samples/workflows/teams/demo/team.json`. Tests pin schema properties and
+`backend/samples/workflows/demo/teams/demo/team.json`. Tests pin schema properties and
 required fields to the source-generated runtime contracts. The schema rejects
 missing type names/owning teams; the shared validator additionally checks that
 owning teams match, metadata constraints, quotas and near-duplicate names.

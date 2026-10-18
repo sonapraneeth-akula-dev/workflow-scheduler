@@ -1,5 +1,5 @@
 {
-  "$schema": "../../src/Wf.Contracts/Schemas/schedules.schema.json",
+  "$schema": "../../../src/Wf.Contracts/Schemas/schedules.schema.json",
   "defaults": {
     "deployment": {
       "env": "dev"

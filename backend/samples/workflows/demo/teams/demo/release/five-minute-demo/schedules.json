@@ -1,0 +1,20 @@
+{
+  "$schema": "../../../../../../../src/Wf.Contracts/Schemas/schedules.schema.json",
+  "defaults": {
+    "order": {
+      "customer": "Sample customer",
+      "quantity": 3,
+      "unitPriceCents": 1250,
+      "discountPercent": 10
+    }
+  },
+  "instances": [
+    {
+      "id": "every-five-minutes",
+      "cron": "*/5 * * * *",
+      "timezone": "Etc/UTC",
+      "overlap": "Skip",
+      "catchUp": "Latest"
+    }
+  ]
+}

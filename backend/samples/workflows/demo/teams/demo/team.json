@@ -1,6 +1,7 @@
 {
-  "$schema": "../../../../src/Wf.Validation/Schemas/team.schema.json",
+  "$schema": "../../../../../src/Wf.Validation/Schemas/team.schema.json",
   "team": "demo",
+  "deployment": "Demo",
   "presentation": {
     "typeOrder": ["release"],
     "groupingKeys": ["environment"],

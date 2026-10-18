@@ -48,6 +48,39 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
         select new object[] { held, required, teamScope };
 
     [Theory]
+    [InlineData("demo", "Demo", true)]
+    [InlineData("dev", "Demo", true)]
+    [InlineData("test", "Demo", true)]
+    [InlineData("prod", "Demo", false)]
+    [InlineData("ppe", "Demo", false)]
+    [InlineData("demo", "Production", false)]
+    [InlineData("dev", "Production", false)]
+    [InlineData("test", "Production", false)]
+    [InlineData("prod", "Production", true)]
+    [InlineData("ppe", "Production", true)]
+    public async Task Deployment_environment_gates_every_resource_before_user_and_global_admin_roles(
+        string environment, string deployment, bool allowed)
+    {
+        var group = Guid.NewGuid();
+        var seed = await Seed(RegistryRole.Admin, group, true);
+        await using (var update = database.DataSource.CreateCommand(
+            "UPDATE teams SET registry=jsonb_set(registry,'{deployment}',to_jsonb($2::text)) WHERE id=$1"))
+        {
+            update.Parameters.AddWithValue(seed.Team);
+            update.Parameters.AddWithValue(deployment);
+            await update.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+        await using var server = await Server.Start(database.DataSource,
+            configureServices: services => services.AddSingleton(new WorkflowEnvironmentPolicy(environment)));
+        foreach (var jwt in new[] { server.Token(group: group), server.Token(role: "Admin") })
+            foreach (var (kind, id) in seed.InScope)
+            {
+                using var response = await server.Get(kind, RegistryRole.Viewer, id, jwt);
+                await Check(response, allowed);
+            }
+    }
+
+    [Theory]
     [MemberData(nameof(Roles))]
     public async Task Http_matrix_checks_every_role_against_stored_team_type_run_and_series(
         RegistryRole held, RegistryRole required, bool teamScope)

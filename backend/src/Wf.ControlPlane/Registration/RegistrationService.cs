@@ -30,10 +30,16 @@ public sealed class RegistrationConflictException(string message, ImmutableArray
 }
 
 public sealed class RegistrationService(NpgsqlDataSource dataSource, IBlobStore blobs, RegistryWriter registryWriter,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider, WorkflowEnvironmentPolicy environment)
 {
     public const long MaximumPackageBytes = 512L * 1024 * 1024;
     private const int MaximumSourceBytes = 1024 * 1024;
+    private void ValidateDeployment(string deployment)
+    {
+        if (!environment.Allows(deployment))
+            throw Invalid("$.registry.deployment", "The team's deployment class is not allowed in this workflow environment.");
+    }
+
     private static readonly JsonSerializerOptions ManifestOptions = new(WorkflowManifestJsonContext.Default.Options)
     {
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
@@ -112,12 +118,30 @@ public sealed class RegistrationService(NpgsqlDataSource dataSource, IBlobStore 
                 if (!errors.IsEmpty) throw new RegistrationValidationException(errors);
             }
             registry = rawRegistry.Deserialize(TeamRegistryJsonContext.Default.TeamRegistry)!;
+            ValidateDeployment(registry.Deployment);
         }
         if (manifest is null && registry is null && request.Schedules is null)
             throw Invalid("$", "Supply a workflow manifest, schedule file, or team registry.");
         var team = identity?[0] ?? registry!.Team;
         if (registry is not null && registry.Team != team)
             throw Invalid("$.registry.team", "Registry ownership must match the workflow identity.");
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using (var gate = new NpgsqlCommand(
+            "SELECT pg_advisory_xact_lock(hashtextextended('wf.registry:'||current_schema()||':'||$1,0))", connection, transaction))
+        {
+            gate.Parameters.AddWithValue(team);
+            await gate.ExecuteNonQueryAsync(cancellationToken);
+        }
+        if (registry is null)
+        {
+            await using var readDeployment = new NpgsqlCommand(
+                "SELECT COALESCE(registry->>'deployment','Production') FROM teams WHERE id=$1", connection, transaction);
+            readDeployment.Parameters.AddWithValue(team);
+            if (await readDeployment.ExecuteScalarAsync(cancellationToken) is not string deployment)
+                throw Invalid("$.registry", "Register the owning team and type first or include their registry.");
+            ValidateDeployment(deployment);
+        }
         if (package is not null)
         {
             try { await blobs.DownloadAsync(package, Stream.Null, cancellationToken); }
@@ -128,15 +152,6 @@ public sealed class RegistrationService(NpgsqlDataSource dataSource, IBlobStore 
             catch (InvalidDataException) { throw Invalid("$.package", "The stored package does not match its declared content."); }
             await using var input = new MemoryStream(sourceZip!, writable: false);
             await blobs.UploadAsync(source!, input, cancellationToken);
-        }
-
-        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        await using (var gate = new NpgsqlCommand(
-            "SELECT pg_advisory_xact_lock(hashtextextended('wf.registry:'||current_schema()||':'||$1,0))", connection, transaction))
-        {
-            gate.Parameters.AddWithValue(team);
-            await gate.ExecuteNonQueryAsync(cancellationToken);
         }
         if (manifest is not null)
         {

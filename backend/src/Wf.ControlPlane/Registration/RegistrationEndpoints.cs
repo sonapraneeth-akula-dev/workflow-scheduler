@@ -25,6 +25,7 @@ public static class RegistrationEndpoints
         var root = configuration["Storage:Root"] ?? Path.Combine(AppContext.BaseDirectory, "wf-data", "blobs");
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<RegistryWriter>();
+        services.TryAddSingleton(new WorkflowEnvironmentPolicy(configuration["WF_WORKFLOW_ENVIRONMENT"] ?? "prod"));
         services.TryAddSingleton<IBlobStore>(provider =>
             new FileSystemBlobStore(root, key, timeProvider: provider.GetRequiredService<TimeProvider>()));
         services.AddSingleton(provider => new BlobUploadGrants(key, RegistrationService.MaximumPackageBytes,

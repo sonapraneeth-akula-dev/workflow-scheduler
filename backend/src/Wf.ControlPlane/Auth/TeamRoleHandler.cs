@@ -2,8 +2,10 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 using Wf.Contracts.Registry;
+using Wf.ControlPlane.Registry;
 
 namespace Wf.ControlPlane.Auth;
 
@@ -12,7 +14,7 @@ public sealed record TeamResource(TeamResourceKind Kind, string Id, Cancellation
 public sealed record TeamRoleRequirement(RegistryRole Role) : IAuthorizationRequirement;
 public sealed record TeamResourceRoute(TeamResourceKind Kind, string Parameter);
 
-public sealed class TeamRoleHandler(NpgsqlDataSource dataSource) : AuthorizationHandler<TeamRoleRequirement>
+public sealed class TeamRoleHandler(NpgsqlDataSource dataSource, WorkflowEnvironmentPolicy environment) : AuthorizationHandler<TeamRoleRequirement>
 {
     public const string DenialReason = "The caller does not have the required role for this resource.";
 
@@ -44,7 +46,7 @@ public sealed class TeamRoleHandler(NpgsqlDataSource dataSource) : Authorization
             return;
         }
         var scope = await Resolve(resource, token);
-        if (scope is null)
+        if (scope is null || !environment.Allows(scope.Value.Deployment))
         {
             Deny();
             return;
@@ -93,12 +95,15 @@ public sealed class TeamRoleHandler(NpgsqlDataSource dataSource) : Authorization
         void Deny() => context.Fail(new AuthorizationFailureReason(this, DenialReason));
     }
 
-    private async Task<(string Team, string? Type)?> Resolve(TeamResource resource, CancellationToken token)
+    private async Task<(string Team, string? Type, string? Deployment)?> Resolve(TeamResource resource, CancellationToken token)
     {
         var sql = resource.Kind switch
         {
-            TeamResourceKind.Team => "SELECT id,NULL::text FROM teams WHERE id=$1",
-            TeamResourceKind.Type => "SELECT team_id,id FROM workflow_types WHERE id=$1",
+            TeamResourceKind.Team => "SELECT id,NULL::text,registry->>'deployment' FROM teams WHERE id=$1",
+            TeamResourceKind.Type => """
+                SELECT t.team_id,t.id,g.registry->>'deployment' FROM workflow_types t
+                JOIN teams g ON g.id=t.team_id WHERE t.id=$1
+                """,
             // Accepted triggers own a run scope before recovery materializes the run row.
             TeamResourceKind.Run => """
                 WITH owner AS (
@@ -108,17 +113,19 @@ public sealed class TeamRoleHandler(NpgsqlDataSource dataSource) : Authorization
                     WHERE run_id=$1 AND kind=0 AND processed_at IS NULL
                         AND NOT EXISTS(SELECT 1 FROM runs WHERE id=$1 AND run_day=uuid_v7_run_day($1))
                 )
-                SELECT t.team_id,t.id FROM owner r JOIN workflow_types t
+                SELECT t.team_id,t.id,g.registry->>'deployment' FROM owner r JOIN workflow_types t
                   ON t.id=split_part(r.workflow_id,'/',1)||'/'||split_part(r.workflow_id,'/',2)
+                JOIN teams g ON g.id=t.team_id
                 WHERE r.workflow_id ~ '^[^/]+/[^/]+/[^/]+$'
                 """,
             TeamResourceKind.Series => """
                 WITH owners AS (
                     SELECT workflow_id FROM run_series WHERE id=$1
                     UNION SELECT workflow_id FROM runs WHERE series_id=$1)
-                SELECT DISTINCT t.team_id,t.id FROM owners o LEFT JOIN workflow_types t
+                SELECT DISTINCT t.team_id,t.id,g.registry->>'deployment' FROM owners o LEFT JOIN workflow_types t
                   ON t.id=split_part(o.workflow_id,'/',1)||'/'||split_part(o.workflow_id,'/',2)
                     AND o.workflow_id ~ '^[^/]+/[^/]+/[^/]+$'
+                LEFT JOIN teams g ON g.id=t.team_id
                 LIMIT 2
                 """,
             _ => throw new InvalidOperationException("Unsupported resource kind.")
@@ -132,7 +139,8 @@ public sealed class TeamRoleHandler(NpgsqlDataSource dataSource) : Authorization
         else query.Parameters.AddWithValue(resource.Id);
         await using var reader = await query.ExecuteReaderAsync(token);
         if (!await reader.ReadAsync(token) || reader.IsDBNull(0)) return null;
-        var result = (reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1));
+        var result = (reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1),
+            reader.IsDBNull(2) ? null : reader.GetString(2));
         return await reader.ReadAsync(token) ? null : result;
     }
 }
@@ -141,6 +149,8 @@ public static class TeamAuthorizationExtensions
 {
     public static IServiceCollection AddTeamAuthorization(this IServiceCollection services)
     {
+        services.TryAddSingleton<WorkflowEnvironmentPolicy>(provider =>
+            new(provider.GetRequiredService<IConfiguration>()["WF_WORKFLOW_ENVIRONMENT"] ?? "prod"));
         services.AddAuthorization(options =>
         {
             foreach (var role in Enum.GetValues<RegistryRole>())

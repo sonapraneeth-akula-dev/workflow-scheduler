@@ -8,6 +8,7 @@ using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Leadership;
 using Wf.ControlPlane.Engine.Recovery;
 using Wf.ControlPlane.Engine.Registry;
+using Wf.ControlPlane.Registry;
 using Wf.Engine.Core;
 using Wf.Engine.Core.Scheduling;
 using Wf.Validation;
@@ -18,7 +19,8 @@ namespace Wf.ControlPlane.Engine.Scheduler;
 public sealed class ScheduleFireRejectedException(string message, Exception? inner = null) : Exception(message, inner);
 
 public sealed class ScheduleFireService(NpgsqlDataSource source, LeaseManager leadership, RunRecovery recovery,
-    ActiveVersionCache versions, ScheduleCatchUp catchUp, TimeProvider time, ILogger<ScheduleFireService> logger) : BackgroundService
+    ActiveVersionCache versions, ScheduleCatchUp catchUp, TimeProvider time, ILogger<ScheduleFireService> logger,
+    WorkflowEnvironmentPolicy environment) : BackgroundService
 {
     private readonly ScheduleTimerHeap timers = new();
     private LeaseToken? readyLease;
@@ -45,13 +47,16 @@ public sealed class ScheduleFireService(NpgsqlDataSource source, LeaseManager le
             SELECT s.workflow_id,s.timezone,s.cron,s.interval_s,s.variables::text,s.version_pin,
                 s.overlap_policy,s.next_fire_at,r.id,s.catchup_policy
             FROM schedules s JOIN workflows w ON w.id=s.workflow_id
+            JOIN workflow_types t ON t.id=w.type_id JOIN teams g ON g.id=t.team_id
             LEFT JOIN run_series r ON r.schedule_id=s.id
             WHERE s.id=$1 AND NOT s.paused AND s.deleted_at IS NULL AND w.deleted_at IS NULL
                 AND s.next_fire_at IS NOT NULL
+                AND COALESCE(g.registry->>'deployment','Production')=$2
             FOR UPDATE OF s
             """, connection, transaction))
         {
             read.Parameters.AddWithValue(timer.ScheduleId);
+            read.Parameters.AddWithValue(environment.Deployment);
             await using var reader = await read.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken)) return null;
             workflow = reader.GetString(0);
@@ -251,8 +256,11 @@ public sealed class ScheduleFireService(NpgsqlDataSource source, LeaseManager le
         var snapshot = new List<ScheduleTimer>();
         await using var query = source.CreateCommand("""
             SELECT s.id,s.next_fire_at FROM schedules s JOIN workflows w ON w.id=s.workflow_id
+            JOIN workflow_types t ON t.id=w.type_id JOIN teams g ON g.id=t.team_id
             WHERE NOT s.paused AND s.deleted_at IS NULL AND s.next_fire_at IS NOT NULL AND w.deleted_at IS NULL
+                AND COALESCE(g.registry->>'deployment','Production')=$1
             """);
+        query.Parameters.AddWithValue(environment.Deployment);
         await using var reader = await query.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
             snapshot.Add(new(reader.GetGuid(0), reader.GetFieldValue<DateTimeOffset>(1)));

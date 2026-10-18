@@ -40,6 +40,50 @@ namespace Wf.Integration.Tests.Registration;
 
 public sealed partial class RegistrationTests(RegistrationDatabase database) : IClassFixture<RegistrationDatabase>
 {
+    [Theory]
+    [InlineData("dev", "Demo", true)]
+    [InlineData("dev", "Production", false)]
+    [InlineData("ppe", "Production", true)]
+    [InlineData("ppe", "Demo", false)]
+    public async Task Registration_enforces_the_explicit_deployment_environment(string environment, string deployment, bool allowed)
+    {
+        await using var server = await Server.Start(database.DataSource, environment: environment);
+        var team = "environment-" + Guid.NewGuid().ToString("N");
+        var registry = new TeamRegistry(team, [], Deployment: deployment);
+        var request = new RegistrationRequest(new('a', 40), "Environment test",
+            Registry: JsonSerializer.SerializeToElement(registry, TeamRegistryJsonContext.Default.TeamRegistry));
+        using var response = await server.Post(request);
+        Assert.Equal(allowed ? HttpStatusCode.Created : HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(allowed ? 1L : 0L, await Value("SELECT count(*) FROM teams WHERE id=$1", team));
+        Assert.Equal(allowed ? 1L : 0L, await Value("SELECT count(*) FROM registry_snapshots WHERE team_id=$1", team));
+        if (!allowed) Assert.Contains("$.registry.deployment",
+            await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Registration_without_a_registry_rechecks_the_stored_deployment(bool scheduleOnly)
+    {
+        await using var server = await Server.Start(database.DataSource);
+        var request = await Request(server);
+        using var first = await server.Post(request);
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        await Execute("UPDATE teams SET registry=jsonb_set(registry,'{deployment}','\"Demo\"') WHERE id=$1", Team(request));
+        var update = request with { Registry = null };
+        if (scheduleOnly)
+            update = update with
+            {
+                Manifest = null, Package = null, Source = null,
+                Schedules = """{"instances":[]}""", ScheduleSourcePath = "schedules.json"
+            };
+        using var denied = await server.Post(update);
+        Assert.Equal(HttpStatusCode.BadRequest, denied.StatusCode);
+        Assert.Contains("$.registry.deployment", await denied.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(1L, await Value("SELECT count(*) FROM workflow_versions WHERE workflow_id=$1", request.WorkflowId!));
+        Assert.Equal(0L, await Value("SELECT count(*) FROM schedules WHERE workflow_id=$1", request.WorkflowId!));
+    }
+
     [Fact]
     public async Task Http_registration_persists_real_sdk_manifest_source_package_provenance_active_pointer_audit_and_notify()
     {
@@ -549,7 +593,7 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
         public ConcurrentQueue<Exception> Failures => failures;
 
         public static async Task<Server> Start(NpgsqlDataSource source, bool runs = false, bool userSchedules = false,
-            bool live = false)
+            bool live = false, string environment = "prod")
         {
             runs |= userSchedules || live;
             var root = Path.Combine(Path.GetTempPath(), "wf-registration-" + Guid.NewGuid().ToString("N"));
@@ -561,6 +605,7 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
             builder.WebHost.UseUrls("http://127.0.0.1:0");
             builder.Configuration["AzureAd:TenantId"] = Tenant;
             builder.Configuration["AzureAd:ClientId"] = Audience;
+            builder.Configuration["WF_WORKFLOW_ENVIRONMENT"] = environment;
             if (userSchedules)
             {
                 builder.Configuration["AzureAd:SpaClientId"] = "60d24b19-f65a-4ed4-96cc-9174bfcacabc";

@@ -1,0 +1,33 @@
+{
+  "$schema": "../../../../../src/Wf.Validation/Schemas/team.schema.json",
+  "team": "operations",
+  "deployment": "Production",
+  "presentation": {
+    "typeOrder": ["readiness", "maintenance"],
+    "listColumns": ["environment", "component"]
+  },
+  "types": [
+    {
+      "team": "operations",
+      "name": "readiness",
+      "description": "Side-effect-free production readiness template",
+      "metadataSchema": {
+        "keys": [
+          { "key": "environment", "required": true, "allowedValues": ["prod", "ppe"] },
+          { "key": "component", "required": true }
+        ]
+      }
+    },
+    {
+      "team": "operations",
+      "name": "maintenance",
+      "description": "Side-effect-free production maintenance template",
+      "metadataSchema": {
+        "keys": [
+          { "key": "environment", "required": true, "allowedValues": ["prod", "ppe"] },
+          { "key": "component", "required": true }
+        ]
+      }
+    }
+  ]
+}

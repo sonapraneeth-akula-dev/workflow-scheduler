@@ -26,7 +26,7 @@ public sealed class ScheduleSchemaTests
     [Fact]
     public void SampleAcceptsCategorisedDefaultsAndBothExpressions()
     {
-        var json = File.ReadAllText(Path.Combine(BackendRoot(), "samples", "workflows",
+        var json = File.ReadAllText(Path.Combine(BackendRoot(), "samples", "workflows", "demo",
             "scenario-a.schedules.json"));
         var file = JsonSerializer.Deserialize(json, ScheduleFileJsonContext.Default.ScheduleFile)!;
         Assert.Equal("dev", file.Defaults["deployment"]["env"].GetString());

@@ -1,4 +1,4 @@
-#:project ../../src/Wf.Sdk/Wf.Sdk.csproj
+#:project ../../../src/Wf.Sdk/Wf.Sdk.csproj
 #:property PublishAot=false
 using Wf.Sdk;
 

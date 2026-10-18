@@ -1,0 +1,34 @@
+{
+  "$schema": "../../../../../src/Wf.Validation/Schemas/team.schema.json",
+  "team": "commerce",
+  "deployment": "Demo",
+  "presentation": {
+    "typeOrder": ["validation", "data"],
+    "listColumns": ["environment", "component"],
+    "labels": { "environment": "Environment", "component": "Service" }
+  },
+  "types": [
+    {
+      "team": "commerce",
+      "name": "validation",
+      "description": "Synthetic checkout validation, including an intentional guard failure",
+      "metadataSchema": {
+        "keys": [
+          { "key": "environment", "required": true, "allowedValues": ["dev", "test", "demo"] },
+          { "key": "component", "required": true }
+        ]
+      }
+    },
+    {
+      "team": "commerce",
+      "name": "data",
+      "description": "Local sample-data integrity checks; no database writes",
+      "metadataSchema": {
+        "keys": [
+          { "key": "environment", "required": true, "allowedValues": ["dev", "test", "demo"] },
+          { "key": "component", "required": true }
+        ]
+      }
+    }
+  ]
+}

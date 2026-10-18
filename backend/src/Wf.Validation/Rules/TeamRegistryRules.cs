@@ -96,6 +96,8 @@ public static class TeamRegistryRules
     {
         if (!ValidIdentifier(registry.Team))
             errors.Add(RegistryShape.CreateError(file, "$.team"));
+        if (registry.Deployment is not ("Demo" or "Production"))
+            errors.Add(RegistryShape.CreateError(file, "$.deployment"));
         CheckRoleBindings(registry.RoleBindings, "$.roleBindings", file, errors, cancellationToken);
         if (registry.Types.IsDefault)
         {

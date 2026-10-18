@@ -31,7 +31,7 @@ public sealed class RegistrationValidationTests
     public async Task RegistrationValidation_aggregates_schedule_and_registry_errors_before_any_storage(string registry)
     {
         await using var data = DataSource();
-        var service = new RegistrationService(data, new UnusedBlobs(), new RegistryWriter(), TimeProvider.System);
+        var service = new RegistrationService(data, new UnusedBlobs(), new RegistryWriter(), TimeProvider.System, new("prod"));
         var request = Request() with
         {
             Registry = Parse(registry), Schedules = InvalidSchedule, ScheduleSourcePath = "schedules.json"
@@ -50,7 +50,7 @@ public sealed class RegistrationValidationTests
     public async Task RegistrationValidation_raw_semantics_precede_companion_errors_and_contract_construction()
     {
         await using var data = DataSource();
-        var service = new RegistrationService(data, new UnusedBlobs(), new RegistryWriter(), TimeProvider.System);
+        var service = new RegistrationService(data, new UnusedBlobs(), new RegistryWriter(), TimeProvider.System, new("prod"));
         var node = JsonNode.Parse(Request().Manifest!.Value.GetRawText())!;
         node["variables"] = JsonNode.Parse("""
             [{"key":"count","type":"Int","default":"never-echo-this-value","required":false}]
@@ -71,7 +71,7 @@ public sealed class RegistrationValidationTests
     public async Task RegistrationValidation_registry_only_keeps_shared_rules()
     {
         await using var data = DataSource();
-        var service = new RegistrationService(data, new UnusedBlobs(), new RegistryWriter(), TimeProvider.System);
+        var service = new RegistrationService(data, new UnusedBlobs(), new RegistryWriter(), TimeProvider.System, new("prod"));
         var request = new RegistrationRequest(new('a', 40), "Author", Registry: Parse("{}"));
         var error = await Assert.ThrowsAsync<RegistrationValidationException>(() =>
             service.RegisterAsync(request, "actor", TestContext.Current.CancellationToken));
@@ -82,7 +82,7 @@ public sealed class RegistrationValidationTests
     public async Task RegistrationValidation_cancellation_is_not_a_problem_or_storage_attempt()
     {
         await using var data = DataSource();
-        var service = new RegistrationService(data, new UnusedBlobs(), new RegistryWriter(), TimeProvider.System);
+        var service = new RegistrationService(data, new UnusedBlobs(), new RegistryWriter(), TimeProvider.System, new("prod"));
         using var cancelled = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         cancelled.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
@@ -124,7 +124,7 @@ public sealed class RegistrationValidationTests
     public async Task RegistrationValidation_absent_companions_are_not_empty_files()
     {
         await using var data = DataSource();
-        var service = new RegistrationService(data, new UnusedBlobs(), new RegistryWriter(), TimeProvider.System);
+        var service = new RegistrationService(data, new UnusedBlobs(), new RegistryWriter(), TimeProvider.System, new("prod"));
         var error = await Assert.ThrowsAsync<RegistrationValidationException>(() =>
             service.RegisterAsync(Request(), "actor", TestContext.Current.CancellationToken));
         var diagnostic = Assert.Single(error.Errors);
@@ -134,6 +134,20 @@ public sealed class RegistrationValidationTests
 
     private static RegistrationRequest Request() => new(new('a', 40), "Author", Manifest.Name,
         JsonSerializer.SerializeToElement(Manifest, WorkflowManifestJsonContext.Default.WorkflowManifest));
+
+    [Theory]
+    [InlineData("dev", "Production")]
+    [InlineData("prod", "Demo")]
+    public async Task Wrong_deployment_is_rejected_before_storage(string environment, string deployment)
+    {
+        await using var data = DataSource();
+        var service = new RegistrationService(data, new UnusedBlobs(), new RegistryWriter(), TimeProvider.System, new(environment));
+        var registry = Parse($$"""{"team":"team","types":[],"deployment":"{{deployment}}"}""");
+        var request = new RegistrationRequest(new('a', 40), "Author", Registry: registry);
+        var error = await Assert.ThrowsAsync<RegistrationValidationException>(() =>
+            service.RegisterAsync(request, "actor", TestContext.Current.CancellationToken));
+        Assert.Equal("$.registry.deployment", Assert.Single(error.Errors).Path);
+    }
     private static JsonElement Parse(string json)
     {
         using var document = JsonDocument.Parse(json);

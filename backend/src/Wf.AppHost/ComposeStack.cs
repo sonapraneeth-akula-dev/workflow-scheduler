@@ -62,6 +62,7 @@ public static class ComposeStack
                 .WithEnvironment("Authentication__Mode", "Development")
                 .WithEnvironment("LocalCompose__Enabled", "true")
                 .WithEnvironment("LocalCompose__Environment", environment)
+                .WithEnvironment("WF_WORKFLOW_ENVIRONMENT", environment)
                 .WithEnvironment("Engine__Enabled", engine ? "true" : "false")
                 .WithEnvironment("Engine__ExecuteRuns", engine ? "true" : "false")
                 .WithEnvironment("Engine__ApiEndpoint", "http://wf-api:8080")

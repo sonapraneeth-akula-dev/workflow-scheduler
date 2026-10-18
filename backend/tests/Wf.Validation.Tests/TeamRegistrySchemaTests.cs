@@ -37,11 +37,12 @@ public sealed class TeamRegistrySchemaTests
     [Fact]
     public void Published_sample_round_trips_metadata_and_team_type_role_scopes()
     {
-        var path = Path.Combine(BackendRoot(), "samples", "workflows", "teams", "demo", "team.json");
+        var path = Path.Combine(BackendRoot(), "samples", "workflows", "demo", "teams", "demo", "team.json");
         var json = File.ReadAllText(path);
         var registry = Read(json);
         Assert.Empty(TeamRegistryRules.Validate(Encoding.UTF8.GetBytes(json), cancellationToken: Token));
         Assert.Equal("demo", registry.Team);
+        Assert.Equal("Demo", registry.Deployment);
         var type = Assert.Single(registry.Types);
         Assert.Equal("release", type.Name);
         Assert.Equal("demo", type.Team);
@@ -143,6 +144,21 @@ public sealed class TeamRegistrySchemaTests
         """;
 
     private static TeamRegistry Read(string json) => JsonSerializer.Deserialize(json, TeamRegistryJsonContext.Default.TeamRegistry)!;
+
+    [Theory]
+    [InlineData("Demo", true)]
+    [InlineData("Production", true)]
+    [InlineData("demo", false)]
+    [InlineData("", false)]
+    [InlineData("unknown", false)]
+    public void Deployment_is_exact_and_defaults_to_production(string deployment, bool valid)
+    {
+        var registry = Read(ValidJson());
+        Assert.Equal("Production", registry.Deployment);
+        var errors = TeamRegistryRules.Validate(registry with { Deployment = deployment }, cancellationToken: Token);
+        if (valid) Assert.Empty(errors);
+        else Assert.Equal("$.deployment", Assert.Single(errors).Path);
+    }
 
     private static void AssertShape(JsonNode schema, JsonTypeInfo type, string[] required)
     {

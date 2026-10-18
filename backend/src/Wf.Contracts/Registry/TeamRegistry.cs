@@ -5,7 +5,8 @@ namespace Wf.Contracts.Registry;
 
 public sealed record TeamRegistry(string Team, ImmutableArray<WorkflowTypeDefinition> Types,
     [property: JsonPropertyName("$schema")] string? Schema = null,
-    ImmutableArray<RegistryRoleBinding> RoleBindings = default, TeamPresentation? Presentation = null)
+    ImmutableArray<RegistryRoleBinding> RoleBindings = default, TeamPresentation? Presentation = null,
+    string Deployment = "Production")
 {
     public ImmutableArray<RegistryRoleBinding> RoleBindings { get; init; } =
         RoleBindings.IsDefault ? [] : RoleBindings;

@@ -18,6 +18,28 @@ public sealed partial class ScheduleFireTests(RegistrationDatabase database) : I
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
+    [Theory]
+    [InlineData("dev", "Demo", true)]
+    [InlineData("dev", "Production", false)]
+    [InlineData("prod", "Production", true)]
+    [InlineData("prod", "Demo", false)]
+    public async Task ScheduleFire_only_claims_workflows_in_the_matching_deployment(
+        string environment, string deployment, bool allowed)
+    {
+        await using var server = await Server.Start(database.DataSource, runs: true);
+        var schedule = await CreateSchedule(server);
+        await Execute("UPDATE teams SET registry=jsonb_set(registry,'{deployment}',to_jsonb($2::text)) WHERE id=$1",
+            schedule.Workflow.Split('/')[0], deployment);
+        await using var engine = new Engine(database.DataSource, server, environment);
+        Assert.True(await engine.Lease.TryAcquireOrRenewAsync(Token));
+        var next = await engine.Scheduler.FireAsync(schedule.Timer, Token);
+        Assert.Equal(allowed, next is not null);
+        Assert.Equal(allowed ? 1L : 0L, await Scalar("SELECT count(*) FROM schedule_fires WHERE schedule_id=$1", schedule.Id));
+        Assert.Equal(allowed ? 1L : 0L, await Scalar("SELECT count(*) FROM runs WHERE series_id=$1", schedule.Series));
+        Assert.Equal(allowed ? schedule.Timer.FireAt.AddMinutes(1) : schedule.Timer.FireAt,
+            await Scalar("SELECT next_fire_at FROM schedules WHERE id=$1", schedule.Id));
+    }
+
     [Fact]
     public async Task ScheduleFire_concurrent_claims_from_two_engines_create_one_complete_run_and_advance_once()
     {
@@ -470,14 +492,14 @@ public sealed partial class ScheduleFireTests(RegistrationDatabase database) : I
         public ScheduleFireService Scheduler { get; }
         private bool stopped;
 
-        public Engine(NpgsqlDataSource source, Server server)
+        public Engine(NpgsqlDataSource source, Server server, string environment = "prod")
         {
             Lease = new(source, new(Guid.NewGuid().ToString("N"), new Uri("http://localhost:5300")),
                 NullLogger<LeaseManager>.Instance);
             Store = new(source, NullLogger<RunStore>.Instance, Lease);
             Recovery = new(source, Store, Lease, server.Clock, NullLogger<RunRecovery>.Instance);
             Scheduler = new(source, Lease, Recovery, server.Versions, new(server.Clock), server.Clock,
-                NullLogger<ScheduleFireService>.Instance);
+                NullLogger<ScheduleFireService>.Instance, new(environment));
         }
 
         public async Task Start()

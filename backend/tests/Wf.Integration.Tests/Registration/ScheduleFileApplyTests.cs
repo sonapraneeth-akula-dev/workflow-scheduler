@@ -398,7 +398,7 @@ public sealed class ScheduleFileApplyTests(RegistrationDatabase database, ITestO
             Store = new(source, NullLogger<RunStore>.Instance, lease);
             recovery = new(source, Store, lease, server.Clock, NullLogger<RunRecovery>.Instance);
             Scheduler = new(source, lease, recovery, server.Versions, new(server.Clock), server.Clock,
-                NullLogger<ScheduleFireService>.Instance);
+                NullLogger<ScheduleFireService>.Instance, new("prod"));
         }
 
         public async Task Start()

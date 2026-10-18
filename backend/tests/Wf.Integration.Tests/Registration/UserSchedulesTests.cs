@@ -467,7 +467,7 @@ public sealed partial class UserSchedulesTests(RegistrationDatabase database) : 
         var store = new RunStore(database.DataSource, NullLogger<RunStore>.Instance, lease);
         using var recovery = new RunRecovery(database.DataSource, store, lease, server.Clock, NullLogger<RunRecovery>.Instance);
         using var scheduler = new ScheduleFireService(database.DataSource, lease, recovery, server.Versions, new(server.Clock),
-            server.Clock, NullLogger<ScheduleFireService>.Instance);
+            server.Clock, NullLogger<ScheduleFireService>.Instance, new("prod"));
         await lease.StartAsync(Token);
         await recovery.StartAsync(Token);
         await scheduler.StartAsync(Token);

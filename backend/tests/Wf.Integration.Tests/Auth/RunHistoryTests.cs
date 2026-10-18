@@ -218,7 +218,7 @@ public sealed class RunHistoryTests(AuthorizationDatabase database, ITestOutputH
         using var versions = new ActiveVersionCache(database.DataSource, NullLogger<ActiveVersionCache>.Instance, clock);
         using var recovery = new RunRecovery(database.DataSource, Store, leader, clock, NullLogger<RunRecovery>.Instance);
         using var scheduler = new ScheduleFireService(database.DataSource, leader, recovery, versions,
-            new ScheduleCatchUp(clock), clock, NullLogger<ScheduleFireService>.Instance);
+            new ScheduleCatchUp(clock), clock, NullLogger<ScheduleFireService>.Instance, new("prod"));
         await scheduler.FireAsync(new(schedule, at.AddMinutes(-10)), Token);
         await using var server = await Server();
         var path = "/api/v1/series/" + series + "/history?sort=createdAtAsc&limit=3";

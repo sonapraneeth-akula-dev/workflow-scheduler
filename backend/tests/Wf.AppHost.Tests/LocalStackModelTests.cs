@@ -26,6 +26,7 @@ public sealed class LocalStackModelTests : IDisposable
         Assert.Equal("{wf.connectionString}", environment["ConnectionStrings__Workflow"]);
         Assert.Equal("Development", environment["DOTNET_ENVIRONMENT"]);
         Assert.Equal("Development", environment["ASPNETCORE_ENVIRONMENT"]);
+        Assert.Equal("dev", environment["WF_WORKFLOW_ENVIRONMENT"]);
         Assert.Equal(Path.Combine(root, "blobs"), environment["Storage__Root"]);
         Assert.Equal("Local", environment["Secrets__Provider"]);
         Assert.Equal(Path.Combine(root, "secrets"), environment["Secrets__Root"]);

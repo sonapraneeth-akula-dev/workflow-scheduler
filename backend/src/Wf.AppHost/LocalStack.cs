@@ -55,6 +55,7 @@ public static class LocalStack
             .WithArgs("--dev")
             .WithEnvironment("DOTNET_ENVIRONMENT", "Development")
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
+            .WithEnvironment("WF_WORKFLOW_ENVIRONMENT", "dev")
             .WithEnvironment("Engine__ExecuteRuns", "true")
             .WithEnvironment("Storage__Root", Path.Combine(root, "blobs"))
             .WithEnvironment("Storage__UploadHmacKey", key)
