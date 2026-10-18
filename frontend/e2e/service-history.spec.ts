@@ -74,6 +74,45 @@ test("navbar discovers team/type service views and restores format, window and d
   await expect.poll(() => new URL(page.url()).pathname).toBe(historyPath)
 })
 
+test("metadata container grouping survives format changes and reload without dropping workflows", async ({
+  page,
+}) => {
+  await page.goto("/service-history")
+  await page.locator('main a[href^="/t/"][href*="/services"]').first().click()
+  const histories = page.getByRole("link", { name: /^History for / })
+  await expect(histories.first()).toBeVisible()
+  const count = await histories.count()
+  const grouping = page.getByLabel("Container grouping")
+  const value = await grouping
+    .locator('option[value^="metadata:"]')
+    .first()
+    .getAttribute("value")
+  if (!value)
+    throw new Error("The registered sample metadata keys are missing.")
+  await grouping.selectOption(value)
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get("groupBy"))
+    .toBe("metadata")
+  expect(new URL(page.url()).searchParams.get("groupKey")).toBe(
+    value.slice("metadata:".length)
+  )
+  await expect(histories).toHaveCount(count)
+  await page.getByRole("radio", { name: "Table format" }).click()
+  await expect(page.locator("main tbody tr")).toHaveCount(count)
+  await page.reload()
+  await expect(grouping).toHaveValue(value)
+  await expect(page.locator("main tbody tr")).toHaveCount(count)
+  const audit = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"])
+    .analyze()
+  expect(audit.violations).toEqual([])
+  await grouping.selectOption("type")
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get("groupKey"))
+    .toBeNull()
+  await expect(histories).toHaveCount(count)
+})
+
 for (const width of [320, 768, 2000]) {
   for (const colorScheme of ["light", "dark"] as const) {
     test(`${colorScheme} service cards and table remain accessible without page overflow at ${width}px`, async ({

@@ -3,15 +3,26 @@ import { ApiError, publicApi } from "@/lib/api/client"
 import { catalogWorkflowSchema, runStatuses } from "@/features/catalog/api"
 import { trendWindowSchema, type TrendWindow } from "@/features/series/api"
 
-export const serviceSearchSchema = z.object({
-  type: z
-    .string()
-    .min(1)
-    .regex(/^[^/\\\p{Cc}]+$/u)
-    .optional(),
-  window: trendWindowSchema.default("30d"),
-  view: z.enum(["cards", "table"]).default("cards"),
-})
+export const serviceSearchSchema = z
+  .object({
+    type: z
+      .string()
+      .min(1)
+      .regex(/^[^/\\\p{Cc}]+$/u)
+      .optional(),
+    window: trendWindowSchema.default("30d"),
+    view: z.enum(["cards", "table"]).default("cards"),
+    groupBy: z.enum(["type", "metadata"]).default("type"),
+    groupKey: z.string().min(1).optional(),
+  })
+  .superRefine((search, context) => {
+    if (search.groupBy === "metadata" && !search.groupKey)
+      context.addIssue({
+        code: "custom",
+        path: ["groupKey"],
+        message: "Choose a metadata key to group containers by.",
+      })
+  })
 export type ServiceSearch = z.infer<typeof serviceSearchSchema>
 export const healthDaySchema = z.object({
   day: z.iso.date(),

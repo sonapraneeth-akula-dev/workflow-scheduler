@@ -69,19 +69,28 @@ function LastRun({ workflow }: { workflow: CatalogWorkflow }) {
   )
 }
 
+function WorkflowTypeLive({ team, type }: { team: string; type: string }) {
+  const live = useCatalogLive(team, type)
+  return live.snapshot?.status === "error" ? (
+    <div className="flex flex-wrap items-center gap-2">
+      <p role="status">Live updates unavailable for {type}.</p>
+      <Button variant="outline" onClick={live.retry}>
+        Retry live updates for {type}
+      </Button>
+    </div>
+  ) : null
+}
+
 function WorkflowGroup({
-  team,
-  type,
+  label,
   entries,
   view,
 }: {
-  team: string
-  type: string
+  label: string
   entries: ServiceWorkflow[]
   view: ServiceSearch["view"]
 }) {
   const id = useId()
-  const live = useCatalogLive(team, entries[0]!.workflow.type)
   return (
     <section
       aria-labelledby={id}
@@ -89,22 +98,12 @@ function WorkflowGroup({
     >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
         <h2 id={id} className="text-lg font-semibold break-words">
-          {type}
+          {label}
         </h2>
         <span className="text-sm text-muted-foreground">
           {entries.length} loaded workflows
         </span>
       </div>
-      {live.snapshot?.status === "error" ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <p role="status" className="text-sm">
-            Live updates unavailable.
-          </p>
-          <Button variant="outline" onClick={live.retry}>
-            Retry live updates
-          </Button>
-        </div>
-      ) : null}
       {view === "cards" ? (
         <ul className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {entries.map(({ workflow, days }) => (
@@ -138,13 +137,13 @@ function WorkflowGroup({
       ) : (
         <div
           role="region"
-          aria-label={`${type} service table`}
+          aria-label={`${label} service table`}
           tabIndex={0}
           className="overflow-auto border"
         >
           <table className="w-full text-left text-sm">
             <caption className="sr-only">
-              {type} workflow status, last run, daily health and history
+              {label} workflow status, last run, daily health and history
             </caption>
             <thead className="border-b bg-secondary text-secondary-foreground">
               <tr>
@@ -231,11 +230,27 @@ export function ServiceHistory({
     accessDenied(query.error) || accessDenied(types.error)
       ? undefined
       : query.data?.pages.flatMap((page) => page.items)
-  const groups = new Map<string, ServiceWorkflow[]>()
+  const metadataKeys = new Set<string>()
+  if (!accessDenied(query.error) && !accessDenied(types.error)) {
+    for (const type of types.data ?? [])
+      if (!search.type || type.name === search.type)
+        for (const field of type.metadataSchema.keys)
+          metadataKeys.add(field.key)
+    for (const entry of entries ?? [])
+      for (const key of Object.keys(entry.workflow.metadata.values))
+        metadataKeys.add(key)
+  }
+  const groups = new Map<string | undefined, ServiceWorkflow[]>()
   for (const entry of entries ?? []) {
-    const type = entry.workflow.metadata.type
-    if (!groups.has(type)) groups.set(type, [])
-    groups.get(type)!.push(entry)
+    const key = search.groupKey
+    const value =
+      search.groupBy === "type"
+        ? entry.workflow.metadata.type
+        : key && Object.hasOwn(entry.workflow.metadata.values, key)
+          ? entry.workflow.metadata.values[key]
+          : undefined
+    if (!groups.has(value)) groups.set(value, [])
+    groups.get(value)!.push(entry)
   }
   return (
     <div className="min-w-0 space-y-4">
@@ -264,6 +279,45 @@ export function ServiceHistory({
                     </option>
                   ))
                 : null}
+            </NativeSelect>
+          </label>
+          <label className="flex min-w-0 flex-col gap-1 text-sm">
+            Container grouping
+            <NativeSelect
+              value={
+                search.groupBy === "metadata"
+                  ? `metadata:${search.groupKey}`
+                  : "type"
+              }
+              onChange={(event) => {
+                const value = event.target.value
+                onChange(
+                  serviceSearchSchema.parse({
+                    ...search,
+                    groupBy: value === "type" ? "type" : "metadata",
+                    groupKey:
+                      value === "type"
+                        ? undefined
+                        : value.slice("metadata:".length),
+                  })
+                )
+              }}
+            >
+              <option value="type">Workflow type</option>
+              {search.groupBy === "metadata" &&
+              search.groupKey &&
+              !metadataKeys.has(search.groupKey) ? (
+                <option value={`metadata:${search.groupKey}`}>
+                  {search.groupKey} (unavailable)
+                </option>
+              ) : null}
+              {[...metadataKeys]
+                .sort((a, b) => a.localeCompare(b))
+                .map((key) => (
+                  <option key={key} value={`metadata:${key}`}>
+                    {key === "type" ? "type (metadata value)" : key}
+                  </option>
+                ))}
             </NativeSelect>
           </label>
           <label className="flex flex-col gap-1 text-sm">
@@ -313,9 +367,12 @@ export function ServiceHistory({
         </div>
       </div>
       <p className="text-sm text-muted-foreground">
-        Real run outcomes across all series and manual runs, grouped by metadata
-        type. Each segment is one UTC run day, including today; days without
-        runs remain neutral.
+        Real run outcomes across all series and manual runs, grouped by{" "}
+        {search.groupBy === "metadata"
+          ? `metadata key "${search.groupKey}"`
+          : "workflow type"}
+        . Each segment is one UTC run day, including today; days without runs
+        remain neutral.
       </p>
       <div
         className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"
@@ -340,13 +397,25 @@ export function ServiceHistory({
       {entries?.length === 0 ? (
         <p role="status">No workflows are available in this team and type.</p>
       ) : null}
+      {[...new Set(entries?.map(({ workflow }) => workflow.type))]
+        .sort()
+        .map((type) => (
+          <WorkflowTypeLive key={`${team}/${type}`} team={team} type={type} />
+        ))}
       {[...groups]
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([type, entries]) => (
+        .sort(([a], [b]) =>
+          a === undefined ? 1 : b === undefined ? -1 : a.localeCompare(b)
+        )
+        .map(([value, entries]) => (
           <WorkflowGroup
-            key={type}
-            team={team}
-            type={type}
+            key={value === undefined ? "missing" : JSON.stringify(value)}
+            label={
+              value === undefined
+                ? "Not set"
+                : value.trim().length === 0
+                  ? `Empty value (${JSON.stringify(value)})`
+                  : value
+            }
             entries={entries}
             view={search.view}
           />

@@ -11,6 +11,7 @@ import userEvent from "@testing-library/user-event"
 import { beforeEach, expect, it, vi } from "vitest"
 import { ApiError } from "@/lib/api/client"
 import { getTypes } from "@/features/catalog/api"
+import { useLive } from "@/lib/live/useLive"
 import { getServiceHistory, type ServiceSearch } from "./api"
 import { ServiceHistory } from "./ServiceHistory"
 
@@ -23,7 +24,7 @@ vi.mock("@/features/catalog/api", async (original) => ({
   getTypes: vi.fn(),
 }))
 vi.mock("@/lib/live/useLive", () => ({
-  useLive: () => ({ snapshot: undefined, retry: vi.fn() }),
+  useLive: vi.fn(() => ({ snapshot: undefined, retry: vi.fn() })),
 }))
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
@@ -48,7 +49,7 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
 }))
-const search: ServiceSearch = { window: "7d", view: "cards" }
+const search: ServiceSearch = { window: "7d", view: "cards", groupBy: "type" }
 const response: Awaited<ReturnType<typeof getServiceHistory>> = {
   team: "team",
   type: null,
@@ -104,7 +105,7 @@ function show() {
   }
 }
 beforeEach(() => {
-  vi.resetAllMocks()
+  vi.clearAllMocks()
   vi.mocked(getServiceHistory).mockResolvedValue(response)
   vi.mocked(getTypes).mockResolvedValue([
     {
@@ -236,4 +237,119 @@ it("announces an empty catalogue without inventing healthy workflow cards", asyn
     await screen.findByText("No workflows are available in this team and type.")
   ).toBeVisible()
   expect(screen.queryByRole("img")).not.toBeInTheDocument()
+})
+
+it("discovers metadata keys from schemas and loaded workflows and updates only URL grouping", async () => {
+  vi.mocked(getTypes).mockResolvedValue([
+    {
+      team: "team",
+      name: "release",
+      description: "Release",
+      metadataSchema: {
+        keys: [{ key: "environment", required: false, allowedValues: [] }],
+        allowFreeForm: true,
+      },
+      latestStatusCounts: {},
+    },
+  ])
+  vi.mocked(getServiceHistory).mockResolvedValue({
+    ...response,
+    items: response.items.map((entry) => ({
+      ...entry,
+      workflow: {
+        ...entry.workflow,
+        metadata: {
+          type: "release",
+          values: { component: "api", type: "custom-type" },
+        },
+      },
+    })),
+  })
+  const shown = show()
+  await screen.findByRole("heading", { name: "build" })
+  const selector = screen.getByLabelText("Container grouping")
+  expect(
+    within(selector).getByRole("option", { name: "environment" })
+  ).toBeVisible()
+  expect(
+    within(selector).getByRole("option", { name: "component" })
+  ).toBeVisible()
+  await userEvent.selectOptions(selector, "metadata:component")
+  expect(shown.change).toHaveBeenLastCalledWith({
+    ...search,
+    groupBy: "metadata",
+    groupKey: "component",
+  })
+  shown.rerender({ ...search, groupBy: "metadata", groupKey: "component" })
+  expect(await screen.findByRole("region", { name: "api" })).toBeVisible()
+  expect(getServiceHistory).toHaveBeenCalledTimes(1)
+  shown.rerender({ ...search, groupBy: "metadata", groupKey: "type" })
+  expect(
+    await screen.findByRole("region", { name: "custom-type" })
+  ).toBeVisible()
+  await userEvent.selectOptions(selector, "type")
+  expect(shown.change).toHaveBeenLastCalledWith({
+    ...search,
+    groupKey: undefined,
+  })
+})
+
+it("keeps missing and empty metadata distinct and subscribes to every workflow type in mixed containers", async () => {
+  const items = response.items.map((entry, index) => {
+    const values: Record<string, string> = index ? { environment: "" } : {}
+    return {
+      ...entry,
+      workflow: {
+        ...entry.workflow,
+        id: `team/${index ? "data" : "release"}/${entry.workflow.name}`,
+        type: index ? "data" : "release",
+        metadata: {
+          type: index ? "data" : "release",
+          values,
+        },
+      },
+    }
+  })
+  vi.mocked(getServiceHistory).mockResolvedValue({ ...response, items })
+  const shown = show()
+  await screen.findByRole("heading", { name: "build" })
+  shown.rerender({ ...search, groupBy: "metadata", groupKey: "environment" })
+  expect(await screen.findByRole("region", { name: "Not set" })).toBeVisible()
+  expect(screen.getByRole("region", { name: 'Empty value ("")' })).toBeVisible()
+  vi.mocked(useLive).mockClear()
+  shown.rerender({ ...search, groupBy: "metadata", groupKey: "constructor" })
+  expect(await screen.findByRole("region", { name: "Not set" })).toBeVisible()
+  expect(screen.getAllByRole("link", { name: /^History for / })).toHaveLength(2)
+  expect(useLive).toHaveBeenCalledWith({ scope: "type", id: "team/release" })
+  expect(useLive).toHaveBeenCalledWith({ scope: "type", id: "team/data" })
+})
+
+it("hides cached metadata grouping keys and containers after access is revoked", async () => {
+  vi.mocked(getTypes).mockResolvedValue([
+    {
+      team: "team",
+      name: "release",
+      description: "Release",
+      metadataSchema: {
+        keys: [{ key: "private-key", required: false, allowedValues: [] }],
+        allowFreeForm: true,
+      },
+      latestStatusCounts: {},
+    },
+  ])
+  const shown = show()
+  await screen.findByRole("option", { name: "private-key" })
+  vi.mocked(getServiceHistory).mockRejectedValue(
+    new ApiError(new Response(null, { status: 403 }), { title: "Revoked" })
+  )
+  await shown.client.invalidateQueries({
+    queryKey: ["catalog", "team", "team", "service-history"],
+  })
+  expect(await screen.findByRole("alert")).toHaveTextContent("Revoked")
+  expect(
+    screen.queryByRole("option", { name: "private-key" })
+  ).not.toBeInTheDocument()
+  expect(
+    screen.queryByRole("heading", { name: "build" })
+  ).not.toBeInTheDocument()
 })

@@ -787,6 +787,13 @@ daily-details expander. **View last run** opens the exact latest run and is
 disabled for never-run workflows; **History** opens that workflow's run history.
 Timestamps keep their full source precision in the time element while displaying
 local time with millisecond precision.
+**Container grouping** defaults to workflow type. Select a metadata key such as
+`environment` or `component` to create a container per exact metadata value.
+Keys come from authorized type schemas and loaded workflow metadata; missing
+values have a **Not set** container and empty values stay distinct. Grouping is
+saved in the URL and changes presentation without repeating the health request.
+Live updates remain subscribed to every loaded workflow type, even when one
+metadata container combines several types.
 
 `Wf.Engine.Core.FailureClassifier` reuses the existing `FailureCategory` contract:
 TaskError, Timeout, Aborted, AgentLost, ResourceLimit, ValidationError, Placement

@@ -209,7 +209,26 @@ it("validates copied format and period choices", () => {
   expect(serviceSearchSchema.parse({})).toEqual({
     window: "30d",
     view: "cards",
+    groupBy: "type",
   })
   expect(serviceSearchSchema.safeParse({ window: "365d" }).success).toBe(false)
   expect(serviceSearchSchema.safeParse({ view: "grid" }).success).toBe(false)
+})
+
+it("restores metadata grouping without conflating the built-in type and a metadata key named type", () => {
+  expect(
+    serviceSearchSchema.parse({ groupBy: "metadata", groupKey: "type" })
+  ).toMatchObject({
+    groupBy: "metadata",
+    groupKey: "type",
+  })
+  expect(serviceSearchSchema.safeParse({ groupBy: "metadata" }).success).toBe(
+    false
+  )
+  expect(
+    serviceSearchSchema.safeParse({ groupBy: "metadata", groupKey: "" }).success
+  ).toBe(false)
+  expect(serviceSearchSchema.safeParse({ groupBy: "foreign" }).success).toBe(
+    false
+  )
 })
