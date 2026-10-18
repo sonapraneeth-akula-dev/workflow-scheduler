@@ -209,36 +209,72 @@ export function RunGraph({
           className="min-w-0 text-sm xl:col-start-1"
           onToggle={(event) => setListOpen(event.currentTarget.open)}
         >
-          <summary className="cursor-pointer">Node list</summary>
+          <summary className="cursor-pointer py-1 font-medium">
+            Node list
+          </summary>
           {listOpen ? (
-            <ol aria-label="Run nodes" className="mt-2 space-y-3 break-words">
-              {plan.nodes.map((item) => (
-                <li key={item.key}>
-                  <button
-                    type="button"
-                    aria-label={`Inspect node ${item.key}`}
-                    aria-pressed={selected === item.key}
-                    className="underline underline-offset-4"
-                    onClick={() => select(item.key)}
-                  >
-                    {item.key}
-                  </button>{" "}
-                  <StatusBadge
-                    status={executionStatuses[run.nodes[item.key]!]!}
-                  />
-                  <p>
-                    Dependencies:{" "}
-                    {item.dependencies
-                      .map(
-                        (dependency) =>
-                          `${dependency.node} (${dependency.when})`
-                      )
-                      .join(", ") || "None"}
-                    .
-                  </p>
-                </li>
-              ))}
-            </ol>
+            <div
+              role="region"
+              aria-label="Scrollable node table"
+              tabIndex={0}
+              className="mt-2 overflow-x-auto border bg-card"
+            >
+              <table
+                aria-label="Run nodes"
+                className="w-full min-w-[32rem] text-left"
+              >
+                <thead className="border-b bg-secondary text-secondary-foreground">
+                  <tr>
+                    {["Node", "Status", "Dependencies"].map((label) => (
+                      <th
+                        scope="col"
+                        key={label}
+                        className="px-3 py-2 font-bold"
+                      >
+                        {label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {plan.nodes.map((item) => (
+                    <tr
+                      key={item.key}
+                      data-selected={selected === item.key ? true : undefined}
+                      className="border-t odd:bg-card even:bg-muted/50 hover:bg-accent/40 data-[selected=true]:bg-secondary"
+                    >
+                      <th
+                        scope="row"
+                        className="w-1/4 px-3 py-2 font-normal [overflow-wrap:anywhere]"
+                      >
+                        <button
+                          type="button"
+                          aria-label={`Inspect node ${item.key}`}
+                          aria-pressed={selected === item.key}
+                          className="font-medium text-primary underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                          onClick={() => select(item.key)}
+                        >
+                          {item.key}
+                        </button>
+                      </th>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <StatusBadge
+                          status={executionStatuses[run.nodes[item.key]!]!}
+                        />
+                      </td>
+                      <td className="px-3 py-2 [overflow-wrap:anywhere]">
+                        {item.dependencies
+                          .map(
+                            (dependency) =>
+                              `${dependency.node} (${dependency.when})`
+                          )
+                          .join(", ") || "None"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : null}
         </details>
       ) : null}

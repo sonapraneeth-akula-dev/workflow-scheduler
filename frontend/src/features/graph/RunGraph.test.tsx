@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { VersionPlan } from "@/features/taskplan/api"
@@ -295,16 +295,25 @@ describe("live graph rendering", () => {
     }
   )
 
-  it("provides a keyboard-operable ordered list of names, statuses and dependency conditions", async () => {
+  it("provides a keyboard-operable node table with live statuses and dependency conditions", async () => {
     const user = userEvent.setup()
-    render(<RunGraph plan={plan} run={run} />)
+    const { rerender } = render(<RunGraph plan={plan} run={run} />)
     expect(
-      screen.queryByRole("list", { name: "Run nodes" })
+      screen.queryByRole("table", { name: "Run nodes" })
     ).not.toBeInTheDocument()
     await user.click(screen.getByText("Node list"))
-    const list = await screen.findByRole("list", { name: "Run nodes" })
-    expect(list).toHaveTextContent("Succeeded")
-    expect(list).toHaveTextContent("start (Always)")
+    const table = await screen.findByRole("table", { name: "Run nodes" })
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((cell) => cell.textContent)
+    ).toEqual(["Node", "Status", "Dependencies"])
+    expect(within(table).getAllByRole("row")).toHaveLength(
+      plan.nodes.length + 1
+    )
+    expect(table).toHaveTextContent("Succeeded")
+    expect(table).toHaveTextContent("start (Always)")
+    expect(table).toHaveTextContent("None")
     await user.click(
       screen.getByRole("button", { name: "Inspect node finish" })
     )
@@ -317,9 +326,26 @@ describe("live graph rendering", () => {
       "href",
       `/t/team/type/w/workflow/versions/${versionId}/tasks/finish%2Fsdk`
     )
+    rerender(
+      <RunGraph
+        plan={plan}
+        run={{
+          ...run,
+          nodes: {
+            ...run.nodes,
+            finish: executionStatuses.indexOf("Succeeded"),
+          },
+        }}
+      />
+    )
+    const selected = within(table)
+      .getByRole("button", { name: "Inspect node finish" })
+      .closest("tr")
+    expect(selected).toHaveTextContent("Succeeded")
+    expect(selected).toHaveAttribute("data-selected", "true")
     await user.click(screen.getByText("Node list"))
     expect(
-      screen.queryByRole("list", { name: "Run nodes" })
+      screen.queryByRole("table", { name: "Run nodes" })
     ).not.toBeInTheDocument()
   })
 

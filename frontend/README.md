@@ -331,10 +331,12 @@ choose the nearest row in the next column, and Home/End reach the first/last nod
 Native Enter/Space selects a node; Tab leaves the graph. Focus scrolls the selected
 viewport into view and survives live state changes. Every execution status has
 readable text plus a decorative icon, never color alone; the shared status badge
-also covers catalogue run statuses. The expandable ordered Node list exposes
-statuses and dependency conditions without spatial navigation, with the same
-selection and historical Task Plan links. Closed lists do not render a second live
-node tree. Chromium, Firefox and WebKit run the actual signed-JWT production-build
+also covers catalogue run statuses. The expandable Node list uses a semantic
+table with a tinted bold header, alternating row colors and selected-row emphasis.
+Names, live statuses and dependency conditions remain available without spatial
+navigation, with the same selection and historical Task Plan links. Narrow
+screens scroll the table without widening the page. Closed tables do not render
+a second live node tree. Chromium, Firefox and WebKit run the actual signed-JWT production-build
 keyboard fixture, including desktop-light/mobile-dark axe and overflow checks.
 
 `WF_GRAPH_BROWSER=true` enables the separate real signed-JWT/PostgreSQL/MessagePack

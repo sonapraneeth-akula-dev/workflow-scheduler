@@ -57,9 +57,9 @@ test("keyboard graph navigation, icon/text statuses and list alternative are acc
   const summary = page.getByText("Node list", { exact: true })
   await expect(summary).toBeFocused()
   await page.keyboard.press("Enter")
-  const list = page.getByRole("list", { name: "Run nodes" })
-  await expect(list.getByRole("button")).toHaveCount(200)
-  await list
+  const table = page.getByRole("table", { name: "Run nodes" })
+  await expect(table.getByRole("button")).toHaveCount(200)
+  await table
     .getByRole("button", { name: "Inspect node node-199", exact: true })
     .focus()
   await page.keyboard.press("Enter")

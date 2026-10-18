@@ -233,6 +233,75 @@ for (const colorScheme of ["light", "dark"] as const) {
     })
   }
 
+  test(`${colorScheme} node table has striped rows, a bold tinted header and keyboard selection without page overflow`, async ({
+    page,
+  }, testInfo) => {
+    await page.emulateMedia({ colorScheme })
+    await page.setViewportSize({ width: 2000, height: 1000 })
+    await openListedRun(page)
+    const nodes = await page.locator("[data-graph-node]").evaluateAll((cards) =>
+      cards.map((card) => ({
+        key: card.getAttribute("data-graph-node")!,
+        status: card.querySelector('[data-slot="badge"]')!.textContent!,
+      }))
+    )
+    await page.getByText("Node list", { exact: true }).click()
+    const table = page.getByRole("table", { name: "Run nodes" })
+    await expect(table).toBeVisible()
+    await expect(table.getByRole("columnheader")).toHaveText([
+      "Node",
+      "Status",
+      "Dependencies",
+    ])
+    await expect(table.getByRole("row")).toHaveCount(nodes.length + 1)
+    await expect(table.getByRole("columnheader").first()).toHaveCSS(
+      "font-weight",
+      "700"
+    )
+    const rowColors = await table
+      .locator("tbody tr")
+      .evaluateAll((rows) =>
+        rows.map((row) => getComputedStyle(row).backgroundColor)
+      )
+    expect(rowColors[0]).not.toBe(rowColors[1])
+    const headerColor = await table
+      .locator("thead")
+      .evaluate((header) => getComputedStyle(header).backgroundColor)
+    expect(headerColor).not.toBe(rowColors[0])
+    for (const [index, node] of nodes.entries()) {
+      const row = table.locator("tbody tr").nth(index)
+      await expect(row.getByRole("button")).toHaveAccessibleName(
+        `Inspect node ${node.key}`
+      )
+      await expect(row.locator('[data-slot="badge"]')).toHaveText(node.status)
+      await expect(row.getByRole("cell").last()).not.toBeEmpty()
+    }
+    const last = table.getByRole("button").last()
+    await last.focus()
+    await page.keyboard.press("Enter")
+    await expect(last).toHaveAttribute("aria-pressed", "true")
+    await expect(
+      page.getByRole("region", { name: `Selected node ${nodes.at(-1)!.key}` })
+    ).toBeVisible()
+    for (const width of [2000, 320]) {
+      await page.setViewportSize({ width, height: 1000 })
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth)
+      ).toBeLessThanOrEqual(width)
+      await page
+        .getByRole("region", { name: "Scrollable node table" })
+        .screenshot({
+          path: testInfo.outputPath(`node-table-${colorScheme}-${width}.png`),
+        })
+    }
+    const audit = await new AxeBuilder({ page })
+      .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+      .analyze()
+    expect(audit.violations.map(({ id }) => id)).toEqual([])
+    await page.getByText("Node list", { exact: true }).click()
+    await expect(table).toHaveCount(0)
+  })
+
   test(`${colorScheme} dependency arrows stay outside every node and stop before the target border`, async ({
     page,
   }, testInfo) => {
