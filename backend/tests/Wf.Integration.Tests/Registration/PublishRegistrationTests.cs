@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
@@ -21,17 +22,22 @@ using Npgsql;
 using Wf.Contracts.Registry;
 using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Auth;
+using Wf.ControlPlane.Engine.Registry;
 using Wf.ControlPlane.Registration;
 using Wf.ControlPlane.Storage;
 
 namespace Wf.Integration.Tests.Registration;
 
-public sealed class PublishRegistrationTests(RegistrationDatabase database) : IClassFixture<RegistrationDatabase>
+public sealed partial class PublishRegistrationTests(RegistrationDatabase database, ITestOutputHelper output)
+    : IClassFixture<RegistrationDatabase>
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     [Fact]
     public async Task Main_branch_merge_runs_template_publication_and_exposes_exact_new_version_through_real_API()
+        => await PublishMergedVersionsAsync(1);
+
+    private async Task<MergeTiming[]> PublishMergedVersionsAsync(int mergeCount)
     {
         var root = Path.Combine(Repository, ".agent-artifacts", "merge-publication", Guid.NewGuid().ToString("N")[..8]);
         var checkout = Path.Combine(root, "r");
@@ -39,12 +45,19 @@ public sealed class PublishRegistrationTests(RegistrationDatabase database) : IC
         Directory.CreateDirectory(workflowDirectory);
         try
         {
+            var packages = await PreparePackageConsumer(root, checkout);
             await using var server = await PublishServer.Start(database.DataSource, Path.Combine(root, "blobs"));
-            var registrarToken = server.AccessToken();
-            var team = "merge-" + Guid.NewGuid().ToString("N");
-            var identity = team + "/release/workflow";
-            var script = $$"""
-                #:project {{Path.Combine(Repository, "backend", "src", "Wf.Sdk", "Wf.Sdk.csproj")}}
+            using var cache = new ActiveVersionCache(database.DataSource,
+                NullLogger<ActiveVersionCache>.Instance, TimeProvider.System);
+            await cache.StartAsync(Token);
+            try
+            {
+                var registrarToken = server.AccessToken();
+                var team = "merge-" + Guid.NewGuid().ToString("N");
+                var identity = team + "/release/workflow";
+                await WaitForVersion(null);
+                var script = $$"""
+                #:package Wf.Sdk
                 #:property PublishAot=false
                 #:property AssemblyName=Merge.Integration.Workflow
                 using Wf.Sdk;
@@ -52,34 +65,29 @@ public sealed class PublishRegistrationTests(RegistrationDatabase database) : IC
                     .Node("work", n => n.Task("echo", ctx => ctx.Outputs["answer"] = 42)));
                 return await workflow.RunAsync(args);
                 """;
-            var source = Path.Combine(workflowDirectory, "workflow.cs");
-            await File.WriteAllTextAsync(source, script, new UTF8Encoding(false), Token);
-            await File.WriteAllBytesAsync(Path.Combine(workflowDirectory, "team.json"),
-                JsonSerializer.SerializeToUtf8Bytes(new TeamRegistry(team, [new(team, "release", "Merge fixtures", new([]))]),
-                    TeamRegistryJsonContext.Default.TeamRegistry), Token);
-            await File.WriteAllTextAsync(Path.Combine(checkout, ".gitignore"), "obj/\nbin/\n", Token);
-            await Git("init", "--quiet", "--initial-branch=main");
-            await Git("config", "user.name", "Merge gate fixture");
-            await Git("config", "user.email", "merge-gate@example.invalid");
-            await Git("config", "commit.gpgsign", "false");
-            await Git("add", "--all");
-            await Git("commit", "--quiet", "-m", "test: Initial workflow");
-            var before = (await Git("rev-parse", "HEAD")).Trim();
-            var initial = await Process(["publish", workflowDirectory, "--engine", server.Origin,
-                "--git-commit", before, "--git-author", "Merge gate fixture", "--input", checkout], registrarToken);
-            Assert.True(initial.Exit == 0, initial.Error);
-            await Git("checkout", "--quiet", "-b", "feat/new-version");
-            await File.WriteAllTextAsync(source, script.Replace("\"1.0.0\"", "\"1.0.1\"", StringComparison.Ordinal),
-                new UTF8Encoding(false), Token);
-            await Git("add", "--all");
-            await Git("commit", "--quiet", "-m", "test: New explicit workflow version");
-            await Git("checkout", "--quiet", "main");
-            await Git("merge", "--quiet", "--no-ff", "--no-edit", "feat/new-version");
-            var head = (await Git("rev-parse", "HEAD")).Trim();
-            var helper = Path.Combine(Repository, "backend", "src", "Wf.Templates", "workflows-repo",
-                ".github", "scripts", "register_on_merge.py");
-            // Resolve the installed tool to this build; selection and publication use the unchanged template helper.
-            const string driver = """
+                var source = Path.Combine(workflowDirectory, "workflow.cs");
+                await File.WriteAllTextAsync(source, script, new UTF8Encoding(false), Token);
+                await File.WriteAllBytesAsync(Path.Combine(workflowDirectory, "team.json"),
+                    JsonSerializer.SerializeToUtf8Bytes(new TeamRegistry(team, [new(team, "release", "Merge fixtures", new([]))]),
+                        TeamRegistryJsonContext.Default.TeamRegistry), Token);
+                await File.WriteAllTextAsync(Path.Combine(checkout, ".gitignore"), "obj/\nbin/\n", Token);
+                await Git("init", "--quiet", "--initial-branch=main");
+                await Git("config", "user.name", "Merge gate fixture");
+                await Git("config", "user.email", "merge-gate@example.invalid");
+                await Git("config", "commit.gpgsign", "false");
+                await Git("add", "--all");
+                await Git("commit", "--quiet", "-m", "test: Initial workflow");
+                var before = (await Git("rev-parse", "HEAD")).Trim();
+                var initial = await External("dotnet",
+                    [typeof(Wf.Cli.Program).Assembly.Location, "publish", workflowDirectory, "--engine", server.Origin,
+                        "--git-commit", before, "--git-author", "Merge gate fixture", "--input", checkout],
+                    Repository, registrarToken, new() { ["NUGET_PACKAGES"] = packages });
+                Assert.True(initial.Exit == 0, initial.Error);
+                await WaitForVersion("1.0.0");
+                var helper = Path.Combine(Repository, "backend", "src", "Wf.Templates", "workflows-repo",
+                    ".github", "scripts", "register_on_merge.py");
+                // Resolve the installed tool to this build; selection and publication use the unchanged template helper.
+                const string driver = """
                 import subprocess, sys
                 from pathlib import Path
                 helper, cli = sys.argv[1:3]
@@ -93,34 +101,88 @@ public sealed class PublishRegistrationTests(RegistrationDatabase database) : IC
                 sys.argv = [helper, "--publish"]
                 gate.main()
                 """;
-            var result = await External(OperatingSystem.IsWindows() ? "python" : "python3",
-                ["-c", driver, helper, typeof(Wf.Cli.Program).Assembly.Location], checkout, registrarToken,
-                new()
+                var timings = new MergeTiming[mergeCount];
+                using var client = new HttpClient { BaseAddress = new(server.Origin) };
+                client.DefaultRequestHeaders.Authorization = new("Bearer", server.AccessToken("Admin"));
+                for (var index = 1; index <= mergeCount; index++)
                 {
-                    ["PUBLISH_BASE_SHA"] = before, ["PUBLISH_HEAD_SHA"] = head,
-                    ["GITHUB_SHA"] = head, ["GITHUB_REF"] = "refs/heads/main", ["GITHUB_EVENT_NAME"] = "push",
-                    ["WF_ENGINE_URL"] = server.Origin
-                });
-            Assert.True(result.Exit == 0, result.Error);
-            Assert.Contains("Registered: " + identity + "@1.0.1", result.Output);
-            Assert.DoesNotContain(registrarToken, result.Output + result.Error);
-            using var client = new HttpClient { BaseAddress = new(server.Origin) };
-            client.DefaultRequestHeaders.Authorization = new("Bearer", server.AccessToken("Admin"));
-            using var response = await client.GetAsync($"/api/v1/workflows/{identity}/versions", Token);
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            using var document = JsonDocument.Parse(await response.Content.ReadAsByteArrayAsync(Token));
-            var items = document.RootElement.GetProperty("items").EnumerateArray().ToArray();
-            Assert.Equal(["1.0.1", "1.0.0"], items.Select(item => item.GetProperty("version").GetString()));
-            var version = items[0].GetProperty("versionId").GetGuid();
-            Assert.Equal(version, document.RootElement.GetProperty("activeVersionId").GetGuid());
-            Assert.Equal(head, await Value("SELECT git_commit FROM workflow_versions WHERE id=$1", version));
+                    var semver = "1.0." + index;
+                    var branch = "feat/new-version-" + index;
+                    await Git("checkout", "--quiet", "-b", branch);
+                    await File.WriteAllTextAsync(source, script.Replace("\"1.0.0\"", "\"" + semver + "\"",
+                        StringComparison.Ordinal), new UTF8Encoding(false), Token);
+                    await Git("add", "--all");
+                    await Git("commit", "--quiet", "-m", "test: New explicit workflow version " + semver);
+                    await Git("checkout", "--quiet", "main");
+                    var merged = Stopwatch.StartNew();
+                    await Git("merge", "--quiet", "--no-ff", "--no-edit", branch);
+                    var head = (await Git("rev-parse", "HEAD")).Trim();
+                    var result = await External(OperatingSystem.IsWindows() ? "python" : "python3",
+                    ["-c", driver, helper, typeof(Wf.Cli.Program).Assembly.Location], checkout, registrarToken,
+                    new()
+                    {
+                        ["PUBLISH_BASE_SHA"] = before,
+                        ["PUBLISH_HEAD_SHA"] = head,
+                        ["GITHUB_SHA"] = head,
+                        ["GITHUB_REF"] = "refs/heads/main",
+                        ["GITHUB_EVENT_NAME"] = "push",
+                        ["WF_ENGINE_URL"] = server.Origin,
+                        ["NUGET_PACKAGES"] = packages
+                    });
+                    Assert.True(result.Exit == 0, result.Error);
+                    Assert.Contains("Registered: " + identity + "@" + semver, result.Output);
+                    Assert.DoesNotContain(registrarToken, result.Output + result.Error);
+                    await WaitForVersion(semver);
+                    var mergeToActive = merged.Elapsed;
+                    var active = cache.GetActive(identity);
+                    // Both timestamps come from PostgreSQL; now() precedes registration commit, so this is conservative.
+                    var registrationToActive = Assert.IsType<TimeSpan>(await Value(
+                        "SELECT clock_timestamp()-created_at FROM workflow_versions WHERE id=$1", active.VersionId));
+                    timings[index - 1] = new(mergeToActive, registrationToActive);
+                    output.WriteLine($"Merge {index}/{mergeCount}: {semver}, merge-to-active={mergeToActive.TotalMilliseconds:F1} ms, " +
+                        $"registration-to-active upper bound={registrationToActive.TotalMilliseconds:F1} ms; commit={head}.");
+                    using var response = await client.GetAsync($"/api/v1/workflows/{identity}/versions", Token);
+                    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                    using var document = JsonDocument.Parse(await response.Content.ReadAsByteArrayAsync(Token));
+                    var items = document.RootElement.GetProperty("items").EnumerateArray().ToArray();
+                    Assert.Equal(Enumerable.Range(0, index + 1).Reverse().Select(value => "1.0." + value),
+                        items.Select(item => item.GetProperty("version").GetString()));
+                    var version = items[0].GetProperty("versionId").GetGuid();
+                    Assert.Equal(version, document.RootElement.GetProperty("activeVersionId").GetGuid());
+                    Assert.Equal(version, active.VersionId);
+                    Assert.Equal(head, await Value("SELECT git_commit FROM workflow_versions WHERE id=$1", version));
+                    Assert.True(registrationToActive >= TimeSpan.Zero && registrationToActive <= TimeSpan.FromSeconds(5),
+                        $"Merge {index}: registration-to-active upper bound {registrationToActive} exceeds five seconds.");
+                    before = head;
+                }
+                return timings;
 
-            async Task<string> Git(params string[] arguments)
-            {
-                var result = await External("git", ["--no-pager", .. arguments], checkout, null);
-                Assert.True(result.Exit == 0, result.Error);
-                return result.Output;
+                async Task<string> Git(params string[] arguments)
+                {
+                    var result = await External("git", ["--no-pager", .. arguments], checkout, null);
+                    Assert.True(result.Exit == 0, result.Error);
+                    return result.Output;
+                }
+
+                async Task WaitForVersion(string? version)
+                {
+                    var elapsed = Stopwatch.StartNew();
+                    while (!cache.IsReady || version is not null &&
+                        (!HasVersion() || cache.GetActive(identity).Manifest.Version != version))
+                    {
+                        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(5),
+                            $"Active version {version ?? "(cache ready)"} was not observed within five seconds.");
+                        await Task.Delay(10, Token);
+                    }
+                }
+
+                bool HasVersion()
+                {
+                    try { _ = cache.GetActive(identity); return true; }
+                    catch (KeyNotFoundException) { return false; }
+                }
             }
+            finally { await cache.StopAsync(Token); }
         }
         finally
         {
@@ -254,7 +316,9 @@ public sealed class PublishRegistrationTests(RegistrationDatabase database) : IC
     {
         var start = new ProcessStartInfo(executable)
         {
-            RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
             WorkingDirectory = directory
         };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);

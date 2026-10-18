@@ -2487,6 +2487,19 @@ requires matching `GITHUB_SHA`, `GITHUB_EVENT_NAME=push`,
 `GITHUB_REF=refs/heads/main`, `WF_ENGINE_URL` and `WF_ACCESS_TOKEN`.
 Failed validation, tests, restore or publication fail the run explicitly.
 
+The `RegistrationLatency_twenty_real_main_merges` integration test creates 20
+actual scratch-repository main merges and publishes each through the template
+helper, real CLI, signed-token API and PostgreSQL. Like a consumer repository,
+it references pinned SDK packages, packed once from the current build into an
+offline feed with an isolated NuGet cache, rather than rebuilding SDK sources
+on every merge. It observes the production
+registry listener without restarting it, checks every version/merge SHA and
+asserts merge-to-active nearest-rank p95 <= 60 seconds and every conservative
+registration-to-active upper bound <= 5 seconds. Both registration timestamps
+use the database clock. Per-merge timings appear in test output; this local
+publication measurement excludes SDK package preparation, hosted runner queues,
+PR test execution and live Entra token exchange.
+
 ## CLI and packages
 
 `wf run` submits a manual run without local task execution or waiting for run
