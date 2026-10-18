@@ -154,10 +154,36 @@ public static class RunsEndpoints
         var run = new RunState(runId, manifest.Nodes, manifest.Metadata, _ => { }, variables.Values);
         var command = new TriggerRunCommand(run.Snapshot with { Placement = request.Placement }, request.WorkflowId,
             versionId, now.Add(manifest.RunTimeout), authorized.SeriesId);
-        if (context.Features.Get<NpgsqlTransaction>() is { } transaction)
+        try
+        {
+            var supplied = context.Features.Get<NpgsqlTransaction>();
+            await using var connection = supplied is null ? await source.OpenConnectionAsync(context.RequestAborted) : null;
+            await using var owned = connection is null ? null : await connection.BeginTransactionAsync(context.RequestAborted);
+            var transaction = supplied ?? owned ?? throw new InvalidOperationException("Run acceptance requires a transaction.");
             await inbox.TriggerAsync(command, actor.ToString("D"), transaction, context.RequestAborted);
-        else
-            await inbox.TriggerAsync(command, actor.ToString("D"), context.RequestAborted);
+            await using var audit = new NpgsqlCommand("""
+                INSERT INTO audit_log(ts,actor,actor_kind,action,target_kind,target_id,team_id,summary)
+                VALUES($1,$2,$3,$4,'Run',$5,$6,jsonb_build_object('before',NULL,
+                    'after',jsonb_build_object('status','Queued','workflowId',$7::text,'versionId',$8::uuid,'seriesId',$9::uuid)))
+                """, transaction.Connection, transaction);
+            audit.Parameters.AddWithValue(now);
+            audit.Parameters.AddWithValue(actor.ToString("D"));
+            audit.Parameters.AddWithValue(context.User.HasClaim("idtyp", "app") ? "App" : "User");
+            audit.Parameters.AddWithValue(authorized.SeriesId is null ? "run.trigger" : "schedule.run-now");
+            audit.Parameters.AddWithValue(runId.ToString("D"));
+            audit.Parameters.AddWithValue(request.WorkflowId[..request.WorkflowId.IndexOf('/')]);
+            audit.Parameters.AddWithValue(request.WorkflowId);
+            audit.Parameters.AddWithValue(versionId);
+            audit.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Uuid, (object?)authorized.SeriesId ?? DBNull.Value);
+            await audit.ExecuteNonQueryAsync(context.RequestAborted);
+            if (owned is not null) await owned.CommitAsync(context.RequestAborted);
+        }
+        catch (NpgsqlException error)
+        {
+            context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(RunsEndpoints).FullName!)
+                .LogError(error, "Run acceptance storage is unavailable.");
+            return Results.Problem(statusCode: 503, title: "Run acceptance storage is unavailable");
+        }
         return Results.Json(new TriggerRunResponse(runId), RunJsonContext.Default.TriggerRunResponse, statusCode: 202);
     }
 

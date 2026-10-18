@@ -962,6 +962,14 @@ the immutable initial snapshot/deadline command and emits PostgreSQL `commands`
 NOTIFY, then returns `202 {"runId":"<UUIDv7>"}`. Only leader recovery creates
 the durable run rows. The run-detail endpoint remains a separate task.
 
+Manual trigger and schedule run-now acceptance also commit a safe audit row in
+that transaction: authenticated actor/kind, action, run/team target, acceptance
+timestamp, null prior run and queued version/series summary. No variable values
+or upload capabilities enter the summary. Audit persistence failure returns an
+explicit 503 and rolls back the command and notification; this is not a
+best-effort write after accepting the run. Broader endpoint audit coverage
+remains a separate, unfinished work item.
+
 Optional `Idempotency-Key` accepts one 1-200-character visible ASCII key,
 without whitespace. PostgreSQL deduplicates for 24 hours per authenticated
 principal and route, across concurrent API hosts and restarts. A matching retry
@@ -971,7 +979,7 @@ Whitespace, JSON object order and omitted request defaults do not change the
 fingerprint; array order and supplied values do. Reusing an unexpired key for
 a different request returns 409 without echoing either body. Missing keys
 leave submissions independent; at expiry the key can identify a new request.
-Reservation, command, response and NOTIFY commit together, so validation or
+Reservation, command, audit, response and NOTIFY commit together, so validation or
 persistence failures cannot leave an orphan run command or consume the key.
 Expired rows stop deduplicating immediately; general physical retention
 cleanup remains a maintenance task.
