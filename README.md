@@ -753,7 +753,7 @@ system-assigned identity. No developer/browser/CLI credential fallback.
 `ctx.Secret(ctx.Var<SecretReference>("credential"))` accesses a declared resolved
 value. Missing or unavailable secrets become safe nonretryable `ValidationError`;
 resolved values never enter manifests, dispatches, journals or process arguments.
-Rebuild existing SDK packages: task-host private readiness protocol 8 is required.
+Rebuild existing SDK packages: task-host private readiness protocol 9 is required.
 Provisioning and provider details: [agent secrets](backend/src/Wf.Agent/Secrets/README.md).
 
 `Tasks.HttpOperation(...)` declares an opt-in long-running HTTP operation:
@@ -2085,22 +2085,50 @@ execution/result; it never invokes the delegate again. Original secret values
 stay in host memory and are recovered only over this authenticated IPC to
 restore masking, not replaced by newly rotated values or persisted in metadata.
 
-Recovered attempts enter `Hello.inflight` before engine reconciliation. The
-last complete resource observation is flushed before agent journaling, replayed
-idempotently on recovery, and followed by its next ordinal. Pending progress and
-checkpoint acknowledgements can reattach; a completed result remains available
-until host ACK. Linux re-adoption uses token-authenticated supervisor control and
+Recovered attempts enter `Hello.inflight` before engine reconciliation. Each
+production host redirects its own OS stdout/stderr through host-owned pipes,
+including inherited native-child output, and masks decoded text before writing
+durable `spool/*.record` protobuf files in its private attempt directory.
+Records retain producer sequence and original timestamp; resources also have
+contiguous sample ordinals. The host's atomically flushed `spool/ack` cursor
+controls prefix deletion. Agent log indexing commits each complete frame and
+its producer cursor together, so replay after a lost acknowledgement neither
+loses bytes nor duplicates a line. A replacement resumes the existing incomplete
+log capture rather than marking a surviving host's capture interrupted.
+Production progress transitions are host-journaled before proceeding; checkpoint
+acknowledgements can reattach. Masked results are flushed to `spool/result.pb`
+before delivery and remain available until all records and the result are
+acknowledged. Agent-capture I/O failure is explicit and does not change the task
+outcome: physical cleanup is proved, its receipt is flushed, and unacknowledged
+host bytes remain for recovery instead of being deleted or blocking a proven
+machine fence. Unacknowledged host spool storage has an explicit 20 GB/one-million
+record ceiling; exceeding it reports a storage failure, not successful capture.
+Linux re-adoption uses token-authenticated supervisor control and
 requires its final physical-quiescence certificate before removing a lifetime.
-Missing/mismatched/dead hosts report `AgentLost`; an unproven descendant tree
+Missing/mismatched/dead hosts without a verified completed spool report `AgentLost`; an unproven descendant tree
 still quarantines admission and physical-fence acknowledgements. A missing
-Windows Job name after supervisor death is not proof that its descendants died.
+Windows Job name after root death alone is not proof that its descendants died.
 Normal completion, cancellation, drain and fencing still require physical
 descendant cleanup before release. Windows hard caps survive re-adoption, but
 old IOCP breach notifications cannot be replayed; managed OOM classification
 remains available. Recovered native network counters expose an explicit gap.
-Lossless host-side log/resource spooling and self-enforced hard termination
-remain task `2.3.2.2.3`; the existing agent log recovery marks interrupted capture
-instead of claiming completeness.
+
+After two seconds without fresh native agent counters, the SDK records
+process-only CPU/RSS observations at one-second intervals while explicitly
+marking descendant, machine and native network accounting unavailable. It does
+not invent continuity for old ETW/BPF baselines. Once the agent returns, native
+observations continue through the same host-owned resource sequence.
+Task completion leaves native sampling open until the agent stores its final
+observation and seals the record stream; acknowledgement waits for that tail too.
+The Linux subreaper supervisor and an independent Windows sibling guard enforce
+the absolute deadline plus 30 seconds of cancellation grace even if the agent
+never returns. The Windows guard is outside the workload Job, retains its
+query/termination handle, verifies the exact target identity and records physical
+quiescence only after the entire Job is empty. It uses no Job breakaway exemption.
+Guard RSS counts toward the warm-host budget. A hard timeout's durable result
+and captured records can be recovered after physical termination without running
+the delegate again. This is agent-only restart/deadline recovery, not a claim of
+lossless machine-reboot recovery or native network-counter continuity.
 
 Authored `.Defaults(p => p.Limits(cpuCores: 0.5, ramMb: 512))`, node/stage
 `.Limits(...)`, and per-task `p => p.Limits(...)` configure optional caps.

@@ -83,6 +83,10 @@ public sealed class NativeResourceSamplerTests : IDisposable
             }
             await WriteAsync(first.Go, serverReady.Port.ToString(CultureInfo.InvariantCulture), stop.Token);
             await WriteAsync(second.Go, clientReady.Port.ToString(CultureInfo.InvariantCulture), stop.Token);
+            await WaitAsync(() => File.Exists(first.Ready + ".connected") &&
+                File.Exists(second.Ready + ".connected"), stop.Token);
+            await WriteAsync(first.Go + ".connected", "1", stop.Token);
+            await WriteAsync(second.Go + ".connected", "1", stop.Token);
             await WaitAsync(() => File.Exists(first.Done) && File.Exists(second.Done), stop.Token);
             var overhead = OperatingSystem.IsLinux() ? ipv6 ? 48 : 28 : 0;
             var clientSent = child && OperatingSystem.IsWindows() ? 0UL : (ulong)(first.Count * (first.SendBytes + overhead));

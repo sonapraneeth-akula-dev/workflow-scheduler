@@ -111,8 +111,18 @@ public sealed class LogSpooler : IAsyncDisposable
         catch { current?.Dispose(); lease.Dispose(); stop.Dispose(); throw; }
     }
 
-    public async Task WriteAsync(string stream, string text, string level = "Information",
+    public Task WriteAsync(string stream, string text, string level = "Information",
+        CancellationToken cancellationToken = default) => WriteCoreAsync(stream, text, level, null, 0, cancellationToken);
+
+    internal Task WriteHostAsync(ulong sequence, DateTimeOffset at, string stream, string text,
         CancellationToken cancellationToken = default)
+    {
+        if (sequence == 0 || at.Offset != TimeSpan.Zero) throw new ArgumentException("Invalid host log cursor or timestamp.");
+        return WriteCoreAsync(stream, text, stream == "stderr" ? "Error" : "Information", at, sequence, cancellationToken);
+    }
+
+    private async Task WriteCoreAsync(string stream, string text, string level, DateTimeOffset? producedAt,
+        ulong hostSequence, CancellationToken cancellationToken)
     {
         if (stream is not ("stdout" or "stderr" or "ctx") || level is not ("Information" or "Warning" or "Error" or "Debug"))
             throw new ArgumentException("Invalid log stream or level.");
@@ -123,14 +133,35 @@ public sealed class LogSpooler : IAsyncDisposable
         try
         {
             Check();
+            if (hostSequence != 0 && hostSequence <= index.HostRecordSequence) return;
             if (index.Complete) throw new InvalidOperationException("The log attempt has completed.");
-            var at = clock.GetUtcNow();
+            var at = producedAt ?? clock.GetUtcNow();
             var frame = JsonSerializer.SerializeToUtf8Bytes(new LogFrame(at, stream, level, masker.Redact(text)),
                 LogJsonContext.Default.LogFrame);
             var bytes = new byte[frame.Length + 1];
             frame.CopyTo(bytes, 0);
             bytes[^1] = (byte)'\n';
             var previousChunk = index.NextChunk;
+            if (hostSequence != 0)
+            {
+                // One producer record per index transaction: recovery trims an uncommitted raw suffix.
+                if (current!.Length + bytes.Length > ChunkBytes) Seal();
+                if (current.Length == 0)
+                {
+                    activeAt = lastAt = at; activeFirstLine = index.Lines + 1; opened = clock.GetTimestamp();
+                    rotationTimer.Change(ChunkInterval, Timeout.InfiniteTimeSpan);
+                }
+                current.Write(bytes);
+                current.Flush(flushToDisk: true);
+                if (at < activeAt) activeAt = at;
+                if (at > lastAt) lastAt = at;
+                index = index with { Bytes = checked(index.Bytes + bytes.Length), Lines = checked(index.Lines + 1),
+                    ActiveAt = activeAt, LastAt = lastAt, HostRecordSequence = hostSequence };
+                Save();
+                ApplyCap(checkGlobalQuota: index.NextChunk != previousChunk);
+                Save();
+                return;
+            }
             var offset = 0;
             while (offset < bytes.Length)
             {

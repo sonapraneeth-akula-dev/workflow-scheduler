@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 
 namespace Wf.Agent.Hosts;
 
@@ -46,6 +47,7 @@ internal sealed partial class HostRecoveryBarrier
             catch (FileNotFoundException) { continue; }
             catch (IOException error)
             { throw new InvalidOperationException("Task-host containment is quarantined: another agent owns an unfinished host lifetime.", error); }
+            if (recordedBoot == boot && HasPhysicalAcknowledgement(path, recordedBoot)) continue;
             if (recordedBoot == boot)
                 throw new InvalidOperationException(
                     "Task-host containment is quarantined after an unclean agent/host shutdown. " +
@@ -62,9 +64,43 @@ internal sealed partial class HostRecoveryBarrier
     {
         var directory = path[..^".pending".Length];
         if (!Directory.Exists(directory)) return;
+        var spool = Path.Combine(directory, "spool");
+        if (Directory.Exists(spool))
+        {
+            if ((File.GetAttributes(spool) & FileAttributes.ReparsePoint) != 0)
+                throw new IOException("Task-host spool cleanup cannot traverse a reparse point.");
+            foreach (var file in Directory.EnumerateFiles(spool))
+            {
+                if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0)
+                    throw new IOException("Task-host spool cleanup cannot follow a link.");
+                File.Delete(file);
+            }
+            Directory.Delete(spool);
+        }
         File.Delete(Path.Combine(directory, "attempt.json.next"));
         File.Delete(Path.Combine(directory, "attempt.json"));
+        File.Delete(Path.Combine(directory, "guard-ready"));
+        File.Delete(Path.Combine(directory, "host-exited"));
+        File.Delete(Path.Combine(directory, "physical-ack"));
         Directory.Delete(directory);
+    }
+
+    private static bool HasPhysicalAcknowledgement(string path, string boot)
+    {
+        var directory = path[..^".pending".Length];
+        var receipt = Path.Combine(directory, "physical-ack");
+        if (!File.Exists(receipt)) return false;
+        Wf.Agent.Logs.LogSpooler.RejectLinks(receipt);
+        var metadata = Path.Combine(directory, "attempt.json");
+        Wf.Agent.Logs.LogSpooler.RejectLinks(metadata);
+        using var file = new FileStream(metadata, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+        if (file.Length is <= 0 or > 8 * 1024 * 1024)
+            throw new InvalidDataException("Physically closed host metadata is invalid.");
+        var record = JsonSerializer.Deserialize(file, TaskHostAttemptJson.Default.TaskHostAttempt) ??
+            throw new InvalidDataException("Physically closed host metadata is missing.");
+        return record.FormatVersion == 1 && record.BootId == boot && record.Pid > 0 && record.StartIdentity > 0 &&
+            Guid.TryParseExact(record.ReceiptToken, "N", out _) &&
+            TaskHostContainment.HasAgentPhysicalAcknowledgement(directory, record.ReceiptToken);
     }
 
     public Lease Begin()

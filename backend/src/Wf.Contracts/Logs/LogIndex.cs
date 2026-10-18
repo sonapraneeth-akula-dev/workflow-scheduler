@@ -18,7 +18,7 @@ public sealed record LogIndex(int Version, string RunId, string NodeKey, string 
     bool CaptureInterrupted = false, DateTimeOffset? ActiveAt = null, DateTimeOffset? LastAt = null,
     long MaxBytes = 2_000_000_000, long HeadBytes = 256_000_000, long TailBytes = 256_000_000,
     long SpoolQuotaBytes = 20_000_000_000, long? RetainedHeadEnd = null, long? RetainedTailStart = null,
-    bool SealedAtRecordBoundary = true)
+    bool SealedAtRecordBoundary = true, ulong HostRecordSequence = 0)
 {
     public string? TruncationMarker => Truncated
         ? $"[... {DroppedLines.ToString(CultureInfo.InvariantCulture)} log records dropped ...]" : null;

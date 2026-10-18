@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Wf.Agent.Secrets;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Logs;
+using Wf.Contracts.Host.V1;
 
 namespace Wf.Agent.Logs;
 
@@ -36,9 +37,12 @@ public sealed class AgentLogService : IAsyncDisposable
         uploader = new(http, clock, uploadLogger);
     }
 
-    public async Task<Capture> BeginAsync(Dispatch dispatch)
+    public async Task<Capture> BeginAsync(Dispatch dispatch, bool resume = false)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
+        var directory = Path.Combine(Path.GetFullPath(options.LogSpoolDirectory),
+            LogIndex.PrefixFor(dispatch.Task).Replace('/', Path.DirectorySeparatorChar));
+        if (resume && captures.TryGetValue(directory, out var existing)) return existing;
         var cap = dispatch.Limits?.MaxLogBytes is > 0
             ? (long)Math.Min(dispatch.Limits.MaxLogBytes, (ulong)options.MaxLogBytes) : options.MaxLogBytes;
         var spool = new LogSpooler(options.LogSpoolDirectory, dispatch.Task, new SecretMasker([]),
@@ -53,10 +57,11 @@ public sealed class AgentLogService : IAsyncDisposable
         catch { await spool.DisposeAsync(); throw; }
     }
 
-    public async Task RecoverAsync(CancellationToken cancellationToken = default)
+    public async Task RecoverAsync(CancellationToken cancellationToken = default, IEnumerable<AttemptRef>? resumable = null)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
         if (!Directory.Exists(options.LogSpoolDirectory)) return;
+        var live = (resumable ?? []).Select(LogIndex.PrefixFor).ToHashSet(StringComparer.Ordinal);
         LogSpooler.RejectLinks(options.LogSpoolDirectory);
         foreach (var path in LogSpooler.Files(options.LogSpoolDirectory, "index.json"))
         {
@@ -74,9 +79,8 @@ public sealed class AgentLogService : IAsyncDisposable
             var attempt = new AttemptRef { RunId = index.RunId, NodeKey = index.NodeKey, TaskKey = index.TaskKey, Attempt = index.Attempt };
             var spool = new LogSpooler(options.LogSpoolDirectory, attempt, new SecretMasker([]),
                 new(MaxBytes: options.MaxLogBytes, SpoolQuotaBytes: options.LogSpoolQuotaBytes), clock);
-            if (!spool.IsComplete)
+            if (!spool.IsComplete && !live.Contains(LogIndex.PrefixFor(attempt)))
             {
-                // Host socket re-adoption is a separate task. Never present an interrupted capture as complete.
                 await spool.CompleteAsync(captureInterrupted: true);
                 Report(new IOException("Task-host capture was interrupted; durable bytes recovered."));
             }
@@ -159,9 +163,22 @@ public sealed class AgentLogService : IAsyncDisposable
             }
         }
 
-        public async Task CompleteAsync()
+        internal async Task<bool> WriteRecordAsync(AttemptRecord record)
         {
-            try { if (Failure is null) await Spool.CompleteAsync(); }
+            if (record.Log is not { At: { } at } log) throw new InvalidDataException("Attempt record has no valid log.");
+            if (Failure is not null) return false;
+            try { await Spool.WriteHostAsync(record.Sequence, at.ToDateTimeOffset(), log.Stream, log.Text); return true; }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                Failure = error;
+                owner.Report(error);
+                return false;
+            }
+        }
+
+        public async Task CompleteAsync(bool captureInterrupted = false)
+        {
+            try { if (Failure is null) await Spool.CompleteAsync(captureInterrupted); }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
             {
                 Failure = error;

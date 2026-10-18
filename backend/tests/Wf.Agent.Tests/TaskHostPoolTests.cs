@@ -150,12 +150,20 @@ public sealed class TaskHostPoolTests : IDisposable
         await using var pool = Pool();
         await pool.PrewarmAsync(Package, TestContext.Current.CancellationToken);
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        if (!timedOut) cancellation.CancelAfter(TimeSpan.FromMilliseconds(200));
-        var result = await pool.ExecuteAsync(Package, Dispatch(task, timedOut ? TimeSpan.FromMilliseconds(200) : null),
-            cancellationToken: cancellation.Token);
-        Assert.Equal(timedOut ? TaskOutcome.TimedOut : TaskOutcome.Cancelled, result.Outcome);
-        Assert.Equal("TaskError", result.Error.Category);
-        Assert.Equal(nonRetryable, result.Error.NonRetryable);
+        var marker = Path.Combine(Path.GetTempPath(), "wf-entered-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var dispatch = Dispatch(task, timedOut ? TimeSpan.FromSeconds(2) : null);
+            dispatch.VariablesJson = ByteString.CopyFromUtf8(JsonSerializer.Serialize(new { checkpointMarker = marker }));
+            var execution = pool.ExecuteAsync(Package, dispatch, cancellationToken: cancellation.Token);
+            await PhysicalHostLifetimeTests.ReadPid(marker);
+            if (!timedOut) await cancellation.CancelAsync();
+            var result = await execution;
+            Assert.Equal(timedOut ? TaskOutcome.TimedOut : TaskOutcome.Cancelled, result.Outcome);
+            Assert.Equal("TaskError", result.Error.Category);
+            Assert.Equal(nonRetryable, result.Error.NonRetryable);
+        }
+        finally { File.Delete(marker); }
     }
 
     [Theory]
@@ -211,12 +219,22 @@ public sealed class TaskHostPoolTests : IDisposable
         await using var pool = Pool();
         await pool.PrewarmAsync(Package, TestContext.Current.CancellationToken);
         var pid = Assert.Single(pool.WarmProcessIds);
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
-        var result = await pool.ExecuteAsync(Package, Dispatch(task), cancellationToken: cancellation.Token);
-        Assert.Equal(TaskOutcome.Cancelled, result.Outcome);
-        Assert.Equal("Aborted", result.Error.Category);
-        Assert.True(result.Error.NonRetryable);
-        AssertStopped(pid);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var marker = Path.Combine(Path.GetTempPath(), "wf-cancel-ready-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var dispatch = Dispatch(task);
+            dispatch.VariablesJson = ByteString.CopyFromUtf8(JsonSerializer.Serialize(new { checkpointMarker = marker }));
+            var execution = pool.ExecuteAsync(Package, dispatch, cancellationToken: cancellation.Token);
+            await PhysicalHostLifetimeTests.ReadPid(marker);
+            await cancellation.CancelAsync();
+            var result = await execution;
+            Assert.Equal(TaskOutcome.Cancelled, result.Outcome);
+            Assert.Equal("Aborted", result.Error.Category);
+            Assert.True(result.Error.NonRetryable);
+            AssertStopped(pid);
+        }
+        finally { await cancellation.CancelAsync(); File.Delete(marker); }
     }
 
     [Fact]

@@ -14,6 +14,36 @@ public sealed class LogSpoolTests
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
     [Fact]
+    public async Task Host_record_replay_commits_cursor_with_the_whole_frame_and_never_duplicates_after_restart()
+    {
+        using var files = new LogFiles();
+        var attempt = Attempt();
+        var at = new DateTimeOffset(2026, 10, 17, 0, 0, 0, TimeSpan.Zero);
+        string directory;
+        await using (var spool = New(files, attempt))
+        {
+            directory = spool.DirectoryPath;
+            await spool.WriteHostAsync(2, at, "stdout", "first", Token);
+            Assert.Equal(2UL, (await spool.SnapshotAsync(Token)).HostRecordSequence);
+        }
+        // Simulate append fsync succeeding but atomic index replacement not committing.
+        await File.AppendAllTextAsync(Path.Combine(directory, "active.raw"), "uncommitted-host-frame\n", Token);
+        await using var recovered = New(files, attempt);
+        await recovered.WriteHostAsync(2, at, "stdout", "first", Token);
+        await recovered.WriteHostAsync(4, at.AddSeconds(1), "stderr", "second", Token);
+        await recovered.CompleteAsync();
+        await recovered.WriteHostAsync(4, at.AddSeconds(1), "stderr", "second", Token);
+        var index = await recovered.SnapshotAsync(Token);
+        Assert.Equal(4UL, index.HostRecordSequence);
+        Assert.Equal(2, index.Lines);
+        var text = Encoding.UTF8.GetString(ReadAll(recovered, index));
+        Assert.DoesNotContain("uncommitted", text);
+        Assert.Contains("\"text\":\"first\"", text);
+        Assert.Contains("\"text\":\"second\"", text);
+        Assert.Equal(at, JsonSerializer.Deserialize(text.Split('\n')[0], LogJsonContext.Default.LogFrame)!.At);
+    }
+
+    [Fact]
     public async Task Identity_is_durable_attempt_scoped_and_distinguishes_nodes_and_retries()
     {
         using var files = new LogFiles();

@@ -12,7 +12,8 @@ using Wf.Contracts.Host.V1;
 
 namespace Wf.Agent.Hosts;
 
-internal sealed record HostRecoveryResult(Dispatch Dispatch, string? Error, ResourceSample? ResourceSample = null);
+internal sealed record HostRecoveryResult(Dispatch Dispatch, string? Error, ResourceSample? ResourceSample = null,
+    TaskCompleted? Completed = null, string? SpoolDirectory = null, Action? Acknowledge = null);
 
 public sealed partial class TaskHostPool
 {
@@ -52,8 +53,9 @@ public sealed partial class TaskHostPool
                 }
                 // Restore every process-lifetime pin before a normal cache request can evict any package.
                 foreach (var (lease, record, _) in records)
-                    packages.Add(lease, await restorePackage(new(record.Version, record.Executable,
-                        record.Arguments, record.WorkingDirectory), deadline.Token));
+                    if (!TaskHostContainment.HasAgentPhysicalAcknowledgement(lease.AttemptDirectory, record.ReceiptToken))
+                        packages.Add(lease, await restorePackage(new(record.Version, record.Executable,
+                            record.Arguments, record.WorkingDirectory), deadline.Token));
                 foreach (var (lease, record, dispatch) in records)
                 {
                     Process? process = null;
@@ -84,13 +86,38 @@ public sealed partial class TaskHostPool
                             await containment.StopAsync(null);
                             physicalStopped = true;
                             RemoveDeadCgroup(record);
-                            containment.Complete();
-                            File.Delete(record.SocketPath);
-                            Directory.Delete(Path.GetDirectoryName(record.SocketPath)!);
-                            if (dispatch is not null) results.Add(new(dispatch, "Task host is dead or its PID creation identity changed.", lastSample));
+                            var spoolDirectory = Path.Combine(lease.AttemptDirectory, "spool");
+                            TaskCompleted? completed = null;
+                            var resultPath = Path.Combine(spoolDirectory, "result.pb");
+                            if (dispatch is not null && File.Exists(resultPath))
+                            {
+                                Wf.Agent.Logs.LogSpooler.RejectLinks(resultPath);
+                                using var file = new FileStream(resultPath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+                                if (file.Length is <= 0 or > 1024 * 1024)
+                                    throw new InvalidDataException("Recovered result exceeds the host protocol limit.");
+                                completed = TaskCompleted.Parser.ParseFrom(file);
+                                if (!completed.Task.Equals(dispatch.Task) || completed.ReservationEpoch != dispatch.ReservationEpoch ||
+                                    completed.Outcome == TaskOutcome.Unspecified || !Enum.IsDefined(completed.Outcome))
+                                    throw new InvalidDataException("Recovered result does not match its durable dispatch.");
+                            }
+                            void Acknowledge()
+                            {
+                                containment.Complete();
+                                var directory = Path.GetDirectoryName(record.SocketPath)!;
+                                if (Directory.Exists(directory))
+                                {
+                                    File.Delete(record.SocketPath);
+                                    Directory.Delete(directory);
+                                }
+                            }
+                            if (dispatch is null) Acknowledge();
+                            else results.Add(new(dispatch, completed is null
+                                ? "Task host is dead or its PID creation identity changed." : null, lastSample, completed,
+                                Directory.Exists(spoolDirectory) ? spoolDirectory : null, Acknowledge));
                             continue;
                         }
-                        var package = packages[lease];
+                        if (!packages.TryGetValue(lease, out var package))
+                            throw new InvalidDataException("Physically acknowledged task-host identity is unexpectedly alive.");
                         var limits = new TaskResourceLimits(record.Attempt?.CpuCores ?? 0, record.Attempt?.RamMb ?? 0);
                         if (record.WorkloadCgroup is { } cgroup)
                         {
@@ -120,7 +147,7 @@ public sealed partial class TaskHostPool
                         }
                         using var readyCall = host.Client.ReadyAsync(new ReadyRequest(), cancellationToken: deadline.Token);
                         var ready = await readyCall.ResponseAsync;
-                        if (ready.ProtocolVersion != 8 || ready.ProcessId != process.Id || ready.WorkflowVersion != record.Version ||
+                        if (ready.ProtocolVersion != 9 || ready.ProcessId != process.Id || ready.WorkflowVersion != record.Version ||
                             dispatch is null && ready.Bound || dispatch is not null && (!ready.Bound ||
                                 !ready.Attempt.Equals(dispatch.Task) || ready.ReservationEpoch != dispatch.ReservationEpoch))
                             throw new InvalidDataException("Authenticated task-host recovery identity or bound attempt does not match.");

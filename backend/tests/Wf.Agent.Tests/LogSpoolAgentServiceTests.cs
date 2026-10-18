@@ -10,6 +10,38 @@ namespace Wf.Agent.Tests;
 
 public sealed class LogSpoolAgentServiceTests
 {
+    [Fact]
+    public async Task Recovered_live_host_capture_stays_open_and_resumes_its_durable_log_cursor()
+    {
+        using var files = new LogFiles();
+        var attempt = LogSpoolTests.Attempt();
+        await using (var spool = new LogSpooler(files.Root, attempt, new SecretMasker([])))
+            await spool.WriteHostAsync(2, DateTimeOffset.UtcNow, "stdout", "before restart", TestContext.Current.CancellationToken);
+        var options = new AgentOptions([new Uri("http://localhost")], Guid.NewGuid().ToString(), "logs", "ci", 1,
+            resultJournalDirectory: Path.Combine(files.Root, "results"), logSpoolDirectory: files.Root);
+        await using var service = new AgentLogService(options, TimeProvider.System, NullLogger<AgentLogService>.Instance,
+            NullLogger<LogChunkUploader>.Instance);
+        await service.RecoverAsync(TestContext.Current.CancellationToken, [attempt]);
+        var capture = await service.BeginAsync(new Dispatch { Task = attempt }, resume: true);
+        Assert.False((await capture.Spool.SnapshotAsync(TestContext.Current.CancellationToken)).Complete);
+        var record = new Wf.Contracts.Host.V1.AttemptRecord
+        {
+            Sequence = 4, Task = attempt, Log = new Wf.Contracts.Host.V1.HostLog
+            {
+                At = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow),
+                Stream = "stdout", Text = "after restart"
+            }
+        };
+        Assert.True(await capture.WriteRecordAsync(record));
+        Assert.True(await capture.WriteRecordAsync(record));
+        var index = await capture.Spool.SnapshotAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(2, index.Lines);
+        Assert.Equal(4UL, index.HostRecordSequence);
+        Assert.False(index.CaptureInterrupted);
+        await capture.CompleteAsync();
+        await capture.Upload.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+    }
+
     [Theory]
     [InlineData(0UL, 1000L)]
     [InlineData(99UL, 99L)]

@@ -15,6 +15,55 @@ public sealed class HostReadoptionTests
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
+    [Fact]
+    public async Task Local_log_failure_preserves_host_spool_and_outcome_without_blocking_a_proven_physical_fence()
+    {
+        var root = PhysicalHostLifetimeTests.Root();
+        var lifetimes = Path.Combine(root, "recovery");
+        try
+        {
+            var assembly = typeof(Wf.TaskHost.Fixture.FixtureMarker).Assembly.Location;
+            var runtime = typeof(HostReadoptionTests).Assembly.Location;
+            using var package = new TaskHostPackage("1.0.0", "dotnet",
+                ["exec", "--runtimeconfig", Path.ChangeExtension(runtime, ".runtimeconfig.json"),
+                    "--depsfile", Path.ChangeExtension(runtime, ".deps.json"), assembly], AppContext.BaseDirectory);
+            var dispatch = new Dispatch
+            {
+                Task = new() { RunId = Guid.NewGuid().ToString("D"), NodeKey = "work", TaskKey = "echo", Attempt = 1 },
+                Version = "1.0.0", ReservationEpoch = 1,
+                DeadlineAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddSeconds(30)),
+                InputsJson = ByteString.CopyFromUtf8("""{"source":{"value":7}}"""),
+                NodeOutputsJson = ByteString.CopyFromUtf8("""{"previous":3}""")
+            };
+            var log = new RecoveryLog();
+            await using (var pool = new TaskHostPool(log, containmentDirectory: lifetimes))
+            {
+                var result = await pool.ExecuteAsync(package, dispatch, cancellationToken: Token,
+                    captureRecord: _ => Task.FromResult(false));
+                Assert.Equal(TaskOutcome.Succeeded, result.Outcome);
+                var pending = Assert.Single(Directory.GetFiles(lifetimes, "*.pending"));
+                Assert.True(File.Exists(Path.Combine(pending[..^".pending".Length], "physical-ack")));
+                Assert.NotEmpty(Directory.GetFiles(pending[..^".pending".Length], "*.record", SearchOption.AllDirectories));
+                await pool.FenceAsync(Token);
+                await pool.PrewarmAsync(package, Token);
+                Assert.Single(pool.WarmProcessIds);
+            }
+            await using var recovered = new TaskHostPool(log, containmentDirectory: lifetimes);
+            var saved = Assert.Single(await recovered.RecoverAsync((value, _) => Task.FromResult(value), Token));
+            Assert.True(saved.Error is null, saved.Error + Environment.NewLine + string.Join(Environment.NewLine, log.Errors));
+            Assert.Equal(TaskOutcome.Succeeded, saved.Completed!.Outcome);
+            Assert.NotNull(saved.SpoolDirectory);
+            Assert.NotNull(saved.Acknowledge);
+            saved.Acknowledge();
+            await recovered.FenceAsync(Token);
+            Assert.Empty(Directory.GetFiles(lifetimes, "*.pending"));
+        }
+        finally
+        {
+            if (!Directory.GetFiles(lifetimes, "*.pending").Any()) Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("complete")]
     [InlineData("cancel")]
@@ -41,7 +90,7 @@ public sealed class HostReadoptionTests
         }
         var logging = new RecoveryLog();
         var pool = new TaskHostPool(logging, containmentDirectory: Path.Combine(crash.Root, "recovery"));
-        var quarantined = scenario == "dead" || OperatingSystem.IsLinux() && scenario == "reused";
+        var quarantined = OperatingSystem.IsLinux() && scenario is "dead" or "reused";
         try
         {
             var watch = Stopwatch.StartNew();
@@ -53,6 +102,7 @@ public sealed class HostReadoptionTests
             if (scenario is "reused" or "dead")
             {
                 Assert.NotNull(restored.Error);
+                restored.Acknowledge?.Invoke();
                 Assert.Throws<InvalidOperationException>(() => pool.RecoveredPackage(crash.Dispatch.Task));
                 if (quarantined)
                     await Assert.ThrowsAsync<InvalidOperationException>(() => pool.FenceAsync(Token));
@@ -244,6 +294,13 @@ public sealed class HostReadoptionTests
                 catch (ArgumentException) { }
                 catch (FileNotFoundException) { }
             parent?.Dispose();
+            if (OperatingSystem.IsWindows() && !string.IsNullOrEmpty(Metadata) &&
+                File.Exists(Path.Combine(Path.GetDirectoryName(Metadata)!, "guard-ready")))
+            {
+                var certificate = Path.Combine(Path.GetDirectoryName(Metadata)!, "host-exited");
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                while (!File.Exists(certificate)) await Task.Delay(10, deadline.Token);
+            }
             if (Record is not null)
             {
                 var socketDirectory = Path.GetDirectoryName(Record.SocketPath)!;

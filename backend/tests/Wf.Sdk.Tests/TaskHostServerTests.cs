@@ -59,7 +59,7 @@ public sealed class TaskHostServerTests
             deadline.CancelAfter(TimeSpan.FromSeconds(10));
             var ready = await client.ReadyAsync(new ReadyRequest(), cancellationToken: deadline.Token);
             Assert.False(ready.Bound);
-            Assert.Equal(8u, ready.ProtocolVersion);
+            Assert.Equal(9u, ready.ProtocolVersion);
             Assert.Equal((uint)Environment.ProcessId, ready.ProcessId);
             var attempt = new AttemptRef { RunId = Guid.NewGuid().ToString(), NodeKey = "work", TaskKey = "task", Attempt = 1 };
             var request = new ExecuteRequest

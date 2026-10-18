@@ -18,6 +18,8 @@ using Wf.Contracts;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Host.V1;
+using Wf.Contracts.Resources;
+using Wf.Contracts.Secrets;
 using Wf.Engine.Core;
 using Wf.Validation;
 
@@ -34,6 +36,8 @@ public static class TaskHostServer
         ArgumentException.ThrowIfNullOrWhiteSpace(socketPath);
         if (!Path.IsPathFullyQualified(socketPath) || System.Text.Encoding.UTF8.GetByteCount(socketPath) >= 108)
             throw new ArgumentException("The task-host socket must be an absolute path shorter than 108 UTF-8 bytes.", nameof(socketPath));
+        if (Environment.GetEnvironmentVariable("WF_TASK_HOST_GUARD") == "1")
+            return await WindowsHostGuard.RunAsync(workflow.Version, cancellationToken);
         if (File.Exists(socketPath))
             throw new IOException("The task-host socket path already exists.");
         if (LinuxHostSupervisor.Required)
@@ -78,6 +82,7 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
     private AttemptRef? bound;
     private Dispatch? boundDispatch;
     private IReadOnlyDictionary<string, string>? boundSecrets;
+    private string[] boundRedactionValues = [];
     private Task<TaskCompleted>? execution;
     private CancellationTokenSource? attemptCancellation;
     private bool timedOut;
@@ -94,6 +99,10 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
     private TaskProgress? pendingProgress;
     private TaskCompletionSource? progressAcknowledgement;
     private int progressReader;
+    private readonly TaskCompletionSource<AttemptSpool?> spoolReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private AttemptSpool? spool;
+    private long lastNativeSample;
+    private int recordReader;
 
     public override Task<HostReady> Ready(ReadyRequest request, ServerCallContext context)
     {
@@ -101,7 +110,7 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
         {
             var ready = new HostReady
             {
-                ProtocolVersion = 8, ProcessId = uint.TryParse(
+                ProtocolVersion = 9, ProcessId = uint.TryParse(
                     Environment.GetEnvironmentVariable("WF_TASK_HOST_SUPERVISOR_PID"), out var supervisor)
                     ? supervisor : (uint)Environment.ProcessId,
                 WorkflowVersion = workflow.Version, Bound = bound is not null,
@@ -154,6 +163,7 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
                 var recovered = new SecretReferences();
                 recovered.Names.Add(boundSecrets!.Keys);
                 foreach (var pair in boundSecrets) recovered.RecoveredValues.Add(pair.Key, pair.Value);
+                recovered.RecoveredRedactionValues.Add(boundRedactionValues);
                 return Task.FromResult(recovered);
             }
             try
@@ -205,11 +215,18 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
                 if (request.ResolvedSecrets.Count != references.Length || references.Any(reference =>
                     !request.ResolvedSecrets.TryGetValue(reference, out var value) || string.IsNullOrEmpty(value)))
                     throw new ArgumentException("Required task secrets are unavailable.");
+                if (request.RedactionValues.Count > 128 || request.RedactionValues.Any(string.IsNullOrEmpty) ||
+                    request.RedactionValues.Sum(Encoding.UTF8.GetByteCount) > 128 * 1024)
+                    throw new ArgumentException("Task redaction values exceed their limits.");
                 var deadline = dispatch.DeadlineAt.ToDateTimeOffset();
                 bound = task.Clone();
                 boundDispatch = dispatch.Clone();
                 boundSecrets = request.ResolvedSecrets.ToDictionary();
+                boundRedactionValues = request.RedactionValues.ToArray();
                 attemptCancellation = new CancellationTokenSource();
+                if (Environment.GetEnvironmentVariable("WF_TASK_HOST_ATTEMPT_DIRECTORY") is { } directory)
+                    spool = new AttemptSpool(directory, dispatch);
+                spoolReady.TrySetResult(spool);
                 execution = ExecuteTaskAsync(dispatch, node, variables, inputs, outputs, deadline, request.ResolvedSecrets);
                 return execution;
             }
@@ -225,7 +242,7 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
         lock (sync)
         {
             CheckAttempt(request.Dispatch?.Task);
-            if (!boundDispatch!.Equals(request.Dispatch) || request.ResolvedSecrets.Count != 0)
+            if (!boundDispatch!.Equals(request.Dispatch) || request.ResolvedSecrets.Count != 0 || request.RedactionValues.Count != 0)
                 throw new RpcException(new Status(StatusCode.FailedPrecondition, "Recovered dispatch does not match this host."));
             return execution!;
         }
@@ -277,6 +294,9 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
             CheckAttempt(request.Task);
             if (!execution!.IsCompletedSuccessfully)
                 throw new RpcException(new Status(StatusCode.FailedPrecondition, "Attempt has no completed result."));
+            try { spool?.RequireAcknowledged(); }
+            catch (InvalidOperationException error)
+            { throw new RpcException(new Status(StatusCode.FailedPrecondition, error.Message)); }
             context.GetHttpContext().Response.OnCompleted(() =>
             {
                 context.GetHttpContext().RequestServices
@@ -367,6 +387,11 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
     {
         token.ThrowIfCancellationRequested();
         _ = Wf.Contracts.Progress.TaskProgressProtocol.Validate(update);
+        if (spool is not null)
+        {
+            spool.Progress(update);
+            return;
+        }
         using var journalDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         var acknowledgement = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (sync)
@@ -379,6 +404,69 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
         progress.Writer.TryWrite(0);
         // Finish the journal handshake even if task cancellation arrives; cleanup may publish next.
         await acknowledgement.Task.WaitAsync(journalDeadline.Token);
+    }
+
+    public override async Task Records(RecordCursor request, IServerStreamWriter<AttemptRecord> responseStream,
+        ServerCallContext context)
+    {
+        if (Interlocked.Exchange(ref recordReader, 1) != 0)
+            throw new RpcException(new Status(StatusCode.AlreadyExists, "Attempt record stream is already attached."));
+        try
+        {
+            var current = await spoolReady.Task.WaitAsync(context.CancellationToken);
+            lock (sync) CheckAttempt(request.Task);
+            if (current is null) return;
+            var after = request.Sequence;
+            while (true)
+            {
+                var batch = current.ReadAfter(after);
+                foreach (var record in batch.Records)
+                {
+                    await responseStream.WriteAsync(record, context.CancellationToken);
+                    after = record.Sequence;
+                }
+                if (batch.Records.Length != 0) continue;
+                if (batch.Complete) return;
+                await batch.Changed.WaitAsync(context.CancellationToken);
+            }
+        }
+        finally { Volatile.Write(ref recordReader, 0); }
+    }
+
+    public override Task<HostReply> ConfirmRecords(RecordCursor request, ServerCallContext context)
+    {
+        lock (sync)
+        {
+            CheckAttempt(request.Task);
+            try { (spool ?? throw new InvalidOperationException("Host has no durable attempt spool.")).Confirm(request.Sequence); }
+            catch (Exception error) when (error is InvalidDataException or InvalidOperationException)
+            { throw new RpcException(new Status(StatusCode.FailedPrecondition, error.Message)); }
+            return Task.FromResult(new HostReply());
+        }
+    }
+
+    public override async Task<HostReply> StoreResource(ResourceSample request, ServerCallContext context)
+    {
+        var current = await spoolReady.Task.WaitAsync(context.CancellationToken);
+        lock (sync)
+        {
+            CheckAttempt(request.Task);
+            if (request.ReservationEpoch != boundDispatch!.ReservationEpoch)
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Resource sample reservation does not match."));
+            current?.Resource(request);
+            Volatile.Write(ref lastNativeSample, Stopwatch.GetTimestamp());
+            return new HostReply();
+        }
+    }
+
+    public override Task<HostReply> SealRecords(RecordCursor request, ServerCallContext context)
+    {
+        lock (sync)
+        {
+            CheckAttempt(request.Task);
+            spool?.SealRecords();
+            return Task.FromResult(new HostReply());
+        }
     }
 
     private void CheckAttempt(AttemptRef? task)
@@ -400,13 +488,17 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
         // Ensure Execute returns before user code can synchronously block the gRPC worker.
         await Task.Yield();
         var watch = Stopwatch.StartNew();
+        var redactor = new SecretRedactor(secrets.Values.Concat(boundRedactionValues));
+        await using var capture = spool is null ? null : new TaskOutputCapture(spool, redactor);
+        using var samplingStop = new CancellationTokenSource();
+        var samples = spool is null ? Task.CompletedTask : SampleOfflineAsync();
         using var deadlineCancellation = new CancellationTokenSource();
         using var deadlineStop = new CancellationTokenSource();
         var remaining = deadline - DateTimeOffset.UtcNow;
         if (remaining <= TimeSpan.Zero) deadlineCancellation.Cancel();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(attemptCancellation!.Token, deadlineCancellation.Token);
         var deadlineTimer = remaining <= TimeSpan.Zero ? Task.CompletedTask : CancelAtDeadlineAsync();
-        var result = new TaskCompleted { Task = dispatch.Task.Clone() };
+        var result = new TaskCompleted { Task = dispatch.Task.Clone(), ReservationEpoch = dispatch.ReservationEpoch };
         var observedOutOfMemory = 0;
         EventHandler<FirstChanceExceptionEventArgs>? memoryHandler = dispatch.Limits?.RamMb > 0
             ? (_, args) =>
@@ -492,6 +584,9 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
             progress.Writer.TryComplete();
             await deadlineStop.CancelAsync();
             await deadlineTimer;
+            await samplingStop.CancelAsync();
+            await samples;
+            if (capture is not null) await capture.CompleteAsync();
         }
         if (Volatile.Read(ref observedOutOfMemory) != 0)
         {
@@ -504,7 +599,41 @@ internal sealed class TaskHostService(WorkflowDefinition workflow) : TaskHost.Ta
                 OutputJsonContext.Default.ImmutableDictionaryStringJsonElement));
         result.At = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow);
         result.ResourceSummary = new ResourceSummary { ElapsedMs = (ulong)watch.ElapsedMilliseconds };
-        return result;
+        result = redactor.RedactResult(result);
+        return spool?.Complete(result) ?? result;
+
+        async Task SampleOfflineAsync()
+        {
+            using var process = Process.GetCurrentProcess();
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            TimeSpan? previousCpu = null;
+            long previousAt = 0;
+            try
+            {
+                while (await timer.WaitForNextTickAsync(samplingStop.Token))
+                {
+                    var now = Stopwatch.GetTimestamp();
+                    if (Stopwatch.GetElapsedTime(Volatile.Read(ref lastNativeSample), now) < TimeSpan.FromSeconds(2)) continue;
+                    process.Refresh();
+                    var cpu = process.TotalProcessorTime;
+                    var interval = previousCpu is null ? (double?)null : Stopwatch.GetElapsedTime(previousAt, now).TotalSeconds;
+                    var point = new ResourcePoint(DateTimeOffset.UtcNow, interval,
+                        previousCpu is { } previous && interval > 0 ? Math.Max(0, (cpu - previous).TotalSeconds / interval.Value * 100) : null,
+                        checked((ulong)process.WorkingSet64), null, null, null, null, null, null,
+                        "process", "process-rss", "unavailable",
+                        interval is null ? "First host-owned sample; no CPU baseline." : null, null,
+                        "Agent disconnected; host-only sampling cannot resume native network accounting.",
+                        "Agent disconnected; native network rates unavailable.");
+                    var observation = new ResourceObservation(point, null, "Agent disconnected; machine counters unavailable.");
+                    spool!.Resource(new ResourceSample { Task = dispatch.Task.Clone(), ReservationEpoch = dispatch.ReservationEpoch,
+                        SampleJson = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(observation,
+                            ResourceJsonContext.Default.ResourceObservation)) });
+                    previousCpu = cpu;
+                    previousAt = now;
+                }
+            }
+            catch (OperationCanceledException) when (samplingStop.IsCancellationRequested) { }
+        }
 
         async Task CancelAtDeadlineAsync()
         {

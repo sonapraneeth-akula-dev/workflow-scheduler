@@ -57,11 +57,13 @@ internal static class LinuxHostSupervisor
         using var worker = Process.Start(start) ?? throw new InvalidOperationException("Task-host worker did not start.");
         worker.StandardInput.Close();
         var exited = worker.WaitForExitAsync();
+        var deadline = WatchDeadlineAsync();
         var parentGone = Task.Run(() => Console.OpenStandardInput().ReadByte());
         var stop = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-        var completed = await Task.WhenAny(exited, parentGone, requestedStop, stop);
+        var completed = await Task.WhenAny(exited, parentGone, requestedStop, stop, deadline);
         if (completed == parentGone && await parentGone == -1)
-            completed = await Task.WhenAny(exited, requestedStop, stop);
+            completed = await Task.WhenAny(exited, requestedStop, stop, deadline);
+        if (completed == deadline) await deadline;
         var forced = completed != exited;
         if (forced) KillChildren();
         await exited;
@@ -76,6 +78,8 @@ internal static class LinuxHostSupervisor
             await Task.Delay(10, CancellationToken.None);
         }
         await controlStop.CancelAsync();
+        try { await deadline; }
+        catch (OperationCanceledException) when (controlStop.IsCancellationRequested) { }
         try { await requestedStop; }
         catch (OperationCanceledException) when (controlStop.IsCancellationRequested) { }
         using (var certificate = new FileStream(socketPath + ".exited", FileMode.CreateNew, FileAccess.Write, FileShare.Read))
@@ -85,6 +89,23 @@ internal static class LinuxHostSupervisor
         }
         // Zero is the supervisor's physical-quiescence certificate, not the workflow's exit status.
         return 0;
+
+        async Task WatchDeadlineAsync()
+        {
+            var directory = Environment.GetEnvironmentVariable("WF_TASK_HOST_ATTEMPT_DIRECTORY");
+            if (directory is null)
+                await Task.Delay(Timeout.InfiniteTimeSpan, controlStop.Token);
+            while (true)
+            {
+                var dispatch = HostDeadline.ReadDispatch(directory!);
+                if (dispatch is not null && HostDeadline.Expired(dispatch))
+                {
+                    HostDeadline.SaveTimeout(directory!, dispatch);
+                    return;
+                }
+                await Task.Delay(100, controlStop.Token);
+            }
+        }
 
         async Task ReceiveStopAsync()
         {

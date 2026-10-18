@@ -65,8 +65,8 @@ jobs:
         env:
           WF_API_DRAIN_SIGNAL: "true"
         run: dotnet test backend/tests/Wf.Integration.Tests --configuration Release --no-build --filter "FullyQualifiedName~ApiDrainTests.Linux_SIGTERM"
-      - name: Verify native agent restart and authenticated host re-adoption
-        run: dotnet test backend/tests/Wf.Integration.Tests --configuration Release --no-build --filter "FullyQualifiedName~HostSurvivalTests" --logger "trx;LogFileName=host-readoption.trx" --results-directory host-readoption-results
+      - name: Verify native agent restart, durable host replay and hard deadlines
+        run: dotnet test backend/tests/Wf.Integration.Tests --configuration Release --no-build --filter "FullyQualifiedName~HostSurvivalTests|FullyQualifiedName~AgentRestartTests" --logger "trx;LogFileName=host-readoption.trx" --results-directory host-readoption-results
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -138,13 +138,13 @@ jobs:
             --mount "type=bind,source=$GITHUB_WORKSPACE,target=/repo" --workdir /repo \
             mcr.microsoft.com/dotnet/sdk:10.0-noble-aot \
             bash infra/agent/test-resource-sampling.sh --without-bpf
-      - name: Verify actual agent loss, host re-adoption, RAM failures and durable replay
+      - name: Verify actual agent loss, durable host replay, hard deadlines and RAM failures
         run: |
           set -euo pipefail
           docker run --rm --privileged --cgroupns=private --network host \
             --env 'WF_TEST_POSTGRES=Host=127.0.0.1;Username=postgres;Database=postgres' \
             --env WF_RESOURCE_ISOLATED_CONTAINER=1 \
-            --env 'WF_RESOURCE_TEST_FILTER=ResourceLimitExecutionTests|HostSurvivalTests' \
+            --env 'WF_RESOURCE_TEST_FILTER=ResourceLimitExecutionTests|HostSurvivalTests|AgentRestartTests' \
             --env WF_RESOURCE_TEST_PROJECT=backend/tests/Wf.Integration.Tests \
             --env WF_RESOURCE_ARTIFACTS=/repo/.agent-artifacts/limits-linux \
             --mount "type=bind,source=$GITHUB_WORKSPACE,target=/repo" --workdir /repo \

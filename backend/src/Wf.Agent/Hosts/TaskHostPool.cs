@@ -155,7 +155,7 @@ public sealed partial class TaskHostPool : IAsyncDisposable
         Action<TaskCompleted>? journalResult = null, Func<string, string, Task>? captureLog = null,
         SecretMasker? secretMasker = null, Action<AgentMessage>? publishResources = null,
         Func<CheckpointSaved, CancellationToken, Task>? publishCheckpoint = null,
-        Action<TaskProgress>? publishProgress = null)
+        Action<TaskProgress>? publishProgress = null, Func<AttemptRecord, Task<bool>>? captureRecord = null)
     {
         ArgumentNullException.ThrowIfNull(package);
         ArgumentNullException.ThrowIfNull(dispatch);
@@ -190,6 +190,11 @@ public sealed partial class TaskHostPool : IAsyncDisposable
         using var limitStop = new CancellationTokenSource();
         using var memoryBreach = new CancellationTokenSource();
         Task limitMonitor = Task.CompletedTask;
+        IDisposable? resourceTracking = null;
+        var acceptingResourceRecords = 1;
+        var resourceCapture = new object();
+        var pendingResources = new List<ResourceSample>();
+        var resourceReady = false;
         try
         {
             lock (host)
@@ -224,14 +229,19 @@ public sealed partial class TaskHostPool : IAsyncDisposable
                     await binding.ResponseAsync;
                 }
             }
-            using var resourceTracking = sampling?.Track(host.Process, dispatch.Task, host.ResourceScope,
+            host.CaptureLog = captureLog;
+            resourceTracking = sampling?.Track(host.Process, dispatch.Task, host.ResourceScope,
                 host.ResourceUnavailableReason, publishResources is null ? null : message =>
                 {
-                    host.Containment.RecordResourceSample(message.ResourceSample);
-                    publishResources(message);
+                    lock (resourceCapture)
+                    {
+                        if (Volatile.Read(ref acceptingResourceRecords) == 0) return;
+                        if (!resourceReady) pendingResources.Add(message.ResourceSample);
+                        else StoreResource(message.ResourceSample);
+                    }
                 }, dispatch.ReservationEpoch, host.ResourceSequence);
-            host.CaptureLog = captureLog;
             var request = new ExecuteRequest { Dispatch = dispatch.Clone(), NodeOutputsJson = nodeOutputsJson ?? dispatch.NodeOutputsJson };
+            request.RedactionValues.Add((secretMasker ?? new SecretMasker([])).Values);
             using var deadline = new CancellationTokenSource();
             var remaining = dispatch.DeadlineAt.ToDateTimeOffset() - DateTimeOffset.UtcNow;
             if (remaining <= TimeSpan.Zero) deadline.Cancel();
@@ -243,6 +253,14 @@ public sealed partial class TaskHostPool : IAsyncDisposable
                     deadline: host.Adopted ? DateTime.UtcNow.AddSeconds(3) : null,
                     cancellationToken: host.Adopted ? cancellationToken : stop.Token);
                 var requiredSecrets = await required.ResponseAsync;
+                if (host.Adopted)
+                {
+                    if (requiredSecrets.RecoveredRedactionValues.Count > 128 ||
+                        requiredSecrets.RecoveredRedactionValues.Any(string.IsNullOrEmpty) ||
+                        requiredSecrets.RecoveredRedactionValues.Sum(Encoding.UTF8.GetByteCount) > 128 * 1024)
+                        throw new SecretResolutionException();
+                    request.RedactionValues.Add(requiredSecrets.RecoveredRedactionValues);
+                }
                 var references = requiredSecrets.Names;
                 if (references.Count > 128 || references.Any(name => !SecretReference.IsValidName(name)))
                     throw new SecretResolutionException();
@@ -266,7 +284,8 @@ public sealed partial class TaskHostPool : IAsyncDisposable
             }
             catch (SecretResolutionException error)
             {
-                host.Masker = (secretMasker ?? new SecretMasker([])).WithValues(request.ResolvedSecrets.Values);
+                host.Masker = (secretMasker ?? new SecretMasker([])).WithValues(
+                    request.ResolvedSecrets.Values.Concat(request.RedactionValues));
                 return SecretFailure(host.Masker.Redact(error.Message));
             }
             catch (RpcException error) when (error.StatusCode == StatusCode.InvalidArgument &&
@@ -285,77 +304,98 @@ public sealed partial class TaskHostPool : IAsyncDisposable
             // Keep manually supplied maskers for existing callers, while always masking real resolved values.
             host.Masker = (secretMasker ?? new SecretMasker([])).WithValues(request.ResolvedSecrets.Values);
             host.HasSecrets = request.ResolvedSecrets.Count != 0;
-            if (host.Adopted) request.ResolvedSecrets.Clear();
+            if (host.Adopted) { request.ResolvedSecrets.Clear(); request.RedactionValues.Clear(); }
             using var checkpointStop = new CancellationTokenSource();
             using var checkpointStream = host.Client.Checkpoints(new ReadyRequest(), cancellationToken: checkpointStop.Token);
             using var progressStream = host.Client.Progress(new ReadyRequest(), cancellationToken: checkpointStop.Token);
+            using var recordStream = host.Client.Records(new RecordCursor { Task = dispatch.Task.Clone() },
+                cancellationToken: checkpointStop.Token);
             var forwarding = ForwardCheckpoints();
             var progressForwarding = ForwardProgress();
+            var recordForwarding = ForwardRecords();
             using var call = host.Adopted ? host.Client.ResumeAsync(request) : host.Client.ExecuteAsync(request);
+            lock (resourceCapture)
+            {
+                resourceReady = true;
+                foreach (var sample in pendingResources) StoreResource(sample);
+                pendingResources.Clear();
+            }
             TaskCompleted result;
             try
             {
-                var first = await (host.Limiter is null
-                    ? Task.WhenAny(call.ResponseAsync, forwarding, progressForwarding)
-                    : Task.WhenAny(call.ResponseAsync, forwarding, progressForwarding, limitMonitor)).WaitAsync(stop.Token);
-                if (host.Limiter is not null && first == limitMonitor)
+                try
                 {
-                    await limitMonitor;
-                    if (memoryBreach.IsCancellationRequested) throw new ResourceLimitException();
-                    throw new InvalidOperationException("Task-host resource monitor stopped before execution completed.");
-                }
-                if (first != call.ResponseAsync) await first;
-                result = await call.ResponseAsync.WaitAsync(stop.Token);
-            }
-            catch (OperationCanceledException) when (stop.IsCancellationRequested)
-            {
-                if (memoryBreach.IsCancellationRequested) throw new ResourceLimitException();
-                var timedOut = deadline.IsCancellationRequested;
-                using var cancel = host.Client.CancelAsync(new CancelRequest { Task = dispatch.Task, TimedOut = timedOut },
-                    deadline: DateTime.UtcNow.AddSeconds(3));
-                try { await cancel.ResponseAsync; }
-                catch (RpcException exception) when (exception.StatusCode is StatusCode.Unavailable or StatusCode.DeadlineExceeded or StatusCode.NotFound)
-                {
-                    logger.LogWarning("Task host {Pid} did not accept cancellation: {Status}.", host.Process.Id, exception.StatusCode);
-                }
-                try { result = await call.ResponseAsync.WaitAsync(grace); }
-                catch (TimeoutException)
-                {
-                    logger.LogWarning("Task host {Pid} ignored cancellation; killing its process tree.", host.Process.Id);
-                    await checkpointStop.CancelAsync();
-                    await Task.WhenAll(forwarding, progressForwarding);
-                    await host.Containment.StopAsync(host.Process);
-                    return new TaskCompleted
+                    var first = await (host.Limiter is null
+                        ? Task.WhenAny(call.ResponseAsync, forwarding, progressForwarding, recordForwarding)
+                        : Task.WhenAny(call.ResponseAsync, forwarding, progressForwarding, recordForwarding, limitMonitor)).WaitAsync(stop.Token);
+                    if (host.Limiter is not null && first == limitMonitor)
                     {
-                        Task = dispatch.Task.Clone(), At = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow),
-                        Outcome = timedOut ? TaskOutcome.TimedOut : TaskOutcome.Cancelled,
-                        Error = new TaskError
-                        {
-                            Category = timedOut ? "Timeout" : "Aborted", NonRetryable = !timedOut,
-                            Message = $"Task host ignored cancellation for {grace}; its process tree was terminated."
-                        }
-                    };
+                        await limitMonitor;
+                        if (memoryBreach.IsCancellationRequested) throw new ResourceLimitException();
+                        throw new InvalidOperationException("Task-host resource monitor stopped before execution completed.");
+                    }
+                    if (first != call.ResponseAsync) await first;
+                    result = await call.ResponseAsync.WaitAsync(stop.Token);
                 }
+                catch (OperationCanceledException) when (stop.IsCancellationRequested)
+                {
+                    if (memoryBreach.IsCancellationRequested) throw new ResourceLimitException();
+                    var timedOut = deadline.IsCancellationRequested;
+                    using var cancel = host.Client.CancelAsync(new CancelRequest { Task = dispatch.Task, TimedOut = timedOut },
+                        deadline: DateTime.UtcNow.AddSeconds(3));
+                    try { await cancel.ResponseAsync; }
+                    catch (RpcException exception) when (exception.StatusCode is StatusCode.Unavailable or StatusCode.DeadlineExceeded or StatusCode.NotFound)
+                    {
+                        logger.LogWarning("Task host {Pid} did not accept cancellation: {Status}.", host.Process.Id, exception.StatusCode);
+                    }
+                    try { result = await call.ResponseAsync.WaitAsync(grace); }
+                    catch (TimeoutException)
+                    {
+                        logger.LogWarning("Task host {Pid} ignored cancellation; killing its process tree.", host.Process.Id);
+                        await checkpointStop.CancelAsync();
+                        await Task.WhenAll(forwarding, progressForwarding, recordForwarding);
+                        await host.Containment.StopAsync(host.Process);
+                        return new TaskCompleted
+                        {
+                            Task = dispatch.Task.Clone(), At = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow),
+                            Outcome = timedOut ? TaskOutcome.TimedOut : TaskOutcome.Cancelled,
+                            Error = new TaskError
+                            {
+                                Category = timedOut ? "Timeout" : "Aborted", NonRetryable = !timedOut,
+                                Message = $"Task host ignored cancellation for {grace}; its process tree was terminated."
+                            }
+                        };
+                    }
+                }
+                StopSampling();
+                using var seal = host.Client.SealRecordsAsync(new RecordCursor { Task = dispatch.Task.Clone() },
+                    deadline: DateTime.UtcNow.AddSeconds(3));
+                await seal.ResponseAsync;
+                // The result does not acknowledge earlier output: commit every producer record first.
+                await recordForwarding.WaitAsync(TimeSpan.FromSeconds(30));
             }
             finally
             {
                 await checkpointStop.CancelAsync();
-                await Task.WhenAll(forwarding, progressForwarding);
+                await Task.WhenAll(forwarding, progressForwarding, recordForwarding);
             }
             if (result.Task is null || !result.Task.Equals(dispatch.Task) ||
                 result.Outcome == TaskOutcome.Unspecified || !System.Enum.IsDefined(result.Outcome))
                 throw new InvalidDataException("Task host returned an invalid attempt result.");
             if (host.Limiter?.MemoryLimitExceeded == true || limits?.RamMb > 0 && result.Error?.Category == "ResourceLimit")
                 throw new ResourceLimitException();
-            resourceTracking?.Dispose();
+            StopSampling();
             result = OutputsGuard.Apply(result, host.Masker);
             if (host.Limiter is null) journalResult?.Invoke(result);
-            using var acknowledgement = host.Client.AcknowledgeAsync(new AcknowledgeRequest { Task = dispatch.Task },
-                deadline: DateTime.UtcNow.AddSeconds(5));
-            await acknowledgement.ResponseAsync;
-            await host.Process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
-            if (!host.Adopted && host.Process.ExitCode != 0)
-                throw new InvalidOperationException($"Task host exited with code {host.Process.ExitCode}: {host.Diagnostics}");
+            if (!host.PreserveSpool)
+            {
+                using var acknowledgement = host.Client.AcknowledgeAsync(new AcknowledgeRequest { Task = dispatch.Task },
+                    deadline: DateTime.UtcNow.AddSeconds(5));
+                await acknowledgement.ResponseAsync;
+                await host.Process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                if (!host.Adopted && host.Process.ExitCode != 0)
+                    throw new InvalidOperationException($"Task host exited with code {host.Process.ExitCode}: {host.Diagnostics}");
+            }
             if (host.Limiter is not null)
             {
                 if (host.Limiter.MemoryLimitExceeded) throw new ResourceLimitException();
@@ -404,12 +444,65 @@ public sealed partial class TaskHostPool : IAsyncDisposable
                 catch (OperationCanceledException) when (checkpointStop.IsCancellationRequested) { }
                 catch (RpcException error) when (checkpointStop.IsCancellationRequested && error.StatusCode == StatusCode.Cancelled) { }
             }
+
+            async Task ForwardRecords()
+            {
+                ulong previous = 0;
+                try
+                {
+                    await foreach (var record in recordStream.ResponseStream.ReadAllAsync(checkpointStop.Token))
+                    {
+                        if (record.Sequence <= previous || !record.Task.Equals(dispatch.Task) ||
+                            record.ReservationEpoch != dispatch.ReservationEpoch)
+                            throw new InvalidDataException("Task-host record cursor or attempt identity is invalid.");
+                        if (record.Log is { } log)
+                        {
+                            if (log.At is null || log.Stream is not ("stdout" or "stderr") || log.Text.Length > 64 * 1024)
+                                throw new InvalidDataException("Invalid task-host log record.");
+                            if (captureRecord is not null)
+                            {
+                                if (!await captureRecord(record)) host.PreserveSpool = true;
+                            }
+                            else if (captureLog is not null) await captureLog(log.Stream, host.Masker.Redact(log.Text));
+                            else logger.LogInformation("Task host {Pid}: {Line}", host.Id, host.Masker.Redact(log.Text));
+                        }
+                        else if (record.Resource is { } sample)
+                        {
+                            if (!sample.Task.Equals(dispatch.Task) || sample.ReservationEpoch != dispatch.ReservationEpoch)
+                                throw new InvalidDataException("Task-host resource record does not match its attempt.");
+                            _ = Wf.Contracts.Resources.ResourceContract.Parse(sample.SampleJson.Memory);
+                            host.Containment.RecordResourceSample(sample);
+                            publishResources?.Invoke(new AgentMessage { ResourceSample = sample });
+                        }
+                        else if (record.Progress is { } update)
+                        {
+                            _ = Wf.Contracts.Progress.TaskProgressProtocol.Validate(update);
+                            if (!update.Task.Equals(dispatch.Task) || update.ReservationEpoch != dispatch.ReservationEpoch)
+                                throw new InvalidDataException("Task-host progress record does not match its attempt.");
+                            if (publishProgress is null)
+                                throw new InvalidOperationException("Durable task progress journaling is not configured at the agent.");
+                            publishProgress(update);
+                        }
+                        else throw new InvalidDataException("Unknown task-host record payload.");
+                        if (!host.PreserveSpool)
+                        {
+                            using var confirmed = host.Client.ConfirmRecordsAsync(new RecordCursor
+                                { Task = dispatch.Task.Clone(), Sequence = record.Sequence }, cancellationToken: checkpointStop.Token);
+                            await confirmed.ResponseAsync;
+                        }
+                        previous = record.Sequence;
+                    }
+                }
+                catch (OperationCanceledException) when (checkpointStop.IsCancellationRequested) { }
+                catch (RpcException error) when (checkpointStop.IsCancellationRequested && error.StatusCode == StatusCode.Cancelled) { }
+            }
         }
         catch (Exception error) when (error is ResourceLimitException ||
             error is RpcException { StatusCode: StatusCode.Unavailable or StatusCode.Cancelled or StatusCode.Unknown or
                 StatusCode.Internal or StatusCode.DeadlineExceeded or StatusCode.ResourceExhausted } &&
             host.Limiter?.MemoryLimitExceeded == true)
         {
+            StopSampling();
             await StopLimitMonitorAsync();
             await ReleaseAsync(host);
             var result = new TaskCompleted
@@ -426,8 +519,25 @@ public sealed partial class TaskHostPool : IAsyncDisposable
         { throw new InvalidOperationException(host.Masker.Redact(error.Message)); }
         finally
         {
-            try { await StopLimitMonitorAsync(); }
+            try { StopSampling(); await StopLimitMonitorAsync(); }
             finally { await ReleaseAsync(host); }
+        }
+
+        void StopSampling()
+        {
+            try { Interlocked.Exchange(ref resourceTracking, null)?.Dispose(); }
+            finally { Interlocked.Exchange(ref acceptingResourceRecords, 0); }
+        }
+
+        void StoreResource(ResourceSample sample)
+        {
+            try
+            {
+                using var saved = host.Client.StoreResourceAsync(sample, deadline: DateTime.UtcNow.AddSeconds(3));
+                saved.ResponseAsync.GetAwaiter().GetResult();
+            }
+            catch (RpcException error) when (Volatile.Read(ref acceptingResourceRecords) == 0 || host.Process.HasExited)
+            { logger.LogDebug("Task-host resource capture ended with its process ({Status}).", error.StatusCode); }
         }
 
         async Task StopLimitMonitorAsync()
@@ -568,9 +678,10 @@ public sealed partial class TaskHostPool : IAsyncDisposable
                         if (prewarming && !warm.Contains(host)) return null;
                     }
                     var ready = await call.ResponseAsync;
-                    if (ready.ProtocolVersion != 8 || ready.ProcessId != process.Id || ready.WorkflowVersion != package.Version || ready.Bound)
+                    if (ready.ProtocolVersion != 9 || ready.ProcessId != process.Id || ready.WorkflowVersion != package.Version || ready.Bound)
                         throw new InvalidDataException("Task-host readiness identity, version or state is invalid.");
                     containment.VerifyReady();
+                    await containment.StartGuardAsync(info, process, readiness.Token);
                     await TrimWarmAsync(prewarming ? host : null);
                     if (prewarming && !warm.Contains(host)) return null;
                     host.IdleSince = clock.GetTimestamp();
@@ -663,7 +774,11 @@ public sealed partial class TaskHostPool : IAsyncDisposable
             finally
             {
                 await host.Containment.StopAsync(host.Process);
-                host.Containment.Complete();
+                var spool = Path.Combine(host.Containment.AttemptDirectory, "spool");
+                if (Directory.Exists(spool) && Directory.EnumerateFiles(spool, "*.record").Any())
+                    host.PreserveSpool = true;
+                if (host.PreserveSpool) host.Containment.PreserveSpool();
+                else host.Containment.Complete();
             }
         }
         catch (Exception exception)
@@ -728,7 +843,7 @@ public sealed partial class TaskHostPool : IAsyncDisposable
                 continue;
             }
             long bytes;
-            try { bytes = WarmWorkingSet(host.Process); }
+            try { bytes = checked(WarmWorkingSet(host.Process) + host.Containment.GuardWorkingSet); }
             catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
             {
                 logger.LogWarning(exception, "Cannot sample warm task host {Pid}; evicting it.", host.Id);
@@ -860,6 +975,7 @@ public sealed partial class TaskHostPool : IAsyncDisposable
         public Func<string, string, Task>? CaptureLog { get; set; }
         public SecretMasker Masker { get; set; } = new([]);
         public bool HasSecrets { get; set; }
+        public bool PreserveSpool { get; set; }
         public bool Adopted { get; }
         public ulong ResourceSequence { get; init; }
         public string Diagnostics => string.Join(Environment.NewLine, diagnostics);

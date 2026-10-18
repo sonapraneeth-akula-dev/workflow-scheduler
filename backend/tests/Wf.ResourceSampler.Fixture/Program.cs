@@ -71,6 +71,8 @@ namespace Wf.Agent.ResourceFixture
             await WaitAsync(request.Go, timeout.Token);
             var port = int.Parse(await File.ReadAllTextAsync(request.Go, timeout.Token), CultureInfo.InvariantCulture);
             socket.Connect(new IPEndPoint(address, port));
+            await WriteAsync(request.Ready + ".connected", "1", timeout.Token);
+            await WaitAsync(request.Go + ".connected", timeout.Token);
             var send = new byte[request.SendBytes];
             var receive = new byte[request.ReceiveBytes + 1];
             for (var index = 0; index < request.Count; index++)

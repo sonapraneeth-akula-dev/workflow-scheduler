@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Net.Sockets;
 using System.Text;
+using System.Globalization;
 using Microsoft.Win32.SafeHandles;
 
 namespace Wf.Agent.Hosts;
@@ -22,9 +23,22 @@ internal sealed partial class TaskHostContainment : IDisposable
     private readonly bool adopted;
     private TaskHostAttempt? attempt;
     private bool completed;
+    private bool physicalCertificate;
+    private Process? guard;
     internal string Token => receiptToken;
     internal string ResourceJobName => $"Local\\wf-task-limits-{receiptToken}";
     internal string LifetimePath => recovery.LifetimePath;
+    internal string AttemptDirectory => recovery.AttemptDirectory;
+    internal long GuardWorkingSet
+    {
+        get
+        {
+            if (guard is null) return 0;
+            guard.Refresh();
+            if (guard.HasExited) throw new InvalidOperationException("Task-host deadline guard exited before its warm host.");
+            return guard.WorkingSet64;
+        }
+    }
 
     public TaskHostContainment(HostRecoveryBarrier barrier, ProcessStartInfo start, string socketPath)
     {
@@ -35,8 +49,12 @@ internal sealed partial class TaskHostContainment : IDisposable
             start.RedirectStandardInput = true;
             start.Environment["WF_TASK_HOST_CONTAINMENT"] = "1";
             start.Environment["WF_TASK_HOST_CONTAINMENT_TOKEN"] = receiptToken;
+            start.Environment["WF_TASK_HOST_ATTEMPT_DIRECTORY"] = recovery.AttemptDirectory;
             start.Environment.Remove("WF_TASK_HOST_SUPERVISOR_PID");
             start.Environment.Remove("WF_TASK_HOST_LIFETIME_JOB");
+            start.Environment.Remove("WF_TASK_HOST_GUARD");
+            start.Environment.Remove("WF_TASK_HOST_GUARD_TARGET");
+            start.Environment.Remove("WF_TASK_HOST_GUARD_START");
             if (OperatingSystem.IsWindows())
             {
                 jobName = $"Local\\wf-task-host-{receiptToken}";
@@ -60,6 +78,12 @@ internal sealed partial class TaskHostContainment : IDisposable
         startIdentity = record.StartIdentity;
         adopted = true;
         attempt = record;
+        if (HasAgentPhysicalAcknowledgement())
+        {
+            if (process is not null) throw new InvalidDataException("Physically acknowledged task-host identity is still running.");
+            physicalCertificate = bound = true;
+            return;
+        }
         if (OperatingSystem.IsWindows())
         {
             job = OpenJob(0x1F003F, false, jobName!);
@@ -67,7 +91,10 @@ internal sealed partial class TaskHostContainment : IDisposable
             {
                 var error = Marshal.GetLastPInvokeError();
                 job.Dispose();
-                throw new Win32Exception(error, "Open task-host lifetime job failed; descendant quiescence is unproven.");
+                if (error != 2 || process is not null || !(HasPhysicalCertificate() || HasAgentPhysicalAcknowledgement()))
+                    throw new Win32Exception(error, "Open task-host lifetime job failed; descendant quiescence is unproven.");
+                physicalCertificate = true;
+                job = null;
             }
             if (process is not null && (job is null || IsInJob(process.Handle, job, out var member) == 0 || member == 0))
             { job?.Dispose(); throw new InvalidDataException("Recovered process is not a member of its recorded lifetime job."); }
@@ -114,6 +141,26 @@ internal sealed partial class TaskHostContainment : IDisposable
             throw new InvalidDataException("SDK task host did not establish mandatory Linux subreaper containment.");
     }
 
+    public async Task StartGuardAsync(ProcessStartInfo template, Process process, CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var start = new ProcessStartInfo(template.FileName) { UseShellExecute = false, WorkingDirectory = template.WorkingDirectory };
+        foreach (var argument in template.ArgumentList) start.ArgumentList.Add(argument);
+        foreach (var pair in template.Environment) start.Environment[pair.Key] = pair.Value;
+        start.Environment["WF_TASK_HOST_GUARD"] = "1";
+        start.Environment["WF_TASK_HOST_GUARD_TARGET"] = process.Id.ToString(CultureInfo.InvariantCulture);
+        start.Environment["WF_TASK_HOST_GUARD_START"] = process.StartTime.ToFileTimeUtc().ToString(CultureInfo.InvariantCulture);
+        guard = Process.Start(start) ?? throw new InvalidOperationException("Independent task-host deadline guard did not start.");
+        var ready = Path.Combine(recovery.AttemptDirectory, "guard-ready");
+        while (!File.Exists(ready))
+        {
+            if (guard.HasExited) throw new InvalidOperationException($"Independent task-host deadline guard exited with code {guard.ExitCode}.");
+            await Task.Delay(10, cancellationToken);
+        }
+        if (ReadReceipt(ready) != receiptToken)
+            throw new InvalidDataException("Task-host deadline guard readiness identity is invalid.");
+    }
+
     public Task StopAsync(Process? process)
     {
         lock (sync) return stopping ??= StopCoreAsync(process);
@@ -123,6 +170,7 @@ internal sealed partial class TaskHostContainment : IDisposable
     {
         if (!bound)
             throw new InvalidOperationException("Task-host containment was not bound; physical quiescence is unproven.");
+        if (physicalCertificate) return;
         if (job is not null)
         {
             if (Terminate(job, 137) == 0)
@@ -134,6 +182,13 @@ internal sealed partial class TaskHostContainment : IDisposable
                     throw new TimeoutException("Owned task-host job did not become physically empty; machine remains quarantined.");
                 await Task.Delay(10);
             }
+            if (File.Exists(Path.Combine(recovery.AttemptDirectory, "guard-ready")))
+                while (!HasPhysicalCertificate())
+                {
+                    if (until.Elapsed > TimeSpan.FromSeconds(10))
+                        throw new TimeoutException("Task-host deadline guard did not confirm its final physical cleanup.");
+                    await Task.Delay(10);
+                }
         }
         else
         {
@@ -173,7 +228,7 @@ internal sealed partial class TaskHostContainment : IDisposable
         }
         if (process is not null) await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
         var certificate = receiptPath[..^".lifetime".Length] + ".exited";
-        if (job is null && (!File.Exists(certificate) || File.ReadAllText(certificate) != receiptToken))
+        if (OperatingSystem.IsLinux() && (!File.Exists(certificate) || File.ReadAllText(certificate) != receiptToken))
             throw new InvalidOperationException("Linux task-host supervisor failed; physical quiescence is unproven and machine remains quarantined.");
     }
 
@@ -182,21 +237,67 @@ internal sealed partial class TaskHostContainment : IDisposable
         lock (sync)
         {
             job?.Dispose();
-            File.Delete(receiptPath);
-            File.Delete(receiptPath[..^".lifetime".Length] + ".control");
-            File.Delete(receiptPath[..^".lifetime".Length] + ".exited");
+            RemoveRuntimeReceipts();
             recovery.Complete();
             completed = true;
+            guard?.Dispose();
         }
+    }
+
+    public void PreserveSpool()
+    {
+        lock (sync)
+        {
+            var path = Path.Combine(recovery.AttemptDirectory, "physical-ack");
+            using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+            {
+                file.Write(Encoding.ASCII.GetBytes(receiptToken));
+                file.Flush(flushToDisk: true);
+            }
+            job?.Dispose();
+            guard?.Dispose();
+            RemoveRuntimeReceipts();
+            recovery.Abandon();
+            completed = true;
+        }
+    }
+
+    private void RemoveRuntimeReceipts()
+    {
+        if (!Directory.Exists(Path.GetDirectoryName(receiptPath))) return;
+        File.Delete(receiptPath);
+        File.Delete(receiptPath[..^".lifetime".Length] + ".control");
+        File.Delete(receiptPath[..^".lifetime".Length] + ".exited");
     }
 
     public void Dispose()
     {
         job?.Dispose();
+        guard?.Dispose();
         recovery.Abandon();
     }
 
     private bool HasReceipt() => File.Exists(receiptPath) && File.ReadAllText(receiptPath) == receiptToken;
+    private bool HasPhysicalCertificate()
+    {
+        var path = Path.Combine(recovery.AttemptDirectory, "host-exited");
+        return File.Exists(path) && ReadReceipt(path) == receiptToken;
+    }
+    private bool HasAgentPhysicalAcknowledgement() => HasAgentPhysicalAcknowledgement(recovery.AttemptDirectory, receiptToken);
+    internal static bool HasAgentPhysicalAcknowledgement(string directory, string token)
+    {
+        var path = Path.Combine(directory, "physical-ack");
+        Wf.Agent.Logs.LogSpooler.RejectLinks(path);
+        return File.Exists(path) && ReadReceipt(path) == token;
+    }
+
+    private static string ReadReceipt(string path)
+    {
+        using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+        if (file.Length != 32) throw new InvalidDataException("Task-host containment receipt has an invalid size.");
+        using var reader = new StreamReader(file, Encoding.ASCII);
+        return reader.ReadToEnd();
+    }
 
     private unsafe uint ActiveProcesses()
     {

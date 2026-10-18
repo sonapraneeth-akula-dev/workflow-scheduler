@@ -52,8 +52,8 @@ public sealed class SecretMaskerTests
         var stream = new SecretMasker(["secret"]).CreateStream();
         Assert.Equal("", stream.Append("sec"));
         Assert.Equal("", stream.Append(""));
-        Assert.Equal("", stream.Append("ret"));
-        Assert.Equal("***", stream.Complete());
+        Assert.Equal("***", stream.Append("ret"));
+        Assert.Equal("", stream.Complete());
         var unfinished = new SecretMasker(["secret"]).CreateStream();
         Assert.Equal("", unfinished.Append("sec"));
         Assert.Equal("sec", unfinished.Complete());
@@ -63,8 +63,8 @@ public sealed class SecretMaskerTests
     public void Shorter_secret_is_not_lost_behind_longer_value_lookahead()
     {
         var stream = new SecretMasker(["ab", "abcdef"]).CreateStream();
-        Assert.Equal("", stream.Append("ab!"));
-        Assert.Equal("***!", stream.Complete());
+        Assert.Equal("***!", stream.Append("ab!"));
+        Assert.Equal("", stream.Complete());
     }
 
     [Fact]
@@ -84,10 +84,10 @@ public sealed class SecretMaskerTests
         var first = masker.CreateStream();
         var second = masker.CreateStream();
         Assert.Equal("", first.Append("sec"));
-        Assert.Equal("", second.Append("ret"));
-        Assert.Equal("ret", second.Complete());
-        Assert.Equal("", first.Append("ret"));
-        Assert.Equal("***", first.Complete());
+        Assert.Equal("ret", second.Append("ret"));
+        Assert.Equal("", second.Complete());
+        Assert.Equal("***", first.Append("ret"));
+        Assert.Equal("", first.Complete());
         Assert.Equal("ret", masker.Redact("ret"));
     }
 
@@ -108,6 +108,17 @@ public sealed class SecretMaskerTests
         var stream = masker.CreateStream();
         Assert.Equal("a", stream.Append("a"));
         Assert.Equal("b", stream.Append("b"));
+        Assert.Equal("", stream.Complete());
+    }
+
+    [Fact]
+    public void Safe_log_lines_are_not_held_until_EOF_by_unrelated_secret_lookahead()
+    {
+        var stream = new SecretMasker(["credential-with-a-long-encoded-representation"]).CreateStream();
+        Assert.Equal("before-restart\n", stream.Append("before-restart\n"));
+        Assert.Equal("offline-stdout ", stream.Append("offline-stdout credential-with-"));
+        Assert.Equal("***\n", stream.Append("a-long-encoded-representation\n"));
+        Assert.Equal("offline-native-child\n", stream.Append("offline-native-child\n"));
         Assert.Equal("", stream.Complete());
     }
 

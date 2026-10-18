@@ -6,22 +6,22 @@ namespace Wf.Sdk.Hosting;
 
 internal static class WindowsHostJobs
 {
-    public static SafeFileHandle? OpenLifetime()
+    public static SafeFileHandle? OpenLifetime(bool terminate = false)
     {
         if (!OperatingSystem.IsWindows()) return null;
         var name = Environment.GetEnvironmentVariable("WF_TASK_HOST_LIFETIME_JOB");
-        return name is null ? null : OpenOwned(name, "host");
+        return name is null ? null : OpenOwned(name, "host", terminate ? 12u : 4u);
     }
 
     public static SafeFileHandle OpenLimits(string name) => OpenOwned(name, "limits");
 
-    private static SafeFileHandle OpenOwned(string name, string kind)
+    private static SafeFileHandle OpenOwned(string name, string kind, uint access = 4)
     {
         var token = Environment.GetEnvironmentVariable("WF_TASK_HOST_CONTAINMENT_TOKEN");
         if (!OperatingSystem.IsWindows() || !Guid.TryParseExact(token, "N", out _) ||
             name != $"Local\\wf-task-{kind}-{token}")
             throw new InvalidDataException("Task-host Windows Job identity is invalid.");
-        var handle = OpenJob(4, false, name);
+        var handle = OpenJob(access, false, name);
         if (handle.IsInvalid)
         {
             var error = Marshal.GetLastPInvokeError();

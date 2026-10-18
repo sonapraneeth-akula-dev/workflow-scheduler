@@ -43,7 +43,7 @@ CI runs `buf lint`, format, and `buf breaking` against that baseline and,
 when present, the pull request base schema. Do not regenerate the baseline
 to hide a breaking change; introduce a new versioned package instead.
 
-`task_host.proto` is private agent/SDK IPC, currently readiness protocol 8.
+`task_host.proto` is private agent/SDK IPC, currently readiness protocol 9.
 Rebuild SDK packages when upgrading this private protocol. Every agent-created
 host requires its owner-only token in `x-wf-host-token`, including readiness,
 secrets and streaming RPCs. `HostReady` identifies the actual bound attempt and
@@ -52,3 +52,15 @@ returns the already-running/completed execution without invoking user code.
 `RequiredSecrets` returns names for a fresh host; for an exact re-adoption it can
 return original resolved values held in host memory, solely to restore masking
 over authenticated private IPC. Never copy those values to durable metadata.
+Additional caller-provided redaction values follow the same memory-only rule.
+`Records` replays durable masked log, resource and progress records by producer
+sequence. `ConfirmRecords` follows durable agent log/journal commit; its flushed
+spool cursor permits deletion of only that acknowledged prefix. Resource samples
+have a separate contiguous ordinal assigned by the host, whether supplied by
+the agent's native sampler or by explicit offline process-only fallback.
+The completed result is masked and flushed before `Execute`/`Resume` returns;
+the agent then stops native sampling, stores its final observation and calls
+`SealRecords`. Only then does the record stream end. Result acknowledgement
+requires every producer record to be committed, including that final sample.
+Hard-deadline watchdogs retain physical containment independently of the agent
+and terminate descendants after the attempt deadline plus 30 seconds of grace.

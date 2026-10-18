@@ -79,13 +79,12 @@ builder.Services.AddSingleton<AgentConnection>();
 builder.Services.AddHostedService<AgentWorker>();
 await builder.Build().RunAsync();
 
-internal sealed class AgentWorker(AgentConnection connection, AgentLogService logs, ILogger<AgentWorker> logger) : BackgroundService
+internal sealed class AgentWorker(AgentConnection connection, ILogger<AgentWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
         {
-            await logs.RecoverAsync(stoppingToken);
             await connection.RunAsync(stoppingToken);
         }
         catch (Exception exception)

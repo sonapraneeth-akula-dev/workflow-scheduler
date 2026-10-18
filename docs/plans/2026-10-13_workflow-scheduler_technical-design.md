@@ -236,10 +236,44 @@ quarantine. A missing named Windows Job after root death is not physical proof:
 closing the last handle can make its name inaccessible while processes survive.
 No uncertain lifetime can acknowledge a reservation fence or admit new hosts.
 Whole-machine reboot remains the fallback for unprovable physical cleanup.
-Private readiness protocol 8 rejects older SDK packages. Lossless host-side
-spooling, a general acknowledged stream cursor (initially zero), and hard
-self-termination after deadline remain task `2.3.2.2.3`; interrupted agent log
-capture is explicitly marked, not presented as lossless.
+Task `2.3.2.2.3` adds private readiness protocol 9; older SDK packages must be
+rebuilt. Each production SDK host owns its stdout/stderr OS pipes, including
+native-child output. The shared streaming redactor runs before durable protobuf
+records reach disk. Logs retain their original timestamps; progress and native
+agent resource observations enter the same producer sequence. Resource sample
+ordinals are independently assigned by the host. `spool/ack` atomically commits
+the acknowledged producer prefix before deletion; the initial metadata cursor
+is not the authoritative stream cursor. Agent log indexing atomically commits
+each whole frame and its host ordinal, trimming an uncommitted raw suffix on
+restart and suppressing duplicate replay. Surviving captures resume; genuinely
+interrupted captures remain explicitly marked.
+
+The SDK flushes masked `spool/result.pb` before returning. The agent stops native
+sampling, stores its final observation and explicitly seals the producer stream;
+acknowledgement waits for all records, including this final sample.
+A local agent log failure retains unacknowledged host
+records without changing the outcome: explicit physical cleanup and a flushed
+token-bound receipt permit admission/fencing while keeping the spool for later
+replay. Host spool exhaustion is an explicit storage error (20 GB or one million
+unacknowledged records), not silent truncation or successful capture.
+Production progress can continue after durable host journaling without waiting
+for a disconnected agent's three-second legacy IPC handshake. After two seconds
+without native samples, the SDK emits one-second process-only CPU/RSS samples;
+descendant scope, machine and native network accounting are explicitly
+unavailable rather than fabricated. Reconnection preserves sample ordinals,
+not continuity of old native counter baselines.
+
+The Linux supervisor and an independent Windows sibling guard enforce the
+absolute attempt deadline plus exactly 30 seconds of cancellation grace without
+the agent. The Windows guard is outside the lifetime/workload Job, never uses
+breakaway, and retains a query/termination handle after authenticating the target
+PID creation identity and Job membership. It terminates the Job, waits for zero
+active processes, then flushes its token-bound physical certificate. Guard RSS
+counts toward the warm budget. A first-writer-wins result file prevents a racing
+deadline from overwriting an already completed result. Re-adoption imports a
+dead host's spool only after exact physical proof and never runs its delegate
+again. Whole-machine reboot and native network continuity are not claimed by
+this agent-only recovery implementation.
 
 **Checkpoints for long tasks.** `await ctx.Checkpoint.SaveAsync(state)` serialises JSON state (≤ 1 MB, at most once per 5 s); the task host uploads it to blob, then the agent journals `CheckpointSaved{run, taskKey, attempt, seq, uri, sha256}` until the engine acks it, like results. The engine applies it idempotently to `task_checkpoints` (keyed by run + task), keeping the highest `seq`, so neither an agent nor an engine crash loses or regresses a checkpoint. A later attempt of the same task gets it from `ctx.Checkpoint.TryLoad<T>()`, and `ctx.Attempt.ResumedFrom` says from when. Without checkpoints a retried task starts from the beginning. Built-in long tasks checkpoint automatically:
 - **Load shard**: every 10 s: position in the load shape, request-source offset, cumulative counts. Resume rejoins the shape at the current time (the ramp is not replayed); the missing interval is recorded and shown in the perf report.

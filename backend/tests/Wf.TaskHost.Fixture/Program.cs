@@ -82,11 +82,15 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
             category: Enum.Parse<FailureCategory>(ctx.Input<string>("source", "value")!)))
         .Task("cancelerror", async ctx =>
         {
+            if (ctx.Var<string>("checkpointMarker") is { Length: > 0 } marker)
+                await File.WriteAllTextAsync(marker, Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
             try { await Task.Delay(Timeout.InfiniteTimeSpan, ctx.CancellationToken); }
             catch (OperationCanceledException) { throw new InvalidOperationException("ordinary error after cancellation"); }
         })
         .Task("cancelauthor", async ctx =>
         {
+            if (ctx.Var<string>("checkpointMarker") is { Length: > 0 } marker)
+                await File.WriteAllTextAsync(marker, Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
             try { await Task.Delay(Timeout.InfiniteTimeSpan, ctx.CancellationToken); }
             catch (OperationCanceledException) { throw new NonRetryableException("author error after cancellation"); }
         })
@@ -105,7 +109,12 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
             else ctx.Outputs["private"] = File.GetUnixFileMode(directory) ==
                 (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         })
-        .Task("delay", async ctx => await Task.Delay(TimeSpan.FromSeconds(30), ctx.CancellationToken))
+        .Task("delay", async ctx =>
+        {
+            if (ctx.Var<string>("checkpointMarker") is { Length: > 0 } marker)
+                await File.WriteAllTextAsync(marker, Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            await Task.Delay(TimeSpan.FromSeconds(30), ctx.CancellationToken);
+        })
         .Task("resources", async ctx =>
         {
             var memory = new byte[32 * 1024 * 1024];
@@ -134,6 +143,8 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
         .Task("badcallback", async ctx =>
         {
             using var registration = ctx.CancellationToken.Register(() => throw new InvalidOperationException("fixture bad cancellation callback"));
+            if (ctx.Var<string>("checkpointMarker") is { Length: > 0 } marker)
+                await File.WriteAllTextAsync(marker, Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
             await Task.Delay(TimeSpan.FromSeconds(30), ctx.CancellationToken);
         })
         .Task("block", ctx =>
@@ -155,7 +166,45 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
             File.WriteAllText(marker, child.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
             Thread.Sleep(Timeout.Infinite);
         }))
-    .PostProcess(s => s.Task("report", async ctx =>
+    .PostProcess(s => s.Task("restartSpool", async ctx =>
+    {
+        var marker = ctx.Var<string>("checkpointMarker");
+        var secret = ctx.Secret(ctx.Var<SecretReference>("credential"));
+        await File.AppendAllTextAsync(marker + ".starts", "1\n", ctx.CancellationToken);
+        Console.WriteLine("before-restart");
+        await File.WriteAllTextAsync(marker, System.Text.Json.JsonSerializer.Serialize(new { pid = Environment.ProcessId }),
+            ctx.CancellationToken);
+        while (!File.Exists(marker + ".offline")) await Task.Delay(10, ctx.CancellationToken);
+        Console.Write("offline-stdout " + secret[..(secret.Length / 2)]);
+        Console.Out.Flush();
+        await Task.Delay(30, ctx.CancellationToken);
+        Console.WriteLine(secret[(secret.Length / 2)..]);
+        Console.Error.WriteLine("offline-stderr " + secret);
+        ctx.Log("offline-ctx " + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(secret)));
+        var info = new ProcessStartInfo(OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh") { UseShellExecute = false };
+        foreach (var argument in OperatingSystem.IsWindows() ? new[] { "/d", "/c", "echo offline-native-child" } :
+                     new[] { "-c", "printf 'offline-native-child\\n'" })
+            info.ArgumentList.Add(argument);
+        using (var child = Process.Start(info)!) await child.WaitForExitAsync(ctx.CancellationToken);
+        await File.WriteAllTextAsync(marker + ".offline-written", "1", ctx.CancellationToken);
+        while (!File.Exists(marker + ".finish")) await Task.Delay(10, ctx.CancellationToken);
+        Console.WriteLine("finish " + secret);
+        ctx.Outputs["pid"] = Environment.ProcessId;
+        ctx.Outputs["offline"] = "result-written-by-original-host";
+        ctx.Outputs["masked"] = secret;
+    }).Task("restartDeadline", ctx =>
+    {
+        var marker = ctx.Var<string>("checkpointMarker");
+        File.AppendAllText(marker + ".starts", "1\n");
+        var info = new ProcessStartInfo(OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh") { UseShellExecute = false };
+        foreach (var argument in OperatingSystem.IsWindows() ? new[] { "/d", "/c", "ping -n 120 127.0.0.1 >nul" } :
+                     new[] { "-c", "sleep 120" })
+            info.ArgumentList.Add(argument);
+        using var child = Process.Start(info)!;
+        Console.WriteLine("before-hard-deadline");
+        File.WriteAllText(marker, System.Text.Json.JsonSerializer.Serialize(new { pid = Environment.ProcessId, child = child.Id }));
+        Thread.Sleep(Timeout.Infinite);
+    }).Task("report", async ctx =>
     {
         ctx.Outputs["pid"] = Environment.ProcessId;
         ctx.Outputs["sourceKey"] = ctx.TaskKey;

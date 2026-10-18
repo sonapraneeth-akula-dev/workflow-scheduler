@@ -8,6 +8,7 @@ using Wf.Agent.Logs;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Reports;
 using Wf.Contracts.Definition;
+using Wf.Contracts.Host.V1;
 
 namespace Wf.Agent;
 
@@ -44,7 +45,54 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
         foreach (var attempt in attempts.Where(attempt => attempt.Dispatch.ReservationEpoch < outbox.ReservationEpoch))
         {
             await hosts.DiscardRecoveredAsync(attempt.Dispatch.Task);
+            attempt.Acknowledge?.Invoke();
             logger.LogWarning("Discarded stale recovered task host at machine epoch {Epoch}.", attempt.Dispatch.ReservationEpoch);
+        }
+        if (logs is not null)
+            await logs.RecoverAsync(stoppingToken, attempts.Where(attempt => (attempt.Error is null || attempt.SpoolDirectory is not null) &&
+                attempt.Dispatch.ReservationEpoch >= outbox.ReservationEpoch).Select(attempt => attempt.Dispatch.Task));
+        foreach (var attempt in attempts.Where(attempt => attempt.SpoolDirectory is not null &&
+                     attempt.Dispatch.ReservationEpoch >= outbox.ReservationEpoch))
+        {
+            AgentLogService.Capture? capture = logs is null ? null : await logs.BeginAsync(attempt.Dispatch, resume: true);
+            ulong previous = 0;
+            foreach (var path in Directory.EnumerateFiles(attempt.SpoolDirectory!, "*.record").Order(StringComparer.Ordinal))
+            {
+                stoppingToken.ThrowIfCancellationRequested();
+                LogSpooler.RejectLinks(path);
+                using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+                if (file.Length is <= 0 or > 128 * 1024)
+                    throw new InvalidDataException("Recovered host record exceeds its protocol limit.");
+                var record = AttemptRecord.Parser.ParseFrom(file);
+                if (record.Sequence <= previous || !record.Task.Equals(attempt.Dispatch.Task) ||
+                    record.ReservationEpoch != attempt.Dispatch.ReservationEpoch ||
+                    Path.GetFileName(path) != record.Sequence.ToString("D20", System.Globalization.CultureInfo.InvariantCulture) + ".record")
+                    throw new InvalidDataException("Recovered host record identity or cursor is invalid.");
+                if (record.Log is { At: not null } log && log.Stream is "stdout" or "stderr" && log.Text.Length <= 64 * 1024)
+                {
+                    if (capture is not null)
+                    {
+                        if (!await capture.WriteRecordAsync(record))
+                            throw new IOException("Recovered host logs could not be durably committed; source spool retained.");
+                    }
+                    else throw new InvalidOperationException("Recovered host logs require a durable agent log service; attempt spool retained.");
+                }
+                else if (record.Resource is { } sample && sample.Task.Equals(attempt.Dispatch.Task) &&
+                    sample.ReservationEpoch == attempt.Dispatch.ReservationEpoch)
+                {
+                    _ = Wf.Contracts.Resources.ResourceContract.Parse(sample.SampleJson.Memory);
+                    outbox.Enqueue(new AgentMessage { ResourceSample = sample });
+                }
+                else if (record.Progress is { } update && update.Task.Equals(attempt.Dispatch.Task) &&
+                    update.ReservationEpoch == attempt.Dispatch.ReservationEpoch)
+                {
+                    _ = Wf.Contracts.Progress.TaskProgressProtocol.Validate(update);
+                    outbox.PublishProgress(update);
+                }
+                else throw new InvalidDataException("Invalid recovered host record payload.");
+                previous = record.Sequence;
+            }
+            if (capture is not null) await capture.CompleteAsync(captureInterrupted: attempt.Completed is null);
         }
         lock (gate)
         {
@@ -55,6 +103,13 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
                 var key = Key(dispatch.Task);
                 accepted.Add(key);
                 if (attempt.ResourceSample is { } sample) outbox.Enqueue(new AgentMessage { ResourceSample = sample });
+                if (attempt.Completed is { } completed)
+                {
+                    if (!outbox.ContainsResult(dispatch.Task))
+                        outbox.Enqueue(new AgentMessage { TaskCompleted = completed });
+                    attempt.Acknowledge?.Invoke();
+                    continue;
+                }
                 if (attempt.Error is { } error)
                 {
                     if (!outbox.ContainsResult(dispatch.Task))
@@ -64,6 +119,7 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
                             At = Timestamp.FromDateTimeOffset(timeProvider.GetUtcNow()), Outcome = TaskOutcome.Failed,
                             Error = new() { Category = "AgentLost", Message = error, NonRetryable = false }
                         } });
+                    attempt.Acknowledge?.Invoke();
                     continue;
                 }
                 var execution = new Execution(dispatch.Clone(),
@@ -312,9 +368,9 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
         AgentLogService.Capture? capture = null;
         try
         {
-            if (logs is not null && !execution.Recovered)
+            if (logs is not null)
             {
-                try { capture = await logs.BeginAsync(dispatch); }
+                try { capture = await logs.BeginAsync(dispatch, resume: execution.Recovered); }
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
                 { logs.Report(error); }
             }
@@ -328,6 +384,7 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
                 await cache.GetAsync(dispatch.Version, new Uri(dispatch.PackageUri), dispatch.Sha256, execution.Cancellation.Token);
             result = await hosts.ExecuteAsync(package, dispatch, cancellationToken: execution.Cancellation.Token,
                 captureLog: capture is null ? null : capture.WriteAsync,
+                captureRecord: logs is null ? null : capture is null ? _ => Task.FromResult(false) : capture.WriteRecordAsync,
                 publishResources: outbox.Enqueue, publishCheckpoint: outbox.PublishCheckpointAsync,
                 publishProgress: outbox.PublishProgress, journalResult: completion =>
                 {
