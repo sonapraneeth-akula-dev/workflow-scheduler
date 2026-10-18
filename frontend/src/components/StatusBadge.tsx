@@ -41,15 +41,20 @@ const icons = {
 
 export function StatusBadge({ status }: { status: Status }) {
   const Icon = icons[status]
+  const color =
+    status === "Succeeded"
+      ? "border-success/35 bg-success/10 text-success"
+      : status === "Failed" || status === "TimedOut"
+        ? "border-destructive/35 bg-destructive/10 text-destructive"
+        : ["SoftFailed", "Retrying", "Aborting"].includes(status)
+          ? "border-warning/35 bg-warning/10 text-warning"
+          : ["Ready", "Dispatched", "Running", "Reused", "Queued"].includes(
+                status
+              )
+            ? "border-info/35 bg-info/10 text-info"
+            : "bg-muted text-muted-foreground"
   return (
-    <Badge
-      variant="outline"
-      className={
-        status === "Failed" || status === "TimedOut"
-          ? "text-destructive"
-          : undefined
-      }
-    >
+    <Badge variant="outline" className={color}>
       <Icon aria-hidden="true" focusable="false" />
       {status === "NeverRun" ? "Never run" : status}
     </Badge>

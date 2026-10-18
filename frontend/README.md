@@ -17,6 +17,11 @@ Headings use Segoe UI Variable Display; body and controls use Segoe UI Variable
 Text. Code, identifiers and the diff editor use Cascadia Code. Fonts are local,
 with Segoe UI/system and Cascadia Mono/Consolas/monospace fallbacks; no font
 downloads are required. The brand retains its distinct wordmark face.
+Light and dark themes share blue primary actions, teal interaction accents and
+distinct success, warning, error and active-status colors. Status labels and
+icons remain readable without color. All application surfaces, including
+avatars, badges, controls, popovers and dialogs, have square corners; embedded
+report documents retain their own sandboxed content styling.
 The right-hand theme action is an accessible sun/moon icon. It follows the
 system theme until explicitly changed, persists the choice in local storage,
 and surfaces unavailable/corrupt preference storage rather than hiding errors.

@@ -1,4 +1,26 @@
-import { expect, test } from "@playwright/test"
+import AxeBuilder from "@axe-core/playwright"
+import { expect, test, type Page } from "@playwright/test"
+
+async function expectSquareCorners(page: Page) {
+  const rounded = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>("body *"))
+      .filter((element) => {
+        const style = getComputedStyle(element)
+        return (
+          element.getClientRects().length > 0 &&
+          style.visibility !== "hidden" &&
+          [
+            style.borderTopLeftRadius,
+            style.borderTopRightRadius,
+            style.borderBottomRightRadius,
+            style.borderBottomLeftRadius,
+          ].some((radius) => parseFloat(radius) !== 0)
+        )
+      })
+      .map((element) => `${element.tagName}.${element.className}`)
+  )
+  expect(rounded).toEqual([])
+}
 
 test("brand stays at the padded left edge on wide screens", async ({
   page,
@@ -132,6 +154,69 @@ test("account settings changes the actual theme and offers system preference", a
 })
 
 for (const colorScheme of ["light", "dark"] as const) {
+  for (const width of [320, 2000]) {
+    test(`${colorScheme} surfaces remain square and accessible at ${width}px`, async ({
+      page,
+    }, testInfo) => {
+      await page.emulateMedia({ colorScheme })
+      await page.setViewportSize({ width, height: 1000 })
+      await page.goto("/runs")
+      await expect(page.locator('[data-slot="badge"]').first()).toBeVisible()
+      await expectSquareCorners(page)
+      const checkAccessibility = async (activeSurface?: string) => {
+        const audit = new AxeBuilder({ page }).withTags([
+          "wcag2a",
+          "wcag2aa",
+          "wcag21aa",
+        ])
+        if (activeSurface) audit.include(activeSurface)
+        const result = await audit.analyze()
+        expect(
+          result.violations.map(({ id, nodes }) => ({
+            id,
+            nodes: nodes.map(({ target, failureSummary }) => ({
+              target,
+              failureSummary,
+            })),
+          }))
+        ).toEqual([])
+      }
+      await checkAccessibility()
+      await page.screenshot({
+        path: testInfo.outputPath(`${colorScheme}-${width}.png`),
+      })
+      const account = page.getByRole("button", { name: /Account menu for / })
+      await account.click()
+      await expect(page.getByRole("menu")).toBeVisible()
+      await expectSquareCorners(page)
+      await checkAccessibility('[role="menu"]')
+      await page
+        .getByRole("menuitem", { name: "Settings", exact: true })
+        .click()
+      await expect(
+        page.getByRole("dialog", { name: "Settings", exact: true })
+      ).toBeVisible()
+      await expectSquareCorners(page)
+      await checkAccessibility('[role="dialog"]')
+      await page.keyboard.press("Escape")
+      await account.click()
+      await page
+        .getByRole("menuitem", { name: "Profile details", exact: true })
+        .click()
+      const profile = page.getByRole("dialog", {
+        name: "Profile details",
+        exact: true,
+      })
+      await expect(
+        profile.getByText(
+          "System administrator access includes all team and type permissions."
+        )
+      ).toBeVisible()
+      await expectSquareCorners(page)
+      await checkAccessibility('[role="dialog"]')
+    })
+  }
+
   test(`icon toggle respects the ${colorScheme} system theme and persists the change`, async ({
     page,
   }) => {
