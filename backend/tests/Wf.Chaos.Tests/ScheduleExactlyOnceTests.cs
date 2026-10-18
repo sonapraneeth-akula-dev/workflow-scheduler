@@ -258,16 +258,19 @@ public sealed class ScheduleExactlyOnceTests(ITestOutputHelper output)
         public bool Killed { get; private set; }
         public bool HasExited => process.HasExited;
         public string LogPath { get; }
+        public Uri Gateway { get; }
 
-        private EngineProcess(Process process, int port, string logPath)
+        private EngineProcess(Process process, int port, int enginePort, string logPath)
         {
             this.process = process;
             LogPath = logPath;
+            Gateway = new($"http://127.0.0.1:{enginePort}");
             client = new HttpClient { BaseAddress = new($"http://127.0.0.1:{port}"), Timeout = TimeSpan.FromSeconds(2) };
             logging = CaptureAsync();
         }
 
-        public static EngineProcess Start(string connectionString, string directory, int index)
+        public static EngineProcess Start(string connectionString, string directory, int index,
+            Action<ProcessStartInfo>? configure = null)
         {
             using var api = new TcpListener(IPAddress.Loopback, 0);
             using var engine = new TcpListener(IPAddress.Loopback, 0);
@@ -289,10 +292,11 @@ public sealed class ScheduleExactlyOnceTests(ITestOutputHelper output)
             start.Environment["Storage__Root"] = Path.Combine(directory, $"storage-{index}");
             start.Environment["Storage__UploadHmacKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
             start.Environment["Logging__LogLevel__Default"] = "Warning";
+            configure?.Invoke(start);
             api.Stop();
             engine.Stop();
             return new(Process.Start(start) ?? throw new InvalidOperationException("Could not start the actual engine."),
-                port, Path.Combine(directory, $"engine-{index}.log"));
+                port, enginePort, Path.Combine(directory, $"engine-{index}.log"));
         }
 
         public async Task<bool> IsLeaderAsync(CancellationToken token)
@@ -339,17 +343,20 @@ public sealed class ScheduleExactlyOnceTests(ITestOutputHelper output)
         public NpgsqlDataSource Source { get; private set; } = null!;
         public Dictionary<string, string> Settings { get; } = [];
 
-        public static async Task<ChaosDatabase> StartAsync(CancellationToken token, bool requireCommitTimestamps = true)
+        public static async Task<ChaosDatabase> StartAsync(CancellationToken token, bool requireCommitTimestamps = true,
+            DotNet.Testcontainers.Networks.INetwork? network = null)
         {
             var database = new ChaosDatabase();
             try
             {
-                var external = Environment.GetEnvironmentVariable("WF_TEST_POSTGRES");
+                var external = network is null ? Environment.GetEnvironmentVariable("WF_TEST_POSTGRES") : null;
                 if (external is null)
                 {
-                    database.container = new PostgreSqlBuilder("postgres:17-alpine")
+                    var builder = new PostgreSqlBuilder("postgres:17-alpine")
                         .WithCommand("-c", "fsync=on", "-c", "full_page_writes=on", "-c", "synchronous_commit=on",
-                            "-c", "track_commit_timestamp=on", "-c", "max_connections=200").Build();
+                            "-c", "track_commit_timestamp=on", "-c", "max_connections=200");
+                    if (network is not null) builder = builder.WithNetwork(network).WithNetworkAliases("postgres");
+                    database.container = builder.Build();
                     await database.container.StartAsync(token);
                     database.ConnectionString = database.container.GetConnectionString();
                 }

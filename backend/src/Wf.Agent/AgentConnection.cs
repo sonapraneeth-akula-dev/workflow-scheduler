@@ -41,6 +41,10 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
                 {
                     logger.LogWarning("Agent HTTP connection failed ({Error}); retrying a configured engine.", exception.HttpRequestError);
                 }
+                catch (HttpIOException exception)
+                {
+                    logger.LogWarning("Agent HTTP stream failed ({Error}); retrying a configured engine.", exception.HttpRequestError);
+                }
                 index = (index + 1) % options.Engines.Count;
                 await Task.Delay(redirect is null ? TimeSpan.FromSeconds(1) : TimeSpan.FromMilliseconds(100), timeProvider, stoppingToken);
             }
@@ -62,7 +66,8 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
         {
             HttpHandler = handler, DisposeHttpClient = true, MaxReceiveMessageSize = 4 * 1024 * 1024, MaxSendMessageSize = 1024 * 1024
         });
-        using var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        using var registration = new CancellationTokenSource(TimeSpan.FromSeconds(10), timeProvider);
+        using var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, registration.Token);
         using var call = new AgentGateway.AgentGatewayClient(channel).Connect(cancellationToken: session.Token);
         var inventory = telemetry.CreateHello(options);
         var attempts = inventory.Inflight.Concat(outgoing.UnacknowledgedAttempts())
@@ -71,15 +76,22 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
         inventory.Inflight.AddRange(attempts);
         var hello = outgoing.CreateHello(inventory);
         var offered = hello.Sequence;
-        await call.RequestStream.WriteAsync(hello, session.Token);
+        try { await call.RequestStream.WriteAsync(hello, session.Token); }
+        catch (OperationCanceledException) when (registration.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
+        {
+            logger.LogWarning("Agent Hello was not acknowledged within 10 seconds; retrying a configured engine.");
+            return null;
+        }
         logger.LogInformation("Agent Hello sent.");
         var sending = SendAsync(hello.Sequence);
         var receiving = ReceiveAsync();
-        var failure = (commands as TaskCommands)?.Failure ?? Task.Delay(Timeout.Infinite, session.Token);
-        var completed = await Task.WhenAny(sending, receiving, failure);
+        var failure = (commands as TaskCommands)?.Failure;
+        var completed = await (failure is null ? Task.WhenAny(sending, receiving) : Task.WhenAny(sending, receiving, failure));
         await session.CancelAsync();
         await Task.WhenAll(sending, receiving);
         if (completed == failure) await failure;
+        if (registration.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
+            logger.LogWarning("Agent Hello was not acknowledged within 10 seconds; retrying a configured engine.");
         return await receiving;
 
         async Task SendAsync(ulong sent)
@@ -143,6 +155,7 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
                         if (message.Ack.Sequence < hello.Sequence || message.Ack.Sequence > Volatile.Read(ref offered))
                             throw new InvalidDataException("Acknowledgement does not correspond to messages sent in this session.");
                         outgoing.Acknowledge(message.Ack);
+                        registration.CancelAfter(Timeout.InfiniteTimeSpan);
                         continue;
                     }
                     if (message.PayloadCase == ControlMessage.PayloadOneofCase.None)

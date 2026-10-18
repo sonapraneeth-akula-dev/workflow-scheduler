@@ -2305,6 +2305,27 @@ other schedules. Transient storage failures disable scheduler readiness until
 resynchronization; fatal corrupt state fails explicitly. Queued-run FIFO release
 remains a dependent task, not implied by basic exactly-once firing.
 
+`Wf.Chaos.Tests/Infrastructure/ChaosFixture.cs` supplies two real production
+engine processes, two real agents, a downloaded SDK task host and an owned
+PostgreSQL 17 database behind Toxiproxy 2.12.0. Per-agent gateway proxies isolate
+one agent without partitioning its healthy peer. The fixture supports hard
+leader/agent/host kills, stable-identity agent restart and database partitions;
+PID creation identities guard task-host cleanup against reuse. Both engines
+share only this fixture's private blob root and signing key. The Toxiproxy
+control API is published on host loopback, never an untrusted interface.
+
+Run `dotnet test backend\tests\Wf.Chaos.Tests --filter FullyQualifiedName~ChaosFixtureTests`
+for the real fault-tool smoke. Its disk injector fills an **8 MiB container-only
+tmpfs**, verifies the actual `ENOSPC` error and verifies recovery after deleting
+its single filler file; it never fills the host disk or claims Windows agent
+volume exhaustion. Linux runs this smoke explicitly in `backend.yml`; it is
+marked `ChaosSmoke`, separate from the default solution lane and from the
+pending full randomized/reboot acceptance suite. Agents explicitly retry a peer
+EOF during an HTTP/2 handshake instead of exiting on `HttpIOException`, and
+require a valid Hello acknowledgement within ten seconds before keeping that
+engine connection. An accepting but silent proxy cannot indefinitely block
+failover to the next configured engine.
+
 The nightly/manual `schedule-chaos.yml` lane runs the actual one-hour
 `ScheduleExactlyOnce` gate against PostgreSQL 17 with durability enabled:
 1,000 minutely schedules, uniformly phased 60 ms apart across each minute,

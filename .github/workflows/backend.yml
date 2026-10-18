@@ -73,6 +73,15 @@ jobs:
           name: host-readoption-${{ matrix.os }}
           path: host-readoption-results
           if-no-files-found: error
+      - name: Verify real two-engine two-agent chaos fault tools
+        if: runner.os == 'Linux'
+        run: dotnet test backend/tests/Wf.Chaos.Tests --configuration Release --no-build --filter "FullyQualifiedName~ChaosFixtureTests" --logger "trx;LogFileName=chaos-fixture.trx" --results-directory chaos-fixture-results
+      - uses: actions/upload-artifact@v4
+        if: always() && runner.os == 'Linux'
+        with:
+          name: chaos-fixture-${{ matrix.os }}
+          path: chaos-fixture-results
+          if-no-files-found: error
       - name: Install and start Windows service
         if: runner.os == 'Windows'
         shell: pwsh
