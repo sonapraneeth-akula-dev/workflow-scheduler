@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright"
 import { expect, test } from "@playwright/test"
 
-test("navbar discovers team/type service views and restores format, window and daily run drill-down", async ({
+test("navbar discovers team/type service views and restores format, window and direct run actions", async ({
   page,
 }) => {
   await page.goto("/")
@@ -40,7 +40,11 @@ test("navbar discovers team/type service views and restores format, window and d
   const group = page.getByRole("region", { name: type, exact: true })
   await expect(group).toBeVisible()
   const card = group.locator("ul > li").first()
-  await expect(card.getByRole("link", { name: "Run history" })).toBeVisible()
+  await expect(card.getByRole("link", { name: /^History for / })).toBeVisible()
+  await expect(
+    card.getByRole("link", { name: /^View last run for / })
+  ).toBeVisible()
+  await expect(page.getByText("Daily health details")).toHaveCount(0)
   await expect(card.locator("[data-health-day]")).toHaveCount(7)
   await page.getByRole("radio", { name: "Table format" }).click()
   await expect(group.getByRole("table")).toBeVisible()
@@ -51,18 +55,23 @@ test("navbar discovers team/type service views and restores format, window and d
   await page.getByLabel("Health window").selectOption("90d")
   const row = group.getByRole("table").locator("tbody tr").first()
   await expect(row.locator("[data-health-day]")).toHaveCount(90)
-  await row.getByText("Daily health details").click()
-  await row.locator("details a").first().click()
-  const url = new URL(page.url())
-  expect(url.pathname).toBe(`/t/${encodeURIComponent(team)}/runs`)
-  expect(url.searchParams.get("workflowId")).toMatch(
-    new RegExp(`^${team}/${type}/`)
+  const lastRun = row.getByRole("link", { name: /^View last run for / })
+  const lastRunPath = await lastRun.getAttribute("href")
+  expect(lastRunPath).toMatch(/^\/runs\/[0-9a-f-]+$/)
+  await lastRun.click()
+  await expect.poll(() => new URL(page.url()).pathname).toBe(lastRunPath)
+  await page.goBack()
+  const history = group
+    .getByRole("table")
+    .locator("tbody tr")
+    .first()
+    .getByRole("link", { name: /^History for / })
+  const historyPath = await history.getAttribute("href")
+  expect(historyPath).toContain(
+    `/t/${encodeURIComponent(team)}/${encodeURIComponent(type)}/w/`
   )
-  expect(url.searchParams.get("from")).toMatch(/T00:00:00Z$/)
-  expect(url.searchParams.get("to")).toMatch(/T00:00:00.000Z$/)
-  await expect(
-    page.getByRole("heading", { name: `${team} runs`, exact: true })
-  ).toBeVisible()
+  await history.click()
+  await expect.poll(() => new URL(page.url()).pathname).toBe(historyPath)
 })
 
 for (const width of [320, 768, 2000]) {
@@ -85,7 +94,7 @@ for (const width of [320, 768, 2000]) {
         if (view === "table")
           await page.getByRole("radio", { name: "Table format" }).click()
         await expect(
-          page.getByRole("link", { name: "Run history" }).first()
+          page.getByRole("link", { name: /^History for / }).first()
         ).toBeVisible()
         expect(
           await page.evaluate(() => document.documentElement.scrollWidth)

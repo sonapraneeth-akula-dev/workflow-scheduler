@@ -123,8 +123,13 @@ it("renders metadata-type containers with workflow names, actual status, last ru
   const card = screen.getByRole("heading", { name: "build" }).closest("li")!
   expect(within(card).getByText("Failed", { exact: true })).toBeVisible()
   expect(
-    within(card).getByRole("link", { name: "Run history" })
+    within(card).getByRole("link", { name: "History for team/release/build" })
   ).toHaveAttribute("href", "/t/team/release/w/build/history")
+  expect(
+    within(card).getByRole("link", {
+      name: "View last run for team/release/build",
+    })
+  ).toHaveAttribute("href", "/runs/019ed132-2f44-7000-8000-000000000002")
   expect(card.querySelector("time")).toHaveAttribute(
     "datetime",
     "2026-10-18T00:00:00Z"
@@ -134,15 +139,17 @@ it("renders metadata-type containers with workflow names, actual status, last ru
   expect(within(card).getByRole("img")).toHaveAccessibleName(
     /3 runs, 2 succeeded, 1 other completed outcomes/
   )
-  await userEvent.click(within(card).getByText("Daily health details"))
-  expect(
-    within(card).getByRole("link", {
-      name: "2026-10-18 UTC: 2 succeeded, 1 failed",
-    })
-  ).toHaveAttribute("href", "/t/team/runs")
+  expect(screen.queryByText("Daily health details")).not.toBeInTheDocument()
+  expect(card.querySelector("details")).toBeNull()
   const never = screen.getByRole("heading", { name: "never" }).closest("li")!
   expect(never.querySelectorAll('[data-health-state="NoRuns"]')).toHaveLength(7)
   expect(within(never).getByText("No completed runs")).toBeVisible()
+  expect(
+    within(never).getByRole("button", { name: "View last run" })
+  ).toBeDisabled()
+  expect(
+    within(never).getByRole("link", { name: "History for team/release/never" })
+  ).toBeVisible()
 })
 
 it("switches to the striped semantic table without changing the cached health query", async () => {
@@ -154,7 +161,16 @@ it("switches to the striped semantic table without changing the cached health qu
     within(table)
       .getAllByRole("columnheader")
       .map((cell) => cell.textContent)
-  ).toEqual(["Workflow", "Latest status", "Last run", "Health", "History"])
+  ).toEqual(["Workflow", "Latest status", "Last run", "Health", "Actions"])
+  expect(
+    within(table).getByRole("link", {
+      name: "View last run for team/release/build",
+    })
+  ).toHaveAttribute("href", "/runs/019ed132-2f44-7000-8000-000000000002")
+  expect(
+    within(table).getByRole("button", { name: "View last run" })
+  ).toBeDisabled()
+  expect(table.querySelector("details")).toBeNull()
   expect(within(table).getAllByRole("row")).toHaveLength(3)
   expect(table.querySelector("thead")).toHaveClass("bg-secondary")
   expect(table.querySelector("tbody tr")).toHaveClass(

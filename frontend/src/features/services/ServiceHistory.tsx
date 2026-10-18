@@ -23,26 +23,47 @@ import {
 } from "./api"
 import { HealthBar } from "./HealthBar"
 
-function HistoryLink({ workflow }: { workflow: CatalogWorkflow }) {
+function WorkflowActions({ workflow }: { workflow: CatalogWorkflow }) {
   return (
-    <Link
-      to="/t/$team/$type/w/$wf/history"
-      params={{ team: workflow.team, type: workflow.type, wf: workflow.name }}
-      className="underline"
-    >
-      Run history
-    </Link>
+    <div className="flex flex-wrap gap-2">
+      {workflow.latestRun ? (
+        <Button asChild variant="outline">
+          <Link
+            to="/runs/$id"
+            params={{ id: workflow.latestRun.id }}
+            aria-label={`View last run for ${workflow.id}`}
+          >
+            View last run
+          </Link>
+        </Button>
+      ) : (
+        <Button variant="outline" disabled>
+          View last run
+        </Button>
+      )}
+      <Button asChild variant="outline">
+        <Link
+          to="/t/$team/$type/w/$wf/history"
+          params={{
+            team: workflow.team,
+            type: workflow.type,
+            wf: workflow.name,
+          }}
+          aria-label={`History for ${workflow.id}`}
+        >
+          History
+        </Link>
+      </Button>
+    </div>
   )
 }
 
 function LastRun({ workflow }: { workflow: CatalogWorkflow }) {
   const run = workflow.latestRun
   return run ? (
-    <Link to="/runs/$id" params={{ id: run.id }} className="underline">
-      <time dateTime={run.createdAt} title={run.createdAt}>
-        {formatTimestamp(run.createdAt)}
-      </time>
-    </Link>
+    <time dateTime={run.createdAt} title={run.createdAt}>
+      {formatTimestamp(run.createdAt)}
+    </time>
   ) : (
     <span className="text-muted-foreground">Never run</span>
   )
@@ -109,8 +130,8 @@ function WorkflowGroup({
                 <p className="font-medium">Last run</p>
                 <LastRun workflow={workflow} />
               </div>
-              <HealthBar team={team} workflowId={workflow.id} days={days} />
-              <HistoryLink workflow={workflow} />
+              <HealthBar days={days} />
+              <WorkflowActions workflow={workflow} />
             </li>
           ))}
         </ul>
@@ -132,7 +153,7 @@ function WorkflowGroup({
                   "Latest status",
                   "Last run",
                   "Health",
-                  "History",
+                  "Actions",
                 ].map((label) => (
                   <th key={label} scope="col" className="p-3 font-bold">
                     {label}
@@ -161,14 +182,10 @@ function WorkflowGroup({
                     <LastRun workflow={workflow} />
                   </td>
                   <td className="min-w-64 p-3">
-                    <HealthBar
-                      team={team}
-                      workflowId={workflow.id}
-                      days={days}
-                    />
+                    <HealthBar days={days} />
                   </td>
                   <td className="p-3">
-                    <HistoryLink workflow={workflow} />
+                    <WorkflowActions workflow={workflow} />
                   </td>
                 </tr>
               ))}

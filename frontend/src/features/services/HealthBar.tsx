@@ -1,5 +1,3 @@
-import { useState } from "react"
-import { Link } from "@tanstack/react-router"
 import { healthState, healthSummary, type HealthDay } from "./api"
 
 const colors = {
@@ -10,16 +8,7 @@ const colors = {
   NoRuns: "bg-muted-foreground/25",
 }
 
-export function HealthBar({
-  team,
-  workflowId,
-  days,
-}: {
-  team: string
-  workflowId: string
-  days: HealthDay[]
-}) {
-  const [expanded, setExpanded] = useState(false)
+export function HealthBar({ days }: { days: HealthDay[] }) {
   const total = days.reduce(
     (sum, day) =>
       sum +
@@ -64,32 +53,6 @@ export function HealthBar({
             : "No completed runs"}
         </span>
       </div>
-      <details
-        open={expanded}
-        onToggle={(event) => setExpanded(event.currentTarget.open)}
-      >
-        <summary className="w-fit text-xs">Daily health details</summary>
-        {expanded ? (
-          <ol className="mt-2 max-h-48 space-y-1 overflow-auto text-xs">
-            {days.map((day) => (
-              <li key={day.day}>
-                <Link
-                  to="/t/$team/runs"
-                  params={{ team }}
-                  search={{
-                    workflowId,
-                    from: `${day.day}T00:00:00Z`,
-                    to: new Date(Date.parse(day.day) + 86400000).toISOString(),
-                  }}
-                  className="underline"
-                >
-                  {day.day} UTC: {healthSummary(day.counts)}
-                </Link>
-              </li>
-            ))}
-          </ol>
-        ) : null}
-      </details>
     </div>
   )
 }

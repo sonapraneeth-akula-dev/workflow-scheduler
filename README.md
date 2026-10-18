@@ -780,6 +780,14 @@ until a deliberate republish. Use `-Environment ppe -Team operations` to select
 only the production tree against a matching backend; never publish demo
 registries into `prod`/`ppe`.
 
+### Service history
+
+Service history cards and tables show daily health inline, without a separate
+daily-details expander. **View last run** opens the exact latest run and is
+disabled for never-run workflows; **History** opens that workflow's run history.
+Timestamps keep their full source precision in the time element while displaying
+local time with millisecond precision.
+
 `Wf.Engine.Core.FailureClassifier` reuses the existing `FailureCategory` contract:
 TaskError, Timeout, Aborted, AgentLost, ResourceLimit, ValidationError, Placement
 and PlatformError. Local execution and the SDK task host preserve explicit
