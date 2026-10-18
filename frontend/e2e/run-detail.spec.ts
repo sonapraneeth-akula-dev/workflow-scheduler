@@ -264,6 +264,7 @@ for (const colorScheme of ["light", "dark"] as const) {
           const length = element.getTotalLength()
           const start = element.getPointAtLength(0)
           const end = element.getPointAtLength(length)
+          const shaft = element.getPointAtLength(length - 8)
           const intersections: string[] = []
           for (let offset = 1; offset < length; offset += 2) {
             const point = element.getPointAtLength(offset)
@@ -280,6 +281,8 @@ for (const colorScheme of ["light", "dark"] as const) {
             edge: `${from}/${to}`,
             sourceGap: start.x - source.right,
             targetGap: target.left - end.x,
+            shaftLength: end.x - shaft.x,
+            shaftRise: end.y - shaft.y,
             sourceInside: start.y > source.top && start.y < source.bottom,
             targetInside: end.y > target.top && end.y < target.bottom,
             intersections,
@@ -291,7 +294,9 @@ for (const colorScheme of ["light", "dark"] as const) {
     for (const edge of geometry) {
       expect(edge.intersections, edge.edge).toEqual([])
       expect(edge.sourceGap, edge.edge).toBeCloseTo(0)
-      expect(edge.targetGap, edge.edge).toBeCloseTo(4)
+      expect(edge.targetGap, edge.edge).toBeCloseTo(2)
+      expect(edge.shaftLength, edge.edge).toBeCloseTo(8)
+      expect(edge.shaftRise, edge.edge).toBeCloseTo(0)
       expect(edge.sourceInside && edge.targetInside, edge.edge).toBe(true)
       expect(edge.stroke).toBeGreaterThanOrEqual(2)
     }

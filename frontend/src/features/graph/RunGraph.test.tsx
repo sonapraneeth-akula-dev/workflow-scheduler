@@ -104,13 +104,19 @@ const run: RunSnapshot = {
 describe("live graph rendering", () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it("uses fixed-size, fully aligned arrowheads and stronger semantic strokes", () => {
+  it("uses compact open chevrons aligned to the endpoint with matching semantic strokes", () => {
     const { container } = render(<RunGraph plan={plan} run={run} />)
     const marker = container.querySelector("marker")!
     expect(marker).toHaveAttribute("markerUnits", "userSpaceOnUse")
-    expect(marker).toHaveAttribute("viewBox", "0 0 10 10")
-    expect(marker).toHaveAttribute("refX", "10")
-    expect(marker).toHaveAttribute("markerWidth", "10")
+    expect(marker).toHaveAttribute("viewBox", "0 0 8 10")
+    expect(marker).toHaveAttribute("refX", "6")
+    expect(marker).toHaveAttribute("markerWidth", "8")
+    expect(marker).toHaveAttribute("orient", "auto")
+    const head = marker.querySelector("path")!
+    expect(head).toHaveAttribute("d", "M1 1 L6 5 L1 9")
+    expect(head).toHaveAttribute("fill", "none")
+    expect(head).toHaveAttribute("stroke-width", "2")
+    expect(head).toHaveAttribute("stroke-linejoin", "round")
     const edge = container.querySelector("[data-graph-edge]")!
     expect(edge).toHaveAttribute("stroke-width", "2")
     expect(edge).toHaveAttribute("marker-end", `url(#${marker.id})`)

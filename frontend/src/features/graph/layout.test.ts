@@ -58,11 +58,11 @@ describe("stable dependency graph layout", () => {
     expect(exits[0]).toBeLessThan(exits[1]!)
     const arrivals = layout.edges
       .filter((edge) => edge.to === "join")
-      .map((edge) => Number(/ (\d+)$/.exec(edge.path)![1]))
+      .map((edge) => Number(/ (\d+) H\d+$/.exec(edge.path)![1]))
     expect(arrivals[0]).toBeGreaterThan(arrivals[1]!)
     for (const edge of layout.edges) {
       const target = layout.nodes.find((node) => node.key === edge.to)!
-      expect(edge.path).toMatch(new RegExp(` ${target.style.left - 4} \\d+$`))
+      expect(edge.path).toMatch(new RegExp(` H${target.style.left - 2}$`))
     }
   })
 

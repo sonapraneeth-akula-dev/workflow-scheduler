@@ -123,9 +123,10 @@ export function layoutGraph(definitions: readonly Definition[]): GraphLayout {
       const to = byKey.get(node.key)!
       const x = from.style.left + from.style.width,
         y = exits.get(dependency.node)!.get(node.key)!
-      const endX = to.style.left - 4,
+      const endX = to.style.left - 2,
         endY = entrances.get(node.key)!.get(dependency.node)!
-      const bend = Math.min(24, (endX - x) / 2)
+      const shaftX = endX - 10
+      const bend = Math.min(24, (shaftX - x) / 2)
       return {
         from: dependency.node,
         to: node.key,
@@ -133,7 +134,7 @@ export function layoutGraph(definitions: readonly Definition[]): GraphLayout {
         path:
           to.rank - from.rank > 1
             ? `M${x} ${y} H${x + 8} V8 H${endX - 12} V${endY} H${endX}`
-            : `M${x} ${y} C${x + bend} ${y} ${endX - bend} ${endY} ${endX} ${endY}`,
+            : `M${x} ${y} C${x + bend} ${y} ${shaftX - bend} ${endY} ${shaftX} ${endY} H${endX}`,
       }
     })
   )
