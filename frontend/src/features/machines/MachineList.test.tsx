@@ -263,6 +263,9 @@ describe("machine list and editor", () => {
   it("submits exact AND filters and clears all filters", async () => {
     const change = vi.fn()
     render(<MachineFilters search={{}} onChange={change} />)
+    expect(screen.getByRole("form", { name: "Machine filters" })).toHaveClass(
+      "items-start"
+    )
     fireEvent.change(screen.getByLabelText("Pool (exact)"), {
       target: { value: "main" },
     })

@@ -49,7 +49,7 @@ export function MachineFilters({
     <form
       aria-label="Machine filters"
       onSubmit={submit}
-      className="flex min-w-0 flex-wrap items-end gap-3"
+      className="flex min-w-0 flex-wrap items-start gap-3"
     >
       <label className="flex min-w-0 flex-col gap-1">
         Pool (exact)
