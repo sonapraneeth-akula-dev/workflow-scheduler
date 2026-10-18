@@ -26,13 +26,77 @@ function RunDetail() {
   const run = live.run
   const [team = "", type = "", wf = ""] = run?.workflowId.split("/") ?? []
   return (
-    <>
-      <h1 className="text-2xl font-semibold">Run</h1>
-      <p className="break-all">{id}</p>
-      <ReconnectingIndicator {...live} />
+    <div className="min-w-0 space-y-4">
+      <section
+        aria-label="Run summary"
+        className="min-w-0 space-y-2 border bg-card p-3"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h1 className="text-2xl font-semibold">Run</h1>
+              {run ? (
+                <p className="font-medium break-words">{run.workflowId}</p>
+              ) : null}
+            </div>
+            <p className="font-mono text-xs break-all text-muted-foreground">
+              {id}
+            </p>
+          </div>
+          {run ? (
+            <p className="text-xs text-muted-foreground">
+              Committed sequence:{" "}
+              <span className="font-mono text-foreground">{run.lastSeq}</span>
+            </p>
+          ) : null}
+        </div>
+        <ReconnectingIndicator {...live} />
+        {run ? (
+          <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+            <div className="flex min-w-0 flex-wrap items-start gap-3 text-sm">
+              <AbortDialog
+                key={run.runId}
+                runId={run.runId}
+                status={run.status}
+                abort={run.abort}
+                live={live.status === "live"}
+              />
+              <RerunDialog
+                key={`rerun-${run.runId}`}
+                runId={run.runId}
+                versionId={run.versionId}
+                status={run.status}
+                placement={run.placement}
+                live={live.status === "live"}
+              />
+            </div>
+            <nav
+              aria-label="Related run pages"
+              className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm [&_a]:inline-flex [&_a]:min-h-8 [&_a]:items-center [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4"
+            >
+              <Link
+                to="/t/$team/$type/w/$wf/versions/$v"
+                params={{ team, type, wf, v: run.versionId }}
+              >
+                Task Plan for this run
+              </Link>
+              <Link
+                to="/t/$team/$type/w/$wf/history"
+                params={{ team, type, wf }}
+              >
+                Workflow history
+              </Link>
+              {run.seriesId ? (
+                <Link to="/series/$id" params={{ id: run.seriesId }}>
+                  Series history
+                </Link>
+              ) : null}
+            </nav>
+          </div>
+        ) : null}
+      </section>
       {run ? (
         <>
-          <p className="break-words">{run.workflowId}</p>
           {run.placement?.singleMachine ? (
             <p
               className="w-fit rounded border px-2 py-1 text-sm"
@@ -54,37 +118,7 @@ function RunDetail() {
             runId={run.runId}
             active={run.status <= 1}
           />
-          <AbortDialog
-            key={run.runId}
-            runId={run.runId}
-            status={run.status}
-            abort={run.abort}
-            live={live.status === "live"}
-          />
-          <RerunDialog
-            key={`rerun-${run.runId}`}
-            runId={run.runId}
-            versionId={run.versionId}
-            status={run.status}
-            placement={run.placement}
-            live={live.status === "live"}
-          />
           <RunLineage run={run} />
-          <Link
-            to="/t/$team/$type/w/$wf/versions/$v"
-            params={{ team, type, wf, v: run.versionId }}
-          >
-            Task Plan for this run
-          </Link>
-          <Link to="/t/$team/$type/w/$wf/history" params={{ team, type, wf }}>
-            Workflow history
-          </Link>
-          {run.seriesId ? (
-            <Link to="/series/$id" params={{ id: run.seriesId }}>
-              Series history
-            </Link>
-          ) : null}
-          <p>Committed sequence: {run.lastSeq}</p>
           <Tabs.Root defaultValue="graph" className="min-w-0 space-y-4">
             <Tabs.List aria-label="Run views" className="flex flex-wrap gap-2">
               <Tabs.Trigger
@@ -161,6 +195,6 @@ function RunDetail() {
           </Tabs.Root>
         </>
       ) : null}
-    </>
+    </div>
   )
 }

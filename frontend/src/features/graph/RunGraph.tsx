@@ -140,13 +140,28 @@ export function RunGraph({
     }
   }
   return (
-    <section aria-label="Live run graph" className="min-w-0">
-      <h2 className="mb-2 text-xl font-semibold">Dependency graph</h2>
-      <p id={instructions} className="mb-3 text-sm text-muted-foreground">
-        Use arrow keys to move between nodes, Home/End for the first/last node,
-        and Enter or Space to inspect tasks and the historical Task Plan. Tab
-        leaves the graph. Scroll to explore, or expand the node list.
-      </p>
+    <section
+      aria-label="Live run graph"
+      className={`grid min-w-0 gap-x-4 gap-y-3 ${node ? "xl:grid-cols-[minmax(0,1fr)_20rem]" : ""}`}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 xl:col-span-full">
+        <h2 className="text-lg font-semibold">
+          Dependency graph{" "}
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
+            {layout.nodes.length} nodes / {layout.edges.length} edges
+          </span>
+        </h2>
+        <p id={instructions} className="text-xs text-muted-foreground">
+          Arrow keys: move. Enter: inspect.
+          <span className="sr-only">
+            {" "}
+            Space also inspects tasks and the historical Task Plan. Home/End
+            reaches the first/last node. Tab leaves the graph. Scroll to
+            explore. The node list offers the same information without spatial
+            navigation.
+          </span>
+        </p>
+      </div>
       {layout.nodes.length === 0 ? (
         <p>No declared nodes.</p>
       ) : (
@@ -181,7 +196,7 @@ export function RunGraph({
       )}
       {layout.nodes.length ? (
         <details
-          className="mt-3"
+          className="min-w-0 text-sm xl:col-start-1"
           onToggle={(event) => setListOpen(event.currentTarget.open)}
         >
           <summary className="cursor-pointer">Node list</summary>
@@ -220,7 +235,7 @@ export function RunGraph({
       {node ? (
         <section
           aria-label={`Selected node ${node.key}`}
-          className="mt-4 min-w-0 rounded-md border p-4 break-words"
+          className="min-w-0 border bg-card p-3 text-sm break-words xl:col-start-2 xl:row-span-2 xl:row-start-2"
         >
           <h3 className="font-semibold">{node.key}</h3>
           {run.reusedNodes[node.key] ? (

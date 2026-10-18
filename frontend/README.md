@@ -286,6 +286,14 @@ Chromium, Firefox and WebKit check safe Markdown, exact text, keyboard JSON
 expansion, real image decoding, explicit malformed-payload errors and desktop
 light/mobile dark accessibility without API transport mocks.
 
+Run details group workflow/run identity, committed sequence, status, controls
+and related history/Task Plan links in a compact responsive summary. The graph
+follows immediately below its tabs; concise keyboard hints keep the full
+instructions available to assistive technology. Selecting a node opens its
+inspector beside the graph on wide screens and below it on smaller screens.
+Status, reconnect/permission failures, placement, queue and lineage information
+remain visible rather than being removed to achieve a denser layout.
+
 Graph nodes use a single roving tab stop: Up/Down move within a column, Left/Right
 choose the nearest row in the next column, and Home/End reach the first/last node.
 Native Enter/Space selects a node; Tab leaves the graph. Focus scrolls the selected
