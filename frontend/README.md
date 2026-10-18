@@ -428,6 +428,13 @@ Type, workflow and status stay in a compact primary toolbar with search/reset
 actions. Series, time range, grouping and metadata remain available under
 **Advanced filters**, with an active-filter count. Copied URLs with advanced
 filters expand them automatically; collapsing the panel never discards values.
+Type and workflow fields suggest authorized registered values while accepting
+custom entries. Workflow suggestions page explicitly. Metadata keys and values
+combine the selected type's schema with loaded workflow metadata; the advanced
+builder adds exact string filters without replacing manual JSON editing. These
+are suggestions, not restrictions or automatic filters, and never substitute
+current metadata for a run's recorded snapshot. Suggestion failures remain
+visible with retry; revoked scope removes cached suggestions.
 
 TanStack Router validates typed URL search parameters, including metadata grouping;
 copying or reloading the URL restores the form and view. Grouping uses the run's

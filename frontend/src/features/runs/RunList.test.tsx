@@ -7,10 +7,16 @@ import { ApiError } from "@/lib/api/client"
 import { FilterBar } from "@/features/catalog/FilterBar"
 import { getRuns, type RunRow } from "./api"
 import { RunList } from "./RunList"
+import { getTypes, getWorkflows } from "@/features/catalog/api"
 
 vi.mock("./api", async (original) => ({
   ...(await original<typeof import("./api")>()),
   getRuns: vi.fn(),
+}))
+vi.mock("@/features/catalog/api", async (original) => ({
+  ...(await original<typeof import("@/features/catalog/api")>()),
+  getTypes: vi.fn(),
+  getWorkflows: vi.fn(),
 }))
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
@@ -167,9 +173,13 @@ describe("filtered run list", () => {
 })
 
 describe("run filter form", () => {
+  beforeEach(() => {
+    vi.mocked(getTypes).mockResolvedValue([])
+    vi.mocked(getWorkflows).mockResolvedValue({ items: [], nextCursor: null })
+  })
   it("keeps its route team when searching and clearing filters", async () => {
     const change = vi.fn()
-    render(
+    show(
       <FilterBar
         team="team"
         filters={{ team: "team", status: "Failed" }}
@@ -189,7 +199,7 @@ describe("run filter form", () => {
   it("submits keyboard-entered exact filters and grouping with a clear reset", async () => {
     const user = userEvent.setup()
     const change = vi.fn()
-    render(<FilterBar filters={{}} onChange={change} />)
+    show(<FilterBar filters={{}} onChange={change} />)
     await user.type(screen.getByLabelText("Team"), "team")
     await user.type(screen.getByLabelText("Type"), "release")
     await user.selectOptions(screen.getByLabelText("Run status"), "Running")
@@ -219,7 +229,7 @@ describe("run filter form", () => {
 
   it("blocks malformed metadata and contradictory type filters without a request", async () => {
     const change = vi.fn()
-    render(<FilterBar filters={{ type: "release" }} onChange={change} />)
+    show(<FilterBar filters={{ type: "release" }} onChange={change} />)
     fireEvent.submit(screen.getByRole("form", { name: "Run filters" }))
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent("requires a team")
@@ -232,7 +242,7 @@ describe("run filter form", () => {
     expect(change).not.toHaveBeenCalled()
   })
   it("opens copied advanced filters without hiding their active state", () => {
-    render(
+    show(
       <FilterBar
         team="team"
         filters={{
@@ -249,6 +259,135 @@ describe("run filter form", () => {
     expect(screen.getByLabelText("Series ID")).toBeVisible()
     expect(screen.getByLabelText("Metadata filters (JSON)")).toHaveValue(
       '{"environment":"dev"}'
+    )
+  })
+  it("suggests authorized values, builds exact metadata filters and still accepts custom entries", async () => {
+    vi.mocked(getTypes).mockResolvedValue([
+      {
+        team: "team",
+        name: "release",
+        description: "Releases",
+        latestStatusCounts: {},
+        metadataSchema: {
+          keys: [
+            {
+              key: "environment",
+              required: true,
+              allowedValues: ["dev", "prod"],
+            },
+          ],
+          allowFreeForm: true,
+        },
+      },
+    ])
+    vi.mocked(getWorkflows).mockResolvedValue({
+      items: [
+        {
+          id: "team/release/build",
+          team: "team",
+          type: "release",
+          name: "build",
+          activeVersion: null,
+          latestVersion: { id: row.versionId, semVer: "1.0.0" },
+          metadata: {
+            type: "release",
+            values: { component: "api", environment: "dev" },
+          },
+          latestRun: null,
+        },
+      ],
+      nextCursor: null,
+    })
+    const change = vi.fn()
+    show(
+      <FilterBar
+        team="team"
+        filters={{ team: "team", type: "release" }}
+        onChange={change}
+      />
+    )
+    await waitFor(() =>
+      expect(
+        document.querySelector('datalist option[value="team/release/build"]')
+      ).toBeInTheDocument()
+    )
+    expect(
+      document.querySelector('datalist option[value="release"]')
+    ).toBeInTheDocument()
+    await userEvent.click(screen.getByText("Advanced filters", { exact: true }))
+    fireEvent.change(screen.getByLabelText("Metadata key", { exact: true }), {
+      target: { value: "environment" },
+    })
+    expect(
+      document.querySelector('datalist option[value="prod"]')
+    ).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("Metadata value"), {
+      target: { value: " custom value " },
+    })
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add metadata filter" })
+    )
+    expect(screen.getByLabelText("Metadata filters (JSON)")).toHaveValue(
+      '{"environment":" custom value "}'
+    )
+    fireEvent.change(screen.getByLabelText("Type", { exact: true }), {
+      target: { value: "custom-type" },
+    })
+    fireEvent.change(screen.getByLabelText("Workflow ID"), {
+      target: { value: "team/custom-type/custom-workflow" },
+    })
+    await userEvent.click(screen.getByRole("button", { name: "Search runs" }))
+    expect(change).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        team: "team",
+        type: "custom-type",
+        workflowId: "team/custom-type/custom-workflow",
+        metadata: { environment: " custom value " },
+      })
+    )
+  })
+  it("surfaces suggestion failure, hides revoked cached options and retries the failing query", async () => {
+    vi.mocked(getTypes).mockResolvedValue([
+      {
+        team: "team",
+        name: "release",
+        description: "",
+        latestStatusCounts: {},
+        metadataSchema: { keys: [], allowFreeForm: true },
+      },
+    ])
+    const { client } = show(
+      <FilterBar
+        team="team"
+        filters={{ team: "team", type: "release" }}
+        onChange={vi.fn()}
+      />
+    )
+    await waitFor(() =>
+      expect(
+        document.querySelector('datalist option[value="release"]')
+      ).toBeInTheDocument()
+    )
+    vi.mocked(getTypes).mockRejectedValue(
+      new ApiError(new Response(null, { status: 403 }), {
+        title: "Suggestions revoked",
+      })
+    )
+    await client.invalidateQueries({
+      queryKey: ["catalog", "team", "team", "filter-types"],
+    })
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Suggestions revoked"
+    )
+    expect(
+      document.querySelector('datalist option[value="release"]')
+    ).not.toBeInTheDocument()
+    vi.mocked(getTypes).mockResolvedValue([])
+    await userEvent.click(
+      screen.getByRole("button", { name: "Retry filter suggestions" })
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
     )
   })
 })

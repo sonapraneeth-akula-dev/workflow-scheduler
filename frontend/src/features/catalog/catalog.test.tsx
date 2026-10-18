@@ -148,6 +148,7 @@ describe("catalogue views", () => {
         name: "release",
         description: "Deploy releases",
         latestStatusCounts: { Failed: 2, NeverRun: 1 },
+        metadataSchema: { keys: [], allowFreeForm: true },
       },
     ])
     show(<TeamArea team="team" />)
@@ -171,6 +172,7 @@ describe("catalogue views", () => {
         name: "perf",
         description: "Performance workflows",
         latestStatusCounts: {},
+        metadataSchema: { keys: [], allowFreeForm: true },
       },
     ])
     show(
@@ -217,8 +219,15 @@ describe("catalogue views", () => {
         name: "release",
         description: "",
         latestStatusCounts: {},
+        metadataSchema: { keys: [], allowFreeForm: true },
       },
-      { team: "team", name: "perf", description: "", latestStatusCounts: {} },
+      {
+        team: "team",
+        name: "perf",
+        description: "",
+        latestStatusCounts: {},
+        metadataSchema: { keys: [], allowFreeForm: true },
+      },
     ])
     show(<TeamArea team="team" />)
     await screen.findByRole("link", { name: "team / perf" })

@@ -47,6 +47,16 @@ const types = z.array(
     team: name,
     name,
     description: z.string(),
+    metadataSchema: z.object({
+      keys: z.array(
+        z.object({
+          key: z.string().min(1),
+          required: z.boolean(),
+          allowedValues: z.array(z.string()),
+        })
+      ),
+      allowFreeForm: z.boolean(),
+    }),
     latestStatusCounts: z.partialRecord(statusSchema, count),
   })
 )

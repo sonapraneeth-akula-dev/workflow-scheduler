@@ -30,7 +30,13 @@ beforeEach(() => {
   vi.resetAllMocks()
   teams.mockResolvedValue([{ team: "demo", typeCount: 1, presentation: null }])
   types.mockResolvedValue([
-    { team: "demo", name: "release", description: "", latestStatusCounts: {} },
+    {
+      team: "demo",
+      name: "release",
+      description: "",
+      latestStatusCounts: {},
+      metadataSchema: { keys: [], allowFreeForm: true },
+    },
   ])
 })
 

@@ -118,6 +118,7 @@ describe("catalogue API trust boundaries", () => {
         name: "release",
         description: "Deploy",
         latestStatusCounts: { Running: "2", NeverRun: 1 },
+        metadataSchema: { keys: [], allowFreeForm: true },
       },
     ])
     expect((await getTypes("team"))[0]?.latestStatusCounts).toEqual({
@@ -135,6 +136,7 @@ describe("catalogue API trust boundaries", () => {
           name: "release",
           description: "",
           latestStatusCounts: { Running: value },
+          metadataSchema: { keys: [], allowFreeForm: true },
         },
       ])
       await expect(getTypes("team")).rejects.toThrow()
@@ -148,6 +150,7 @@ describe("catalogue API trust boundaries", () => {
         name: "release",
         description: "",
         latestStatusCounts: {},
+        metadataSchema: { keys: [], allowFreeForm: true },
       },
     ])
     await expect(getTypes("team")).rejects.toThrow("different team's")
