@@ -14,6 +14,15 @@ without overlapping the brand or account actions.
 The right-hand theme action is an accessible sun/moon icon. It follows the
 system theme until explicitly changed, persists the choice in local storage,
 and surfaces unavailable/corrupt preference storage rather than hiding errors.
+After the theme action, the account menu shows the signed-in name and an
+initials avatar (the current sign-in supplies no photo). Profile details use
+fresh server permission checks for system, team and type administrator access,
+including inherited roles; no role is inferred from display names or decoded
+tokens. Loading/errors hide old role details. Settings offers light, dark and
+system appearance. A divider separates the red sign-out action, which reuses
+the existing Entra logout and live-subscription cleanup. Explicit Development
+authentication has no interactive session: sign-out is disabled with an
+explanation rather than pretending to log out the fixed local identity.
 
 ## Run locally
 

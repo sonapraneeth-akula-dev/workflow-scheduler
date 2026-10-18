@@ -7,6 +7,12 @@ const auth = vi.hoisted(() => ({
   logout: vi.fn(async () => undefined),
   select: vi.fn(),
   reset: vi.fn(async () => undefined),
+  account: {
+    name: "Example User",
+    username: "user@example.invalid",
+    localAccountId: "caller-id",
+    tenantId: "60d24b19-f65a-4ed4-96cc-9174bfcacabc",
+  },
 }))
 vi.mock("@azure/msal-browser", () => ({
   PublicClientApplication: class {
@@ -15,6 +21,8 @@ vi.mock("@azure/msal-browser", () => ({
     loginPopup = auth.login
     logoutPopup = auth.logout
     setActiveAccount = auth.select
+    getActiveAccount = () => auth.account
+    getAllAccounts = () => [auth.account]
   },
 }))
 vi.mock("@/lib/live/subscriptions", () => ({
@@ -27,6 +35,17 @@ beforeEach(() => {
   vi.stubEnv("VITE_ENTRA_TENANT_ID", "60d24b19-f65a-4ed4-96cc-9174bfcacabc")
   vi.stubEnv("VITE_ENTRA_SPA_CLIENT_ID", "562b0870-4522-43da-8587-41e9b788f309")
   vi.stubEnv("VITE_ENTRA_API_SCOPE", "api://kardia/read")
+})
+
+it("exposes signed-in account identity without inferring authorization from identity claims", async () => {
+  const { getSession } = await import("./session")
+  await expect(getSession()).resolves.toEqual({
+    displayName: "Example User",
+    isDevelopment: false,
+    username: "user@example.invalid",
+    accountId: "caller-id",
+    tenantId: "60d24b19-f65a-4ed4-96cc-9174bfcacabc",
+  })
 })
 afterEach(() => {
   vi.resetModules()

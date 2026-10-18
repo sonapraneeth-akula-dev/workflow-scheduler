@@ -1,6 +1,7 @@
 import { useMutation, useQuery, type QueryClient } from "@tanstack/react-query"
 import { createRootRouteWithContext, Outlet } from "@tanstack/react-router"
 import { AppHeader } from "@/components/AppHeader"
+import { AccountMenu } from "@/components/AccountMenu"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { Button } from "@/components/ui/button"
 import { ErrorNotice } from "@/components/ErrorNotice"
@@ -47,15 +48,21 @@ function RootLayout() {
           dark={theme.dark}
           onToggle={() => theme.setPreference(theme.dark ? "light" : "dark")}
         />
-        {session.data ? <span>{session.data.displayName}</span> : null}
-        {session.data?.isDevelopment ? (
-          <span>Development authentication</span>
+        {session.data ? (
+          <AccountMenu
+            session={session.data}
+            signingOut={authentication.isPending}
+            onSignOut={() => authentication.mutate()}
+            preference={theme.preference}
+            onThemeChange={theme.setPreference}
+            themeError={theme.error}
+          />
         ) : (
           <Button
             disabled={session.isPending || authentication.isPending}
             onClick={() => authentication.mutate()}
           >
-            {session.data ? "Sign out" : "Sign in"}
+            Sign in
           </Button>
         )}
       </AppHeader>

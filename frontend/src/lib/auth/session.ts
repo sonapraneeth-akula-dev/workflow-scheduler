@@ -4,6 +4,9 @@ import { z } from "zod"
 export interface Session {
   readonly displayName: string
   readonly isDevelopment: boolean
+  readonly username?: string
+  readonly accountId?: string
+  readonly tenantId?: string
 }
 
 const configuration = z.object({
@@ -78,7 +81,13 @@ export async function getSession(): Promise<Session | null> {
     return null
   }
   application.setActiveAccount(account)
-  return { displayName: account.name ?? account.username, isDevelopment: false }
+  return {
+    displayName: account.name ?? account.username,
+    isDevelopment: false,
+    username: account.username,
+    accountId: account.localAccountId,
+    tenantId: account.tenantId,
+  }
 }
 
 export async function signIn(): Promise<void> {
