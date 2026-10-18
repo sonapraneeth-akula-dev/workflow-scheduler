@@ -6,6 +6,7 @@ import { formatTimestamp } from "@/lib/timestamps"
 import { StatusBadge } from "@/components/StatusBadge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { NativeSelect } from "@/components/ui/native-select"
 import { accessDenied, runStatuses } from "@/features/catalog/api"
 import { TriggerBadge } from "./TriggerBadge"
 import { RunNowButton } from "@/features/series/RunNowButton"
@@ -47,16 +48,12 @@ export function HistoryFilters({
     >
       <label className="flex flex-col gap-1">
         Run status
-        <select
-          name="status"
-          defaultValue={search.status ?? ""}
-          className="rounded border bg-background p-2"
-        >
+        <NativeSelect name="status" defaultValue={search.status ?? ""}>
           <option value="">All statuses and fire facts</option>
           {runStatuses.map((status) => (
             <option key={status}>{status}</option>
           ))}
-        </select>
+        </NativeSelect>
       </label>
       <label className="flex min-w-0 flex-col gap-1">
         Aborted by (principal UUID)
@@ -68,27 +65,19 @@ export function HistoryFilters({
       </label>
       <label className="flex flex-col gap-1">
         Outcome
-        <select
-          name="outcome"
-          defaultValue={search.outcome ?? ""}
-          className="rounded border bg-background p-2"
-        >
+        <NativeSelect name="outcome" defaultValue={search.outcome ?? ""}>
           <option value="">Runs and retained fire facts</option>
           <option value="Run">Runs only</option>
           <option>Skipped</option>
           <option>Missed</option>
-        </select>
+        </NativeSelect>
       </label>
       <label className="flex flex-col gap-1">
         History order
-        <select
-          name="sort"
-          defaultValue={search.sort ?? "createdAtDesc"}
-          className="rounded border bg-background p-2"
-        >
+        <NativeSelect name="sort" defaultValue={search.sort ?? "createdAtDesc"}>
           <option value="createdAtDesc">Newest first</option>
           <option value="createdAtAsc">Oldest first</option>
-        </select>
+        </NativeSelect>
       </label>
       <Button type="submit">Filter history</Button>
       <Button type="button" variant="outline" onClick={() => onChange({})}>

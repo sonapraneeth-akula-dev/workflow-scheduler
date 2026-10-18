@@ -8,6 +8,7 @@ import { Link } from "@tanstack/react-router"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { formatTimestamp } from "@/lib/timestamps"
 import { Button } from "@/components/ui/button"
+import { NativeSelect } from "@/components/ui/native-select"
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -153,14 +154,13 @@ export function VersionsTab({
                       className="flex max-w-full min-w-0 flex-col gap-1 overflow-hidden"
                     >
                       Compare {side}
-                      <select
+                      <NativeSelect
                         value={selected}
                         onChange={(event) =>
                           (side === "from" ? setFrom : setTo)(
                             event.target.value
                           )
                         }
-                        className="max-w-full min-w-0 rounded border bg-background p-2 focus-visible:outline-2 focus-visible:-outline-offset-2"
                       >
                         {selected &&
                         !versions.some(
@@ -181,7 +181,7 @@ export function VersionsTab({
                             {version.version} ({version.versionId})
                           </option>
                         ))}
-                      </select>
+                      </NativeSelect>
                     </label>
                   )
                 })}

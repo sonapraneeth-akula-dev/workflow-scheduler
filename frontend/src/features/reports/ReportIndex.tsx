@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { formatTimestamp } from "@/lib/timestamps"
 import { Button } from "@/components/ui/button"
+import { NativeSelect } from "@/components/ui/native-select"
 import { useLive } from "@/lib/live/useLive"
 import { getReportIndex, type ReportItem } from "./api"
 
@@ -75,23 +76,21 @@ export function ReportIndex({ runId }: { runId: string }) {
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex min-w-0 flex-col gap-1">
           Report kind
-          <select
+          <NativeSelect
             value={kind}
             onChange={(event) => setKind(event.target.value)}
-            className="h-9 max-w-full rounded-md border bg-background px-3"
           >
             <option value="">All kinds</option>
             {[...new Set(reports.map((report) => report.kind))].map((value) => (
               <option key={value}>{value}</option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         <label className="flex min-w-0 flex-col gap-1">
           Report tag
-          <select
+          <NativeSelect
             value={tag}
             onChange={(event) => setTag(event.target.value)}
-            className="h-9 max-w-full rounded-md border bg-background px-3"
           >
             <option value="">All tags</option>
             {[...new Set(reports.flatMap((report) => report.tags))].map(
@@ -99,7 +98,7 @@ export function ReportIndex({ runId }: { runId: string }) {
                 <option key={value}>{value}</option>
               )
             )}
-          </select>
+          </NativeSelect>
         </label>
         <Button
           variant="outline"

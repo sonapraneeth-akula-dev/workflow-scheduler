@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react"
 import { runStatuses } from "./api"
 import { Button } from "@/components/ui/button"
+import { NativeSelect } from "@/components/ui/native-select"
 import { Input } from "@/components/ui/input"
 import { runSearchSchema, type RunSearch } from "@/features/runs/search"
 
@@ -79,31 +80,23 @@ export function FilterBar({
         ))}
         <label className="flex min-w-0 flex-col gap-1">
           Run status
-          <select
-            name="status"
-            defaultValue={filters.status ?? ""}
-            className="h-9 rounded-md border bg-background px-3"
-          >
+          <NativeSelect name="status" defaultValue={filters.status ?? ""}>
             <option value="">All statuses</option>
             {runStatuses.map((status) => (
               <option key={status}>{status}</option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         <label className="flex min-w-0 flex-col gap-1">
           Group loaded runs by
-          <select
-            name="groupBy"
-            defaultValue={filters.groupBy ?? "none"}
-            className="h-9 rounded-md border bg-background px-3"
-          >
+          <NativeSelect name="groupBy" defaultValue={filters.groupBy ?? "none"}>
             <option value="none">No grouping</option>
             <option value="team">Team</option>
             <option value="type">Type</option>
             <option value="workflow">Workflow</option>
             <option value="status">Status</option>
             <option value="metadata">Metadata</option>
-          </select>
+          </NativeSelect>
         </label>
         <label className="flex min-w-0 flex-col gap-1">
           Metadata group key

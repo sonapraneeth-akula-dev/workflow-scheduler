@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { formatTimestamp } from "@/lib/timestamps"
 import { Button } from "@/components/ui/button"
+import { NativeSelect } from "@/components/ui/native-select"
 import { usePermissions } from "@/lib/auth/usePermissions"
 import { useLive } from "@/lib/live/useLive"
 import { EditLabelsDialog } from "./EditLabelsDialog"
@@ -61,30 +62,24 @@ export function MachineFilters({
       </label>
       <label className="flex min-w-0 flex-col gap-1">
         OS
-        <select
-          aria-label="OS"
-          name="os"
-          defaultValue={search.os ?? ""}
-          className="rounded border bg-background p-2"
-        >
+        <NativeSelect aria-label="OS" name="os" defaultValue={search.os ?? ""}>
           <option value="">All operating systems</option>
           <option value="windows">Windows</option>
           <option value="linux">Linux</option>
-        </select>
+        </NativeSelect>
       </label>
       <label className="flex min-w-0 flex-col gap-1">
         Health
-        <select
+        <NativeSelect
           aria-label="Health"
           name="status"
           defaultValue={search.status ?? ""}
-          className="rounded border bg-background p-2"
         >
           <option value="">All health states</option>
           {["Healthy", "Unhealthy", "Draining"].map((status) => (
             <option key={status}>{status}</option>
           ))}
-        </select>
+        </NativeSelect>
       </label>
       <label className="flex min-w-0 flex-col gap-1">
         Label filters (one key=value per line)

@@ -36,6 +36,10 @@ distinct success, warning, error and active-status colors. Status labels and
 icons remain readable without color. All application surfaces, including
 avatars, badges, controls, popovers and dialogs, have square corners; embedded
 report documents retain their own sandboxed content styling.
+Single-value dropdowns share the native select component across filters,
+forms and report/table controls. Selected text has dedicated chevron clearance
+and trailing padding; controls keep native keyboard behavior, bounded widths,
+visible focus and disabled states in both themes.
 The right-hand theme action is an accessible sun/moon icon. It follows the
 system theme until explicitly changed, persists the choice in local storage,
 and surfaces unavailable/corrupt preference storage rather than hiding errors.

@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { formatTimestamp } from "@/lib/timestamps"
 import { Button } from "@/components/ui/button"
+import { NativeSelect } from "@/components/ui/native-select"
 import { getHistory, type HistoryCursor } from "@/features/runs/history"
 import { ReportRenderer } from "@/renderers/ReportRenderer"
 import {
@@ -100,8 +101,8 @@ export function ReportCompare({ seriesId }: { seriesId: string }) {
               className="flex min-w-0 flex-col gap-1 overflow-clip"
             >
               {side === "left" ? "Left run" : "Right run"}
-              <select
-                className="h-9 w-full max-w-full min-w-0 rounded-md border bg-background px-3 focus-visible:-outline-offset-2"
+              <NativeSelect
+                className="w-full"
                 value={side === "left" ? leftRunId : rightRunId}
                 disabled={!!history.error || !runs.length}
                 onChange={(event) => {
@@ -124,7 +125,7 @@ export function ReportCompare({ seriesId }: { seriesId: string }) {
                     {run.runId} | {formatTimestamp(run.at)} | {run.status}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
           ))}
         </div>
@@ -146,8 +147,8 @@ export function ReportCompare({ seriesId }: { seriesId: string }) {
         </Button>
         <label className="flex min-w-0 flex-col gap-1 overflow-clip">
           Report from left run
-          <select
-            className="h-9 w-full max-w-full min-w-0 rounded-md border bg-background px-3 focus-visible:-outline-offset-2"
+          <NativeSelect
+            className="w-full"
             value={reportId}
             disabled={!reports.length}
             onChange={(event) => {
@@ -162,7 +163,7 @@ export function ReportCompare({ seriesId }: { seriesId: string }) {
                 {item.attempt}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         {leftRunId && index.data && !index.error && !reports.length ? (
           <p role="status">No reports published for the left run.</p>

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { Button } from "@/components/ui/button"
+import { NativeSelect } from "@/components/ui/native-select"
 import { Plot } from "@/renderers/chart/ChartReport"
 import type { ChartData } from "@/renderers/chart/chartData"
 import { trendWindowSchema, type TrendWindow } from "@/features/series/api"
@@ -50,7 +51,7 @@ export function DashboardPage({
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1">
           Dashboard window
-          <select
+          <NativeSelect
             value={window}
             onChange={(event) =>
               onChange({
@@ -58,21 +59,19 @@ export function DashboardPage({
                 top,
               })
             }
-            className="rounded border bg-background p-2"
           >
             <option value="7d">Last 7 days</option>
             <option value="30d">Last 30 days</option>
             <option value="90d">Last 90 days</option>
-          </select>
+          </NativeSelect>
         </label>
         <label className="flex flex-col gap-1">
           Top rankings
-          <select
+          <NativeSelect
             value={top}
             onChange={(event) =>
               onChange({ window, top: Number(event.currentTarget.value) })
             }
-            className="rounded border bg-background p-2"
           >
             {[...new Set([5, 10, 25, 50, top])]
               .sort((a, b) => a - b)
@@ -81,7 +80,7 @@ export function DashboardPage({
                   {n}
                 </option>
               ))}
-          </select>
+          </NativeSelect>
         </label>
         <Button
           variant="outline"

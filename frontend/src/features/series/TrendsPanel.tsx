@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { Button } from "@/components/ui/button"
+import { NativeSelect } from "@/components/ui/native-select"
 import { accessDenied } from "@/features/catalog/api"
 import { usePermissions } from "@/lib/auth/usePermissions"
 import { Plot } from "@/renderers/chart/ChartReport"
@@ -90,8 +91,7 @@ export function TrendsPanel({
         <h2 className="text-xl font-semibold">Trends</h2>
         <label className="flex flex-col gap-1">
           Trend window
-          <select
-            className="rounded border bg-background p-2"
+          <NativeSelect
             value={window}
             onChange={(event) =>
               onWindowChange(trendWindowSchema.parse(event.currentTarget.value))
@@ -100,7 +100,7 @@ export function TrendsPanel({
             <option value="7d">Last 7 days</option>
             <option value="30d">Last 30 days</option>
             <option value="90d">Last 90 days</option>
-          </select>
+          </NativeSelect>
         </label>
         <Button
           variant="outline"

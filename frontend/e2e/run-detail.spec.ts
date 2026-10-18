@@ -302,6 +302,72 @@ for (const colorScheme of ["light", "dark"] as const) {
     await expect(table).toHaveCount(0)
   })
 
+  test(`${colorScheme} report dropdowns leave clear chevron padding at mobile and desktop widths`, async ({
+    page,
+  }, testInfo) => {
+    await page.emulateMedia({ colorScheme })
+    await openListedRun(page)
+    await page.getByRole("tab", { name: "Reports", exact: true }).click()
+    const reports = page.getByRole("region", {
+      name: "Run reports",
+      exact: true,
+    })
+    for (const width of [2000, 320]) {
+      await page.setViewportSize({ width, height: 1000 })
+      for (const name of ["Report kind", "Report tag"]) {
+        const control = reports.getByRole("combobox", { name, exact: true })
+        await expect(control).toHaveAttribute("data-slot", "native-select")
+        const spacing = await control.evaluate((element) => {
+          if (!(element instanceof HTMLSelectElement))
+            throw new Error("Expected a native dropdown.")
+          const style = getComputedStyle(element)
+          const box = element.getBoundingClientRect()
+          const icon = element
+            .parentElement!.querySelector('[data-slot="native-select-icon"]')!
+            .getBoundingClientRect()
+          const context = document.createElement("canvas").getContext("2d")!
+          context.font = style.font
+          const textWidth = context.measureText(
+            element.selectedOptions[0]!.text
+          ).width
+          return {
+            padding: parseFloat(style.paddingRight),
+            trailing: box.right - icon.right,
+            clearance:
+              icon.left -
+              (box.left +
+                parseFloat(style.borderLeftWidth) +
+                parseFloat(style.paddingLeft) +
+                textWidth),
+            center: Math.abs(
+              (icon.top + icon.bottom - box.top - box.bottom) / 2
+            ),
+            radius: style.borderTopRightRadius,
+          }
+        })
+        expect(spacing.padding).toBeGreaterThanOrEqual(40)
+        expect(spacing.trailing).toBeGreaterThanOrEqual(11)
+        expect(spacing.clearance).toBeGreaterThanOrEqual(10)
+        expect(spacing.center).toBeLessThanOrEqual(1)
+        expect(spacing.radius).toBe("0px")
+      }
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth)
+      ).toBeLessThanOrEqual(width)
+      await reports.screenshot({
+        path: testInfo.outputPath(`dropdowns-${colorScheme}-${width}.png`),
+      })
+    }
+    await page.goto("/runs?status=Succeeded")
+    const status = page.getByRole("combobox", {
+      name: "Run status",
+      exact: true,
+    })
+    await status.selectOption("Failed")
+    await expect(status).toHaveValue("Failed")
+    await expect(status).toHaveAttribute("data-slot", "native-select")
+  })
+
   test(`${colorScheme} dependency arrows stay outside every node and stop before the target border`, async ({
     page,
   }, testInfo) => {

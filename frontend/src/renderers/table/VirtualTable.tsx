@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
+import { NativeSelect } from "@/components/ui/native-select"
 import type { TableData } from "./types"
 
 const rowHeight = 32
@@ -48,10 +49,10 @@ export function VirtualTable({
         </label>
         <label className="flex min-w-0 flex-col gap-1 overflow-clip">
           Sort table by
-          <select
+          <NativeSelect
             value={sort}
             onChange={(event) => setSort(Number(event.target.value))}
-            className="h-9 w-full max-w-full min-w-0 rounded-md border bg-background px-3 focus-visible:-outline-offset-2"
+            className="w-full"
           >
             <option value={-1}>Original row order</option>
             {columns.map((column, index) => (
@@ -59,7 +60,7 @@ export function VirtualTable({
                 {column || "(unnamed)"} (column {index + 1})
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         <Button
           variant="outline"

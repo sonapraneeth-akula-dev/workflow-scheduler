@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { Button } from "@/components/ui/button"
+import { NativeSelect } from "@/components/ui/native-select"
 import { Input } from "@/components/ui/input"
 import { ApiError } from "@/lib/api/client"
 import { usePermissions } from "@/lib/auth/usePermissions"
@@ -235,8 +236,7 @@ function ScopedSubscriptions(props: Props) {
                   <legend className="font-medium">Add a subscription</legend>
                   <label className="flex min-w-0 flex-col gap-1">
                     Channel
-                    <select
-                      className="max-w-full rounded border bg-background p-2"
+                    <NativeSelect
                       value={channel}
                       onChange={(change) => {
                         setChannel(
@@ -250,12 +250,11 @@ function ScopedSubscriptions(props: Props) {
                       <option>Email</option>
                       <option>Teams</option>
                       <option>Webhook</option>
-                    </select>
+                    </NativeSelect>
                   </label>
                   <label className="flex min-w-0 flex-col gap-1">
                     Events
-                    <select
-                      className="max-w-full rounded border bg-background p-2"
+                    <NativeSelect
                       value={event}
                       onChange={(change) =>
                         setEvent(eventSchema.parse(change.currentTarget.value))
@@ -265,7 +264,7 @@ function ScopedSubscriptions(props: Props) {
                       <option value="Failed">
                         Failures, timeouts and aborts only
                       </option>
-                    </select>
+                    </NativeSelect>
                   </label>
                   <label className="flex min-w-0 flex-col gap-1">
                     {channel === "Email"

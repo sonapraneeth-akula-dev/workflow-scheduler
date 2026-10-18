@@ -1,6 +1,7 @@
 import { useId } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { NativeSelect } from "@/components/ui/native-select"
 import type { RunPlacement } from "@/lib/live/runApi"
 import type { TriggerRequest } from "./trigger-api"
 import { rerunPlacementOptions, triggerPlacementOptions } from "./placement-api"
@@ -46,7 +47,7 @@ export function PlacementFields({
       {value?.singleMachine ? (
         <>
           <label htmlFor={id}>Machine</label>
-          <select
+          <NativeSelect
             id={id}
             value={value.machine ?? ""}
             disabled={!valid || query.isFetching || !!query.error}
@@ -63,7 +64,7 @@ export function PlacementFields({
                 {machine.name}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           {!valid ? (
             <p>Complete valid variables to check eligible machines.</p>
           ) : null}
