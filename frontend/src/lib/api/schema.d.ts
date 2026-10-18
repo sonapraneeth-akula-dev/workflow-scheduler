@@ -41,7 +41,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Authorized, team-scoped workflow cards and daily run counts across all series and manual runs. window=7d|30d|90d includes the current UTC run day; from inclusive, to exclusive. Each day records all named run statuses; no runs means empty counts, not success. Uses the same exact team/type, keyset cursor and metadata filters as the workflow catalogue. No payloads or capabilities. */
+        /** @description Authorized, team-scoped workflow cards and daily run counts across all series and manual runs. window=7d|14d|30d|90d (default 14d) includes the current UTC run day; from inclusive, to exclusive. Each day records all named run statuses; no runs means empty counts, not success. Uses the same exact team/type, keyset cursor and metadata filters as the workflow catalogue. No payloads or capabilities. */
         get: {
             parameters: {
                 query: {

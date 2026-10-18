@@ -29,14 +29,14 @@ function page() {
   return {
     team: "team",
     type: null,
-    window: "7d",
-    from: "2026-10-12",
+    window: "14d",
+    from: "2026-10-05",
     to: "2026-10-19",
     items: [
       {
         workflow,
-        days: Array.from({ length: 7 }, (_, index) => ({
-          day: `2026-10-${String(12 + index).padStart(2, "0")}`,
+        days: Array.from({ length: 14 }, (_, index) => ({
+          day: `2026-10-${String(5 + index).padStart(2, "0")}`,
           counts: index ? {} : { Succeeded: 1 },
         })),
       },
@@ -54,14 +54,14 @@ it("uses exact team, optional type, explicit window, bounded page and cancellati
   respond(data)
   const signal = new AbortController().signal
   expect(
-    await getServiceHistory("team", undefined, "7d", null, signal)
+    await getServiceHistory("team", undefined, "14d", null, signal)
   ).toEqual(data)
   expect(get).toHaveBeenCalledWith("/api/v1/service-history", {
     params: {
       query: {
         team: "team",
         type: undefined,
-        window: "7d",
+        window: "14d",
         limit: 50,
         cursor: undefined,
       },
@@ -137,7 +137,7 @@ it.each([
   async (change) => {
     respond(change(page()))
     await expect(
-      getServiceHistory("team", undefined, "7d", null)
+      getServiceHistory("team", undefined, "14d", null)
     ).rejects.toThrow()
   }
 )
@@ -146,7 +146,7 @@ it("validates explicit type, continued cursor and Unicode code-point order", asy
   const data = { ...page(), type: "release", nextCursor: "next" }
   respond(data)
   await expect(
-    getServiceHistory("team", "release", "7d", {
+    getServiceHistory("team", "release", "14d", {
       cursor: "next",
       afterId: "team/release/0",
     })
@@ -169,14 +169,14 @@ it("validates explicit type, continued cursor and Unicode code-point order", asy
     ],
   })
   await expect(
-    getServiceHistory("team", "release", "7d", null)
+    getServiceHistory("team", "release", "14d", null)
   ).resolves.toHaveProperty("items.length", 2)
   respond({
     ...data,
     items: [{ ...data.items[0], workflow: { ...workflow, type: "foreign" } }],
   })
   await expect(
-    getServiceHistory("team", "release", "7d", null)
+    getServiceHistory("team", "release", "14d", null)
   ).rejects.toThrow()
 })
 
@@ -200,20 +200,27 @@ it.each([401, 403, 503])(
       error: { title: "Service history unavailable" },
     })
     await expect(
-      getServiceHistory("team", undefined, "7d", null)
+      getServiceHistory("team", undefined, "14d", null)
     ).rejects.toMatchObject({ status })
   }
 )
 
 it("validates copied format and period choices", () => {
   expect(serviceSearchSchema.parse({})).toEqual({
-    window: "30d",
+    window: "14d",
     view: "cards",
     groupBy: "type",
   })
   expect(serviceSearchSchema.safeParse({ window: "365d" }).success).toBe(false)
   expect(serviceSearchSchema.safeParse({ view: "grid" }).success).toBe(false)
 })
+
+it.each(["7d", "14d", "30d", "90d"])(
+  "normalizes saved %s periods to the fixed two-week view",
+  (window) => {
+    expect(serviceSearchSchema.parse({ window }).window).toBe("14d")
+  }
+)
 
 it("restores metadata grouping without conflating the built-in type and a metadata key named type", () => {
   expect(

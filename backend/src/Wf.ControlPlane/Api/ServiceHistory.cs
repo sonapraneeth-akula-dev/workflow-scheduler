@@ -24,7 +24,7 @@ public static partial class CatalogEndpoints
             .Produces<ServiceHistoryPage>().ProducesProblem(400).ProducesProblem(401)
             .ProducesProblem(500).ProducesProblem(503)
             .WithDescription("Authorized, team-scoped workflow cards and daily run counts across all series and manual runs. " +
-                "window=7d|30d|90d includes the current UTC run day; from inclusive, to exclusive. " +
+                "window=7d|14d|30d|90d (default 14d) includes the current UTC run day; from inclusive, to exclusive. " +
                 "Each day records all named run statuses; no runs means empty counts, not success. " +
                 "Uses the same exact team/type, keyset cursor and metadata filters as the workflow catalogue. No payloads or capabilities.")
             .AddOpenApiOperationTransformer((operation, _, _) =>
@@ -52,8 +52,15 @@ public static partial class CatalogEndpoints
         {
             filter = CatalogQuery.Parse(new QueryCollection(context.Request.Query
                 .Where(entry => entry.Key != "window").ToDictionary()));
-            window = TrendWindow.Parse(new QueryCollection(context.Request.Query
-                .Where(entry => entry.Key == "window").ToDictionary()), time.GetUtcNow());
+            var name = context.Request.Query.TryGetValue("window", out var values)
+                ? values.Count == 1 ? values[0] : null : "14d";
+            var days = name switch
+            {
+                "7d" => 7, "14d" => 14, "30d" => 30, "90d" => 90,
+                _ => throw new ArgumentException("Invalid service history window.")
+            };
+            var to = DateOnly.FromDateTime(time.GetUtcNow().UtcDateTime).AddDays(1);
+            window = new(name!, to.AddDays(-days), to);
             if (filter.Team is null) throw new ArgumentException("Choose an exact team for service history.");
         }
         catch (ArgumentException error)

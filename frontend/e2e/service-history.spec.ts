@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright"
 import { expect, test } from "@playwright/test"
 
-test("navbar discovers team/type service views and restores format, window and direct run actions", async ({
+test("navbar discovers team/type service views and restores format with two-week health and direct run actions", async ({
   page,
 }) => {
   await page.goto("/")
@@ -35,8 +35,11 @@ test("navbar discovers team/type service views and restores format, window and d
   await expect(
     page.getByRole("heading", { name: `${team} service history`, exact: true })
   ).toBeVisible()
-  await expect(page.getByLabel("Workflow type")).toHaveValue(type)
-  await page.getByLabel("Health window").selectOption("7d")
+  await expect(
+    page.getByRole("combobox", { name: "Workflow type", exact: true })
+  ).toHaveValue(type)
+  await expect(page.getByText("Daily health: last 14 days (UTC)")).toBeVisible()
+  await expect(page.getByLabel("Health window")).toHaveCount(0)
   const group = page.getByRole("region", { name: type, exact: true })
   await expect(group).toBeVisible()
   const card = group.locator("ul > li").first()
@@ -45,16 +48,14 @@ test("navbar discovers team/type service views and restores format, window and d
     card.getByRole("link", { name: /^View last run for / })
   ).toBeVisible()
   await expect(page.getByText("Daily health details")).toHaveCount(0)
-  await expect(card.locator("[data-health-day]")).toHaveCount(7)
+  await expect(card.locator("[data-health-day]")).toHaveCount(14)
   await page.getByRole("radio", { name: "Table format" }).click()
   await expect(group.getByRole("table")).toBeVisible()
   expect(new URL(page.url()).searchParams.get("view")).toBe("table")
   await page.reload()
-  await expect(page.getByLabel("Health window")).toHaveValue("7d")
   await expect(group.getByRole("table")).toBeVisible()
-  await page.getByLabel("Health window").selectOption("90d")
   const row = group.getByRole("table").locator("tbody tr").first()
-  await expect(row.locator("[data-health-day]")).toHaveCount(90)
+  await expect(row.locator("[data-health-day]")).toHaveCount(14)
   const lastRun = row.getByRole("link", { name: /^View last run for / })
   const lastRunPath = await lastRun.getAttribute("href")
   expect(lastRunPath).toMatch(/^\/runs\/[0-9a-f-]+$/)
@@ -72,6 +73,52 @@ test("navbar discovers team/type service views and restores format, window and d
   )
   await history.click()
   await expect.poll(() => new URL(page.url()).pathname).toBe(historyPath)
+})
+
+test("legacy service URLs use two weeks in both formats without dropping metadata grouping", async ({
+  page,
+}) => {
+  await page.goto("/service-history")
+  await page.locator('main a[href^="/t/"][href*="/services"]').first().click()
+  await expect(
+    page.getByRole("link", { name: /^History for / }).first()
+  ).toBeVisible()
+  const url = new URL(page.url())
+  url.searchParams.set("groupBy", "metadata")
+  url.searchParams.set("groupKey", "environment")
+  for (const window of ["7d", "30d", "90d"]) {
+    url.searchParams.set("window", window)
+    url.searchParams.set("view", "cards")
+    const health = page.waitForResponse((response) => {
+      const request = new URL(response.url())
+      return (
+        request.pathname === "/api/v1/service-history" &&
+        request.searchParams.get("window") === "14d" &&
+        response.ok()
+      )
+    })
+    await page.goto(url.toString())
+    const response = await (await health).json()
+    expect(response.window).toBe("14d")
+    expect(response.items.length).toBeGreaterThan(0)
+    for (const item of response.items) {
+      expect(item.days).toHaveLength(14)
+      expect(item.days[0].day).toBe(response.from)
+      expect(Date.parse(response.to) - Date.parse(response.from)).toBe(
+        14 * 86400000
+      )
+    }
+    await expect(page.getByLabel("Container grouping")).toHaveValue(
+      "metadata:environment"
+    )
+    const bars = page.locator('main [role="img"]')
+    await expect(bars.first().locator("[data-health-day]")).toHaveCount(14)
+    await page.getByRole("radio", { name: "Table format" }).click()
+    await expect(
+      page.locator("main tbody tr").first().locator("[data-health-day]")
+    ).toHaveCount(14)
+    expect(new URL(page.url()).searchParams.get("window")).toBe("14d")
+  }
 })
 
 test("metadata container grouping survives format changes and reload without dropping workflows", async ({
@@ -126,9 +173,8 @@ for (const width of [320, 768, 2000]) {
         .first()
         .click()
       await expect(page.getByRole("img").first()).toBeVisible()
-      await page.getByLabel("Health window").selectOption("30d")
       const bars = page.locator('main [role="img"]')
-      await expect(bars.first().locator("[data-health-day]")).toHaveCount(30)
+      await expect(bars.first().locator("[data-health-day]")).toHaveCount(14)
       for (const view of ["cards", "table"]) {
         if (view === "table")
           await page.getByRole("radio", { name: "Table format" }).click()

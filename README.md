@@ -787,6 +787,10 @@ daily-details expander. **View last run** opens the exact latest run and is
 disabled for never-run workflows; **History** opens that workflow's run history.
 Timestamps keep their full source precision in the time element while displaying
 local time with millisecond precision.
+Daily health uses a fixed **last 14 UTC days**, including today, in both formats;
+days without runs remain neutral and never-run workflows stay visible.
+Older saved `7d`, `30d` and `90d` view URLs normalize to `14d`; the service-history
+API defaults to `14d` while retaining explicit legacy periods for API clients.
 **Container grouping** defaults to workflow type. Select a metadata key such as
 `environment` or `component` to create a container per exact metadata value.
 Keys come from authorized type schemas and loaded workflow metadata; missing

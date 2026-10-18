@@ -12,10 +12,12 @@ namespace Wf.Integration.Tests.Auth;
 public sealed partial class AuthorizationMatrixTests
 {
     [Theory]
+    [InlineData(null, 14)]
     [InlineData("7d", 7)]
+    [InlineData("14d", 14)]
     [InlineData("30d", 30)]
     [InlineData("90d", 90)]
-    public async Task ServiceHistory_counts_all_statuses_across_series_and_manual_runs_with_real_daily_gaps(string window, int days)
+    public async Task ServiceHistory_counts_all_statuses_across_series_and_manual_runs_with_real_daily_gaps(string? window, int days)
     {
         var group = Guid.NewGuid();
         var seed = await Seed(RegistryRole.Viewer, group, false);
@@ -37,13 +39,14 @@ public sealed partial class AuthorizationMatrixTests
         await ServiceHistoryRun(seed.OtherType + "/hidden", now, RunStatus.Failed, null);
         await using var server = await Server.Start(database.DataSource,
             configureServices: services => services.AddSingleton<TimeProvider>(clock));
-        using var response = await server.GetPath($"/api/v1/service-history?team={seed.Team}&window={window}", server.Token(group: group));
+        var path = $"/api/v1/service-history?team={seed.Team}" + (window is null ? "" : $"&window={window}");
+        using var response = await server.GetPath(path, server.Token(group: group));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.True(response.Headers.CacheControl!.NoStore);
         Assert.Equal("nosniff", Assert.Single(response.Headers.GetValues("X-Content-Type-Options")));
         var page = (await response.Content.ReadFromJsonAsync<ServiceHistoryPage>(TestContext.Current.CancellationToken))!;
         Assert.Equal(seed.Team, page.Team);
-        Assert.Equal(window, page.Window);
+        Assert.Equal(window ?? "14d", page.Window);
         Assert.Equal(days, page.To.DayNumber - page.From.DayNumber);
         Assert.Equal(2, page.Items.Count);
         var item = Assert.Single(page.Items, entry => entry.Workflow.Id == workflow);
@@ -74,11 +77,16 @@ public sealed partial class AuthorizationMatrixTests
         using var response = await server.GetPath(path, jwt);
         var first = (await response.Content.ReadFromJsonAsync<ServiceHistoryPage>(TestContext.Current.CancellationToken))!;
         Assert.Equal(["a", "c"], first.Items.Select(item => item.Workflow.Name));
+        Assert.Equal("14d", first.Window);
+        Assert.All(first.Items, item => Assert.Equal(14, item.Days.Count));
         Assert.NotNull(first.NextCursor);
         await CatalogWorkflow(seed.Type + "/b");
         using var nextResponse = await server.GetPath(path + "&cursor=" + first.NextCursor, jwt);
         var next = (await nextResponse.Content.ReadFromJsonAsync<ServiceHistoryPage>(TestContext.Current.CancellationToken))!;
         Assert.Equal("e", Assert.Single(next.Items).Workflow.Name);
+        Assert.Equal(first.From, next.From);
+        Assert.Equal(first.To, next.To);
+        Assert.Equal(14, next.Items[0].Days.Count);
         Assert.Null(next.NextCursor);
         foreach (var token in new[]
         {
@@ -100,6 +108,8 @@ public sealed partial class AuthorizationMatrixTests
     [InlineData("")]
     [InlineData("?type=release")]
     [InlineData("?team=demo&window=1d")]
+    [InlineData("?team=demo&window=")]
+    [InlineData("?team=demo&window=14d&window=14d")]
     [InlineData("?team=demo&window=7d&window=30d")]
     [InlineData("?team=demo&team=other")]
     [InlineData("?team=demo&status=Running")]

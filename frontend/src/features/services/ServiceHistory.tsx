@@ -255,9 +255,14 @@ export function ServiceHistory({
   return (
     <div className="min-w-0 space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <h1 className="min-w-0 text-2xl font-semibold break-words">
-          {team} service history
-        </h1>
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold break-words">
+            {team} service history
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Daily health: last 14 days (UTC)
+          </p>
+        </div>
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex min-w-0 flex-col gap-1 text-sm">
             Workflow type
@@ -318,24 +323,6 @@ export function ServiceHistory({
                     {key === "type" ? "type (metadata value)" : key}
                   </option>
                 ))}
-            </NativeSelect>
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            Health window
-            <NativeSelect
-              value={search.window}
-              onChange={(event) =>
-                onChange(
-                  serviceSearchSchema.parse({
-                    ...search,
-                    window: event.target.value,
-                  })
-                )
-              }
-            >
-              <option value="7d">7 days</option>
-              <option value="30d">30 days</option>
-              <option value="90d">90 days</option>
             </NativeSelect>
           </label>
           <ToggleGroup

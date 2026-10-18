@@ -49,12 +49,12 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
 }))
-const search: ServiceSearch = { window: "7d", view: "cards", groupBy: "type" }
+const search: ServiceSearch = { window: "14d", view: "cards", groupBy: "type" }
 const response: Awaited<ReturnType<typeof getServiceHistory>> = {
   team: "team",
   type: null,
-  window: "7d",
-  from: "2026-10-12",
+  window: "14d",
+  from: "2026-10-05",
   to: "2026-10-19",
   nextCursor: null,
   items: ["build", "never"].map((name) => ({
@@ -80,10 +80,10 @@ const response: Awaited<ReturnType<typeof getServiceHistory>> = {
               endedAt: null,
             },
     },
-    days: Array.from({ length: 7 }, (_, index) => ({
-      day: `2026-10-${12 + index}`,
+    days: Array.from({ length: 14 }, (_, index) => ({
+      day: `2026-10-${String(5 + index).padStart(2, "0")}`,
       counts:
-        name === "never" ? {} : index === 6 ? { Succeeded: 2, Failed: 1 } : {},
+        name === "never" ? {} : index === 13 ? { Succeeded: 2, Failed: 1 } : {},
     })),
   })),
 }
@@ -135,7 +135,7 @@ it("renders metadata-type containers with workflow names, actual status, last ru
     "datetime",
     "2026-10-18T00:00:00Z"
   )
-  expect(card.querySelectorAll('[data-health-state="NoRuns"]')).toHaveLength(6)
+  expect(card.querySelectorAll('[data-health-state="NoRuns"]')).toHaveLength(13)
   expect(card.querySelectorAll('[data-health-state="Failed"]')).toHaveLength(1)
   expect(within(card).getByRole("img")).toHaveAccessibleName(
     /3 runs, 2 succeeded, 1 other completed outcomes/
@@ -143,7 +143,9 @@ it("renders metadata-type containers with workflow names, actual status, last ru
   expect(screen.queryByText("Daily health details")).not.toBeInTheDocument()
   expect(card.querySelector("details")).toBeNull()
   const never = screen.getByRole("heading", { name: "never" }).closest("li")!
-  expect(never.querySelectorAll('[data-health-state="NoRuns"]')).toHaveLength(7)
+  expect(never.querySelectorAll('[data-health-state="NoRuns"]')).toHaveLength(
+    14
+  )
   expect(within(never).getByText("No completed runs")).toBeVisible()
   expect(
     within(never).getByRole("button", { name: "View last run" })
@@ -172,6 +174,9 @@ it("switches to the striped semantic table without changing the cached health qu
     within(table).getByRole("button", { name: "View last run" })
   ).toBeDisabled()
   expect(table.querySelector("details")).toBeNull()
+  expect(
+    table.querySelector("tbody tr")!.querySelectorAll("[data-health-day]")
+  ).toHaveLength(14)
   expect(within(table).getAllByRole("row")).toHaveLength(3)
   expect(table.querySelector("thead")).toHaveClass("bg-secondary")
   expect(table.querySelector("tbody tr")).toHaveClass(
@@ -181,7 +186,7 @@ it("switches to the striped semantic table without changing the cached health qu
   expect(getServiceHistory).toHaveBeenCalledTimes(1)
 })
 
-it("changes type, window and view through the typed URL callback", async () => {
+it("keeps a fixed two-week health window while changing type and view through the URL callback", async () => {
   const shown = show()
   await screen.findByText("build", { exact: true })
   await userEvent.selectOptions(
@@ -189,8 +194,8 @@ it("changes type, window and view through the typed URL callback", async () => {
     "release"
   )
   expect(shown.change).toHaveBeenLastCalledWith({ ...search, type: "release" })
-  await userEvent.selectOptions(screen.getByLabelText("Health window"), "90d")
-  expect(shown.change).toHaveBeenLastCalledWith({ ...search, window: "90d" })
+  expect(screen.queryByLabelText("Health window")).not.toBeInTheDocument()
+  expect(screen.getByText("Daily health: last 14 days (UTC)")).toBeVisible()
   await userEvent.click(screen.getByRole("radio", { name: "Table format" }))
   expect(shown.change).toHaveBeenLastCalledWith({ ...search, view: "table" })
 })

@@ -1,7 +1,6 @@
 import { z } from "zod"
 import { ApiError, publicApi } from "@/lib/api/client"
 import { catalogWorkflowSchema, runStatuses } from "@/features/catalog/api"
-import { trendWindowSchema, type TrendWindow } from "@/features/series/api"
 
 export const serviceSearchSchema = z
   .object({
@@ -10,7 +9,10 @@ export const serviceSearchSchema = z
       .min(1)
       .regex(/^[^/\\\p{Cc}]+$/u)
       .optional(),
-    window: trendWindowSchema.default("30d"),
+    window: z
+      .enum(["7d", "14d", "30d", "90d"])
+      .default("14d")
+      .transform(() => "14d" as const),
     view: z.enum(["cards", "table"]).default("cards"),
     groupBy: z.enum(["type", "metadata"]).default("type"),
     groupKey: z.string().min(1).optional(),
@@ -31,14 +33,14 @@ export const healthDaySchema = z.object({
 const servicePageSchema = z.object({
   team: z.string().min(1),
   type: z.string().nullable(),
-  window: trendWindowSchema,
+  window: z.literal("14d"),
   from: z.iso.date(),
   to: z.iso.date(),
   items: z
     .array(
       z.object({
         workflow: catalogWorkflowSchema,
-        days: z.array(healthDaySchema).max(90),
+        days: z.array(healthDaySchema).max(14),
       })
     )
     .max(50),
@@ -61,7 +63,7 @@ function compareIds(left: string, right: string) {
 export async function getServiceHistory(
   team: string,
   type: string | undefined,
-  window: TrendWindow,
+  window: ServiceSearch["window"],
   cursor: ServiceCursor,
   signal?: AbortSignal
 ) {
