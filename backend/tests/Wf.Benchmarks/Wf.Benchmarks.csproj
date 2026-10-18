@@ -6,6 +6,8 @@
   <ItemGroup>
     <PackageReference Include="BenchmarkDotNet" />
     <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" />
     <ProjectReference Include="..\..\src\Wf.Sdk\Wf.Sdk.csproj" />
     <ProjectReference Include="..\..\src\Wf.ControlPlane\Wf.ControlPlane.csproj" />
     <ProjectReference Include="..\..\src\Wf.Agent\Wf.Agent.csproj" />

@@ -79,7 +79,9 @@ public sealed partial class AuthorizationMatrixTests
     {
         var group = Guid.NewGuid();
         var seed = await Seed(RegistryRole.Viewer, group, true);
-        await using var server = await Server.Start(database.DataSource, live: true);
+        var clock = new Wf.Sdk.Tests.ManualTimeProvider();
+        await using var server = await Server.Start(database.DataSource, live: true,
+            configureServices: services => services.AddSingleton<TimeProvider>(clock));
         await using var client = await MessagePackClient.Connect(server, server.Token(group: group));
         Assert.Null(await client.Subscribe("type", seed.Type));
         Assert.Null(await client.Subscribe("run", seed.Run.ToString("D")));
@@ -92,16 +94,34 @@ public sealed partial class AuthorizationMatrixTests
         var events = new List<LiveEvent>();
         while (events.Count < 8) events.AddRange((await client.ReadRun()).Events);
         Assert.Equal(Enumerable.Range(1, 8).Select(value => (long)value), events.Select(change => change.Seq));
+        await WaitForCoalescingTimer();
+        clock.Advance(TimeSpan.FromMilliseconds(249));
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        Assert.False(client.Lists.Reader.TryPeek(out _));
+        clock.Advance(TimeSpan.FromMilliseconds(1));
         var first = await client.ReadList();
         Assert.Equal(8, Assert.Single(first.Items).LastSeq);
-        var sent = Stopwatch.GetTimestamp();
         for (var index = 9; index <= 16; index++)
             await appender.AppendAsync(Change(seed.Run, index), TestContext.Current.CancellationToken);
+        while (events.Count < 16) events.AddRange((await client.ReadRun()).Events);
+        Assert.Equal(Enumerable.Range(1, 16).Select(value => (long)value), events.Select(change => change.Seq));
+        await WaitForCoalescingTimer();
+        clock.Advance(TimeSpan.FromMilliseconds(249));
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        Assert.False(client.Lists.Reader.TryPeek(out _));
+        clock.Advance(TimeSpan.FromMilliseconds(1));
         var next = await client.ReadList();
         Assert.Equal(16, Assert.Single(next.Items).LastSeq);
-        Assert.True(Stopwatch.GetElapsedTime(sent) >= TimeSpan.FromMilliseconds(240));
-        await Task.Delay(350, TestContext.Current.CancellationToken);
+        clock.Advance(TimeSpan.FromMilliseconds(250));
+        await Task.Delay(50, TestContext.Current.CancellationToken);
         Assert.False(client.Lists.Reader.TryPeek(out _));
+
+        async Task WaitForCoalescingTimer()
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            while (clock.PendingTimerCount == 0) await Task.Delay(10, timeout.Token);
+        }
     }
 
     [Fact]

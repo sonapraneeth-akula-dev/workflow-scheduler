@@ -13,3 +13,9 @@ dist/
 .env.*
 !.env.example
 /.wf/
+/.agent-artifacts/
+/compose-results/
+/node-compile-cache/
+/.rr-*/
+/wf-h-*/
+/Microsoft.NET.Workload_*.log

@@ -34,6 +34,7 @@ public sealed class RunQueryServer(WebApplication app, HttpClient client, RSA rs
         var key = new RsaSecurityKey(rsa) { KeyId = "run-query-test" };
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Production" });
         builder.Logging.ClearProviders();
+        builder.Logging.AddSimpleConsole().SetMinimumLevel(LogLevel.Warning);
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Configuration["AzureAd:TenantId"] = Tenant;
         builder.Configuration["AzureAd:ClientId"] = Audience;
@@ -71,6 +72,12 @@ public sealed class RunQueryServer(WebApplication app, HttpClient client, RSA rs
             if (live) app.MapHub<LiveHub>(LiveHub.Path);
             app.MapWorkflowOpenApi();
             await app.StartAsync(token);
+            if (live)
+            {
+                using var ready = CancellationTokenSource.CreateLinkedTokenSource(token);
+                ready.CancelAfter(TimeSpan.FromSeconds(10));
+                while (!app.Services.GetRequiredService<LiveFanout>().IsReady) await Task.Delay(10, ready.Token);
+            }
             var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
             return new(app, new HttpClient(new SocketsHttpHandler { UseProxy = false })
                 { BaseAddress = new(address), Timeout = TimeSpan.FromSeconds(20) }, rsa, key, token);
@@ -117,7 +124,15 @@ public sealed class RunQueryServer(WebApplication app, HttpClient client, RSA rs
     public async ValueTask DisposeAsync()
     {
         client.Dispose();
-        try { await app.DisposeAsync(); }
-        finally { rsa.Dispose(); }
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await app.StopAsync(timeout.Token);
+        }
+        finally
+        {
+            try { await app.DisposeAsync(); }
+            finally { rsa.Dispose(); }
+        }
     }
 }

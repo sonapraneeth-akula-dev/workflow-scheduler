@@ -9,6 +9,7 @@ internal sealed class ManualTimeProvider : TimeProvider
     public override DateTimeOffset GetUtcNow() { lock (sync) return now; }
     public override long TimestampFrequency => TimeSpan.TicksPerSecond;
     public override long GetTimestamp() => GetUtcNow().UtcTicks;
+    public int PendingTimerCount { get { lock (sync) return timers.Count(timer => timer.At != DateTimeOffset.MaxValue); } }
 
     public void Advance(TimeSpan elapsed)
     {

@@ -8,11 +8,17 @@ Requires .NET 10, Bun, installed frontend dependencies
 (`cd frontend; bun install --frozen-lockfile`), and Docker with Linux containers
 or an existing PostgreSQL 17+ database. From the repository root:
 
+| Scenario | Launcher | Database |
+| --- | --- | --- |
+| Native API, agent and frontend; Docker database | AppHost command below | Persistent PostgreSQL container, managed automatically |
+| Fully native; no Docker | Same AppHost with `ConnectionStrings__wf` set | Existing native PostgreSQL 17+ |
+| Containerized local environment | `Wf.Cli local up --env dev` or `ppe`, below | Isolated Compose PostgreSQL and application containers |
+
 ```powershell
 dotnet run --project .\backend\src\Wf.AppHost
 ```
 
-With the Aspire CLI installed, `aspire run` from `backend\src\Wf.AppHost`
+With the Aspire CLI installed, `aspire run` from the repository root or `backend\src\Wf.AppHost`
 starts the same application. The dashboard URL appears in the terminal.
 The AppHost starts migrations, the control plane, one local agent process and
 Vite; API health gates agent/UI startup, and failed migrations prevent host
@@ -43,6 +49,40 @@ The development upload-signing key persists in AppHost user secrets across
 restarts. Restarting the stack preserves its database, blobs and agent UUID.
 `Secrets:Provider=Local` and the protected local secrets directory are configured;
 Azure credentials or an interactive login are not required.
+
+For an isolated native-app/Docker-database checkout without reusing the default
+database volume or local files:
+
+```powershell
+# Leave unrelated databases and Compose environments untouched.
+Remove-Item Env:\ConnectionStrings__wf -ErrorAction SilentlyContinue
+dotnet run --project .\backend\src\Wf.AppHost -- `
+  "--Local:DataRoot=$PWD\.wf\native-main" `
+  --Local:PostgresVolume=wf-native-main
+```
+
+Reuse these same arguments on subsequent starts to preserve this stack's state.
+Open `http://127.0.0.1:5173` for the frontend,
+`http://127.0.0.1:5000/healthz` for backend health, and
+`http://127.0.0.1:5000/api/v1/workflows` for the workflow API.
+The frontend proxies `/api` and `/hubs` to this backend.
+Stop the foreground launcher with **Ctrl+C**; it stops its application resources
+without deleting the persistent database volume or local files.
+
+For a fully native setup, create a dedicated empty database in your locally
+installed PostgreSQL first, then use a connection string for that database:
+
+```powershell
+# Replace the connection string locally; never commit real credentials.
+$env:ConnectionStrings__wf = 'Host=127.0.0.1;Port=5432;Database=workflow_local;Username=postgres;Password=YOUR_LOCAL_PASSWORD'
+dotnet run --project .\backend\src\Wf.AppHost -- `
+  "--Local:DataRoot=$PWD\.wf\native-postgres"
+```
+
+The supplied user must be able to run schema migrations. No PostgreSQL container
+is created in this mode. Do not point this launcher at a shared, production or
+older prototype database: migrations change its schema. Remove
+`Env:\ConnectionStrings__wf` before returning to the Docker-database profile.
 
 To run multiple native agents plus an optional real Linux agent:
 
@@ -2804,3 +2844,46 @@ container is created. Both modes require `fsync`, `full_page_writes` and
 `benchmarks.yml` runs the gate and its actual performance fixture on Windows
 and Linux; ordinary backend tests exclude the `Performance` trait. Remote CI
 execution is not implied by the local result.
+
+```powershell
+dotnet run -c Release -p:ServerGarbageCollection=true --project backend\tests\Wf.Benchmarks -- --live-fanout-bench
+```
+
+The live fan-out gate connects 500 actual WebSocket/MessagePack clients with
+distinct signed Viewer identities. Each subscribes to the same type and one of
+100 evenly sharded runs (five subscribers per run). After every client observes
+the warmup, an independent producer schedules 50,000 lifecycle events at 10,000
+events/s for five seconds. Synthetic input uses synchronous PostgreSQL binary
+COPY and atomic, sequence-checked run watermark updates: this measures the real
+notification/live fan-out path, not engine ingestion throughput or browser
+rendering. Four independent input lanes each own 25 runs and commit ten rounds
+(250 events) every 100 ms. Each run remains strictly ordered; the producer never
+waits for an earlier commit. Timestamps precede persistence and include
+commit queueing, database work and client receipt, not just socket transmission.
+
+Acceptance requires exact durable input and 250,000 ordered run-event deliveries,
+plus all 25,000,000 client/entity updates covered by coalesced list watermarks.
+Every covered input contributes a latency sample at its first covering client
+receipt; coalescing cannot hide old or missing updates. Both distributions require
+nearest-rank p95 <= 1 s and p99 <= 2 s. Wrong identities/states, gaps, duplicate run
+events, regressed list watermarks, disconnects or resync requests fail the run.
+The producer cannot reduce its offered rate when commits or clients are slow;
+its five-second window and scheduling lag are gated and reported separately
+from commit drain time. All three PostgreSQL durability settings must remain ON.
+
+The fixture analyzes its seeded run summaries, limits its database pool to eight
+connections, and enables 64 automatically prepared statements after two uses.
+These are database-plan optimizations, not cached authorization decisions:
+each actual send still performs fresh scope and role checks. The report records
+these settings; the fixture removes only its owned schema/container. JSON reports, including
+failed measurements, remain under
+`BenchmarkDotNet.Artifacts\live-fanout\<id>\report.json`. A reduced actual signed
+WebSocket smoke and count/latency/durability gate tests run separately; smoke
+cannot satisfy the 500-client acceptance gate. `benchmarks.yml` includes Windows
+and Linux lanes; local results do not imply hosted CI execution.
+
+**Current status:** the full 500-client acceptance gate has not passed.
+Task 6.1.1.1.4 remains pending; the committed fixture and fan-out optimizations
+are a work-in-progress checkpoint, not a performance acceptance claim.
+The CI job deliberately enforces the unchanged thresholds and can fail until
+the remaining performance work is complete.

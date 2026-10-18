@@ -1,0 +1,5 @@
+{
+  "appHost": {
+    "path": "backend/src/Wf.AppHost/Wf.AppHost.csproj"
+  }
+}

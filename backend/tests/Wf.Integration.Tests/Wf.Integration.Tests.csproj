@@ -18,6 +18,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Wf.Validation.Tests\ValidatorFixture.cs" Link="Registration\ValidatorFixture.cs" />
+    <Compile Include="..\Wf.Sdk.Tests\ManualTimeProvider.cs" Link="Live\ManualTimeProvider.cs" />
     <None Include="..\..\db\migrations\*.sql" Link="Migrations\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Update="LocalRun\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

@@ -41,6 +41,16 @@ if (args.Length > 0 && args[0] == "--trigger-api-bench")
     }
     return await TriggerApiBench.RunAsync();
 }
+
+if (args.Length > 0 && args[0] == "--live-fanout-bench")
+{
+    if (args.Length != 1)
+    {
+        Console.Error.WriteLine("Usage: --live-fanout-bench");
+        return 1;
+    }
+    return await LiveFanoutBench.RunAsync();
+}
 #endif
 
 if (args.Length > 0 && args[0] == "--compare")

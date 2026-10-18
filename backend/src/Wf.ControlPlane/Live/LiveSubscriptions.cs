@@ -16,10 +16,13 @@ public sealed class LiveSubscriptions(IHubContext<LiveHub> hub, IServiceScopeFac
         .Where(subscription => subscription.Scope == "logs").Select(subscription => subscription.Id).Distinct(StringComparer.Ordinal).ToArray();
 
     public bool HasAnySubscribers => !connections.IsEmpty &&
-        connections.Values.Any(connection => !connection.Subscriptions.IsEmpty);
+        connections.Any(pair => !pair.Value.Subscriptions.IsEmpty);
 
-    public bool HasSubscribers(string scope, string id) =>
-        connections.Values.Any(connection => connection.Subscriptions.ContainsKey(LiveHub.Group(scope, id)));
+    public bool HasSubscribers(string scope, string id)
+    {
+        var group = LiveHub.Group(scope, id);
+        return connections.Any(pair => pair.Value.Subscriptions.ContainsKey(group));
+    }
 
     public async Task ConnectAsync(HubCallerContext context)
     {
@@ -110,8 +113,12 @@ public sealed class LiveSubscriptions(IHubContext<LiveHub> hub, IServiceScopeFac
         finally { connection.Gate.Release(); }
     }
 
-    public Task PublishAsync<T>(string scope, string id, string target, T payload, CancellationToken token) =>
-        Task.WhenAll(connections.Select(pair => SendAsync(pair.Key, pair.Value, LiveHub.Group(scope, id), target, payload, token)));
+    public Task PublishAsync<T>(string scope, string id, string target, T payload, CancellationToken token)
+    {
+        var group = LiveHub.Group(scope, id);
+        return Task.WhenAll(connections.Where(pair => pair.Value.Subscriptions.ContainsKey(group))
+            .Select(pair => SendAsync(pair.Key, pair.Value, group, target, payload, token)));
+    }
 
     public async Task ResyncAsync(CancellationToken token)
     {

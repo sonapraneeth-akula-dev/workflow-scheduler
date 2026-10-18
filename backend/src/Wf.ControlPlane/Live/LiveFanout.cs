@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -13,7 +14,7 @@ public sealed class LiveFanout(NpgsqlDataSource source, LiveSubscriptions subscr
     private readonly Dictionary<Guid, long> changes = [];
     private readonly Dictionary<Guid, ReportAdded> reports = [];
     private readonly Dictionary<string, LiveRunSummary> lists = new(StringComparer.Ordinal);
-    private readonly Dictionary<Guid, long> published = [];
+    private readonly ConcurrentDictionary<Guid, long> published = [];
     private readonly Channel<bool> changed = Signal();
     private readonly Channel<bool> listChanged = Signal();
     private readonly Channel<bool> reportChanged = Signal();
@@ -120,7 +121,11 @@ public sealed class LiveFanout(NpgsqlDataSource source, LiveSubscriptions subscr
             {
                 if (checkPermissions) await subscriptions.ReauthorizeAsync(token);
                 if (reset) await subscriptions.ResyncAsync(token);
-                foreach (var (id, sequence) in pending) await PublishRunAsync(id, sequence, token);
+                foreach (var old in published.Keys.Where(run => !subscriptions.HasSubscribers("run", run.ToString("D"))).ToArray())
+                    published.TryRemove(old, out _);
+                await Parallel.ForEachAsync(pending,
+                    new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = token },
+                    async (change, cancellation) => await PublishRunAsync(change.Key, change.Value, cancellation));
             }
             catch (Exception exception) when (exception is NpgsqlException { IsTransient: true } or IOException or TimeoutException)
             {
@@ -217,8 +222,6 @@ public sealed class LiveFanout(NpgsqlDataSource source, LiveSubscriptions subscr
     private async Task PublishRunAsync(Guid id, long sequence, CancellationToken token)
     {
         if (!subscriptions.HasAnySubscribers) return;
-        foreach (var old in published.Keys.Where(run => !subscriptions.HasSubscribers("run", run.ToString("D"))).ToArray())
-            published.Remove(old);
         LiveRunSummary summary;
         await using (var query = source.CreateCommand("""
             SELECT r.workflow_id,r.version_id,r.series_id,r.status,r.last_seq,r.created_at,r.ended_at
