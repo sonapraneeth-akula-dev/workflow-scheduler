@@ -1,7 +1,14 @@
-import { createFileRoute, Link } from "@tanstack/react-router"
+import {
+  createFileRoute,
+  Link,
+  useCanGoBack,
+  useRouter,
+} from "@tanstack/react-router"
 import { z } from "zod"
 import { Tabs } from "radix-ui"
+import { ArrowLeftIcon } from "lucide-react"
 import { ReconnectingIndicator } from "@/components/ReconnectingIndicator"
+import { Button } from "@/components/ui/button"
 import { LiveRunGraph } from "@/features/graph/RunGraph"
 import { AbortDialog } from "@/features/runs/AbortDialog"
 import { RerunDialog } from "@/features/runs/RerunDialog"
@@ -22,6 +29,8 @@ export const Route = createFileRoute("/runs/$id")({
 
 function RunDetail() {
   const { id } = Route.useParams()
+  const router = useRouter()
+  const canGoBack = useCanGoBack()
   const live = useRun(id)
   const run = live.run
   const [team = "", type = "", wf = ""] = run?.workflowId.split("/") ?? []
@@ -34,6 +43,20 @@ function RunDetail() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={
+                  canGoBack ? "Back to previous page" : "Back to runs"
+                }
+                onClick={() => {
+                  if (canGoBack) router.history.back()
+                  else void router.navigate({ to: "/runs", replace: true })
+                }}
+              >
+                <ArrowLeftIcon aria-hidden="true" />
+                Back
+              </Button>
               <h1 className="text-2xl font-semibold">Run</h1>
               {run ? (
                 <p className="font-medium break-words">{run.workflowId}</p>

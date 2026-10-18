@@ -293,6 +293,10 @@ instructions available to assistive technology. Selecting a node opens its
 inspector beside the graph on wide screens and below it on smaller screens.
 Status, reconnect/permission failures, placement, queue and lineage information
 remain visible rather than being removed to achieve a denser layout.
+The run header's Back button returns through application history, preserving
+the originating listing/history URL and its filters, including after a reload.
+A direct entry with no previous application location replaces the run with
+Runs instead of sending the user outside the app or creating a return loop.
 Graph columns are vertically centered; branch/join connections use separate
 ordered attachment points. Skipped-column dependencies travel above the cards
 instead of crossing an intermediate node. High-contrast two-pixel strokes and

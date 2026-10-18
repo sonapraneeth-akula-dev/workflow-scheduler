@@ -57,6 +57,54 @@ for (const width of [320, 768, 2000]) {
   })
 }
 
+test("Back returns to the exact filtered run listing, including after reload", async ({
+  page,
+}) => {
+  await openListedRun(page)
+  await page.reload()
+  await page.getByRole("button", { name: "Back to previous page" }).click()
+  await expect(page).toHaveURL(/\/runs\?status=Succeeded$/)
+  await expect(
+    page.getByRole("heading", { name: "Runs", exact: true })
+  ).toBeVisible()
+})
+
+test("Back returns to the workflow history that opened this run", async ({
+  page,
+}) => {
+  const runPath = await openListedRun(page)
+  await page
+    .getByRole("link", { name: "Workflow history", exact: true })
+    .click()
+  const origin = page.url()
+  await page.locator(`main a[href="${runPath}"]`).first().click()
+  await page.getByRole("button", { name: "Back to previous page" }).click()
+  await expect(page).toHaveURL(origin)
+})
+
+test("direct-entry Back replaces the run with Runs instead of leaving the app or creating a loop", async ({
+  page,
+  browser,
+}) => {
+  const runPath = await openListedRun(page)
+  const context = await browser.newContext({
+    baseURL: new URL(page.url()).origin,
+  })
+  try {
+    const direct = await context.newPage()
+    await direct.goto("data:text/html,External%20entry")
+    await direct.goto(runPath)
+    await direct.getByRole("button", { name: "Back to runs" }).click()
+    await expect(direct).toHaveURL(/\/runs$/)
+    expect(await direct.evaluate(() => history.state.__TSR_index)).toBe(0)
+    await expect(
+      direct.getByRole("heading", { name: "Runs", exact: true })
+    ).toBeVisible()
+  } finally {
+    await context.close()
+  }
+})
+
 for (const colorScheme of ["light", "dark"] as const) {
   test(`${colorScheme} dependency arrows stay outside every node and stop before the target border`, async ({
     page,
