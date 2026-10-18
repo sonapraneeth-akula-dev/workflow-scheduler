@@ -27,7 +27,7 @@ import { ScheduleForm } from "@/features/schedules/ScheduleForm"
 import { OriginBadge } from "@/features/schedules/OriginBadge"
 import { RunNowButton } from "@/features/series/RunNowButton"
 import { SubscribeMenu } from "@/features/subscriptions/SubscribeMenu"
-import { formatFire } from "@/features/schedules/schedule-draft"
+import { formatTimestamp } from "@/lib/timestamps"
 import {
   deleteSchedule,
   getSchedule,
@@ -137,9 +137,14 @@ function ScheduleDetail() {
       />
       <p>
         Next fire:{" "}
-        {schedule.nextFireAt
-          ? formatFire(schedule.nextFireAt, schedule.timezone)
-          : "Not scheduled"}
+        {schedule.nextFireAt ? (
+          <time dateTime={schedule.nextFireAt} title={schedule.nextFireAt}>
+            {formatTimestamp(schedule.nextFireAt)}
+          </time>
+        ) : (
+          "Not scheduled"
+        )}{" "}
+        Schedule timezone: {schedule.timezone}.
       </p>
       <div className="flex flex-wrap gap-3">
         <Button

@@ -4,6 +4,20 @@ React 19, TypeScript 5, Vite, Bun, TanStack Router/Query, Tailwind CSS 4 and own
 shadcn/Radix primitives. File routes are generated into `src\routeTree.gen.ts`;
 commit generated route changes with their source routes.
 
+## Timestamp display
+
+Application instants remain UTC in storage and API/live data. UI timestamps use
+the browser's local timezone, 24-hour time and exactly three fractional digits,
+for example `18 Oct 2026, 16:11:48.146 IST`. Timezone labels follow the instant's
+daylight-saving rules (`PST` in winter, `PDT` in summer). Native English short
+names are preferred; a full timezone name is used when no abbreviation exists,
+never an invented abbreviation or an unlabeled numeric offset.
+Original RFC3339 values, including sub-millisecond precision, remain unchanged
+in `time[datetime]` and hover titles. Formatting never changes sorting, cursors,
+durations, filters or downloaded content. UTC daily aggregation buckets and
+explicit UTC date-filter boundaries remain labeled UTC; they are dates, not
+localized instants. Cron evaluation still uses the configured schedule timezone.
+
 ## Application shell
 
 The Kardia wordmark is an independent home link at the viewport's padded left
@@ -79,10 +93,12 @@ JSON serialization avoids introducing a numeric wrapper dependency. Browsers
 without the required native support fail explicitly before unsafe edits.
 
 The server validates the complete draft and computes five upcoming UTC instants.
-The UI shows them in the selected timezone with offset labels, including repeated
-DST hours. Invalid fields, failed/offline previews and pending mutations disable
-submission. Editing uses the response's strong ETag in `If-Match`; a real 412
-preserves unsaved edits and requires an explicit reload. Pause/resume preserve
+The UI shows them in the browser's local timezone with millisecond precision and
+DST-aware timezone names. The selected schedule timezone still controls cron
+evaluation, not presentation. Invalid fields, failed/offline previews and
+pending mutations disable submission. Editing uses the response's strong ETag
+in `If-Match`; a real 412 preserves unsaved edits and requires an explicit reload.
+Pause/resume preserve
 unsaved edits; reload intentionally discards them. Delete requires confirmation
 and retains historical runs/series.
 
@@ -185,7 +201,7 @@ accessibility on Chromium, Firefox and WebKit.
 Workflow lists and workflow history link to **Versions** at
 `/t/<team>/<type>/w/<workflow>/versions`. The uncached history reads 50
 registrations per page, with immutable UUID/SemVer links, Git author/commit,
-registering identity, nullable notes, SDK and UTC registration time. Active and
+registering identity, nullable notes, SDK and local registration time. Active and
 latest pointers remain distinct after rollback. Version details retain the
 read-only Task Plan, show registration provenance and default comparison from
 the pinned UUID, even when that version is outside the loaded history page.
@@ -378,10 +394,10 @@ Typed URL filters restore status, exact aborted-by principal, outcome and
 ascending/descending creation order after copy/reload. Principal identities
 follow the backend's canonical lowercase nonempty GUID contract, without
 imposing run UUID version/variant bits. Status/aborted-by filters exclude
-fire-only facts. UTC
-timestamps, explicit loading/empty/error states, refresh and cursor-based
-older-page loading are accessible in light/dark and narrow layouts. A failed
-older-page request preserves already loaded records; revoked reads hide them.
+fire-only facts. Local timestamps, explicit loading/empty/error states, refresh
+and cursor-based older-page loading are accessible in light/dark and narrow
+layouts. A failed older-page request preserves already loaded records; revoked
+reads hide them.
 The catch-up run has a Catch-up badge while its retained source outcome remains
 Missed. Paging validates resource identity, filter matches and strict
 timestamp/UUID/kind ordering, including microsecond ties. Trends remain separate.
@@ -423,7 +439,7 @@ permissions and live status are checked again on submit.
 The run's status badge follows authoritative committed state, not the HTTP
 receipt. An accepted abort banner explicitly waits for committed cancellation;
 recorded Aborting still permits cleanup, and only recorded Aborted says work
-has stopped. Original actor/name, UTC acceptance time, reason and source survive
+has stopped. Original actor/name, acceptance time, reason and source survive
 reload and appear in series/workflow history. No actor is invented for legacy
 Aborted rows without a record. Dialog cancellation restores the trigger; after
 acceptance removes it, focus returns to the named Run controls region. The
@@ -445,9 +461,10 @@ recorded timestamps. Active attempts have no invented end or ticking duration.
 Clock inversions remain visible as warnings rather than misleading bars.
 The initially open native details table exposes every actual attempt in
 manifest/task order, including its original attempt number, full task key,
-recorded UTC times, queue/execution metrics, outcome/category and historical
-agent ID. Missing legacy attribution remains unknown; no current agent is
-substituted. The table works without interpreting the spatial chart.
+recorded times in the browser's local timezone, queue/execution metrics,
+outcome/category and historical agent ID. Missing legacy attribution remains
+unknown; no current agent is substituted. The table works without interpreting
+the spatial chart.
 
 `run-timeline.spec.ts` runs through the optional backend timeline browser fixture
 with actual dispatcher retries, agent-loss replacement, PostgreSQL/Kestrel and

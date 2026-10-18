@@ -177,11 +177,3 @@ export function validateDraft(draft: ScheduleDraft): {
   }
   return { request, errors }
 }
-
-export function formatFire(value: string, timezone: string): string {
-  return `${new Intl.DateTimeFormat("en-GB", {
-    timeZone: timezone,
-    dateStyle: "medium",
-    timeStyle: "long",
-  }).format(new Date(value))} (${timezone})`
-}

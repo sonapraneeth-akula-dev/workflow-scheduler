@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { formatTimestamp } from "@/lib/timestamps"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { runStatuses } from "@/features/catalog/api"
@@ -40,8 +41,11 @@ function Transition({ event }: { event: SystemEvent }) {
       {event.progress ? (
         <span className="block">
           Occurred{" "}
-          <time dateTime={event.progress.occurredAt}>
-            {event.progress.occurredAt}
+          <time
+            dateTime={event.progress.occurredAt}
+            title={event.progress.occurredAt}
+          >
+            {formatTimestamp(event.progress.occurredAt)}
           </time>
         </span>
       ) : null}
@@ -197,7 +201,7 @@ export function SystemEvents({ runId }: { runId: string }) {
                   <tr>
                     {[
                       "Sequence",
-                      "Recorded (UTC)",
+                      "Recorded (local)",
                       "Entity / key",
                       "Attempt",
                       "Transition",
@@ -222,7 +226,9 @@ export function SystemEvents({ runId }: { runId: string }) {
                         {event.seq}
                       </th>
                       <td className="p-3 whitespace-nowrap">
-                        <time dateTime={event.at}>{event.at}</time>
+                        <time dateTime={event.at} title={event.at}>
+                          {formatTimestamp(event.at)}
+                        </time>
                       </td>
                       <td className="p-3">
                         {["Run", "Node", "Task"][event.entity]}

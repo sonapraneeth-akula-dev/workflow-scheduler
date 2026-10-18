@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ApiError } from "@/lib/api/client"
+import { formatTimestamp } from "@/lib/timestamps"
 import { getTimeline, type RunTimeline } from "./timeline-api"
 import { Timeline } from "./Timeline"
 
@@ -72,12 +73,15 @@ describe("run attempt timeline", () => {
     expect(table).toHaveTextContent("TaskError")
     expect(
       screen.getByRole("columnheader", {
-        name: "Resumed from checkpoint (UTC)",
+        name: "Resumed from checkpoint (local)",
       })
     ).toBeVisible()
     expect(
       container.querySelector('time[datetime="2026-10-16T08:00:03.123456Z"]')
-    ).toHaveTextContent("2026-10-16T08:00:03.123456Z")
+    ).toHaveTextContent(formatTimestamp("2026-10-16T08:00:03.123456Z"))
+    expect(
+      container.querySelector('time[datetime="2026-10-16T08:00:03.123456Z"]')
+    ).toHaveAttribute("title", "2026-10-16T08:00:03.123456Z")
     expect(table).toHaveTextContent("0 ms recorded; not completed")
     expect(container.querySelectorAll("[data-timeline-queue]")).toHaveLength(2)
     expect(
@@ -126,7 +130,9 @@ describe("run attempt timeline", () => {
     expect(
       container.querySelector("[data-timeline-queue]")
     ).not.toBeInTheDocument()
-    expect(screen.getByRole("table")).toHaveTextContent("2026-10-16T07:59:59Z")
+    expect(screen.getByRole("table")).toHaveTextContent(
+      formatTimestamp("2026-10-16T07:59:59Z")
+    )
   })
   it.each([401, 403, 503])(
     "hides stale data after failed refresh HTTP %i and surfaces the error",

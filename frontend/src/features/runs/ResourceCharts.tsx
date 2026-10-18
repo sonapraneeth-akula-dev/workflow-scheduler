@@ -1,6 +1,7 @@
 import { lazy, Suspense, useId, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { formatTimestamp } from "@/lib/timestamps"
 import { Button } from "@/components/ui/button"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { ApiError } from "@/lib/api/client"
@@ -373,7 +374,7 @@ function SampleSeries({
             <tr>
               {[
                 "Sequence",
-                "UTC",
+                "Time (local)",
                 "Interval",
                 "CPU",
                 "RAM",
@@ -427,7 +428,9 @@ function SampleRow({
       </th>
       {point ? (
         [
-          point.atUtc,
+          <time key="at" dateTime={point.atUtc} title={point.atUtc}>
+            {formatTimestamp(point.atUtc)}
+          </time>,
           decimal(point.intervalSeconds, " s", "No interval recorded."),
           decimal(point.cpuPercent, "%", point.cpuUnavailableReason),
           bytes(point.ramBytes, point.memoryUnavailableReason),

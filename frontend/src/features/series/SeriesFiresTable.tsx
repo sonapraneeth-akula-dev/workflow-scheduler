@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorNotice } from "@/components/ErrorNotice"
-import { formatFire } from "@/features/schedules/schedule-draft"
+import { formatTimestamp } from "@/lib/timestamps"
 import { TriggerBadge } from "@/features/runs/TriggerBadge"
 import { getSeriesFires } from "@/lib/api/client"
 
@@ -34,7 +34,7 @@ export function SeriesFiresTable({ seriesId }: { seriesId: string }) {
       </div>
       <p>
         Newest first. Includes skipped and missed fires, even when no run was
-        created. Times shown in UTC.
+        created. Times shown in your local timezone.
       </p>
       {query.isPending ? (
         <div role="status" aria-label="Loading fire history">
@@ -57,7 +57,7 @@ export function SeriesFiresTable({ seriesId }: { seriesId: string }) {
             <thead className="border-b">
               <tr>
                 <th scope="col" className="p-3">
-                  Scheduled time (UTC)
+                  Scheduled time (local)
                 </th>
                 <th scope="col" className="p-3">
                   Outcome
@@ -75,7 +75,7 @@ export function SeriesFiresTable({ seriesId }: { seriesId: string }) {
                 <tr key={fire.fireAt} className="border-b last:border-0">
                   <th scope="row" className="p-3 font-normal whitespace-nowrap">
                     <time dateTime={fire.fireAt} title={fire.fireAt}>
-                      {formatFire(fire.fireAt, "Etc/UTC")}
+                      {formatTimestamp(fire.fireAt)}
                     </time>
                   </th>
                   <td className="p-3">

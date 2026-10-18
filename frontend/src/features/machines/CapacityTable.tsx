@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { formatTimestamp } from "@/lib/timestamps"
 import { Button } from "@/components/ui/button"
 import {
   AlertDialog,
@@ -138,8 +139,11 @@ export function CapacityTable({
                   <td className="p-2">{capacity.source}</td>
                   <td className="p-2">
                     {capacity.calibratedAt ? (
-                      <time dateTime={capacity.calibratedAt}>
-                        {capacity.calibratedAt}
+                      <time
+                        dateTime={capacity.calibratedAt}
+                        title={capacity.calibratedAt}
+                      >
+                        {formatTimestamp(capacity.calibratedAt)}
                       </time>
                     ) : (
                       "Unverified (manual; not calibrated)"

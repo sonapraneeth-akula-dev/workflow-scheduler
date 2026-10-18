@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { formatTimestamp } from "@/lib/timestamps"
 import { Button } from "@/components/ui/button"
 import {
   AlertDialog,
@@ -111,8 +112,9 @@ export function VersionsTab({
         <CloneDialog workflowId={workflowId} versionId={pinnedVersionId} />
       ) : null}
       <p>
-        Newest registration first. Times shown in UTC; active and latest may
-        differ after rollback. History and comparison are read-only.
+        Newest registration first. Times shown in your local timezone; active
+        and latest may differ after rollback. History and comparison are
+        read-only.
       </p>
       {query.isPending ? <p role="status">Loading version history...</p> : null}
       {query.error ? <ErrorNotice error={query.error} /> : null}
@@ -201,7 +203,7 @@ export function VersionsTab({
                     <tr>
                       {[
                         "Version",
-                        "Registered (UTC)",
+                        "Registered (local)",
                         "Git author / Registered by",
                         "Commit / SDK",
                         "Change note",
@@ -238,8 +240,11 @@ export function VersionsTab({
                           ) : null}
                         </th>
                         <td className="p-3">
-                          <time dateTime={version.registration.registeredAt}>
-                            {version.registration.registeredAt}
+                          <time
+                            dateTime={version.registration.registeredAt}
+                            title={version.registration.registeredAt}
+                          >
+                            {formatTimestamp(version.registration.registeredAt)}
                           </time>
                         </td>
                         <td className="max-w-80 p-3 break-words">

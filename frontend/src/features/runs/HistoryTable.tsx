@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { formatTimestamp } from "@/lib/timestamps"
 import { StatusBadge } from "@/components/StatusBadge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -146,10 +147,10 @@ export function HistoryTable({
         </p>
       ) : null}
       <p className="text-sm text-muted-foreground">
-        Times shown in UTC. Duration requires recorded start and end times.
-        Variables show recorded names and types only; all values and defaults
-        are omitted. Secret entries are redacted. Status and aborted-by filters
-        exclude fire-only facts.
+        Times shown in your local timezone. Duration requires recorded start and
+        end times. Variables show recorded names and types only; all values and
+        defaults are omitted. Secret entries are redacted. Status and aborted-by
+        filters exclude fire-only facts.
       </p>
       {query.isPending ? <p role="status">Loading run history...</p> : null}
       {query.error ? <ErrorNotice error={query.error} /> : null}
@@ -169,7 +170,7 @@ export function HistoryTable({
             <thead className="border-b">
               <tr>
                 {[
-                  "Time (UTC) / Run",
+                  "Time (local) / Run",
                   "Status / Fire outcome",
                   "Duration",
                   "Trigger",
@@ -195,9 +196,10 @@ export function HistoryTable({
                     <th scope="row" className="space-y-2 p-3 font-normal">
                       <time
                         dateTime={row.at}
+                        title={row.at}
                         className="block whitespace-nowrap"
                       >
-                        {row.at}
+                        {formatTimestamp(row.at)}
                       </time>
                       {row.runId ? (
                         <Link
@@ -280,7 +282,9 @@ export function HistoryTable({
                           </dd>
                           <dt className="font-medium">At</dt>
                           <dd>
-                            <time dateTime={row.abort.at}>{row.abort.at}</time>
+                            <time dateTime={row.abort.at} title={row.abort.at}>
+                              {formatTimestamp(row.abort.at)}
+                            </time>
                           </dd>
                           <dt className="font-medium">Reason</dt>
                           <dd className="whitespace-pre-wrap">

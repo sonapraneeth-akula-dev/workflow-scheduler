@@ -1,6 +1,7 @@
 import { memo, useId, useRef, useState, type FormEvent } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { formatTimestamp } from "@/lib/timestamps"
 import { StatusBadge } from "@/components/StatusBadge"
 import { Button } from "@/components/ui/button"
 import { Can } from "@/components/ui/Can"
@@ -183,9 +184,11 @@ export const AbortDialog = memo(function AbortDialog({
               {abort.byName}
               <code className="block break-all">{abort.by}</code>
             </dd>
-            <dt className="font-medium">At (UTC)</dt>
+            <dt className="font-medium">At (local)</dt>
             <dd>
-              <time dateTime={abort.at}>{abort.at}</time>
+              <time dateTime={abort.at} title={abort.at}>
+                {formatTimestamp(abort.at)}
+              </time>
             </dd>
             <dt className="font-medium">Reason</dt>
             <dd className="whitespace-pre-wrap">{abort.reason}</dd>

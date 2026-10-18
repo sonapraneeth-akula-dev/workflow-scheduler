@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { formatTimestamp } from "@/lib/timestamps"
 import { Button } from "@/components/ui/button"
 import {
   auditSearchSchema,
@@ -125,7 +126,7 @@ export function AuditTrail({ search }: { search: AuditSearch }) {
             <thead>
               <tr>
                 {[
-                  "Timestamp (UTC)",
+                  "Timestamp (local)",
                   "Actor",
                   "Action",
                   "Target",
@@ -141,7 +142,9 @@ export function AuditTrail({ search }: { search: AuditSearch }) {
               {rows.map((row) => (
                 <tr key={`${row.at}/${row.id}`} className="border-t align-top">
                   <td className="p-2">
-                    <time dateTime={row.at}>{row.at}</time>
+                    <time dateTime={row.at} title={row.at}>
+                      {formatTimestamp(row.at)}
+                    </time>
                     <p>#{row.id}</p>
                   </td>
                   <td className="max-w-56 p-2 break-words">

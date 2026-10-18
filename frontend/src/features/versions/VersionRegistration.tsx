@@ -1,4 +1,5 @@
 import type { VersionRegistration as Registration } from "./api"
+import { formatTimestamp } from "@/lib/timestamps"
 
 export function VersionRegistration({
   registration,
@@ -19,10 +20,13 @@ export function VersionRegistration({
       </dd>
       <dt className="font-medium">SDK version</dt>
       <dd>{registration.sdkVersion}</dd>
-      <dt className="font-medium">Registered (UTC)</dt>
+      <dt className="font-medium">Registered (local)</dt>
       <dd>
-        <time dateTime={registration.registeredAt}>
-          {registration.registeredAt}
+        <time
+          dateTime={registration.registeredAt}
+          title={registration.registeredAt}
+        >
+          {formatTimestamp(registration.registeredAt)}
         </time>
       </dd>
     </dl>

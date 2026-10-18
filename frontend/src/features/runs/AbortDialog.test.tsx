@@ -9,6 +9,7 @@ import {
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { getPermissions } from "@/lib/api/client"
+import { formatTimestamp } from "@/lib/timestamps"
 import { AbortDialog } from "./AbortDialog"
 import { abortRun } from "./abort"
 
@@ -154,7 +155,10 @@ describe("confirmed abort controls", () => {
     expect(banner).toHaveTextContent("Abort accepted")
     expect(banner).toHaveTextContent("Waiting for committed run state")
     expect(banner).toHaveTextContent("Original operator")
-    expect(banner).toHaveTextContent(receipt.at)
+    expect(banner).toHaveTextContent(formatTimestamp(receipt.at))
+    expect(
+      banner.querySelector(`time[datetime="${receipt.at}"]`)
+    ).toHaveAttribute("title", receipt.at)
     expect(abortRun).toHaveBeenCalledWith(run.runId, reason)
     expect(
       screen.queryByText("Aborted", { exact: true })

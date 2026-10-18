@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { formatTimestamp } from "@/lib/timestamps"
 import { Button } from "@/components/ui/button"
 import { usePermissions } from "@/lib/auth/usePermissions"
 import { useLive } from "@/lib/live/useLive"
@@ -120,7 +121,9 @@ function Reservation({ machine }: { machine: Machine }) {
       </p>
       <p>
         Lease expiry:{" "}
-        <time dateTime={reservation.expiresAt}>{reservation.expiresAt}</time>
+        <time dateTime={reservation.expiresAt} title={reservation.expiresAt}>
+          {formatTimestamp(reservation.expiresAt)}
+        </time>
       </p>
       <p>
         {reservation.releasePending

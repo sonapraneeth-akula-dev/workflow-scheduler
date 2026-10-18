@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { formatTimestamp } from "@/lib/timestamps"
 import { Button } from "@/components/ui/button"
 import { useLive } from "@/lib/live/useLive"
 import { getReportIndex, type ReportItem } from "./api"
@@ -178,8 +179,11 @@ export function ReportIndex({ runId }: { runId: string }) {
                         </p>
                         <p>
                           Published{" "}
-                          <time dateTime={report.createdAt}>
-                            {report.createdAt}
+                          <time
+                            dateTime={report.createdAt}
+                            title={report.createdAt}
+                          >
+                            {formatTimestamp(report.createdAt)}
                           </time>
                         </p>
                       </li>

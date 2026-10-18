@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright"
 import { expect, test } from "@playwright/test"
 import { z } from "zod"
+import { formatTimestamp } from "../src/lib/timestamps"
 
 const settings = z.object({ runId: z.uuid(), token: z.string().min(1) }).parse({
   runId: process.env.WF_TIMELINE_RUN,
@@ -85,8 +86,12 @@ test("actual retried run timeline separates queue/execution and retains accessib
   expect(actual.attempts.every((row) => row.agentId !== null)).toBe(true)
   expect(actual.attempts.some((row) => row.resumedFrom !== null)).toBe(true)
   expect(actual.attempts[0]?.resumedFrom).toBeNull()
+  const timezone = await page.evaluate(
+    () => Intl.DateTimeFormat().resolvedOptions().timeZone
+  )
+  const localTime = (at: string) => formatTimestamp(at, timezone)
   await expect(
-    table.getByRole("columnheader", { name: "Resumed from checkpoint (UTC)" })
+    table.getByRole("columnheader", { name: "Resumed from checkpoint (local)" })
   ).toBeVisible()
   await expect(table.getByRole("row")).toHaveCount(actual.attempts.length + 1)
   for (const [index, attempt] of actual.attempts.entries()) {
@@ -97,16 +102,18 @@ test("actual retried run timeline separates queue/execution and retains accessib
     )
     await expect(row.getByRole("cell").nth(1)).toHaveText(attempt.agentId!)
     await expect(row.getByRole("cell").nth(2)).toHaveText(
-      attempt.resumedFrom ?? "Not recorded"
+      attempt.resumedFrom ? localTime(attempt.resumedFrom) : "Not recorded"
     )
     if (attempt.resumedFrom)
       await expect(
         row.locator(`time[datetime="${attempt.resumedFrom}"]`)
       ).toBeVisible()
-    await expect(row).toContainText(attempt.queuedAt)
-    await expect(row).toContainText(attempt.dispatchedAt)
-    if (attempt.startedAt) await expect(row).toContainText(attempt.startedAt)
-    if (attempt.endedAt) await expect(row).toContainText(attempt.endedAt)
+    await expect(row).toContainText(localTime(attempt.queuedAt))
+    await expect(row).toContainText(localTime(attempt.dispatchedAt))
+    if (attempt.startedAt)
+      await expect(row).toContainText(localTime(attempt.startedAt))
+    if (attempt.endedAt)
+      await expect(row).toContainText(localTime(attempt.endedAt))
     await expect(row).toContainText(`${attempt.queueWaitMs} ms`)
     await expect(row).toContainText(`${attempt.durationMs} ms`)
     if (attempt.terminalStatus)

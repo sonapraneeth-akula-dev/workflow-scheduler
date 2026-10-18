@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { formatTimestamp } from "@/lib/timestamps"
 import { Button } from "@/components/ui/button"
 import { getHistory, type HistoryCursor } from "@/features/runs/history"
 import { ReportRenderer } from "@/renderers/ReportRenderer"
@@ -120,7 +121,7 @@ export function ReportCompare({ seriesId }: { seriesId: string }) {
                       run.runId === (side === "left" ? rightRunId : leftRunId)
                     }
                   >
-                    {run.runId} | {run.at} | {run.status}
+                    {run.runId} | {formatTimestamp(run.at)} | {run.status}
                   </option>
                 ))}
               </select>

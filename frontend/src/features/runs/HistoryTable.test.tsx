@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ApiError } from "@/lib/api/client"
+import { formatTimestamp } from "@/lib/timestamps"
 import { getHistory, type HistoryRow, type HistorySearch } from "./history"
 import { HistoryFilters, HistoryTable } from "./HistoryTable"
 
@@ -118,7 +119,10 @@ describe("historical table", () => {
     expect(table).toHaveTextContent("Manual")
     expect(table).toHaveTextContent("Operator Name")
     expect(table).toHaveTextContent(row.abort!.by)
-    expect(table).toHaveTextContent(row.abort!.at)
+    expect(table).toHaveTextContent(formatTimestamp(row.abort!.at))
+    expect(
+      table.querySelector(`time[datetime="${row.abort!.at}"]`)
+    ).toHaveAttribute("title", row.abort!.at)
     expect(table).toHaveTextContent("Stop deployment")
     expect(table).toHaveTextContent("credential (Secret) - [redacted]")
     expect(table).toHaveTextContent("count (Long)")

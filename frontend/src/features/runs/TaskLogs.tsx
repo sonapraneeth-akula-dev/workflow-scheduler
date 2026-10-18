@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { formatTimestamp } from "@/lib/timestamps"
 import { Button } from "@/components/ui/button"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { useLive } from "@/lib/live/useLive"
@@ -302,7 +303,10 @@ function AttemptLogs({
                   </span>
                   {frame ? (
                     <span>
-                      {frame.at} [{frame.stream}/{frame.level}]{" "}
+                      <time dateTime={frame.at} title={frame.at}>
+                        {formatTimestamp(frame.at)}
+                      </time>{" "}
+                      [{frame.stream}/{frame.level}]{" "}
                       {frame.text
                         .replaceAll("\r", "\\r")
                         .replaceAll("\n", "\\n")}

@@ -16,6 +16,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { formatTimestamp } from "@/lib/timestamps"
 import { usePermissions } from "@/lib/auth/usePermissions"
 import {
   ApiError,
@@ -25,7 +26,6 @@ import {
 } from "@/lib/api/client"
 import {
   draftFor,
-  formatFire,
   timezones,
   validateDraft,
   type ScheduleDraft,
@@ -311,6 +311,10 @@ export function ScheduleForm({
         <h2 id="next-fires" className="mb-3 text-lg font-semibold">
           Next 5 fire times
         </h2>
+        <p className="mb-3 text-sm text-muted-foreground">
+          Times shown in your local timezone. The schedule timezone above
+          controls cron evaluation.
+        </p>
         {!request || !canWrite ? (
           <p>Complete the valid schedule fields to preview upcoming fires.</p>
         ) : null}
@@ -333,7 +337,9 @@ export function ScheduleForm({
           <ol className="flex list-inside list-decimal flex-col gap-2">
             {preview.data.map((fire) => (
               <li key={fire}>
-                <time dateTime={fire}>{formatFire(fire, draft.timezone)}</time>
+                <time dateTime={fire} title={fire}>
+                  {formatTimestamp(fire)}
+                </time>
               </li>
             ))}
           </ol>

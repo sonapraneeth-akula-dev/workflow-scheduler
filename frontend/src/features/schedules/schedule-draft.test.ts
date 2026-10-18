@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
+import { formatTimestamp } from "@/lib/timestamps"
 import {
   draftFor,
   durationSeconds,
-  formatFire,
   validateDraft,
   type ScheduleDraft,
 } from "./schedule-draft"
@@ -175,13 +175,12 @@ describe("schedule draft boundaries", () => {
     expect(validateDraft(unicode).request).toBeUndefined()
   })
 
-  it("shows distinct offset labels for the repeated local DST hour", () => {
-    const first = formatFire("2026-11-01T05:30:00Z", "America/New_York")
-    const second = formatFire("2026-11-01T06:30:00Z", "America/New_York")
-    expect(first).toContain("01:30:00")
-    expect(second).toContain("01:30:00")
+  it("shows distinct timezone labels for the repeated local DST hour", () => {
+    const first = formatTimestamp("2026-11-01T05:30:00Z", "America/New_York")
+    const second = formatTimestamp("2026-11-01T06:30:00Z", "America/New_York")
+    expect(first).toContain("01:30:00.000 EDT")
+    expect(second).toContain("01:30:00.000 EST")
     expect(first).not.toBe(second)
-    expect(first).toContain("America/New_York")
   })
 
   it("never rounds an Int64 variable override while validating the draft", () => {

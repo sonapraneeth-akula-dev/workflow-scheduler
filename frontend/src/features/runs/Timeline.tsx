@@ -1,6 +1,7 @@
 import { memo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { formatTimestamp } from "@/lib/timestamps"
 import { StatusBadge } from "@/components/StatusBadge"
 import { Button } from "@/components/ui/button"
 import { getTimeline, instantTicks, type TimelineAttempt } from "./timeline-api"
@@ -144,8 +145,8 @@ function Time({ at }: { at: string | null }) {
   return at === null ? (
     <>Not recorded</>
   ) : (
-    <time dateTime={at} className="whitespace-nowrap">
-      {at}
+    <time dateTime={at} title={at} className="whitespace-nowrap">
+      {formatTimestamp(at)}
     </time>
   )
 }
@@ -202,8 +203,8 @@ export const Timeline = memo(function Timeline({ runId }: { runId: string }) {
                   <table className="w-full text-left text-sm">
                     <caption className="sr-only">
                       Recorded task attempts, agent identities, queue and
-                      execution times in UTC; no values are estimated from the
-                      current clock
+                      execution times in your local timezone; no values are
+                      estimated from the current clock
                     </caption>
                     <thead className="border-b">
                       <tr>
@@ -211,11 +212,11 @@ export const Timeline = memo(function Timeline({ runId }: { runId: string }) {
                           "Task / node",
                           "Attempt",
                           "Agent",
-                          "Resumed from checkpoint (UTC)",
-                          "Queued (UTC)",
-                          "Dispatched (UTC)",
-                          "Started (UTC)",
-                          "Ended (UTC)",
+                          "Resumed from checkpoint (local)",
+                          "Queued (local)",
+                          "Dispatched (local)",
+                          "Started (local)",
+                          "Ended (local)",
                           "Queue wait",
                           "Execution duration",
                           "Outcome",

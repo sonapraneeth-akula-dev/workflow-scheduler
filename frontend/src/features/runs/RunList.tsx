@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { formatTimestamp } from "@/lib/timestamps"
 import { StatusBadge } from "@/components/StatusBadge"
 import { Button } from "@/components/ui/button"
 import { accessDenied } from "@/features/catalog/api"
@@ -132,7 +133,7 @@ function Results({ rows, filters }: { rows: RunRow[]; filters: RunSearch }) {
                   title={row.createdAt}
                   className="truncate text-sm"
                 >
-                  {row.createdAt}
+                  {formatTimestamp(row.createdAt)}
                 </time>
               </div>
             </li>
