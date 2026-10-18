@@ -32,7 +32,7 @@ using DispatchCommand = Wf.Contracts.Agent.V1.Dispatch;
 
 namespace Wf.Integration.Tests.Execution;
 
-public sealed class RunTimelineApiTests(RunTimelineDatabase database, ITestOutputHelper output)
+public sealed partial class RunTimelineApiTests(RunTimelineDatabase database, ITestOutputHelper output)
     : IClassFixture<RunTimelineDatabase>
 {
     private const string Sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -52,13 +52,17 @@ public sealed class RunTimelineApiTests(RunTimelineDatabase database, ITestOutpu
         await ActualDispatchRetry(browser: true);
     }
 
-    private async Task ActualDispatchRetry(bool browser)
+    private async Task ActualDispatchRetry(bool browser, bool systemEvents = false, string? systemBrowser = null)
     {
         var (team, group) = await Registry();
         var store = Store();
         var version = Guid.CreateVersion7();
         var definition = Workflow.Define($"{team}/metrics/workflow", "1.0.0", w =>
-            w.Type("metrics").Node("node", n => n.Task("task", _ => { })));
+            w.Type("metrics").Node("node", n =>
+            {
+                if (systemEvents) n.Affinity(new(AffinityKind.Run));
+                n.Task("task", _ => { });
+            }));
         await Version(definition, version);
         var run = await Create(team, version);
         var clock = new TimelineClock();
@@ -72,7 +76,8 @@ public sealed class RunTimelineApiTests(RunTimelineDatabase database, ITestOutpu
         await store.AppendAsync(run, EventEntity.Task, "node/task", (int)ExecutionStatus.Ready, clock.GetUtcNow(), Token);
         clock.Advance(2);
         var firstDispatch = Command(run, 1, clock);
-        await dispatcher.DispatchAsync(run, new(run.Snapshot.RunId, "node", "task", 1, Sha), firstDispatch, Token);
+        await dispatcher.DispatchAsync(run, new(run.Snapshot.RunId, "node", "task", 1, Sha,
+            Policy: systemEvents ? new(Affinity: new(AffinityKind.Run)) : null), firstDispatch, Token);
         firstDispatch = Assert.Single(await store.PendingAsync(first, Token)).Command;
         using var blobs = new FileSystemBlobStore(System.IO.Path.Combine(ArtifactRoot(), "checkpoint-" + Guid.NewGuid().ToString("N")),
             RandomNumberGenerator.GetBytes(32));
@@ -88,6 +93,15 @@ public sealed class RunTimelineApiTests(RunTimelineDatabase database, ITestOutpu
         clock.Advance(3);
         await store.AcceptAsync(first, new AgentMessage { TaskStarted = new()
             { Task = Command(run, 1, clock).Task, At = Timestamp.FromDateTimeOffset(clock.GetUtcNow()) } }, Token);
+        if (systemEvents)
+        {
+            await RemoteProgress(store, first, firstDispatch, clock, 1, RemoteOperationPhase.SubmissionPending);
+            await RemoteProgress(store, first, firstDispatch, clock, 2, RemoteOperationPhase.Submitted);
+            await RemoteProgress(store, first, firstDispatch, clock, 3, RemoteOperationPhase.Waiting);
+            var beforeReplay = (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot.LastSequence;
+            await RemoteProgress(store, first, firstDispatch, clock, 3, RemoteOperationPhase.Waiting);
+            Assert.Equal(beforeReplay, (await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot.LastSequence);
+        }
         var active = await Read(api, run.Snapshot.RunId, jwt);
         Assert.NotNull(Assert.Single(active.Attempts).StartedAt);
         Assert.Equal(0, active.Attempts[0].DurationMs);
@@ -117,6 +131,15 @@ public sealed class RunTimelineApiTests(RunTimelineDatabase database, ITestOutpu
         clock.Advance(2);
         await store.AcceptAsync(second, new AgentMessage { TaskStarted = new()
             { Task = Command(run, 2, clock).Task, At = Timestamp.FromDateTimeOffset(clock.GetUtcNow()) } }, Token);
+        if (systemEvents)
+        {
+            await RemoteProgress(store, second, replacement, clock, 1, RemoteOperationPhase.Resuming);
+            await RemoteProgress(store, second, replacement, clock, 2, RemoteOperationPhase.Waiting);
+            await CheckSystemEvents(api, run.Snapshot.RunId, jwt, version, first.AgentId, second.AgentId);
+            if (systemBrowser is not null)
+                await SystemEventBrowser(api, run.Snapshot.RunId, jwt, systemBrowser,
+                    () => RemoteProgress(store, second, replacement, clock, 3, RemoteOperationPhase.Succeeded));
+        }
         clock.Advance(3);
         await store.AcceptAsync(second, new AgentMessage { TaskCompleted = new()
             { Task = Command(run, 2, clock).Task, At = Timestamp.FromDateTimeOffset(clock.GetUtcNow()),
@@ -124,7 +147,7 @@ public sealed class RunTimelineApiTests(RunTimelineDatabase database, ITestOutpu
         run = await store.LoadAsync(run.Snapshot.RunId, Token);
         await store.AppendAsync(run, EventEntity.Node, "node", (int)ExecutionStatus.Succeeded, clock.GetUtcNow(), Token);
         await store.AppendAsync(run, EventEntity.Run, null, (int)RunStatus.Succeeded, clock.GetUtcNow(), Token);
-        await Execute("UPDATE agents SET name='private-machine-secret' WHERE id=$1", first.AgentId);
+        await Execute("UPDATE agents SET name=$2 WHERE id=$1", first.AgentId, "private-machine-secret-" + first.AgentId.ToString("N"));
         await Execute("UPDATE task_attempts SET error='private-error' WHERE run_id=$1", run.Snapshot.RunId);
         await Execute("UPDATE node_runs SET outputs='{\"private-output\":\"never-project\"}' WHERE run_id=$1",
             run.Snapshot.RunId);
@@ -148,6 +171,7 @@ public sealed class RunTimelineApiTests(RunTimelineDatabase database, ITestOutpu
         using var plan = await api.Get($"/api/v1/workflows/{definition.Name}/versions/{version:D}", jwt, Token);
         Assert.Equal(HttpStatusCode.OK, plan.StatusCode);
         if (browser) await Browsers(api, run.Snapshot.RunId, jwt);
+        if (systemEvents) await CheckSystemEvents(api, run.Snapshot.RunId, jwt, version, first.AgentId, second.AgentId);
         await Execute("UPDATE task_attempts SET agent_id=NULL WHERE run_id=$1 AND attempt=1", run.Snapshot.RunId);
         var legacy = await Read(api, run.Snapshot.RunId, jwt);
         Assert.Null(legacy.Attempts[0].AgentId);

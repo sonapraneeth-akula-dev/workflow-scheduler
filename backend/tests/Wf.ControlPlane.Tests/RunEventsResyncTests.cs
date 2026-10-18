@@ -98,7 +98,7 @@ public sealed class RunEventsResyncTests
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(page, RunEventsJsonContext.Default.RunEventsPage));
         Assert.Equal(long.MaxValue, json.RootElement.GetProperty("lastSeq").GetInt64());
         var item = json.RootElement.GetProperty("events")[0];
-        Assert.Equal(new[] { "abort", "agentId", "at", "attempt", "entity", "key", "progress", "seq", "state", "waitingReason" },
+        Assert.Equal(new[] { "abort", "agentId", "at", "attempt", "entity", "key", "plannedAgentId", "progress", "selectionReason", "seq", "state", "waitingReason" },
             item.EnumerateObject().Select(property => property.Name).Order());
         Assert.Equal(at.ToString("O", CultureInfo.InvariantCulture), item.GetProperty("at").GetString());
         Assert.Equal(long.MaxValue, item.GetProperty("seq").GetInt64());

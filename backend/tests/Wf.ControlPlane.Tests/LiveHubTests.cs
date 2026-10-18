@@ -97,7 +97,7 @@ public sealed class LiveHubTests
                 LiveEvent.From(new(run, 43, at, EventEntity.Task, "work", (int)ExecutionStatus.Ready)
                     { WaitingReason = "WaitingForMachine" }),
                 LiveEvent.From(new(run, 44, at, EventEntity.Task, "work", (int)ExecutionStatus.Dispatched)
-                    { AgentId = agent }),
+                    { AgentId = agent, Attempt = 1, SelectionReason = "Affinity", PlannedAgentId = agent }),
                 LiveEvent.From(new(run, 45, at, EventEntity.Task, "work/task", (int)ExecutionStatus.Running)
                     { Attempt = 2, Progress = new(1, RemoteOperationPhase.Waiting, at) })
             ]);
@@ -111,6 +111,8 @@ public sealed class LiveHubTests
         Assert.Equal("UI", packed.RootElement.GetProperty("events")[0].GetProperty("abort").GetProperty("source").GetString());
         Assert.Equal("WaitingForMachine", packed.RootElement.GetProperty("events")[1].GetProperty("waitingReason").GetString());
         Assert.Equal(agent.ToString("D"), packed.RootElement.GetProperty("events")[2].GetProperty("agentId").GetString());
+        Assert.Equal("Affinity", packed.RootElement.GetProperty("events")[2].GetProperty("selectionReason").GetString());
+        Assert.Equal(agent.ToString("D"), packed.RootElement.GetProperty("events")[2].GetProperty("plannedAgentId").GetString());
         var progress = packed.RootElement.GetProperty("events")[3];
         Assert.Equal(2, progress.GetProperty("attempt").GetInt32());
         Assert.Equal(1, progress.GetProperty("progress").GetProperty("sequence").GetInt32());

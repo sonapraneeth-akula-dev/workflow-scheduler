@@ -1602,6 +1602,28 @@ fails `Placement` instead of silently using another worker. Re-run without
 `placement` keeps the source override; `singleMachine: false` explicitly removes
 it. Existing authorization remains unchanged; no login/logout flow is added.
 
+The run's **System Events** tab and `/runs/<run-id>/events` page show durable
+transitions in committed sequence order, including every recorded attempt,
+dispatch/start/outcome, retries, waiting and remote-operation phases. Task logs,
+individual remote polls, variables, outputs, error text, remote URLs and
+operation IDs are not projected. Each dispatch records the actual selected agent
+and fixed placement reason atomically with its outbox entry. **Planned agent**
+means the pre-decision affinity/run pin, which can differ after agent loss; it is
+not a prediction or a copy of the selected agent. An unpinned decision is explicit,
+and missing legacy attribution stays unrecorded. Task Plan links use the run's
+immutable version UUID, not the current active version.
+
+`GET /api/v1/runs/{id}/system-events` requires fresh Run Viewer authorization and
+returns no-store pages with exact `node`, full `task=node/task` and `attempt`
+filters. `limit` defaults to 100 and is capped at 200. `nextCursor` binds the run,
+filters, limit and committed watermark, so later commits cannot shift historical
+pages; restart without a cursor to include them. Sequence/watermark strings retain
+all Int64 digits. The UI reads ten events per page and shares the existing
+ref-counted live connection; pushed deltas and resync invalidate loaded pages,
+including changes arriving during a read. No timer polling is introduced, and
+failed authorization/refresh hides stale results. The separate strict
+`/events?afterSeq=...` live-resync contract remains unchanged.
+
 Checkpoint ingestion uses a journaled `CheckpointSaved` pointer, never JSON state
 in the agent result journal. The engine verifies the immutable run/task/sequence
 blob, SHA-256 and JSON (at most 1 MiB), then commits `task_checkpoints` before its

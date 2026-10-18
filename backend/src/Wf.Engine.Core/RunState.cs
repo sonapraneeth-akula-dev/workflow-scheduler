@@ -159,6 +159,8 @@ public sealed class RunState
             Reject($"Run '{Snapshot.RunId}' expected event sequence {Snapshot.LastSequence + 1} for the same run.");
         if (@event.At.Offset != TimeSpan.Zero)
             Reject("Event timestamps must use UTC.");
+        try { @event.ValidateSelection(); }
+        catch (ArgumentException) { Reject("Agent selection metadata is invalid."); }
         if (@event.Progress is { } progress)
         {
             try { Wf.Contracts.Progress.TaskProgressProtocol.Validate(progress); }

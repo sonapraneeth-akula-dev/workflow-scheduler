@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test"
 
 const catalogueOrigin = process.env.WF_CATALOG_ORIGIN
 const timelineOrigin = process.env.WF_TIMELINE_ORIGIN
+const systemEventsOrigin = process.env.WF_SYSTEM_EVENTS_ORIGIN
 const reportOrigin = process.env.WF_REPORT_ORIGIN
 const activationOrigin = process.env.WF_ACTIVATION_ORIGIN
 const rerunOrigin = process.env.WF_RERUN_ORIGIN
@@ -12,6 +13,7 @@ const trendsOrigin = process.env.WF_TRENDS_ORIGIN
 const dashboardOrigin = process.env.WF_DASHBOARD_ORIGIN
 const subscriptionOrigin = process.env.WF_SUBSCRIPTION_ORIGIN
 const fixtureOrigin =
+  systemEventsOrigin ??
   subscriptionOrigin ??
   dashboardOrigin ??
   trendsOrigin ??
@@ -40,6 +42,7 @@ export default defineConfig({
       ? ["**/catalog-isolation.spec.ts", "**/run-graph*.spec.ts"]
       : []),
     ...(!timelineOrigin ? ["**/run-timeline.spec.ts"] : []),
+    ...(!systemEventsOrigin ? ["**/system-events.spec.ts"] : []),
     ...(fixtureOrigin && !reportOrigin ? ["**/report-*.spec.ts"] : []),
   ],
   fullyParallel: false,

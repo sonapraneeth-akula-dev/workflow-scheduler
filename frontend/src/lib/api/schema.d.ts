@@ -2356,6 +2356,100 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{id}/system-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Read-only durable system transitions, ascending sequence, at most 200 per page. Optional exact node, full node/task and attempt filters. Cursor binds run, filters, limit and committed watermark; refresh without a cursor for newer events. Sequence strings preserve Int64 precision. Selected agent and reason are actual dispatch facts; plannedAgentId is a pre-decision affinity/run pin, not a predicted agent. Missing legacy metadata stays null. Pinned version identifies the declared Task Plan. No task logs, variables, outputs, failure text, remote URLs, operation IDs or machine capabilities. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Exact node key (UTF-8 at most 512 bytes). */
+                    node?: string;
+                    /** @description Exact full node/task key; must agree with node when both are supplied. */
+                    task?: string;
+                    /** @description Canonical positive smallint, 1-32767. */
+                    attempt?: string;
+                    /** @description Canonical page size 1-200; default 100. */
+                    limit?: string;
+                    /** @description Opaque cursor from the preceding page; keep run, filters and limit unchanged. */
+                    cursor?: string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SystemEventsPage"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{id}/events": {
         parameters: {
             query?: never;
@@ -5439,6 +5533,9 @@ export interface components {
             /** Format: int32 */
             attempt?: null | number | string;
             progress?: null | components["schemas"]["LiveProgress"];
+            selectionReason?: null | string;
+            /** Format: uuid */
+            plannedAgentId?: null | string;
         };
         LiveProgress: null | {
             /** Format: uint32 */
@@ -5792,6 +5889,9 @@ export interface components {
                     phase: number | string;
                     occurredAt: string;
                 };
+                selectionReason?: null | string;
+                /** Format: uuid */
+                plannedAgentId?: null | string;
             }[];
         };
         RunEventsPage: {
@@ -6034,6 +6134,35 @@ export interface components {
             secretRef: null | string;
             /** Format: date-time */
             createdAt: string;
+        };
+        SystemEvent: {
+            seq: string;
+            at: string;
+            /** Format: int32 */
+            entity: number | string;
+            key: null | string;
+            /** Format: int32 */
+            state: number | string;
+            /** Format: int32 */
+            attempt: null | number | string;
+            /** Format: uuid */
+            agentId: null | string;
+            selectionReason: null | string;
+            /** Format: uuid */
+            plannedAgentId: null | string;
+            waitingReason: null | string;
+            failureCategory: null | string;
+            progress: null | components["schemas"]["LiveProgress"];
+        };
+        SystemEventsPage: {
+            /** Format: uuid */
+            runId: string;
+            workflowId: string;
+            /** Format: uuid */
+            versionId: string;
+            lastSeq: string;
+            events: components["schemas"]["SystemEvent"][];
+            nextCursor: null | string;
         };
         TaskAction: {
             kind: components["schemas"]["TaskActionKind"];

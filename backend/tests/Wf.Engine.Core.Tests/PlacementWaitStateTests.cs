@@ -29,13 +29,42 @@ public sealed class PlacementWaitStateTests
             RunState.Restore(before, [wait with { Sequence = 4 }], _ => { }));
         var agent = Guid.NewGuid();
         run.Apply(run.CreateEvent(EventEntity.Task, "node/task", (int)ExecutionStatus.Dispatched, now.AddSeconds(2))
-            with { AgentId = agent });
+            with { AgentId = agent, Attempt = 1, SelectionReason = "LeastLoaded" });
         Assert.Empty(run.Snapshot.TaskWaitReasons);
         Assert.Equal(agent, run.Snapshot.PlacementAgentId);
         var reloaded = JsonSerializer.Deserialize<RunSnapshot>(JsonSerializer.Serialize(run.Snapshot))!;
         Assert.Equal(agent, RunState.Restore(reloaded, [], Assert.Fail).Snapshot.PlacementAgentId);
         Assert.Equal(JsonSerializer.Serialize(run.Snapshot),
             JsonSerializer.Serialize(RunState.Restore(initial, run.Events, Assert.Fail).Snapshot));
+    }
+
+    [Theory]
+    [InlineData("unknown")]
+    [InlineData("no-agent")]
+    [InlineData("no-attempt")]
+    [InlineData("empty-pin")]
+    [InlineData("pin-without-reason")]
+    [InlineData("progress")]
+    public void Invalid_selection_metadata_never_mutates_the_committed_run(string invalid)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var run = new RunState(Guid.CreateVersion7(), [new("node", [], [new("task")])],
+            new("test", ImmutableSortedDictionary<string, string>.Empty), _ => { }, now);
+        run.Append(EventEntity.Run, null, (int)RunStatus.Running, now);
+        run.Append(EventEntity.Task, "node/task", (int)ExecutionStatus.Ready, now);
+        var change = run.CreateEvent(EventEntity.Task, "node/task", (int)ExecutionStatus.Dispatched, now) with
+        { AgentId = Guid.NewGuid(), Attempt = 1, SelectionReason = "LeastLoaded" };
+        change = invalid switch
+        {
+            "unknown" => change with { SelectionReason = "private-secret" },
+            "no-agent" => change with { AgentId = null },
+            "no-attempt" => change with { Attempt = null },
+            "empty-pin" => change with { PlannedAgentId = Guid.Empty },
+            "pin-without-reason" => change with { SelectionReason = null, PlannedAgentId = Guid.NewGuid() },
+            _ => change with { Progress = new(1, Wf.Contracts.Agent.V1.RemoteOperationPhase.Submitted, now) }
+        };
+        Assert.Throws<InvalidOperationException>(() => run.Apply(change));
+        Assert.Equal(2, run.Snapshot.LastSequence);
     }
 
     [Theory]

@@ -7,6 +7,7 @@ import { AbortDialog } from "@/features/runs/AbortDialog"
 import { RerunDialog } from "@/features/runs/RerunDialog"
 import { RunLineage } from "@/features/runs/RunLineage"
 import { Timeline } from "@/features/runs/Timeline"
+import { SystemEvents } from "@/features/runs/SystemEvents"
 import { ResourceCharts } from "@/features/runs/ResourceCharts"
 import { TaskOutputs } from "@/features/runs/TaskOutputs"
 import { QueuedBanner } from "@/features/runs/QueuedBanner"
@@ -115,6 +116,12 @@ function RunDetail() {
               >
                 Reports
               </Tabs.Trigger>
+              <Tabs.Trigger
+                value="events"
+                className="rounded border px-3 py-2 data-[state=active]:bg-muted"
+              >
+                System Events
+              </Tabs.Trigger>
             </Tabs.List>
             <Tabs.Content
               value="graph"
@@ -134,6 +141,12 @@ function RunDetail() {
             </Tabs.Content>
             <Tabs.Content value="outputs" className="min-w-0">
               <TaskOutputs key={run.runId} runId={run.runId} />
+            </Tabs.Content>
+            <Tabs.Content value="events" className="min-w-0 space-y-4">
+              <Link to="/runs/$id/events" params={{ id: run.runId }}>
+                Open System Events page
+              </Link>
+              <SystemEvents key={run.runId} runId={run.runId} />
             </Tabs.Content>
           </Tabs.Root>
         </>

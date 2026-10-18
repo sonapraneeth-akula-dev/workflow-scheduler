@@ -16,7 +16,7 @@ using Wf.Engine.Core;
 
 namespace Wf.ControlPlane.Api;
 
-public static class RunEventsEndpoints
+public static partial class RunEventsEndpoints
 {
     private static readonly RunStoreJson DurableJson = new(new JsonSerializerOptions(RunStoreJson.Default.Options)
     {
@@ -24,6 +24,7 @@ public static class RunEventsEndpoints
     });
     public static IEndpointRouteBuilder MapRunEventsEndpoints(this IEndpointRouteBuilder endpoints)
     {
+        MapSystemEvents(endpoints);
         endpoints.MapGet("/api/v1/runs/{id}/events", Events).RequireAuthorization()
             .Produces<RunEventsPage>().ProducesProblem(400).ProducesProblem(401).ProducesProblem(403)
             .ProducesProblem(409).ProducesProblem(500).ProducesProblem(503)

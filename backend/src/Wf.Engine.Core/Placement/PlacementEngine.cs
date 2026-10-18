@@ -27,11 +27,13 @@ public sealed class PlacementDecision
     public PlacementRequest Request { get; }
     public PlacementAgent? Agent { get; }
     public PlacementReason Reason { get; }
+    public Guid? PlannedAgentId { get; }
     internal Guid Owner { get; }
     internal long Revision { get; }
 
-    internal PlacementDecision(PlacementRequest request, PlacementAgent? agent, PlacementReason reason, Guid owner, long revision) =>
-        (Request, Agent, Reason, Owner, Revision) = (request, agent, reason, owner, revision);
+    internal PlacementDecision(PlacementRequest request, PlacementAgent? agent, PlacementReason reason, Guid owner, long revision,
+        Guid? plannedAgentId) =>
+        (Request, Agent, Reason, Owner, Revision, PlannedAgentId) = (request, agent, reason, owner, revision, plannedAgentId);
 }
 
 // Caller supplies authoritative capacity, including committed-but-not-yet-heartbeating dispatches.
@@ -62,6 +64,7 @@ public sealed class PlacementEngine
             Validate(agent);
             if (!ids.Add(agent.Id)) throw new ArgumentException("Agent IDs must be unique.", nameof(agents));
         }
+        Guid? planned = null;
         if (request.RePlacement && !request.AutoRetry) return Decision(null, PlacementReason.AutoRetryDisabled);
         var affinity = request.Policy?.Affinity;
         Guid? pinned = affinity?.Kind switch
@@ -72,6 +75,7 @@ public sealed class PlacementEngine
             _ => null
         };
         if (pinned == Guid.Empty) pinned = null;
+        planned = pinned;
         if (affinity?.Kind == AffinityKind.SameMachineAs && pinned is null)
             return Decision(null, PlacementReason.WaitingForAffinity);
         if (request.RePlacement && pinned == request.PreviousAgentId) pinned = null;
@@ -124,7 +128,8 @@ public sealed class PlacementEngine
             (agent.ReservedForRun is not { } reserved ||
                 reserved == request.RunId && (agent.ReservedForNode is null || agent.ReservedForNode == request.NodeKey)) &&
             PlacementFilter.Matches(request.Policy?.Selector, agent);
-        PlacementDecision Decision(PlacementAgent? agent, PlacementReason reason) => new(request, agent, reason, owner, Snapshot.Revision);
+        PlacementDecision Decision(PlacementAgent? agent, PlacementReason reason) =>
+            new(request, agent, reason, owner, Snapshot.Revision, planned);
     }
 
     // Apply only after the Dispatched event is durable; proposals never consume a pin or round-robin turn.

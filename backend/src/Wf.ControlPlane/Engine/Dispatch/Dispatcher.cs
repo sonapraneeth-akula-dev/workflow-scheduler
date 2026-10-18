@@ -56,7 +56,7 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
     {
         var decision = await ChooseAsync(connection, run, request, cancellationToken);
         if (decision.Agent is not null)
-            await SaveDispatchAsync(connection, run, request, command, decision.Agent.Id, policy,
+            await SaveDispatchAsync(connection, run, request, command, decision, policy,
                 platformRetries, authorRetries, cancellationToken);
         return decision;
     }
@@ -102,7 +102,7 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
             var decision = await ChooseAsync(connection, durable, request, cancellationToken);
             if (decision.Agent is null) return decision;
             var dispatch = command.Clone();
-            var change = await SaveDispatchAsync(connection, durable, request, dispatch, decision.Agent.Id, executionPolicy, 0, 0, cancellationToken);
+            var change = await SaveDispatchAsync(connection, durable, request, dispatch, decision, executionPolicy, 0, 0, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             run.Apply(change);
             placement.Apply(decision);
@@ -232,7 +232,7 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
                 run.CreateEvent(EventEntity.Task, taskKey, (int)ExecutionStatus.Retrying, now) with
                     { Attempt = attempt, AttemptEndedAt = lostAt, AttemptStatus = ExecutionStatus.Failed,
                         FailureCategory = FailureCategory.AgentLost }, cancellationToken);
-            await SaveDispatchAsync(connection, run, request, dispatch, decision.Agent.Id, policy,
+            await SaveDispatchAsync(connection, run, request, dispatch, decision, policy,
                 checked((short)(platformRetries + 1)), authorRetries, cancellationToken);
             await RunStore.ExecuteAsync(connection, """
                 UPDATE task_attempts SET replacement_processed_at=$4
@@ -360,9 +360,10 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
     }
 
     private async Task<RunEvent> SaveDispatchAsync(NpgsqlConnection connection, RunState run, PlacementRequest request,
-        DispatchCommand dispatch, Guid agentId, ExecutionPolicy policy, short platformRetries, short authorRetries,
+        DispatchCommand dispatch, PlacementDecision decision, ExecutionPolicy policy, short platformRetries, short authorRetries,
         CancellationToken cancellationToken)
     {
+        var agentId = decision.Agent?.Id ?? throw new InvalidOperationException("Dispatch requires a selected agent.");
         await using (var epoch = new NpgsqlCommand("SELECT reservation_epoch FROM agents WHERE id=$1", connection))
         {
             epoch.Parameters.AddWithValue(agentId);
@@ -371,7 +372,11 @@ public sealed class Dispatcher(NpgsqlDataSource dataSource, RunStore runs, Agent
         }
         var key = $"{request.NodeKey}/{request.TaskKey}";
         var change = run.CreateEvent(EventEntity.Task, key, (int)ExecutionStatus.Dispatched, timeProvider.GetUtcNow()) with
-            { Attempt = request.Attempt, AgentId = agentId };
+        {
+            Attempt = request.Attempt, AgentId = agentId, SelectionReason = decision.Reason.ToString(),
+            PlannedAgentId = run.Snapshot.Placement?.SingleMachine == true
+                ? run.Snapshot.PlacementAgentId : decision.PlannedAgentId
+        };
         await RunStore.AppendAsync(connection, run, change, cancellationToken);
         var metric = run.Snapshot.Metrics!.Tasks[key].Attempts[^1];
         await RunStore.ExecuteAsync(connection, """

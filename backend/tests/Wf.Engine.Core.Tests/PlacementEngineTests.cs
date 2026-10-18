@@ -243,6 +243,7 @@ public sealed class PlacementEngineTests
         var engine = Seed(kind);
         var decision = engine.Propose(AffinityRequest(kind), [Agent(1), Agent(2) with { WarmRuns = ImmutableHashSet.Create(Run) }]);
         Assert.Equal(Agent(kind == AffinityKind.None ? 2 : 1).Id, decision.Agent!.Id);
+        Assert.Equal(kind == AffinityKind.None ? null : (Guid?)Agent(1).Id, decision.PlannedAgentId);
         if (kind != AffinityKind.None) Assert.Equal(PlacementReason.Affinity, decision.Reason);
     }
 
@@ -267,10 +268,12 @@ public sealed class PlacementEngineTests
         var retry = request with { Attempt = 2, RePlacement = true, PreviousAgentId = Agent(1).Id };
         var decision = engine.Propose(retry, agents);
         Assert.Equal(Agent(2).Id, decision.Agent!.Id);
+        Assert.Equal(Agent(1).Id, decision.PlannedAgentId);
         engine.Apply(decision);
         var next = engine.Propose(retry with { TaskKey = "next" },
             [Agent(2) with { SlotsUsed = 1 }, Agent(3) with { WarmRuns = ImmutableHashSet.Create(Run) }]);
         Assert.Equal(Agent(2).Id, next.Agent!.Id);
+        Assert.Equal(Agent(2).Id, next.PlannedAgentId);
         var restored = new PlacementEngine(JsonSerializer.Deserialize<PlacementSnapshot>(JsonSerializer.Serialize(engine.Snapshot))!);
         Assert.Equal(Agent(2).Id, restored.Propose(request, [Agent(2), Agent(3)]).Agent!.Id);
     }

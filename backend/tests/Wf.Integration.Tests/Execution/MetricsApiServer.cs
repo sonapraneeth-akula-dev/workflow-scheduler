@@ -57,6 +57,7 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, MetricsJsonContext.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Admin.RetentionJson.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunTimelineJsonContext.Default);
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, SystemEventsJson.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Series.SeriesTrendsJson.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Dashboards.DashboardJson.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Subscriptions.SubscriptionJson.Default);

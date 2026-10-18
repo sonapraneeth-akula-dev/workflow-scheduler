@@ -20,6 +20,11 @@ export const liveEventSchema = z
     abort: liveAbortSchema.nullable(),
     waitingReason: z.literal("WaitingForMachine").nullable().optional(),
     agentId: z.uuid().nullable().optional(),
+    selectionReason: z
+      .enum(["WarmHost", "LeastLoaded", "RoundRobin", "Affinity"])
+      .nullable()
+      .optional(),
+    plannedAgentId: z.uuid().nullable().optional(),
     attempt: z.int().min(1).max(32767).nullable().optional(),
     progress: z
       .object({
@@ -40,12 +45,28 @@ export const liveEventSchema = z
         (event.state !== 2 && event.state !== 3) ||
         event.abort ||
         event.agentId ||
-        event.waitingReason)
+        event.waitingReason ||
+        event.selectionReason ||
+        event.plannedAgentId)
     )
       context.addIssue({
         code: "custom",
         message:
           "Progress must identify an active task attempt without a transition.",
+      })
+    if (
+      (event.selectionReason || event.plannedAgentId) &&
+      (!event.selectionReason ||
+        event.entity !== 2 ||
+        event.state !== 2 ||
+        !event.agentId ||
+        !event.attempt ||
+        event.progress ||
+        event.waitingReason)
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Agent selection must identify an actual dispatched attempt.",
       })
   })
 
