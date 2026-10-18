@@ -193,6 +193,7 @@ describe("run filter form", () => {
     await user.type(screen.getByLabelText("Team"), "team")
     await user.type(screen.getByLabelText("Type"), "release")
     await user.selectOptions(screen.getByLabelText("Run status"), "Running")
+    await user.click(screen.getByText("Advanced filters", { exact: true }))
     await user.selectOptions(
       screen.getByLabelText("Group loaded runs by"),
       "metadata"
@@ -229,5 +230,25 @@ describe("run filter form", () => {
     fireEvent.submit(screen.getByRole("form", { name: "Run filters" }))
     expect(screen.getByRole("alert")).toHaveTextContent("JSON object")
     expect(change).not.toHaveBeenCalled()
+  })
+  it("opens copied advanced filters without hiding their active state", () => {
+    render(
+      <FilterBar
+        team="team"
+        filters={{
+          team: "team",
+          metadata: { environment: "dev" },
+          seriesId: "019ed132-2f44-7000-8000-000000000001",
+        }}
+        onChange={vi.fn()}
+      />
+    )
+    expect(
+      screen.getByText("Advanced filters (2 active)").closest("details")
+    ).toHaveAttribute("open")
+    expect(screen.getByLabelText("Series ID")).toBeVisible()
+    expect(screen.getByLabelText("Metadata filters (JSON)")).toHaveValue(
+      '{"environment":"dev"}'
+    )
   })
 })

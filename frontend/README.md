@@ -424,6 +424,10 @@ with AND; times require an explicit RFC3339 offset, with inclusive start and
 exclusive end, preserving up to microsecond precision. Metadata filters are a
 JSON object of exact strings, including empty values and significant whitespace.
 Invalid or contradictory drafts show a form error without sending a request.
+Type, workflow and status stay in a compact primary toolbar with search/reset
+actions. Series, time range, grouping and metadata remain available under
+**Advanced filters**, with an active-filter count. Copied URLs with advanced
+filters expand them automatically; collapsing the panel never discards values.
 
 TanStack Router validates typed URL search parameters, including metadata grouping;
 copying or reloading the URL restores the form and view. Grouping uses the run's
