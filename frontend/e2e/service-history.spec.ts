@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright"
 import { expect, test } from "@playwright/test"
 
-test("navbar discovers team/type service views and restores format with two-week health and direct run actions", async ({
+test("navbar discovers team/type service views and restores format with individual new-tab run actions", async ({
   page,
 }) => {
   await page.goto("/")
@@ -38,7 +38,9 @@ test("navbar discovers team/type service views and restores format with two-week
   await expect(
     page.getByRole("combobox", { name: "Workflow type", exact: true })
   ).toHaveValue(type)
-  await expect(page.getByText("Daily health: last 14 days (UTC)")).toBeVisible()
+  await expect(
+    page.getByText("Run instances: last 14 days (UTC)")
+  ).toBeVisible()
   await expect(page.getByLabel("Health window")).toHaveCount(0)
   const group = page.getByRole("region", { name: type, exact: true })
   await expect(group).toBeVisible()
@@ -48,14 +50,36 @@ test("navbar discovers team/type service views and restores format with two-week
     card.getByRole("link", { name: /^View last run for / })
   ).toBeVisible()
   await expect(page.getByText("Daily health details")).toHaveCount(0)
-  await expect(card.locator("[data-health-day]")).toHaveCount(14)
+  const strip = card.locator("[data-run-history]")
+  await expect(strip).toBeVisible()
+  const run = strip.locator("[data-run-id]").first()
+  await expect(run).toBeVisible()
+  const runId = await run.getAttribute("data-run-id")
+  const runStatus = await run.getAttribute("data-run-status")
+  await expect(run).toHaveAttribute("href", `/runs/${runId}`)
+  await expect(run).toHaveAttribute("target", "_blank")
+  await expect(run).toHaveAttribute("rel", "noopener noreferrer")
+  await expect(run).toHaveAccessibleName(
+    new RegExp(`^${runStatus} run ${runId},`)
+  )
+  await run.focus()
+  const popupPromise = page.waitForEvent("popup")
+  await page.keyboard.press("Enter")
+  const popup = await popupPromise
+  await expect.poll(() => new URL(popup.url()).pathname).toBe(`/runs/${runId}`)
+  await popup.close()
+  await expect(group).toBeVisible()
   await page.getByRole("radio", { name: "Table format" }).click()
   await expect(group.getByRole("table")).toBeVisible()
   expect(new URL(page.url()).searchParams.get("view")).toBe("table")
   await page.reload()
   await expect(group.getByRole("table")).toBeVisible()
   const row = group.getByRole("table").locator("tbody tr").first()
-  await expect(row.locator("[data-health-day]")).toHaveCount(14)
+  await expect(row.locator("[data-run-history]")).toBeVisible()
+  await expect(row.locator("[data-run-id]").first()).toHaveAttribute(
+    "target",
+    "_blank"
+  )
   const lastRun = row.getByRole("link", { name: /^View last run for / })
   const lastRunPath = await lastRun.getAttribute("href")
   expect(lastRunPath).toMatch(/^\/runs\/[0-9a-f-]+$/)
@@ -111,12 +135,20 @@ test("legacy service URLs use two weeks in both formats without dropping metadat
     await expect(page.getByLabel("Container grouping")).toHaveValue(
       "metadata:environment"
     )
-    const bars = page.locator('main [role="img"]')
-    await expect(bars.first().locator("[data-health-day]")).toHaveCount(14)
+    const strips = page.locator("main [data-run-history]")
+    await expect(strips).toHaveCount(response.items.length)
+    const totalRuns = response.items.reduce(
+      (sum: number, item: { runs: unknown[] }) => sum + item.runs.length,
+      0
+    )
+    await expect(page.locator("main [data-run-id]")).toHaveCount(totalRuns)
     await page.getByRole("radio", { name: "Table format" }).click()
-    await expect(
-      page.locator("main tbody tr").first().locator("[data-health-day]")
-    ).toHaveCount(14)
+    await expect(page.locator("main tbody tr [data-run-history]")).toHaveCount(
+      response.items.length
+    )
+    await expect(page.locator("main tbody tr [data-run-id]")).toHaveCount(
+      totalRuns
+    )
     expect(new URL(page.url()).searchParams.get("window")).toBe("14d")
   }
 })
@@ -172,9 +204,9 @@ for (const width of [320, 768, 2000]) {
         .locator('main a[href^="/t/"][href*="/services"]')
         .first()
         .click()
-      await expect(page.getByRole("img").first()).toBeVisible()
-      const bars = page.locator('main [role="img"]')
-      await expect(bars.first().locator("[data-health-day]")).toHaveCount(14)
+      await expect(
+        page.locator("main [data-run-history]").first()
+      ).toBeVisible()
       for (const view of ["cards", "table"]) {
         if (view === "table")
           await page.getByRole("radio", { name: "Table format" }).click()

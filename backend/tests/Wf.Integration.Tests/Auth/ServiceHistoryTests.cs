@@ -29,10 +29,13 @@ public sealed partial class AuthorizationMatrixTests
         var clock = new ManualTimeProvider();
         var now = clock.GetUtcNow();
         var first = now.Date.AddDays(1 - days);
+        var ids = new List<Guid>();
         foreach (var status in Enum.GetValues<RunStatus>())
-            await ServiceHistoryRun(workflow, new(first, TimeSpan.Zero), status,
-                status == RunStatus.Succeeded ? null : Guid.NewGuid());
-        await ServiceHistoryRun(workflow, now.AddMinutes(1), RunStatus.Succeeded, Guid.NewGuid());
+            ids.Add(await ServiceHistoryRun(workflow, new(first, TimeSpan.Zero), status,
+                status == RunStatus.Succeeded ? null : Guid.NewGuid()));
+        var latest = await ServiceHistoryRun(workflow, now.AddMinutes(1), RunStatus.Succeeded, Guid.NewGuid(),
+            now.AddMinutes(1).AddSeconds(1), now.AddMinutes(1).AddSeconds(2));
+        ids.Add(latest);
         await ServiceHistoryRun(workflow, new(first.AddTicks(-1), TimeSpan.Zero), RunStatus.Failed, null);
         await ServiceHistoryRun(workflow, new(now.Date.AddDays(1), TimeSpan.Zero), RunStatus.Failed, null);
         await ServiceHistoryRun(seed.Team + "/sibling/hidden", now, RunStatus.Failed, null);
@@ -57,12 +60,55 @@ public sealed partial class AuthorizationMatrixTests
         Assert.Equal(1, item.Days[^1].Counts["Succeeded"]);
         Assert.All(item.Days.Skip(1).SkipLast(1), day => Assert.Empty(day.Counts));
         Assert.Equal(8, item.Days.Sum(day => day.Counts.Values.Sum()));
+        Assert.Equal(ids.Order(), item.Runs.Select(run => run.Id).Order());
+        Assert.Equal(latest, item.Runs[0].Id);
+        Assert.Equal(now.AddMinutes(1).AddSeconds(1), item.Runs[0].StartedAt);
+        Assert.Equal(now.AddMinutes(1).AddSeconds(2), item.Runs[0].EndedAt);
+        Assert.All(Enum.GetNames<RunStatus>(), status => Assert.Contains(item.Runs, run => run.Status == status));
         var never = Assert.Single(page.Items, entry => entry.Workflow.Name == "b-never");
         Assert.Null(never.Workflow.LatestRun);
         Assert.All(never.Days, day => Assert.Empty(day.Counts));
+        Assert.Empty(never.Runs);
         var json = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         foreach (var secret in new[] { seed.Other, "hidden", "private-payload", "variables", "roleBindings", "packageUri" })
             Assert.DoesNotContain(secret, json);
+    }
+
+    [Fact]
+    public async Task ServiceHistory_limits_instances_per_workflow_without_truncating_counts_and_preserves_precise_order()
+    {
+        var group = Guid.NewGuid();
+        var seed = await Seed(RegistryRole.Viewer, group, false);
+        var clock = new ManualTimeProvider();
+        var now = clock.GetUtcNow();
+        var expected = new Dictionary<string, List<CatalogLatestRun>>();
+        foreach (var (name, count) in new[] { ("a", 65), ("b", 55) })
+        {
+            var workflow = seed.Type + "/" + name;
+            await CatalogWorkflow(workflow);
+            var instances = new List<CatalogLatestRun>();
+            for (var index = 0; index < count; index++)
+            {
+                var at = now.AddTicks(index % 3 * 10);
+                var status = index % 2 == 0 ? RunStatus.Succeeded : RunStatus.Failed;
+                var id = await ServiceHistoryRun(workflow, at, status, index % 2 == 0 ? null : Guid.NewGuid());
+                instances.Add(new(id, status.ToString(), at, null, null));
+            }
+            expected.Add(workflow, instances);
+        }
+        await using var server = await Server.Start(database.DataSource,
+            configureServices: services => services.AddSingleton<TimeProvider>(clock));
+        using var response = await server.GetPath("/api/v1/service-history?team=" + seed.Team, server.Token(group: group));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var page = (await response.Content.ReadFromJsonAsync<ServiceHistoryPage>(TestContext.Current.CancellationToken))!;
+        Assert.Equal(2, page.Items.Count);
+        foreach (var item in page.Items)
+        {
+            var instances = expected[item.Workflow.Id];
+            Assert.Equal(instances.Count, item.Days.Sum(day => day.Counts.Values.Sum()));
+            Assert.Equal(instances.OrderByDescending(run => run.CreatedAt).ThenByDescending(run => run.Id).Take(50),
+                item.Runs);
+        }
     }
 
     [Fact]
@@ -79,6 +125,7 @@ public sealed partial class AuthorizationMatrixTests
         Assert.Equal(["a", "c"], first.Items.Select(item => item.Workflow.Name));
         Assert.Equal("14d", first.Window);
         Assert.All(first.Items, item => Assert.Equal(14, item.Days.Count));
+        Assert.All(first.Items, item => Assert.Empty(item.Runs));
         Assert.NotNull(first.NextCursor);
         await CatalogWorkflow(seed.Type + "/b");
         using var nextResponse = await server.GetPath(path + "&cursor=" + first.NextCursor, jwt);
@@ -122,7 +169,8 @@ public sealed partial class AuthorizationMatrixTests
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    private async Task ServiceHistoryRun(string workflow, DateTimeOffset at, RunStatus status, Guid? series)
+    private async Task<Guid> ServiceHistoryRun(string workflow, DateTimeOffset at, RunStatus status, Guid? series,
+        DateTimeOffset? startedAt = null, DateTimeOffset? endedAt = null)
     {
         var id = Guid.CreateVersion7(at);
         await using (var partition = database.DataSource.CreateCommand("SELECT ensure_run_partitions(uuid_v7_run_day($1))"))
@@ -131,14 +179,17 @@ public sealed partial class AuthorizationMatrixTests
             await partition.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
         }
         await using var query = database.DataSource.CreateCommand("""
-            INSERT INTO runs(run_day,id,workflow_id,version_id,series_id,trigger,triggered_by,variables,metadata,status,created_at)
-            VALUES(uuid_v7_run_day($1),$1,$2,$1,$3,0,'service-history','{"private-payload":"secret"}','{}',$4,$5)
+            INSERT INTO runs(run_day,id,workflow_id,version_id,series_id,trigger,triggered_by,variables,metadata,status,created_at,started_at,ended_at)
+            VALUES(uuid_v7_run_day($1),$1,$2,$1,$3,0,'service-history','{"private-payload":"secret"}','{}',$4,$5,$6,$7)
             """);
         query.Parameters.AddWithValue(id);
         query.Parameters.AddWithValue(workflow);
         query.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)series ?? DBNull.Value);
         query.Parameters.AddWithValue((short)status);
         query.Parameters.AddWithValue(at);
+        query.Parameters.AddWithValue(NpgsqlDbType.TimestampTz, (object?)startedAt ?? DBNull.Value);
+        query.Parameters.AddWithValue(NpgsqlDbType.TimestampTz, (object?)endedAt ?? DBNull.Value);
         await query.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        return id;
     }
 }

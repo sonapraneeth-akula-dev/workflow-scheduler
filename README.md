@@ -805,7 +805,7 @@ permission in `WF_RUN_ACCESS_TOKEN`; a Registrar-only token cannot trigger runs.
 The explicit local development backend accepts the placeholder above for both.
 Without `-RunOnce`, publication executes no tasks.
 Scheduled sources are skipped with a warning unless `-IncludeSchedules` is
-explicitly supplied. Existing five-minute schedules are therefore untouched by
+explicitly supplied. Existing schedules are therefore untouched by
 the default loader. The relocated five-minute source is version `1.0.1`;
 previously accepted `1.0.0` packages/source remain immutable and keep running
 until a deliberate republish. Use `-Environment ppe -Team operations` to select
@@ -814,22 +814,37 @@ registries into `prod`/`ppe`.
 
 ### Service history
 
-Service history cards and tables show daily health inline, without a separate
-daily-details expander. **View last run** opens the exact latest run and is
+Service history cards and tables show individual run instances inline.
+Each status-colored icon represents one run, with a distinct status symbol,
+run ID and timestamp; clicking it opens that exact run in a new tab.
+**View last run** opens the exact latest run and is
 disabled for never-run workflows; **History** opens that workflow's run history.
 Timestamps keep their full source precision in the time element while displaying
 local time with millisecond precision.
-Daily health uses a fixed **last 14 UTC days**, including today, in both formats;
-days without runs remain neutral and never-run workflows stay visible.
+Both formats show the latest **50 runs per workflow** within the fixed
+**last 14 UTC days**, including today, newest first. When more runs exist,
+the count explicitly says **Latest 50 of N**; **History** retains the full list.
+Success rates use all completed runs in the window, not only the displayed 50.
+Workflows without runs remain visible with an explicit empty state.
 Older saved `7d`, `30d` and `90d` view URLs normalize to `14d`; the service-history
 API defaults to `14d` while retaining explicit legacy periods for API clients.
+Each API item includes bounded `runs` plus untruncated daily `days` counts,
+read from the same database snapshot.
 **Container grouping** defaults to workflow type. Select a metadata key such as
 `environment` or `component` to create a container per exact metadata value.
 Keys come from authorized type schemas and loaded workflow metadata; missing
 values have a **Not set** container and empty values stay distinct. Grouping is
-saved in the URL and changes presentation without repeating the health request.
+saved in the URL and changes presentation without repeating the history request.
 Live updates remain subscribed to every loaded workflow type, even when one
 metadata container combines several types.
+
+To browse the published samples, open **Service history** in the navigation,
+select `demo`, `platform` or `commerce`, then a workflow type (or **All workflow
+types**). Direct team views are `/t/demo/services`, `/t/platform/services` and
+`/t/commerce/services`; choose **History** on a card for every run of that
+workflow. `platform` contains `release` and `maintenance`; `commerce` contains
+`validation` and `data`. Source files alone do not appear in navigation until
+published with the sample loader above.
 
 `Wf.Engine.Core.FailureClassifier` reuses the existing `FailureCategory` contract:
 TaskError, Timeout, Aborted, AgentLost, ResourceLimit, ValidationError, Placement

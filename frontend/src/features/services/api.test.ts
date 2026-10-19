@@ -1,10 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest"
-import {
-  getServiceHistory,
-  healthState,
-  healthSummary,
-  serviceSearchSchema,
-} from "./api"
+import { getServiceHistory, serviceSearchSchema } from "./api"
 import type { CatalogWorkflow } from "@/features/catalog/api"
 
 const { get } = vi.hoisted(() => ({ get: vi.fn() }))
@@ -39,6 +34,15 @@ function page() {
           day: `2026-10-${String(5 + index).padStart(2, "0")}`,
           counts: index ? {} : { Succeeded: 1 },
         })),
+        runs: [
+          {
+            id: "019ed132-2f44-7000-8000-000000000002",
+            status: "Succeeded",
+            createdAt: "2026-10-05T12:00:00Z",
+            startedAt: null,
+            endedAt: null,
+          },
+        ],
       },
     ],
     nextCursor: null as string | null,
@@ -180,16 +184,106 @@ it("validates explicit type, continued cursor and Unicode code-point order", asy
   ).rejects.toThrow()
 })
 
-it("keeps no-run days neutral and never paints mixed or unfinished outcomes as healthy", () => {
-  expect(healthState({})).toBe("NoRuns")
-  expect(healthSummary({})).toBe("No runs")
-  expect(healthState({ Succeeded: 5 })).toBe("Succeeded")
-  expect(healthState({ Succeeded: 5, Running: 1 })).toBe("Running")
-  expect(healthState({ Succeeded: 5, Aborted: 1 })).toBe("Aborted")
-  expect(healthState({ Succeeded: 5, TimedOut: 1, Running: 1 })).toBe("Failed")
-  expect(healthSummary({ Succeeded: 5, Failed: 1 })).toBe(
-    "5 succeeded, 1 failed"
-  )
+it.each([
+  { id: "not-a-run-id" },
+  { status: "Unknown" },
+  { status: "Failed" },
+  { createdAt: "2026-10-04T23:59:59Z" },
+  { createdAt: "2026-10-19T00:00:00Z" },
+  { createdAt: "2026-10-05T12:00:00.0000001Z" },
+  { startedAt: "invalid" },
+])("rejects invalid or inconsistent run instances: %j", async (change) => {
+  const data = page()
+  respond({
+    ...data,
+    items: [
+      {
+        ...data.items[0],
+        runs: [{ ...data.items[0]!.runs[0]!, ...change }],
+      },
+    ],
+  })
+  await expect(
+    getServiceHistory("team", undefined, "14d", null)
+  ).rejects.toThrow()
+})
+
+it("requires exact bounded counts, unique IDs and newest-first microsecond/UUID order", async () => {
+  const data = page()
+  const item = data.items[0]!
+  const original = item.runs[0]!
+  item.days[0]!.counts = { Succeeded: 2 }
+  item.runs = [
+    {
+      ...original,
+      id: "019ed132-2f44-7000-8000-000000000001",
+      createdAt: "2026-10-05T12:00:00.000002Z",
+    },
+    {
+      ...original,
+      id: "019ed132-2f44-7000-8000-000000000002",
+      createdAt: "2026-10-05T17:30:00.000001+05:30",
+    },
+  ]
+  respond(data)
+  await expect(
+    getServiceHistory("team", undefined, "14d", null)
+  ).resolves.toHaveProperty("items.0.runs.length", 2)
+  item.runs.reverse()
+  respond(data)
+  await expect(
+    getServiceHistory("team", undefined, "14d", null)
+  ).rejects.toThrow()
+  item.runs[1]!.createdAt = item.runs[0]!.createdAt
+  respond(data)
+  await expect(
+    getServiceHistory("team", undefined, "14d", null)
+  ).resolves.toBeDefined()
+  item.runs.reverse()
+  respond(data)
+  await expect(
+    getServiceHistory("team", undefined, "14d", null)
+  ).rejects.toThrow()
+  item.runs = [original, original]
+  respond(data)
+  await expect(
+    getServiceHistory("team", undefined, "14d", null)
+  ).rejects.toThrow()
+  item.runs = []
+  respond(data)
+  await expect(
+    getServiceHistory("team", undefined, "14d", null)
+  ).rejects.toThrow()
+  item.days[0]!.counts = {}
+  respond(data)
+  await expect(
+    getServiceHistory("team", undefined, "14d", null)
+  ).resolves.toBeDefined()
+})
+
+it("accepts 50 recent instances with larger full-window counts but rejects over-cap or incomplete lists", async () => {
+  const data = page()
+  const item = data.items[0]!
+  const original = item.runs[0]!
+  item.days[0]!.counts = { Succeeded: 80 }
+  item.runs = Array.from({ length: 51 }, (_, index) => ({
+    ...original,
+    id: `019ed132-2f44-7000-8000-${(100 - index).toString(16).padStart(12, "0")}`,
+  }))
+  respond(data)
+  await expect(
+    getServiceHistory("team", undefined, "14d", null)
+  ).rejects.toThrow()
+  item.runs.pop()
+  respond(data)
+  await expect(
+    getServiceHistory("team", undefined, "14d", null)
+  ).resolves.toHaveProperty("items.0.runs.length", 50)
+  item.runs.pop()
+  respond(data)
+  await expect(
+    getServiceHistory("team", undefined, "14d", null)
+  ).rejects.toThrow()
 })
 
 it.each([401, 403, 503])(

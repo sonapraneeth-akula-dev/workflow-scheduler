@@ -8,7 +8,8 @@ using Wf.ControlPlane.Api.Series;
 namespace Wf.ControlPlane.Api;
 
 public sealed record WorkflowHealthDay(DateOnly Day, IReadOnlyDictionary<string, long> Counts);
-public sealed record ServiceWorkflow(CatalogWorkflow Workflow, IReadOnlyList<WorkflowHealthDay> Days);
+public sealed record ServiceWorkflow(CatalogWorkflow Workflow, IReadOnlyList<WorkflowHealthDay> Days,
+    IReadOnlyList<CatalogLatestRun> Runs);
 public sealed record ServiceHistoryPage(string Team, string? Type, string Window, DateOnly From, DateOnly To,
     IReadOnlyList<ServiceWorkflow> Items, string? NextCursor);
 
@@ -23,9 +24,10 @@ public static partial class CatalogEndpoints
         endpoints.MapGet("/api/v1/service-history", ReadServiceHistory).RequireAuthorization()
             .Produces<ServiceHistoryPage>().ProducesProblem(400).ProducesProblem(401)
             .ProducesProblem(500).ProducesProblem(503)
-            .WithDescription("Authorized, team-scoped workflow cards and daily run counts across all series and manual runs. " +
+            .WithDescription("Authorized, team-scoped workflows with daily counts and the latest 50 run instances per workflow across all series and manual runs. " +
                 "window=7d|14d|30d|90d (default 14d) includes the current UTC run day; from inclusive, to exclusive. " +
                 "Each day records all named run statuses; no runs means empty counts, not success. " +
+                "Run instances share the counts' snapshot and window, ordered by createdAt then id descending. " +
                 "Uses the same exact team/type, keyset cursor and metadata filters as the workflow catalogue. No payloads or capabilities.")
             .AddOpenApiOperationTransformer((operation, _, _) =>
             {
@@ -71,12 +73,27 @@ public static partial class CatalogEndpoints
         {
             var page = await ReadWorkflowPage(context, source, authorization, filter);
             var counts = new Dictionary<(string Workflow, DateOnly Day), Dictionary<string, long>>();
+            var runs = new Dictionary<string, List<CatalogLatestRun>>(StringComparer.Ordinal);
             if (page.Items.Count > 0)
             {
                 await using var query = source.CreateCommand("""
-                    SELECT workflow_id,run_day,status,count(*) FROM runs
+                    SELECT workflow_id,run_day,status,count(*) AS total,
+                        NULL::uuid AS id,NULL::timestamptz AS created_at,
+                        NULL::timestamptz AS started_at,NULL::timestamptz AS ended_at
+                    FROM runs
                     WHERE workflow_id=ANY($1) AND run_day>=$2 AND run_day<$3
                     GROUP BY workflow_id,run_day,status
+                    UNION ALL
+                    SELECT r.workflow_id,r.run_day,r.status,NULL::bigint,
+                        r.id,r.created_at,r.started_at,r.ended_at
+                    FROM unnest($1::text[]) AS w(workflow_id)
+                    CROSS JOIN LATERAL (
+                        SELECT workflow_id,run_day,status,id,created_at,started_at,ended_at
+                        FROM runs
+                        WHERE workflow_id=w.workflow_id AND run_day>=$2 AND run_day<$3
+                        ORDER BY created_at DESC,id DESC LIMIT 50
+                    ) AS r
+                    ORDER BY workflow_id,created_at DESC,id DESC
                     """);
                 query.Parameters.AddWithValue(page.Items.Select(item => item.Id).ToArray());
                 query.Parameters.AddWithValue(window.From);
@@ -84,6 +101,17 @@ public static partial class CatalogEndpoints
                 await using var reader = await query.ExecuteReaderAsync(context.RequestAborted);
                 while (await reader.ReadAsync(context.RequestAborted))
                 {
+                    if (!reader.IsDBNull(4))
+                    {
+                        var workflowId = reader.GetString(0);
+                        if (!runs.TryGetValue(workflowId, out var instances))
+                            runs.Add(workflowId, instances = []);
+                        instances.Add(new(reader.GetGuid(4), Status(reader.GetInt16(2)),
+                            reader.GetFieldValue<DateTimeOffset>(5),
+                            reader.IsDBNull(6) ? null : reader.GetFieldValue<DateTimeOffset>(6),
+                            reader.IsDBNull(7) ? null : reader.GetFieldValue<DateTimeOffset>(7)));
+                        continue;
+                    }
                     var key = (reader.GetString(0), reader.GetFieldValue<DateOnly>(1));
                     if (!counts.TryGetValue(key, out var statuses)) counts.Add(key, statuses = new(StringComparer.Ordinal));
                     var count = reader.GetInt64(3);
@@ -96,7 +124,7 @@ public static partial class CatalogEndpoints
                 {
                     var day = window.From.AddDays(offset);
                     return new WorkflowHealthDay(day, counts.GetValueOrDefault((workflow.Id, day)) ?? []);
-                }).ToArray())).ToArray();
+                }).ToArray(), runs.GetValueOrDefault(workflow.Id) ?? [])).ToArray();
             return Results.Json(new(filter.Team, filter.Type, window.Name, window.From, window.To, items, page.NextCursor),
                 ServiceHistoryJson.Default.ServiceHistoryPage);
         }

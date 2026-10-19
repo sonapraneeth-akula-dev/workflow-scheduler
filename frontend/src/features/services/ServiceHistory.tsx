@@ -21,7 +21,7 @@ import {
   type ServiceSearch,
   type ServiceWorkflow,
 } from "./api"
-import { HealthBar } from "./HealthBar"
+import { RunHistoryStrip } from "./RunHistoryStrip"
 
 function WorkflowActions({ workflow }: { workflow: CatalogWorkflow }) {
   return (
@@ -106,7 +106,7 @@ function WorkflowGroup({
       </div>
       {view === "cards" ? (
         <ul className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {entries.map(({ workflow, days }) => (
+          {entries.map(({ workflow, days, runs }) => (
             <li
               key={workflow.id}
               className="min-w-0 space-y-4 border bg-background p-3"
@@ -129,7 +129,7 @@ function WorkflowGroup({
                 <p className="font-medium">Last run</p>
                 <LastRun workflow={workflow} />
               </div>
-              <HealthBar days={days} />
+              <RunHistoryStrip days={days} runs={runs} />
               <WorkflowActions workflow={workflow} />
             </li>
           ))}
@@ -143,7 +143,7 @@ function WorkflowGroup({
         >
           <table className="w-full text-left text-sm">
             <caption className="sr-only">
-              {label} workflow status, last run, daily health and history
+              {label} workflow status, last run, run instances and history
             </caption>
             <thead className="border-b bg-secondary text-secondary-foreground">
               <tr>
@@ -151,7 +151,7 @@ function WorkflowGroup({
                   "Workflow",
                   "Latest status",
                   "Last run",
-                  "Health",
+                  "Run instances",
                   "Actions",
                 ].map((label) => (
                   <th key={label} scope="col" className="p-3 font-bold">
@@ -161,7 +161,7 @@ function WorkflowGroup({
               </tr>
             </thead>
             <tbody>
-              {entries.map(({ workflow, days }) => (
+              {entries.map(({ workflow, days, runs }) => (
                 <tr
                   key={workflow.id}
                   className="border-b last:border-0 odd:bg-card even:bg-muted/50"
@@ -181,7 +181,7 @@ function WorkflowGroup({
                     <LastRun workflow={workflow} />
                   </td>
                   <td className="min-w-64 p-3">
-                    <HealthBar days={days} />
+                    <RunHistoryStrip days={days} runs={runs} />
                   </td>
                   <td className="p-3">
                     <WorkflowActions workflow={workflow} />
@@ -260,7 +260,7 @@ export function ServiceHistory({
             {team} service history
           </h1>
           <p className="text-sm text-muted-foreground">
-            Daily health: last 14 days (UTC)
+            Run instances: last 14 days (UTC)
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -358,19 +358,20 @@ export function ServiceHistory({
         {search.groupBy === "metadata"
           ? `metadata key "${search.groupKey}"`
           : "workflow type"}
-        . Each segment is one UTC run day, including today; days without runs
-        remain neutral.
+        . Each colored icon is one run, newest first; select it to open that
+        instance in a new tab. Up to 50 recent runs per workflow are shown;
+        History contains the full list. Success rates include all completed runs
+        in the window.
       </p>
       <div
         className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"
-        aria-label="Health legend"
+        aria-label="Run status legend"
       >
         {[
           ["bg-success", "Succeeded"],
           ["bg-destructive", "Failed or timed out"],
           ["bg-warning", "Aborted"],
-          ["bg-info", "Active"],
-          ["bg-muted-foreground/25", "No runs"],
+          ["bg-info", "Queued, running or aborting"],
         ].map(([color, label]) => (
           <span key={label} className="inline-flex items-center gap-1.5">
             <span className={`size-2.5 ${color}`} aria-hidden="true" />

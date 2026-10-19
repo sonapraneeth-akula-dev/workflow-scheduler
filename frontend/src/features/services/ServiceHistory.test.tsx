@@ -85,6 +85,18 @@ const response: Awaited<ReturnType<typeof getServiceHistory>> = {
       counts:
         name === "never" ? {} : index === 13 ? { Succeeded: 2, Failed: 1 } : {},
     })),
+    runs:
+      name === "never"
+        ? []
+        : (["Failed", "Succeeded", "Succeeded"] as const).map(
+            (status, index) => ({
+              id: `019ed132-2f44-7000-8000-${String(2 - index).padStart(12, "0")}`,
+              status,
+              createdAt: `2026-10-18T00:00:0${2 - index}Z`,
+              startedAt: null,
+              endedAt: null,
+            })
+          ),
   })),
 }
 function show() {
@@ -118,7 +130,7 @@ beforeEach(() => {
   ])
 })
 
-it("renders metadata-type containers with workflow names, actual status, last run, health and history", async () => {
+it("renders individual run outcomes with exact new-tab links, last run and full history", async () => {
   show()
   expect(await screen.findByRole("heading", { name: "release" })).toBeVisible()
   const card = screen.getByRole("heading", { name: "build" }).closest("li")!
@@ -135,17 +147,32 @@ it("renders metadata-type containers with workflow names, actual status, last ru
     "datetime",
     "2026-10-18T00:00:00Z"
   )
-  expect(card.querySelectorAll('[data-health-state="NoRuns"]')).toHaveLength(13)
-  expect(card.querySelectorAll('[data-health-state="Failed"]')).toHaveLength(1)
-  expect(within(card).getByRole("img")).toHaveAccessibleName(
-    /3 runs, 2 succeeded, 1 other completed outcomes/
+  expect(card.querySelectorAll('[data-run-status="Succeeded"]')).toHaveLength(2)
+  expect(card.querySelectorAll('[data-run-status="Failed"]')).toHaveLength(1)
+  expect(within(card).getByRole("group")).toHaveAccessibleName(
+    "Run history: 3 runs in 14 UTC days, newest first"
   )
+  const runLinks = within(card).getAllByRole("link", {
+    name: /Opens in a new tab/,
+  })
+  expect(runLinks).toHaveLength(3)
+  runLinks.forEach((link, index) => {
+    expect(link).toHaveAttribute(
+      "href",
+      `/runs/${response.items[0]!.runs[index]!.id}`
+    )
+    expect(link).toHaveAttribute("target", "_blank")
+    expect(link).toHaveAttribute("rel", "noopener noreferrer")
+    expect(link).toHaveAccessibleName(
+      new RegExp(response.items[0]!.runs[index]!.status)
+    )
+  })
+  expect(within(card).getByText("66.7% completed successfully")).toBeVisible()
   expect(screen.queryByText("Daily health details")).not.toBeInTheDocument()
   expect(card.querySelector("details")).toBeNull()
   const never = screen.getByRole("heading", { name: "never" }).closest("li")!
-  expect(never.querySelectorAll('[data-health-state="NoRuns"]')).toHaveLength(
-    14
-  )
+  expect(never.querySelectorAll("[data-run-id]")).toHaveLength(0)
+  expect(within(never).getByText("No runs in the last 14 days")).toBeVisible()
   expect(within(never).getByText("No completed runs")).toBeVisible()
   expect(
     within(never).getByRole("button", { name: "View last run" })
@@ -164,7 +191,13 @@ it("switches to the striped semantic table without changing the cached health qu
     within(table)
       .getAllByRole("columnheader")
       .map((cell) => cell.textContent)
-  ).toEqual(["Workflow", "Latest status", "Last run", "Health", "Actions"])
+  ).toEqual([
+    "Workflow",
+    "Latest status",
+    "Last run",
+    "Run instances",
+    "Actions",
+  ])
   expect(
     within(table).getByRole("link", {
       name: "View last run for team/release/build",
@@ -175,8 +208,8 @@ it("switches to the striped semantic table without changing the cached health qu
   ).toBeDisabled()
   expect(table.querySelector("details")).toBeNull()
   expect(
-    table.querySelector("tbody tr")!.querySelectorAll("[data-health-day]")
-  ).toHaveLength(14)
+    table.querySelector("tbody tr")!.querySelectorAll("[data-run-id]")
+  ).toHaveLength(3)
   expect(within(table).getAllByRole("row")).toHaveLength(3)
   expect(table.querySelector("thead")).toHaveClass("bg-secondary")
   expect(table.querySelector("tbody tr")).toHaveClass(
@@ -195,9 +228,82 @@ it("keeps a fixed two-week health window while changing type and view through th
   )
   expect(shown.change).toHaveBeenLastCalledWith({ ...search, type: "release" })
   expect(screen.queryByLabelText("Health window")).not.toBeInTheDocument()
-  expect(screen.getByText("Daily health: last 14 days (UTC)")).toBeVisible()
+  expect(screen.getByText("Run instances: last 14 days (UTC)")).toBeVisible()
   await userEvent.click(screen.getByRole("radio", { name: "Table format" }))
   expect(shown.change).toHaveBeenLastCalledWith({ ...search, view: "table" })
+})
+
+it("labels the 50-run limit while calculating success across the full window", async () => {
+  const entry = response.items[0]!
+  vi.mocked(getServiceHistory).mockResolvedValue({
+    ...response,
+    items: [
+      {
+        ...entry,
+        days: entry.days.map((day, index) => ({
+          ...day,
+          counts: index === 13 ? { Succeeded: 60, Failed: 20 } : {},
+        })),
+        runs: Array.from({ length: 50 }, (_, index) => ({
+          ...entry.runs[0]!,
+          id: `019ed132-2f44-7000-8000-${(100 - index).toString(16).padStart(12, "0")}`,
+          status: "Succeeded",
+        })),
+      },
+    ],
+  })
+  show()
+  expect(
+    await screen.findByText("Latest 50 of 80 runs / 14 days")
+  ).toBeVisible()
+  expect(
+    screen.getAllByRole("link", { name: /Opens in a new tab/ })
+  ).toHaveLength(50)
+  expect(screen.getByText("75% completed successfully")).toBeVisible()
+})
+
+it("distinguishes every outcome with an accessible status icon and matching color", async () => {
+  const entry = response.items[0]!
+  const statuses = [
+    "Queued",
+    "Running",
+    "Aborting",
+    "Succeeded",
+    "Failed",
+    "TimedOut",
+    "Aborted",
+  ] as const
+  vi.mocked(getServiceHistory).mockResolvedValue({
+    ...response,
+    items: [
+      {
+        ...entry,
+        runs: statuses.map((status, index) => ({
+          ...entry.runs[0]!,
+          id: `019ed132-2f44-7000-8000-${(100 - index).toString(16).padStart(12, "0")}`,
+          status,
+        })),
+      },
+    ],
+  })
+  show()
+  await screen.findByRole("heading", { name: "build" })
+  const colors = [
+    "bg-info",
+    "bg-info",
+    "bg-info",
+    "bg-success",
+    "bg-destructive",
+    "bg-destructive",
+    "bg-warning",
+  ]
+  screen
+    .getAllByRole("link", { name: /Opens in a new tab/ })
+    .forEach((link, index) => {
+      expect(link).toHaveAccessibleName(new RegExp(`^${statuses[index]} run `))
+      expect(link).toHaveClass(colors[index]!, "size-6")
+      expect(link.querySelector("svg")).toHaveAttribute("aria-hidden", "true")
+    })
 })
 
 it("preserves cached cards on transient failure, retries, and hides all cached health on revoked access", async () => {
