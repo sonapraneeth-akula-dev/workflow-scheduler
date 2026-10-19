@@ -10,7 +10,12 @@ import {
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ApiError } from "@/lib/api/client"
-import { getHistory, type HistoryRow, type HistorySearch } from "./history"
+import {
+  getHistory,
+  type HistoryRow,
+  type HistoryScope,
+  type HistorySearch,
+} from "./history"
 import { HistoryFilters, HistoryTable } from "./HistoryTable"
 
 vi.mock("./history", async (original) => ({
@@ -78,14 +83,14 @@ const row: HistoryRow = {
   fire: null,
 }
 const scope = { seriesId: row.seriesId! }
-function show(search: HistorySearch = {}) {
+function show(search: HistorySearch = {}, historyScope: HistoryScope = scope) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return {
     ...render(
       <QueryClientProvider client={client}>
-        <HistoryTable scope={scope} search={search} />
+        <HistoryTable scope={historyScope} search={search} />
       </QueryClientProvider>
     ),
     client,
@@ -96,6 +101,121 @@ function page(items: HistoryRow[] = [row], nextCursor: string | null = null) {
 }
 describe("historical table", () => {
   beforeEach(() => vi.clearAllMocks())
+  it("links each loaded schedule series once above the table instead of repeating links beside run IDs", async () => {
+    const otherSeriesId = "019ed132-2f44-7000-8000-000000000005"
+    vi.mocked(getHistory).mockResolvedValue(
+      page([
+        row,
+        { ...row, runId: "019ed132-2f44-7000-8000-000000000011" },
+        {
+          ...row,
+          runId: "019ed132-2f44-7000-8000-000000000012",
+          seriesId: otherSeriesId,
+        },
+        {
+          ...row,
+          runId: "019ed132-2f44-7000-8000-000000000013",
+          seriesId: null,
+        },
+      ])
+    )
+    show({}, { workflowId: row.workflowId })
+    const navigation = await screen.findByRole("navigation", {
+      name: "Schedule series histories",
+    })
+    expect(within(navigation).getAllByRole("link")).toHaveLength(2)
+    for (const id of [row.seriesId!, otherSeriesId]) {
+      expect(
+        within(navigation).getByRole("link", {
+          name: `Schedule series history: ${id}`,
+        })
+      ).toHaveAttribute("href", `/series/${id}`)
+    }
+    expect(navigation).toHaveTextContent("Service history summarizes workflows")
+    expect(navigation).toHaveTextContent(
+      "run history lists executions and schedule events"
+    )
+    expect(navigation).toHaveTextContent(
+      "Series history narrows those records to one schedule series"
+    )
+    const table = screen.getByRole("table")
+    expect(
+      within(table).queryByRole("link", { name: /series history/i })
+    ).not.toBeInTheDocument()
+    expect(
+      within(table)
+        .getAllByRole("rowheader")
+        .map((cell) => cell.textContent)
+    ).toEqual([
+      row.runId,
+      "019ed132-2f44-7000-8000-000000000011",
+      "019ed132-2f44-7000-8000-000000000012",
+      "019ed132-2f44-7000-8000-000000000013",
+    ])
+  })
+  it("uses a concise link for a single series and keeps its immutable identity in the URL and tooltip", async () => {
+    vi.mocked(getHistory).mockResolvedValue(page())
+    show({}, { workflowId: row.workflowId })
+    const link = await screen.findByRole("link", {
+      name: "Schedule series history",
+    })
+    expect(link).toHaveAttribute("href", `/series/${row.seriesId}`)
+    expect(link).toHaveAttribute(
+      "title",
+      `Runs and schedule events for series ${row.seriesId}`
+    )
+  })
+  it("does not link a series page to itself", async () => {
+    vi.mocked(getHistory).mockResolvedValue(page())
+    show()
+    await screen.findByRole("table")
+    expect(
+      screen.queryByRole("navigation", { name: "Schedule series histories" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("link", { name: /series history/i })
+    ).not.toBeInTheDocument()
+  })
+  it.each([{ items: [] }, { items: [{ ...row, seriesId: null }] }])(
+    "does not invent series links for empty or unassociated history: %j",
+    async ({ items }) => {
+      vi.mocked(getHistory).mockResolvedValue(page(items))
+      show({}, { workflowId: row.workflowId })
+      await waitFor(() =>
+        expect(
+          screen.queryByText("Loading run history...")
+        ).not.toBeInTheDocument()
+      )
+      expect(
+        screen.queryByRole("navigation", { name: "Schedule series histories" })
+      ).not.toBeInTheDocument()
+    }
+  )
+  it("deduplicates series navigation across loaded pages and includes newly loaded series", async () => {
+    const otherSeriesId = "019ed132-2f44-7000-8000-000000000005"
+    vi.mocked(getHistory)
+      .mockResolvedValueOnce(page([row], "next"))
+      .mockResolvedValueOnce(
+        page([
+          { ...row, runId: "019ed132-2f44-7000-8000-000000000011" },
+          {
+            ...row,
+            runId: "019ed132-2f44-7000-8000-000000000012",
+            seriesId: otherSeriesId,
+          },
+        ])
+      )
+    show({}, { workflowId: row.workflowId })
+    const navigation = await screen.findByRole("navigation", {
+      name: "Schedule series histories",
+    })
+    expect(within(navigation).getAllByRole("link")).toHaveLength(1)
+    fireEvent.click(screen.getByRole("button", { name: "Load more history" }))
+    await waitFor(() =>
+      expect(within(navigation).getAllByRole("link")).toHaveLength(2)
+    )
+    expect(screen.getAllByRole("rowheader")).toHaveLength(3)
+  })
   it("labels execution UUIDs as Run ID in a separate column with their original run links", async () => {
     vi.mocked(getHistory).mockResolvedValue(page())
     show()
@@ -367,8 +487,11 @@ describe("historical table", () => {
     "hides cached rows after HTTP %i revocation",
     async (status) => {
       vi.mocked(getHistory).mockResolvedValue(page())
-      show()
+      show({}, { workflowId: row.workflowId })
       await screen.findByRole("table")
+      expect(
+        screen.getByRole("navigation", { name: "Schedule series histories" })
+      ).toBeVisible()
       vi.mocked(getHistory).mockRejectedValue(
         new ApiError(new Response(null, { status }), {
           title: "Permission revoked.",
@@ -379,6 +502,9 @@ describe("historical table", () => {
       )
       await screen.findByRole("alert")
       expect(screen.queryByRole("table")).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("navigation", { name: "Schedule series histories" })
+      ).not.toBeInTheDocument()
     }
   )
   it("uses keyboard-submitted exact abortedBy and typed sort/status filters", async () => {

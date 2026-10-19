@@ -155,6 +155,9 @@ export function HistoryTable({
   const hasCancellation = rows?.some(
     (row) => row.abort || row.status === "Aborting" || row.status === "Aborted"
   )
+  const seriesIds = scope.seriesId
+    ? []
+    : [...new Set(rows?.flatMap((row) => (row.seriesId ? [row.seriesId] : [])))]
   const scheduleId = query.error
     ? undefined
     : query.data?.pages.at(-1)?.currentScheduleId
@@ -191,6 +194,34 @@ export function HistoryTable({
       {query.isPending ? <p role="status">Loading run history...</p> : null}
       {query.error ? <ErrorNotice error={query.error} /> : null}
       {rows?.length === 0 ? <p role="status">No matching history.</p> : null}
+      {seriesIds.length > 0 ? (
+        <nav
+          aria-label="Schedule series histories"
+          className="flex min-w-0 flex-col gap-2"
+        >
+          <p className="text-sm text-muted-foreground">
+            Service history summarizes workflows; run history lists executions
+            and schedule events. Series history narrows those records to one
+            schedule series. Each series in the loaded rows is linked once
+            below.
+          </p>
+          <div className="flex min-w-0 flex-wrap gap-x-4 gap-y-2">
+            {seriesIds.map((id) => (
+              <Link
+                key={id}
+                to="/series/$id"
+                params={{ id }}
+                title={`Runs and schedule events for series ${id}`}
+                className="min-w-0 break-all text-primary underline"
+              >
+                {seriesIds.length === 1
+                  ? "Schedule series history"
+                  : `Schedule series history: ${id}`}
+              </Link>
+            ))}
+          </div>
+        </nav>
+      ) : null}
       {rows && rows.length > 0 ? (
         <div
           role="region"
@@ -262,15 +293,6 @@ export function HistoryTable({
                       ) : (
                         "No run"
                       )}
-                      {row.seriesId && !scope.seriesId ? (
-                        <Link
-                          className="block"
-                          to="/series/$id"
-                          params={{ id: row.seriesId }}
-                        >
-                          Series history
-                        </Link>
-                      ) : null}
                     </th>
                     <td className="space-y-2 p-3">
                       <div className="flex flex-wrap items-center gap-2">

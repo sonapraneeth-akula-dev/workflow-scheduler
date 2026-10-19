@@ -28,6 +28,58 @@ async function openWorkflowHistory(page: Page) {
   ).toHaveCount(0)
 }
 
+test("schedule-series histories are linked once outside run IDs and work on mobile", async ({
+  page,
+}) => {
+  const response = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/v1/runs/history" &&
+      response.ok()
+  )
+  await page.goto("/t/ui-tests/release/w/workflow/history")
+  const { items } = z
+    .object({
+      items: z.array(z.object({ seriesId: z.uuid().nullable() })),
+    })
+    .parse(await (await response).json())
+  const ids = [
+    ...new Set(items.flatMap(({ seriesId }) => (seriesId ? [seriesId] : []))),
+  ]
+  expect(ids.length).toBeGreaterThan(0)
+  const navigation = page.getByRole("navigation", {
+    name: "Schedule series histories",
+  })
+  await expect(navigation.getByRole("link")).toHaveCount(ids.length)
+  for (const id of ids) {
+    await expect(navigation.locator(`a[href="/series/${id}"]`)).toHaveAttribute(
+      "title",
+      `Runs and schedule events for series ${id}`
+    )
+  }
+  await expect(
+    page.getByRole("table").getByRole("link", { name: /series history/i })
+  ).toHaveCount(0)
+  await page.setViewportSize({ width: 375, height: 812 })
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth)
+  ).toBeLessThanOrEqual(375)
+  expect(
+    (
+      await new AxeBuilder({ page })
+        .include('nav[aria-label="Schedule series histories"]')
+        .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+        .analyze()
+    ).violations
+  ).toEqual([])
+  await navigation.getByRole("link").first().focus()
+  await page.keyboard.press("Enter")
+  await expect(
+    page.getByRole("heading", { name: "Series history", exact: true })
+  ).toBeVisible()
+  await expect(page.getByRole("table")).toBeVisible()
+  await expect(navigation).toHaveCount(0)
+})
+
 test("executed versions show semantic labels while preserving immutable version links", async ({
   page,
 }) => {

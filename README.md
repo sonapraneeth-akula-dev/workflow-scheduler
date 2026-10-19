@@ -831,6 +831,12 @@ tooltip. Other pages retain their existing local-time display.
 The separate **Run ID** column contains the execution UUID and opens that run's
 details; it is not a test-definition ID. Schedule events without an execution
 show **No run** instead of a fabricated identifier.
+**Service history** summarizes workflows and their recent executions.
+**Run history** lists a workflow's executions and schedule events.
+**Series history** narrows those records to one schedule series, including its
+skipped/missed schedule events. Workflow history links each distinct series in
+the loaded rows once above the table, not beside every run ID; loading more rows
+adds any newly encountered series. A series page never links back to itself.
 **Executed version** shows the semantic version from that run's immutable
 registration (for example `1.2.3`), not today's active release. The internal UUID
 stays in the version-details URL and tooltip; legacy missing registrations
