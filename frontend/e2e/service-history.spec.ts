@@ -291,17 +291,30 @@ for (const width of [320, 768, 2000]) {
     }, info) => {
       await page.emulateMedia({ colorScheme })
       await page.setViewportSize({ width, height: 1000 })
-      await page.goto("/service-history")
-      await page
-        .locator('main a[href^="/t/"][href*="/services"]')
-        .first()
-        .click()
+      await page.goto("/t/report-tests/services")
       await expect(
         page.locator("main [data-run-history]").first()
       ).toBeVisible()
       for (const view of ["cards", "table"]) {
         if (view === "table")
           await page.getByRole("radio", { name: "Table format" }).click()
+        if (view === "cards") {
+          const timestamp = page.locator("main li > p > time").first()
+          await expect(timestamp).toBeVisible()
+          const layout = await timestamp.evaluate((element) => {
+            const label = element.previousElementSibling
+            if (!label) throw new Error("Last-run label is missing.")
+            return {
+              offset: Math.abs(
+                label.getBoundingClientRect().top -
+                  element.getClientRects()[0]!.top
+              ),
+              lines: element.getClientRects().length,
+            }
+          })
+          expect(layout.offset).toBeLessThanOrEqual(1)
+          if (width === 2000) expect(layout.lines).toBe(1)
+        }
         await expect(
           page.getByRole("link", { name: /^History for / }).first()
         ).toBeVisible()

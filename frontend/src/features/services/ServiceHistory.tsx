@@ -136,10 +136,10 @@ function WorkflowGroup({
               >
                 {workflow.id}
               </p>
-              <div className="space-y-1 text-sm">
-                <p className="font-medium">Last run</p>
+              <p className="text-sm">
+                <span className="font-medium">Last run:</span>{" "}
                 <LastRun workflow={workflow} />
-              </div>
+              </p>
               <RunHistoryStrip runs={runs} runLimit={runLimit} />
               <WorkflowActions workflow={workflow} />
             </li>

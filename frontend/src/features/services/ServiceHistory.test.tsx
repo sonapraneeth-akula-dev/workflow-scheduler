@@ -152,6 +152,12 @@ it("renders individual run outcomes with exact new-tab links, last run and full 
     "datetime",
     "2026-10-18T00:00:00Z"
   )
+  const lastRunLabel = within(card).getByText("Last run:", { exact: true })
+  expect(lastRunLabel.tagName).toBe("SPAN")
+  expect(card.querySelector("time")?.parentElement).toBe(
+    lastRunLabel.parentElement
+  )
+  expect(lastRunLabel.parentElement?.tagName).toBe("P")
   expect(card.querySelectorAll('[data-run-status="Succeeded"]')).toHaveLength(2)
   expect(card.querySelectorAll('[data-run-status="Failed"]')).toHaveLength(1)
   expect(within(card).getByRole("group")).toHaveAccessibleName(
@@ -176,6 +182,9 @@ it("renders individual run outcomes with exact new-tab links, last run and full 
   expect(screen.queryByText("Daily health details")).not.toBeInTheDocument()
   expect(card.querySelector("details")).toBeNull()
   const never = screen.getByRole("heading", { name: "Never" }).closest("li")!
+  expect(
+    within(never).getByText("Last run:", { exact: true }).parentElement
+  ).toHaveTextContent("Last run: Never run")
   expect(never.querySelectorAll("[data-run-id]")).toHaveLength(0)
   expect(within(never).getByText("No runs", { exact: true })).toBeVisible()
   expect(within(never).getByText("No completed runs")).toBeVisible()
