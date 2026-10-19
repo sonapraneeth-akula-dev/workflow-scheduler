@@ -823,6 +823,11 @@ schedule starts need no reason. Skipped/missed schedule entries retain their
 recorded explanation, or explicitly report an unavailable scheduling reason.
 The history table omits variables; it focuses on outcomes, timing, versions
 and cancellation audit.
+Its separate **Date / time (IST)** column uses India Standard Time
+(`Asia/Kolkata`, UTC+05:30) with three-digit milliseconds, independently of the
+browser timezone. Cancellation audit times in this table use the same timezone;
+the original timestamp and full precision remain in each time's `datetime` and
+tooltip. Other pages retain their existing local-time display.
 **Executed version** shows the semantic version from that run's immutable
 registration (for example `1.2.3`), not today's active release. The internal UUID
 stays in the version-details URL and tooltip; legacy missing registrations

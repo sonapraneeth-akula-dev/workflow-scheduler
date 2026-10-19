@@ -183,10 +183,10 @@ export function HistoryTable({
         </p>
       ) : null}
       <p className="text-sm text-muted-foreground">
-        Times shown in your local timezone. Duration requires recorded start and
-        end times. Schedule triggered means a run was created, not that it is
-        still running. Status and cancelled-by filters exclude schedule events
-        without a run.
+        Times shown in India Standard Time (IST, UTC+05:30) with milliseconds.
+        Duration requires recorded start and end times. Schedule triggered means
+        a run was created, not that it is still running. Status and cancelled-by
+        filters exclude schedule events without a run.
       </p>
       {query.isPending ? <p role="status">Loading run history...</p> : null}
       {query.error ? <ErrorNotice error={query.error} /> : null}
@@ -206,7 +206,8 @@ export function HistoryTable({
             <thead className="border-b">
               <tr>
                 {[
-                  "Time (local) / Run",
+                  "Date / time (IST)",
+                  "Run",
                   "Status / Scheduling",
                   "Duration",
                   "Trigger",
@@ -241,14 +242,12 @@ export function HistoryTable({
                     key={`${row.kind}/${row.at}/${row.kind === "Run" ? row.runId : row.fire!.scheduleId}`}
                     className="border-b last:border-0"
                   >
-                    <th scope="row" className="space-y-2 p-3 font-normal">
-                      <time
-                        dateTime={row.at}
-                        title={row.at}
-                        className="block whitespace-nowrap"
-                      >
-                        {formatTimestamp(row.at)}
+                    <td className="p-3 whitespace-nowrap">
+                      <time dateTime={row.at} title={row.at}>
+                        {formatTimestamp(row.at, "Asia/Kolkata")}
                       </time>
+                    </td>
+                    <th scope="row" className="space-y-2 p-3 font-normal">
                       {row.runId ? (
                         <Link
                           className="block font-mono"
@@ -340,7 +339,7 @@ export function HistoryTable({
                                 dateTime={row.abort.at}
                                 title={row.abort.at}
                               >
-                                {formatTimestamp(row.abort.at)}
+                                {formatTimestamp(row.abort.at, "Asia/Kolkata")}
                               </time>
                             </dd>
                             <dt className="font-medium">Reason</dt>

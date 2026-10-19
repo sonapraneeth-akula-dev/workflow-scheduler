@@ -1,10 +1,15 @@
 import type { ReactNode } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ApiError } from "@/lib/api/client"
-import { formatTimestamp } from "@/lib/timestamps"
 import { getHistory, type HistoryRow, type HistorySearch } from "./history"
 import { HistoryFilters, HistoryTable } from "./HistoryTable"
 
@@ -91,6 +96,29 @@ function page(items: HistoryRow[] = [row], nextCursor: string | null = null) {
 }
 describe("historical table", () => {
   beforeEach(() => vi.clearAllMocks())
+  it.each([
+    ["2026-10-18T23:59:59.007999Z", "19 Oct 2026, 05:29:59.007 IST"],
+    ["2026-10-19T05:29:59.007999+05:30", "19 Oct 2026, 05:29:59.007 IST"],
+    ["2026-10-18T23:59:59Z", "19 Oct 2026, 05:29:59.000 IST"],
+  ])(
+    "shows %s in a separate IST date column with milliseconds",
+    async (at, expected) => {
+      vi.mocked(getHistory).mockResolvedValue(page([{ ...row, at }]))
+      show()
+      const table = await screen.findByRole("table")
+      expect(
+        within(table).getByRole("columnheader", { name: "Date / time (IST)" })
+      ).toBeVisible()
+      const date = within(within(table).getAllByRole("row")[1]!).getAllByRole(
+        "cell"
+      )[0]!
+      expect(date).toHaveTextContent(expected)
+      expect(date.querySelector("time")).toHaveAttribute("datetime", at)
+      expect(date.querySelector("time")).toHaveAttribute("title", at)
+      expect(within(date).queryByRole("link")).not.toBeInTheDocument()
+      expect(date).not.toHaveTextContent(row.runId!)
+    }
+  )
   it("uses only the API's current schedule identity, including an empty filtered page", async () => {
     vi.mocked(getHistory).mockResolvedValue({
       ...page([]),
@@ -125,12 +153,12 @@ describe("historical table", () => {
     expect(table).toHaveTextContent("Manual")
     expect(table).toHaveTextContent("Operator Name")
     expect(table).toHaveTextContent(row.abort!.by)
-    expect(table).toHaveTextContent(formatTimestamp(row.abort!.at))
+    expect(table).toHaveTextContent("16 Oct 2026, 12:30:00.123 IST")
     expect(
       table.querySelector(`time[datetime="${row.abort!.at}"]`)
     ).toHaveAttribute("title", row.abort!.at)
     expect(table).toHaveTextContent("Stop deployment")
-    expect(screen.getAllByRole("columnheader")).toHaveLength(6)
+    expect(screen.getAllByRole("columnheader")).toHaveLength(7)
     expect(table).not.toHaveTextContent("Variables")
     expect(table).not.toHaveTextContent("credential")
     expect(table).not.toHaveTextContent("count (Long)")
@@ -258,7 +286,7 @@ describe("historical table", () => {
     expect(
       screen.queryByRole("columnheader", { name: "Cancellation" })
     ).not.toBeInTheDocument()
-    expect(screen.getAllByRole("columnheader")).toHaveLength(5)
+    expect(screen.getAllByRole("columnheader")).toHaveLength(6)
     expect(screen.queryByText("Not cancelled")).not.toBeInTheDocument()
   })
   it("distinguishes unchanged successful runs from recorded and legacy cancellations", async () => {

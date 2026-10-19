@@ -1,12 +1,12 @@
 import { expect, test, type Locator } from "@playwright/test"
 import { openTeamRunList } from "./team-runs"
 
-async function expectLocalTimes(scope: Locator, locale: string) {
+async function expectTimes(scope: Locator, locale: string, timeZone?: string) {
   await expect(scope.locator("time[datetime]").first()).toBeVisible()
-  const times = await scope
-    .locator("time[datetime]")
-    .evaluateAll((elements, locale) => {
+  const times = await scope.locator("time[datetime]").evaluateAll(
+    (elements, { locale, timeZone }) => {
       const formatter = new Intl.DateTimeFormat(locale, {
+        timeZone,
         day: "2-digit",
         month: "short",
         year: "numeric",
@@ -31,7 +31,9 @@ async function expectLocalTimes(scope: Locator, locale: string) {
           expected: `${parts.get("day")} ${parts.get("month")} ${parts.get("year")}, ${parts.get("hour")}:${parts.get("minute")}:${parts.get("second")}.${parts.get("fractionalSecond")} ${parts.get("timeZoneName")}`,
         }
       })
-    }, locale)
+    },
+    { locale, timeZone }
+  )
   for (const time of times) {
     expect(time.text).toBe(time.expected)
     expect(time.title).toBe(time.raw)
@@ -47,23 +49,26 @@ for (const [timezoneId, locale] of [
   test.describe(timezoneId, () => {
     test.use({ timezoneId })
 
-    test("run lists, attempts, events and history show local milliseconds while retaining exact timestamps", async ({
+    test("run lists, attempts and events use local milliseconds while history stays in IST", async ({
       page,
     }) => {
       await openTeamRunList(page)
       const main = page.locator("main")
-      await expectLocalTimes(main, locale)
+      await expectTimes(main, locale)
       await main.locator('a[href^="/runs/"]').first().click()
       await page.getByRole("tab", { name: "Timeline", exact: true }).click()
-      await expectLocalTimes(page.getByRole("tabpanel"), locale)
+      await expectTimes(page.getByRole("tabpanel"), locale)
       await page
         .getByRole("tab", { name: "System Events", exact: true })
         .click()
-      await expectLocalTimes(page.getByRole("tabpanel"), locale)
+      await expectTimes(page.getByRole("tabpanel"), locale)
       await page
         .getByRole("link", { name: "Workflow history", exact: true })
         .click()
-      await expectLocalTimes(main, locale)
+      await expect(
+        main.getByRole("columnheader", { name: "Date / time (IST)" })
+      ).toBeVisible()
+      await expectTimes(main, "en-IN", "Asia/Kolkata")
     })
   })
 }
