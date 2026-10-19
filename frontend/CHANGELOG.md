@@ -38,6 +38,7 @@ All notable frontend changes are documented here, using Keep a Changelog.
   accessibility checks, draft/authentication units and a frontend CI lane.
 
 ### Changed
+- Chart value axes reserve enough width for housing-price and error labels.
 - Run graph keeps the graph and node list together beside the selected-node
   inspector in balanced desktop columns, stacking on smaller screens and using
   the full width before selection; the collapsible node list has bounded

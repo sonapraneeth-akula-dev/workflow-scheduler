@@ -18,6 +18,7 @@ $tree = if ($deployment -eq 'Demo') { 'demo' } else { 'production' }
 $repository = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 $teamRoot = Join-Path $PSScriptRoot "$tree\teams"
 $directories = @(Get-ChildItem -LiteralPath $teamRoot -Directory | Sort-Object Name)
+if ($Team.Count -eq 0 -and $deployment -eq 'Demo') { $Team = @('data-science') }
 foreach ($name in $Team) {
     if ($name -notin $directories.Name) { throw "Unknown $tree sample team: $name" }
 }
@@ -58,7 +59,7 @@ foreach ($workflow in $workflows) {
     Write-Host "Publishing $($workflow.Id) [$deployment/$Environment]"
     $arguments = @('publish', $workflow.Directory, '--engine', $Engine.AbsoluteUri,
         '--git-commit', $commit.Trim(), '--git-author', 'Sample publication',
-        '--change-note', "Repository $tree sample; no external system side effects",
+        '--change-note', "Repository $tree sample workflow",
         '--work-directory', (Join-Path $repository ('.wf\samples\' + $workflow.Id.Replace('/', '-'))))
     foreach ($inputProject in @('Wf.Sdk', 'Wf.Contracts', 'Wf.Engine.Core', 'Wf.Validation')) {
         $arguments += @('--input', (Join-Path $repository "backend\src\$inputProject"))

@@ -51,6 +51,7 @@ public static class ComposeStack
             .WithEnvironment("Agent__ResultJournalDirectory", "/var/lib/wf-agent/results")
             .WithEnvironment("Agent__LogSpoolDirectory", "/var/lib/wf-agent/logs")
             .WithEnvironment("Agent__PackageCache", "/var/lib/wf-agent/packages")
+            .WithEnvironment("WF_DATASET_ROOT", "/var/lib/wf-agent/datasets")
             .WithEnvironment("Secrets__Provider", "Local")
             .WithEnvironment("Secrets__LocalDirectory", "/var/lib/wf-agent/secrets")
             .WithVolume("agent-data", "/var/lib/wf-agent").WaitFor(gateway);

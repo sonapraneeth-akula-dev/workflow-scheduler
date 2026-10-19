@@ -144,7 +144,7 @@ export function Plot({
                     }
                   : {}),
             },
-            { stroke: foreground, grid: { stroke: border } },
+            { size: 80, stroke: foreground, grid: { stroke: border } },
           ],
         },
         values,

@@ -752,7 +752,78 @@ timeouts and aborts return 1. Ctrl+C requests an abort and allows cleanup.
 durations and secret-reference names use plain text, other types use JSON.
 All policies and variables validate before tasks start.
 
-### Hourly .NET 10 dataflow demo
+### NYC housing linear regression
+
+The default local sample is
+`data-science/linear-regression/nyc-housing`: team **Data Science**, workflow
+type **Linear Regression**, workflow **NYC Housing Prices**. Its graph is a
+single readable chain, with one task per node:
+
+| Node | Task | Result |
+| --- | --- | --- |
+| Dataset | Download if missing | Verified source snapshot and fixed training/validation/test CSVs |
+| Train | Fit linear regression | Price predicted from building area, using 100 gradient-descent epochs |
+| Validate | Measure validation error | Validation R², MAE and RMSE, without fitting on validation rows |
+| Test | Evaluate held-out test | Final metrics, actual/predicted chart and every test prediction |
+
+Data comes from NYC Department of Finance's public NYC Open Data rolling sales
+dataset `usep-8jbt`, with no credentials required. The sample selects tax-class-1
+residential sales, 500–5000 gross square feet and $100,000–$3,000,000 sale prices.
+It retains one latest sale per property and orders property IDs by SHA-256 for
+reproducible 70% training, 15% validation and 15% final-test splits. The fixed
+snapshot does not silently refresh when upstream data changes.
+
+The dataset task checks the cache before making any HTTP request. A cache hit
+verifies SHA-256 hashes for the source and all three CSVs, reports **reuse** and
+does not download. This is an explicit conditional branch inside the task, not
+an engine-level `Skipped` task status. Concurrent runs share a file lock;
+interrupted downloads never publish a valid cache manifest. A damaged cache
+fails explicitly rather than silently training on altered data.
+
+Direct/native execution defaults to
+`%LOCALAPPDATA%\wf\datasets\nyc-housing-v1`; `WF_DATASET_ROOT` overrides the parent
+directory. Native AppHost sets that parent to `<Local:DataRoot>\datasets`
+(its default data root is `%LOCALAPPDATA%\wf`).
+Linux AppHost agents and the local Docker Compose stack use
+`/var/lib/wf-agent/datasets/nyc-housing-v1` inside their persistent agent volume.
+For a **single-node local Docker Swarm**, mount a named volume at
+`/var/lib/wf-agent` and set `WF_DATASET_ROOT=/var/lib/wf-agent/datasets`.
+Run affinity keeps all four tasks on one worker, so a run never passes a native
+disk path to a Linux worker or reads another worker's independent volume.
+Multi-node Swarm can cache separately on each worker; to reuse one download
+across workers, mount shared storage at the same path on every eligible worker.
+Containers need outbound HTTPS access to NYC Open Data. Do not store the cache
+in a package extraction directory or delete the agent volume to restart a run.
+
+Publish and trigger the new sample against the native development backend:
+
+```powershell
+$env:WF_ACCESS_TOKEN = 'local-development' # explicit loopback Development only
+.\backend\samples\workflows\publish-samples.ps1 `
+  -Environment dev -Engine http://127.0.0.1:5000 -RunOnce
+Remove-Item Env:\WF_ACCESS_TOKEN
+```
+
+Open `/t/data-science/linear-regression/w/nyc-housing/history`. **Reports**
+includes training/validation RMSE by epoch, a fitted-price chart, model
+coefficients, validation metrics, final held-out R²/MAE/RMSE, a training-mean
+baseline comparison and a CSV of every test prediction. Regression does not
+have a classification accuracy percentage. This deliberately simple model
+ignores location and condition: its errors are measured honestly, not hidden
+behind a success threshold. Successful execution does not imply a useful
+property valuation model.
+
+Run directly without a backend:
+
+```powershell
+dotnet run --file .\backend\samples\workflows\demo\teams\data-science\linear-regression\nyc-housing\workflow.cs
+```
+
+Direct execution prints reports; registered execution publishes them through
+the normal authorized report pipeline. The previous demo sources below remain
+as explicit opt-in examples/test fixtures, not the default local workflow set.
+
+### Archived hourly .NET 10 dataflow example
 
 `backend\samples\workflows\demo\teams\demo\release\five-minute-demo\workflow.cs`
 is a file-based .NET 10 workflow with four nodes and eight real SDK tasks:
@@ -813,7 +884,7 @@ and eight task-level rows. **Logs** also contain each task's input/output trace.
 The direct, serverless script prints the same report JSON instead of uploading
 it, because that mode has no configured report storage.
 
-### Manual JSON, retry and failure demo
+### Archived JSON, retry and failure example
 
 `backend\samples\workflows\demo\teams\demo\release\json-failure-demo\workflow.cs`
 adds an unscheduled, synthetic-only demo: `sample` selects the scenario once,
@@ -889,7 +960,8 @@ authorization and scheduler fires enforce the class server-side. Even a global
 Admin cannot browse or trigger the other class. Environment changes do not
 cancel already accepted runs or alter stored schedule definitions.
 
-The demo tree includes `platform` (release, maintenance) and `commerce`
+The default demo loader selects only `data-science` (linear-regression).
+The demo tree also retains opt-in `platform` (release, maintenance) and `commerce`
 (validation, data), with two workflows per type. They use only local synthetic
 data. `commerce/validation/payment-guard` intentionally fails by default so the
 history shows a real failed run; rerun with `simulateFailure=false` for success.
@@ -897,7 +969,7 @@ No history is backdated or fabricated. Days without runs remain neutral.
 The production tree contains side-effect-free `operations` readiness and
 maintenance templates, not live deployments.
 
-Publish and trigger the eight new unscheduled demos against the local backend:
+Explicitly opt in to the eight archived synthetic examples:
 
 ```powershell
 $env:WF_ACCESS_TOKEN = 'local-development' # explicit loopback --dev backend only
@@ -1015,21 +1087,21 @@ fail, use the displayed **Retry live updates** control to reconnect.
 Service names use capitalized display labels, not renamed identifiers.
 Team `presentation.labels` supplies metadata-key labels such as **Component**.
 The optional `presentation.names` dictionary supplies exact resource/grouping
-labels, for example `"demo": "Demo"`,
-`"demo/release/five-minute-demo": "Five Minute Demo"` and
-`"dataflow-demo": "Dataflow Demo"`. Unconfigured names turn hyphens/underscores
+labels, for example `"data-science": "Data Science"`,
+`"data-science/linear-regression": "Linear Regression"` and
+`"data-science/linear-regression/nyc-housing": "NYC Housing Prices"`.
+Unconfigured names turn hyphens/underscores
 into spaces and capitalize word initials without lowercasing existing acronyms.
 These names appear in service navigation, team headings, containers and workflow
 cards/tables. IDs, URLs, metadata values, filters, schedules and run history
 remain unchanged. The sample team configurations are authoritative for these labels.
 
 To browse the published samples, open **Service history** in the navigation,
-select `demo`, `platform` or `commerce`, then a workflow type (or **All workflow
-types**). Direct team views are `/t/demo/services`, `/t/platform/services` and
-`/t/commerce/services`; choose **History** on a card for every run of that
-workflow. `platform` contains `release` and `maintenance`; `commerce` contains
-`validation` and `data`. Source files alone do not appear in navigation until
-published with the sample loader above.
+select **Data Science**, then **Linear Regression** (or **All workflow types**).
+The direct team view is `/t/data-science/services`; choose **History** on the
+**NYC Housing Prices** card for every run of that workflow. Archived example
+teams appear only if explicitly published. Source files alone do not appear in
+navigation until published with the sample loader above.
 
 `Wf.Engine.Core.FailureClassifier` reuses the existing `FailureCategory` contract:
 TaskError, Timeout, Aborted, AgentLost, ResourceLimit, ValidationError, Placement

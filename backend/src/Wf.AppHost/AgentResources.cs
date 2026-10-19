@@ -95,6 +95,7 @@ public static class AgentResources
                 .WithEnvironment("Agent__ResultJournalDirectory", Child("results"))
                 .WithEnvironment("Agent__LogSpoolDirectory", Child("logs"))
                 .WithEnvironment("Agent__PackageCache", Child("packages"))
+                .WithEnvironment("WF_DATASET_ROOT", descriptor.Linux ? Child("datasets") : Path.Combine(root, "datasets"))
                 .WithEnvironment("Secrets__Provider", "Local")
                 .WithEnvironment("Secrets__LocalDirectory", secrets);
 

@@ -107,6 +107,7 @@ describe("owned uPlot chart and tabular alternative", () => {
     const plot = FakePlot.instances[0]!
     expect(plot.data).toEqual([line.x, line.series[0]!.values])
     expect(plot.options.legend).toEqual({ show: false })
+    expect(plot.options.axes![1]!.size).toBe(80)
     fireEvent.click(screen.getByText("Chart data table"))
     expect(screen.getByRole("table")).toHaveAttribute("aria-rowcount", "4")
     expect(

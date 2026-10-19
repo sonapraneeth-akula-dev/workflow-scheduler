@@ -123,6 +123,7 @@ public sealed class LocalStackModelTests : IDisposable
             Assert.Equal("local", environment["Agent__Labels__environment"]);
             Assert.Equal("wf-agent", environment["Agent__Labels__instance"]);
             Assert.Equal(Path.Combine(root, "secrets"), environment["Secrets__LocalDirectory"]);
+            Assert.Equal(Path.Combine(root, "datasets"), environment["WF_DATASET_ROOT"]);
             Assert.Contains("wf-host.bindings.engine", environment["Agent__Engines__0"]);
             foreach (var (key, leaf) in new[] { ("ResultJournalDirectory", "results"), ("LogSpoolDirectory", "logs"), ("PackageCache", "packages") })
                 Assert.Equal(Path.Combine(root, "agents", "local", leaf), environment["Agent__" + key]);

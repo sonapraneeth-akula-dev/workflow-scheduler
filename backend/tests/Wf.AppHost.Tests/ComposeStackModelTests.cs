@@ -60,6 +60,10 @@ public sealed class ComposeStackModelTests
         Assert.Equal("wf-gateway", Assert.Single(agent.Annotations.OfType<WaitAnnotation>()).Resource.Name);
         Assert.Equal(environment, agentValues["Agent__Labels__environment"]);
         Assert.Equal("/var/lib/wf-agent/results", agentValues["Agent__ResultJournalDirectory"]);
+        Assert.Equal("/var/lib/wf-agent/datasets", agentValues["WF_DATASET_ROOT"]);
+        Assert.Contains(agent.Annotations.OfType<ContainerMountAnnotation>(), mount =>
+            mount.Source == "agent-data" && mount.Target == "/var/lib/wf-agent" &&
+            mount.Type == ContainerMountType.Volume && !mount.IsReadOnly);
         var postgres = Assert.Single(builder.Resources.OfType<PostgresServerResource>());
         Assert.Equal("18.6-alpine", Assert.Single(postgres.Annotations.OfType<ContainerImageAnnotation>()).Tag);
         Assert.Equal("postgres-data", Assert.Single(postgres.Annotations.OfType<ContainerMountAnnotation>()).Source);
