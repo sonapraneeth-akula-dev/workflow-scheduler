@@ -137,17 +137,19 @@ public sealed partial class AuthorizationMatrixTests
             [new(seed.Team, "release", "description", new([]), [new(RegistryRole.Viewer, group)]),
              new(seed.Team, "sibling", "description", new([]))],
             RoleBindings: [new(RegistryRole.Viewer, teamGroup)],
-            Presentation: new(TypeOrder: ["sibling", "release"])));
+            Presentation: new(TypeOrder: ["sibling", "release"],
+                Names: System.Collections.Immutable.ImmutableDictionary<string, string>.Empty.Add(seed.Team + "/sibling", "Private Sibling Label"))));
         await using var server = await Server.Start(database.DataSource);
         using var typeResponse = await server.GetPath("/api/v1/teams", server.Token(group: group));
         var typeTeam = Assert.Single((await typeResponse.Content.ReadFromJsonAsync<TeamRegistry[]>(TestContext.Current.CancellationToken))!);
         Assert.Equal("release", Assert.Single(typeTeam.Types).Name);
         Assert.Null(typeTeam.Presentation);
         var typeJson = await typeResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        foreach (var hidden in new[] { "sibling", group.ToString(), teamGroup.ToString() }) Assert.DoesNotContain(hidden, typeJson);
+        foreach (var hidden in new[] { "sibling", "Private Sibling Label", group.ToString(), teamGroup.ToString() }) Assert.DoesNotContain(hidden, typeJson);
         using var teamResponse = await server.GetPath("/api/v1/teams", server.Token(group: teamGroup));
         var team = Assert.Single((await teamResponse.Content.ReadFromJsonAsync<TeamRegistry[]>(TestContext.Current.CancellationToken))!);
         Assert.Equal(["sibling", "release"], team.Presentation!.TypeOrder);
+        Assert.Equal("Private Sibling Label", team.Presentation.Names[seed.Team + "/sibling"]);
         Assert.Empty(team.RoleBindings);
         Assert.All(team.Types, type => Assert.Empty(type.RoleBindings));
         using var global = await server.GetPath("/api/v1/teams", server.Token(role: "Admin"));

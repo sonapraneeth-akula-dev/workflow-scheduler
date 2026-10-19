@@ -5,14 +5,26 @@ import { DropdownMenu } from "radix-ui"
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ErrorNotice } from "@/components/ErrorNotice"
-import { accessDenied, getTeams, getTypes } from "@/features/catalog/api"
+import {
+  accessDenied,
+  getTeams,
+  getTypes,
+  type Presentation,
+} from "@/features/catalog/api"
+import { presentationName } from "@/features/catalog/usePresentation"
 
 const itemStyle =
   "flex min-h-9 cursor-pointer items-center justify-between gap-4 px-3 py-2 text-sm outline-none focus:bg-accent data-highlighted:bg-accent data-state-open:bg-accent data-disabled:cursor-not-allowed data-disabled:opacity-50"
 const contentStyle =
   "z-50 max-h-[70vh] min-w-52 max-w-[calc(100vw-2rem)] overflow-auto border bg-popover p-1 text-popover-foreground shadow-md"
 
-function TeamServiceLinks({ team }: { team: string }) {
+function TeamServiceLinks({
+  team,
+  presentation,
+}: {
+  team: string
+  presentation: Presentation | null
+}) {
   const query = useQuery({
     queryKey: ["catalog", "team", team, "filter-types"],
     queryFn: ({ signal }) => getTypes(team, signal),
@@ -50,7 +62,11 @@ function TeamServiceLinks({ team }: { team: string }) {
                 params={{ team }}
                 search={{ type: type.name }}
               >
-                {type.name}
+                {presentationName(
+                  presentation,
+                  type.name,
+                  `${team}/${type.name}`
+                )}
               </Link>
             </DropdownMenu.Item>
           ))
@@ -121,8 +137,11 @@ export function ServiceHistoryNav() {
           {!accessDenied(query.error)
             ? query.data?.map((team) => (
                 <DropdownMenu.Sub key={team.team}>
-                  <DropdownMenu.SubTrigger className={itemStyle}>
-                    {team.team}
+                  <DropdownMenu.SubTrigger
+                    className={itemStyle}
+                    data-team={team.team}
+                  >
+                    {presentationName(team.presentation, team.team)}
                     <ChevronRightIcon aria-hidden="true" className="size-4" />
                   </DropdownMenu.SubTrigger>
                   <DropdownMenu.Portal>
@@ -133,7 +152,10 @@ export function ServiceHistoryNav() {
                       collisionPadding={12}
                       className={contentStyle}
                     >
-                      <TeamServiceLinks team={team.team} />
+                      <TeamServiceLinks
+                        team={team.team}
+                        presentation={team.presentation}
+                      />
                     </DropdownMenu.SubContent>
                   </DropdownMenu.Portal>
                 </DropdownMenu.Sub>

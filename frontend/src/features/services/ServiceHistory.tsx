@@ -11,7 +11,13 @@ import {
   accessDenied,
   getTypes,
   type CatalogWorkflow,
+  type Presentation,
 } from "@/features/catalog/api"
+import {
+  presentationLabel,
+  presentationName,
+  usePresentation,
+} from "@/features/catalog/usePresentation"
 import { useCatalogLive } from "@/features/catalog/useCatalogLive"
 import { formatTimestamp } from "@/lib/timestamps"
 import { useServiceHistoryPreferences } from "@/lib/ServiceHistoryPreferences"
@@ -87,11 +93,13 @@ function WorkflowGroup({
   entries,
   view,
   runLimit,
+  presentation,
 }: {
   label: string
   entries: ServiceWorkflow[]
   view: ServiceSearch["view"]
   runLimit: number
+  presentation: Presentation | null
 }) {
   const id = useId()
   return (
@@ -116,7 +124,7 @@ function WorkflowGroup({
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <h3 className="min-w-0 text-base font-semibold break-words">
-                  {workflow.name}
+                  {presentationName(presentation, workflow.name, workflow.id)}
                 </h3>
                 <StatusBadge
                   status={workflow.latestRun?.status ?? "NeverRun"}
@@ -170,7 +178,13 @@ function WorkflowGroup({
                   className="border-b last:border-0 odd:bg-card even:bg-muted/50"
                 >
                   <th scope="row" className="p-3 font-medium">
-                    <span className="block">{workflow.name}</span>
+                    <span className="block">
+                      {presentationName(
+                        presentation,
+                        workflow.name,
+                        workflow.id
+                      )}
+                    </span>
                     <span className="font-mono text-xs font-normal text-muted-foreground">
                       {workflow.id}
                     </span>
@@ -209,6 +223,7 @@ export function ServiceHistory({
   onChange: (next: ServiceSearch) => void
 }) {
   const history = useServiceHistoryPreferences()
+  const presentation = usePresentation(team)
   const types = useQuery({
     queryKey: ["catalog", "team", team, "filter-types"],
     queryFn: ({ signal }) => getTypes(team, signal),
@@ -234,6 +249,10 @@ export function ServiceHistory({
     accessDenied(query.error) || accessDenied(types.error)
       ? undefined
       : query.data?.pages.flatMap((page) => page.items)
+  const config =
+    accessDenied(query.error) || accessDenied(types.error)
+      ? null
+      : (presentation.data ?? null)
   const metadataKeys = new Set<string>()
   if (!accessDenied(query.error) && !accessDenied(types.error)) {
     for (const type of types.data ?? [])
@@ -261,7 +280,7 @@ export function ServiceHistory({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold break-words">
-            {team} service history
+            {presentationName(config, team)} Service History
           </h1>
           <p className="text-sm text-muted-foreground">
             Run instances: latest {history.runLimit} runs per workflow
@@ -284,7 +303,11 @@ export function ServiceHistory({
               {!accessDenied(types.error)
                 ? types.data?.map((type) => (
                     <option key={type.name} value={type.name}>
-                      {type.name}
+                      {presentationName(
+                        config,
+                        type.name,
+                        `${team}/${type.name}`
+                      )}
                     </option>
                   ))
                 : null}
@@ -317,14 +340,20 @@ export function ServiceHistory({
               search.groupKey &&
               !metadataKeys.has(search.groupKey) ? (
                 <option value={`metadata:${search.groupKey}`}>
-                  {search.groupKey} (unavailable)
+                  {presentationName(
+                    null,
+                    presentationLabel(config, search.groupKey)
+                  )}{" "}
+                  (unavailable)
                 </option>
               ) : null}
               {[...metadataKeys]
                 .sort((a, b) => a.localeCompare(b))
                 .map((key) => (
                   <option key={key} value={`metadata:${key}`}>
-                    {key === "type" ? "type (metadata value)" : key}
+                    {key === "type"
+                      ? `${presentationName(null, presentationLabel(config, key))} (metadata value)`
+                      : presentationName(null, presentationLabel(config, key))}
                   </option>
                 ))}
             </NativeSelect>
@@ -351,7 +380,13 @@ export function ServiceHistory({
             variant="outline"
             className="transition-none"
             disabled={query.isFetching || types.isFetching}
-            onClick={() => void Promise.all([query.refetch(), types.refetch()])}
+            onClick={() =>
+              void Promise.all([
+                query.refetch(),
+                types.refetch(),
+                presentation.refetch(),
+              ])
+            }
           >
             Refresh service history
           </Button>
@@ -360,7 +395,7 @@ export function ServiceHistory({
       <p className="text-sm text-muted-foreground">
         Real run outcomes across all series and manual runs, grouped by{" "}
         {search.groupBy === "metadata"
-          ? `metadata key "${search.groupKey}"`
+          ? `metadata key "${presentationName(null, presentationLabel(config, search.groupKey!))}"`
           : "workflow type"}
         . Each colored icon is one run, newest first; select it to open that
         instance in a new tab. Up to {history.runLimit} recent runs per workflow
@@ -388,6 +423,7 @@ export function ServiceHistory({
       {query.isPending ? <p role="status">Loading service history...</p> : null}
       {query.error ? <ErrorNotice error={query.error} /> : null}
       {types.error ? <ErrorNotice error={types.error} /> : null}
+      {presentation.error ? <ErrorNotice error={presentation.error} /> : null}
       {entries?.length === 0 ? (
         <p role="status">No workflows are available in this team and type.</p>
       ) : null}
@@ -402,6 +438,7 @@ export function ServiceHistory({
         )
         .map(([value, entries]) => (
           <WorkflowGroup
+            presentation={config}
             runLimit={history.runLimit}
             key={value === undefined ? "missing" : JSON.stringify(value)}
             label={
@@ -409,7 +446,11 @@ export function ServiceHistory({
                 ? "Not set"
                 : value.trim().length === 0
                   ? `Empty value (${JSON.stringify(value)})`
-                  : value
+                  : presentationName(
+                      config,
+                      value,
+                      search.groupBy === "type" ? `${team}/${value}` : value
+                    )
             }
             entries={entries}
             view={search.view}

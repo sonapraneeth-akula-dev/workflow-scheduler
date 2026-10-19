@@ -43,6 +43,8 @@ public sealed class TeamRegistrySchemaTests
         Assert.Empty(TeamRegistryRules.Validate(Encoding.UTF8.GetBytes(json), cancellationToken: Token));
         Assert.Equal("demo", registry.Team);
         Assert.Equal("Demo", registry.Deployment);
+        Assert.Equal("Demo", registry.Presentation!.Names["demo"]);
+        Assert.Equal("Five Minute Demo", registry.Presentation.Names["demo/release/five-minute-demo"]);
         var type = Assert.Single(registry.Types);
         Assert.Equal("release", type.Name);
         Assert.Equal("demo", type.Team);

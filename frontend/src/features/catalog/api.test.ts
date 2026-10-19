@@ -46,6 +46,7 @@ describe("catalogue API trust boundaries", () => {
       listColumns: ["environment"],
       defaultFilters: { environment: "dev" },
       labels: { environment: "Environment" },
+      names: { team: "Demo Team", "team/release/build": "Build Workflow" },
     }
     respond([
       {
@@ -89,6 +90,30 @@ describe("catalogue API trust boundaries", () => {
       params: { path: { team: "team" }, query: { "meta.environment": "dev" } },
       signal: undefined,
     })
+  })
+
+  it.each([
+    { team: "" },
+    { team: " " },
+    { team: "Demo\n" },
+    { team: 42 },
+    { team: "x".repeat(1025) },
+  ])("rejects malformed configured display names %j", async (names) => {
+    respond([
+      {
+        team: "team",
+        types: [],
+        presentation: {
+          typeOrder: [],
+          groupingKeys: [],
+          listColumns: [],
+          defaultFilters: {},
+          labels: {},
+          names,
+        },
+      },
+    ])
+    await expect(getTeams()).rejects.toThrow()
   })
 
   it("opts into server-side presentation defaults without transporting stored values", async () => {

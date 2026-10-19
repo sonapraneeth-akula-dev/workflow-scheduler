@@ -17,7 +17,8 @@ public sealed class PresentationTests
         var registry = Registry() with
         {
             Presentation = new(["cleanup", "release"], ["environment"], ["component", "environment"],
-                Map("environment", "dev"), Map("environment", "Environment"))
+                Map("environment", "dev"), Map("environment", "Environment"),
+                Map("demo/release/five-minute-demo", "Five Minute Demo"))
         };
         Assert.Empty(Check(registry));
         var serialized = JsonSerializer.SerializeToUtf8Bytes(registry, TeamRegistryJsonContext.Default.TeamRegistry);
@@ -27,6 +28,7 @@ public sealed class PresentationTests
         Assert.Equal(["component", "environment"], restored.Presentation.ListColumns);
         Assert.Equal("dev", restored.Presentation.DefaultFilters["environment"]);
         Assert.Equal("Environment", restored.Presentation.Labels["environment"]);
+        Assert.Equal("Five Minute Demo", restored.Presentation.Names["demo/release/five-minute-demo"]);
         Assert.Equal("release", restored.Types[0].Name);
         Assert.Equal(serialized, JsonSerializer.SerializeToUtf8Bytes(restored, TeamRegistryJsonContext.Default.TeamRegistry));
     }
@@ -43,6 +45,7 @@ public sealed class PresentationTests
         Assert.Empty(registry.Presentation.ListColumns);
         Assert.Empty(registry.Presentation.DefaultFilters);
         Assert.Empty(registry.Presentation.Labels);
+        Assert.Empty(registry.Presentation.Names);
         Assert.Empty(Check(Read("""{"team":"demo","types":[],"presentation":null}""")));
     }
 
@@ -110,6 +113,26 @@ public sealed class PresentationTests
         AssertError(Assert.Single(Check(registry)), "$.presentation.groupingKeys[0]");
     }
 
+    [Theory]
+    [InlineData("demo", "Demo")]
+    [InlineData("demo/release/five-minute-demo", "Five Minute Demo")]
+    [InlineData("dataflow-demo", "Dataflow Demo")]
+    public void Display_names_are_labels_not_identity_or_filter_references(string key, string name)
+    {
+        var registry = Registry() with { Presentation = new(Names: Map(key, name)) };
+        Assert.Empty(Check(registry));
+        Assert.Equal("demo", registry.Team);
+        Assert.Equal("release", registry.Types[0].Name);
+    }
+
+    [Theory]
+    [InlineData("", "Demo")]
+    [InlineData(" ", "Demo")]
+    [InlineData("demo", " ")]
+    [InlineData("demo", "Demo\n")]
+    public void Invalid_display_names_are_rejected(string key, string name) =>
+        Assert.Equal("WFV024", Assert.Single(Check(Registry() with { Presentation = new(Names: Map(key, name)) })).RuleId);
+
     [Fact]
     public void Errors_are_stably_ordered_and_never_echo_filter_or_label_values()
     {
@@ -131,6 +154,9 @@ public sealed class PresentationTests
     [InlineData("""{"listColumns":[42]}""")]
     [InlineData("""{"defaultFilters":null}""")]
     [InlineData("""{"labels":{"environment":42}}""")]
+    [InlineData("""{"names":{"demo":42}}""")]
+    [InlineData("""{"names":null}""")]
+    [InlineData("""{"names":{"demo":"Demo","demo":"Other"}}""")]
     [InlineData("""{"typeOrder":[],"typeOrder":[]}""")]
     [InlineData("""{"defaultFilters":{"environment":"dev","environment":"ppe"}}""")]
     public void Malformed_presentation_returns_sanitized_registry_shape_error(string presentation)
@@ -150,6 +176,8 @@ public sealed class PresentationTests
             new() { ListColumns = default },
             new() { DefaultFilters = null! },
             new() { Labels = null! },
+            new() { Names = null! },
+            new(Names: Map("demo", null!)),
             new(Labels: Map("environment", null!)),
             new(DefaultFilters: Map("environment", null!))
         ];

@@ -1,6 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { ServiceHistory } from "@/features/services/ServiceHistory"
 import { serviceSearchSchema } from "@/features/services/api"
+import {
+  presentationName,
+  usePresentation,
+} from "@/features/catalog/usePresentation"
 
 export const Route = createFileRoute("/t/$team/services")({
   validateSearch: serviceSearchSchema,
@@ -10,6 +14,7 @@ export const Route = createFileRoute("/t/$team/services")({
 function TeamServices() {
   const { team } = Route.useParams()
   const search = Route.useSearch()
+  const presentation = usePresentation(team)
   const navigate = Route.useNavigate()
   return (
     <>
@@ -17,7 +22,7 @@ function TeamServices() {
         <Link to="/service-history">Service history</Link>
         <span aria-hidden="true">/</span>
         <Link to="/t/$team" params={{ team }}>
-          {team}
+          {presentationName(presentation.data ?? null, team)}
         </Link>
       </nav>
       <ServiceHistory

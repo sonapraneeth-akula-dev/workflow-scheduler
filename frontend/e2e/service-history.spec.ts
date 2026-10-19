@@ -14,7 +14,8 @@ test("navbar discovers team/type service views and restores format with individu
     .locator('[role="menuitem"][aria-haspopup="menu"]')
     .first()
   await expect(teamItem).toBeVisible()
-  const team = (await teamItem.textContent())!.trim()
+  const team = (await teamItem.getAttribute("data-team"))!
+  const teamName = (await teamItem.textContent())!.trim()
   await teamItem.focus()
   await page.keyboard.press("ArrowRight")
   const types = page.getByRole("menu", {
@@ -30,10 +31,17 @@ test("navbar discovers team/type service views and restores format with individu
     })
     .first()
   await expect(typeItem).toBeVisible()
-  const type = (await typeItem.textContent())!.trim()
+  const typeName = (await typeItem.textContent())!.trim()
+  const type = new URL(
+    (await typeItem.getAttribute("href"))!,
+    page.url()
+  ).searchParams.get("type")!
   await typeItem.click()
   await expect(
-    page.getByRole("heading", { name: `${team} service history`, exact: true })
+    page.getByRole("heading", {
+      name: `${teamName} Service History`,
+      exact: true,
+    })
   ).toBeVisible()
   await expect(
     page.getByRole("combobox", { name: "Workflow type", exact: true })
@@ -42,7 +50,7 @@ test("navbar discovers team/type service views and restores format with individu
     page.getByText("Run instances: latest 10 runs per workflow")
   ).toBeVisible()
   await expect(page.getByLabel("Health window")).toHaveCount(0)
-  const group = page.getByRole("region", { name: type, exact: true })
+  const group = page.getByRole("region", { name: typeName, exact: true })
   await expect(group).toBeVisible()
   const card = group.locator("ul > li").first()
   await expect(card.getByRole("link", { name: /^History for / })).toBeVisible()
@@ -199,6 +207,42 @@ test("personal Settings changes the recent run count and persists across reloads
   await expect(dialog.getByRole("status")).toHaveText(
     "Personal run-count setting saved."
   )
+})
+
+test("configured capitalized names match source labels without changing routes or grouping keys", async ({
+  page,
+}) => {
+  const teamsResponse = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/v1/teams" && response.ok()
+  )
+  await page.goto("/t/demo/services?groupBy=metadata&groupKey=component")
+  const teams = await (await teamsResponse).json()
+  const demo = teams.find((team: { team: string }) => team.team === "demo")
+  expect(demo.presentation.names.demo).toBe("Demo")
+  expect(demo.presentation.names["demo/release/five-minute-demo"]).toBe(
+    "Five Minute Demo"
+  )
+  await expect(
+    page.getByRole("heading", { name: "Demo Service History" })
+  ).toBeVisible()
+  await expect(
+    page.getByLabel("Container grouping").locator("option:checked")
+  ).toHaveText("Component")
+  const group = page.getByRole("region", { name: "Dataflow Demo", exact: true })
+  await expect(
+    group.getByRole("heading", { name: "Five Minute Demo", exact: true })
+  ).toBeVisible()
+  const history = group.getByRole("link", {
+    name: "History for demo/release/five-minute-demo",
+  })
+  await expect(history).toHaveAttribute(
+    "href",
+    "/t/demo/release/w/five-minute-demo/history"
+  )
+  await page.getByRole("radio", { name: "Table format" }).click()
+  await expect(group.getByRole("rowheader")).toContainText("Five Minute Demo")
+  expect(new URL(page.url()).searchParams.get("groupKey")).toBe("component")
 })
 
 test("metadata container grouping survives format changes and reload without dropping workflows", async ({

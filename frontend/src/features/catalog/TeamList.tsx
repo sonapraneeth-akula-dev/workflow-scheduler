@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { accessDenied, getTeams } from "./api"
 import type { RunSearch } from "@/features/runs/search"
+import { presentationName } from "./usePresentation"
 
 export function TeamList({
   destination = "catalog",
@@ -50,7 +51,7 @@ export function TeamList({
                 search={search ?? {}}
                 className="break-words underline"
               >
-                {team.team}
+                {presentationName(team.presentation, team.team)}
               </Link>
               <p>
                 {team.typeCount} permitted{" "}

@@ -49,6 +49,15 @@ public static class PresentationValidator
                 if (!keys.Contains(key) || string.IsNullOrWhiteSpace(value))
                     errors.Add(InvalidPresentation.CreateError(file, Property("labels", key)));
             }
+        if (presentation.Names is null)
+            errors.Add(InvalidPresentation.CreateError(file, "$.presentation.names"));
+        else
+            foreach (var (key, value) in presentation.Names)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!ValidName(key) || !ValidName(value))
+                    errors.Add(InvalidPresentation.CreateError(file, Property("names", key)));
+            }
         return errors.OrderBy(error => error.Path, StringComparer.Ordinal).ToImmutableArray();
 
         void CheckList(ImmutableArray<string> values, string path, HashSet<string> allowed)
@@ -69,4 +78,7 @@ public static class PresentationValidator
     }
 
     private static string Property(string name, string key) => $"$.presentation.{name}[\"{JsonEncodedText.Encode(key)}\"]";
+
+    private static bool ValidName(string value) => !string.IsNullOrWhiteSpace(value) &&
+        value.EnumerateRunes().Count() <= 1024 && !value.Any(char.IsControl);
 }

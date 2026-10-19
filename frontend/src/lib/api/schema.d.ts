@@ -5469,6 +5469,9 @@ export interface components {
             labels: {
                 [key: string]: string;
             };
+            names: {
+                [key: string]: string;
+            };
         };
         CatalogRegistryType: {
             team: string;

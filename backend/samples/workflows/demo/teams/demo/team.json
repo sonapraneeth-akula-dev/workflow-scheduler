@@ -7,7 +7,13 @@
     "groupingKeys": ["environment"],
     "listColumns": ["environment", "component"],
     "defaultFilters": { "environment": "dev" },
-    "labels": { "environment": "Environment", "component": "Component" }
+    "labels": { "environment": "Environment", "component": "Component" },
+    "names": {
+      "demo": "Demo",
+      "demo/release": "Release",
+      "demo/release/five-minute-demo": "Five Minute Demo",
+      "dataflow-demo": "Dataflow Demo"
+    }
   },
   "roleBindings": [
     { "role": "Viewer", "groupId": "11111111-1111-1111-1111-111111111111" }

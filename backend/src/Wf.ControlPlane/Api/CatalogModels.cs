@@ -18,7 +18,8 @@ public sealed record CatalogMetadataSchema(IReadOnlyList<CatalogMetadataField> K
 public sealed record CatalogRegistryType(string Team, string Name, string Description,
     CatalogMetadataSchema MetadataSchema, IReadOnlyList<RegistryRoleBinding> RoleBindings);
 public sealed record CatalogPresentation(IReadOnlyList<string> TypeOrder, IReadOnlyList<string> GroupingKeys,
-    IReadOnlyList<string> ListColumns, IReadOnlyDictionary<string, string> DefaultFilters, IReadOnlyDictionary<string, string> Labels);
+    IReadOnlyList<string> ListColumns, IReadOnlyDictionary<string, string> DefaultFilters,
+    IReadOnlyDictionary<string, string> Labels, IReadOnlyDictionary<string, string> Names);
 public sealed record CatalogTeam(string Team, IReadOnlyList<CatalogRegistryType> Types,
     [property: JsonPropertyName("$schema")] string? Schema, IReadOnlyList<RegistryRoleBinding> RoleBindings,
     CatalogPresentation? Presentation)
@@ -27,7 +28,7 @@ public sealed record CatalogTeam(string Team, IReadOnlyList<CatalogRegistryType>
         registry.Types.Select(type => new CatalogRegistryType(type.Team, type.Name, type.Description,
             CatalogMetadataSchema.From(type.MetadataSchema), type.RoleBindings)).ToArray(), registry.Schema, registry.RoleBindings,
         registry.Presentation is not { } presentation ? null : new(presentation.TypeOrder, presentation.GroupingKeys,
-            presentation.ListColumns, presentation.DefaultFilters, presentation.Labels));
+            presentation.ListColumns, presentation.DefaultFilters, presentation.Labels, presentation.Names));
 }
 public sealed record CatalogType(string Team, string Name, string Description, CatalogMetadataSchema MetadataSchema,
     IReadOnlyDictionary<string, long> LatestStatusCounts);

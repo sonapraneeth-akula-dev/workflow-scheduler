@@ -48,6 +48,17 @@ export function presentationLabel(
     : key
 }
 
+export function presentationName(
+  config: Presentation | null,
+  value: string,
+  id = value
+): string {
+  if (config?.names && Object.hasOwn(config.names, id)) return config.names[id]!
+  return value
+    .replace(/[-_]+/g, " ")
+    .replace(/(^|\s)\p{L}/gu, (letter) => letter.toLocaleUpperCase())
+}
+
 export function groupWorkflows(
   workflows: readonly CatalogWorkflow[],
   config: Presentation | null

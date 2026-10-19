@@ -49,6 +49,12 @@
           "type": "object",
           "propertyNames": { "$ref": "#/$defs/nonemptyText" },
           "additionalProperties": { "$ref": "#/$defs/nonemptyText" }
+        },
+        "names": {
+          "type": "object",
+          "description": "Display names keyed by exact resource ID or grouping value. Does not rename identifiers.",
+          "propertyNames": { "$ref": "#/$defs/displayName" },
+          "additionalProperties": { "$ref": "#/$defs/displayName" }
         }
       }
     },
@@ -61,6 +67,11 @@
       "allOf": [{ "$ref": "#/$defs/nonemptyText" }],
       "maxLength": 128,
       "pattern": "^[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
+    "displayName": {
+      "allOf": [{ "$ref": "#/$defs/nonemptyText" }],
+      "maxLength": 1024,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
     },
     "workflowType": {
       "type": "object",

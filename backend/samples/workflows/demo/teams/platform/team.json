@@ -5,7 +5,14 @@
   "presentation": {
     "typeOrder": ["release", "maintenance"],
     "listColumns": ["environment", "component"],
-    "labels": { "environment": "Environment", "component": "Service" }
+    "labels": { "environment": "Environment", "component": "Service" },
+    "names": {
+      "platform": "Platform",
+      "platform/release/gateway-ready": "Gateway Ready",
+      "platform/release/worker-ready": "Worker Ready",
+      "platform/maintenance/inventory-check": "Inventory Check",
+      "platform/maintenance/retention-preview": "Retention Preview"
+    }
   },
   "types": [
     {

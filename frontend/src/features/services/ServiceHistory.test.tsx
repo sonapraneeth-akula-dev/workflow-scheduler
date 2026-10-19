@@ -10,7 +10,7 @@ import {
 import userEvent from "@testing-library/user-event"
 import { beforeEach, expect, it, vi } from "vitest"
 import { ApiError } from "@/lib/api/client"
-import { getTypes } from "@/features/catalog/api"
+import { getTeams, getTypes } from "@/features/catalog/api"
 import { useLive } from "@/lib/live/useLive"
 import { getServiceHistory, type ServiceSearch } from "./api"
 import { ServiceHistory } from "./ServiceHistory"
@@ -26,6 +26,7 @@ vi.mock("./api", async (original) => ({
 vi.mock("@/features/catalog/api", async (original) => ({
   ...(await original<typeof import("@/features/catalog/api")>()),
   getTypes: vi.fn(),
+  getTeams: vi.fn(),
 }))
 vi.mock("@/lib/live/useLive", () => ({
   useLive: vi.fn(() => ({ snapshot: undefined, retry: vi.fn() })),
@@ -119,6 +120,9 @@ function show() {
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
+  vi.mocked(getTeams).mockResolvedValue([
+    { team: "team", typeCount: 1, presentation: null },
+  ])
   vi.mocked(getServiceHistory).mockResolvedValue(response)
   vi.mocked(getTypes).mockResolvedValue([
     {
@@ -133,8 +137,8 @@ beforeEach(() => {
 
 it("renders individual run outcomes with exact new-tab links, last run and full history", async () => {
   show()
-  expect(await screen.findByRole("heading", { name: "release" })).toBeVisible()
-  const card = screen.getByRole("heading", { name: "build" }).closest("li")!
+  expect(await screen.findByRole("heading", { name: "Release" })).toBeVisible()
+  const card = screen.getByRole("heading", { name: "Build" }).closest("li")!
   expect(within(card).getByText("Failed", { exact: true })).toBeVisible()
   expect(
     within(card).getByRole("link", { name: "History for team/release/build" })
@@ -171,7 +175,7 @@ it("renders individual run outcomes with exact new-tab links, last run and full 
   expect(within(card).getByText("66.7% completed successfully")).toBeVisible()
   expect(screen.queryByText("Daily health details")).not.toBeInTheDocument()
   expect(card.querySelector("details")).toBeNull()
-  const never = screen.getByRole("heading", { name: "never" }).closest("li")!
+  const never = screen.getByRole("heading", { name: "Never" }).closest("li")!
   expect(never.querySelectorAll("[data-run-id]")).toHaveLength(0)
   expect(within(never).getByText("No runs", { exact: true })).toBeVisible()
   expect(within(never).getByText("No completed runs")).toBeVisible()
@@ -185,7 +189,7 @@ it("renders individual run outcomes with exact new-tab links, last run and full 
 
 it("switches to the striped semantic table without changing the cached health query", async () => {
   const shown = show()
-  await screen.findByText("build", { exact: true })
+  await screen.findByText("Build", { exact: true })
   shown.rerender({ ...search, view: "table" })
   const table = await screen.findByRole("table")
   expect(
@@ -222,7 +226,7 @@ it("switches to the striped semantic table without changing the cached health qu
 
 it("uses the personal default run count while changing type and view through the URL callback", async () => {
   const shown = show()
-  await screen.findByText("build", { exact: true })
+  await screen.findByText("Build", { exact: true })
   await userEvent.selectOptions(
     screen.getByLabelText("Workflow type"),
     "release"
@@ -300,7 +304,7 @@ it("distinguishes every outcome with an accessible status icon and matching colo
     ],
   })
   show()
-  await screen.findByRole("heading", { name: "build" })
+  await screen.findByRole("heading", { name: "Build" })
   const colors = [
     "bg-info",
     "bg-info",
@@ -321,7 +325,7 @@ it("distinguishes every outcome with an accessible status icon and matching colo
 
 it("preserves cached cards on transient failure, retries, and hides all cached health on revoked access", async () => {
   const shown = show()
-  await screen.findByText("build", { exact: true })
+  await screen.findByText("Build", { exact: true })
   vi.mocked(getServiceHistory).mockRejectedValue(
     new ApiError(new Response(null, { status: 503 }), {
       title: "Health unavailable",
@@ -333,7 +337,7 @@ it("preserves cached cards on transient failure, retries, and hides all cached h
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Health unavailable"
   )
-  expect(screen.getByText("build", { exact: true })).toBeVisible()
+  expect(screen.getByText("Build", { exact: true })).toBeVisible()
   vi.mocked(getServiceHistory).mockResolvedValue(response)
   fireEvent.click(
     screen.getByRole("button", { name: "Refresh service history" })
@@ -350,7 +354,7 @@ it("preserves cached cards on transient failure, retries, and hides all cached h
     queryKey: ["catalog", "team", "team", "service-history"],
   })
   expect(await screen.findByRole("alert")).toHaveTextContent("Viewer revoked")
-  expect(screen.queryByText("build", { exact: true })).not.toBeInTheDocument()
+  expect(screen.queryByText("Build", { exact: true })).not.toBeInTheDocument()
   expect(screen.queryByRole("img")).not.toBeInTheDocument()
 })
 
@@ -390,13 +394,13 @@ it("discovers metadata keys from schemas and loaded workflows and updates only U
     })),
   })
   const shown = show()
-  await screen.findByRole("heading", { name: "build" })
+  await screen.findByRole("heading", { name: "Build" })
   const selector = screen.getByLabelText("Container grouping")
   expect(
-    within(selector).getByRole("option", { name: "environment" })
+    within(selector).getByRole("option", { name: "Environment" })
   ).toBeVisible()
   expect(
-    within(selector).getByRole("option", { name: "component" })
+    within(selector).getByRole("option", { name: "Component" })
   ).toBeVisible()
   await userEvent.selectOptions(selector, "metadata:component")
   expect(shown.change).toHaveBeenLastCalledWith({
@@ -405,11 +409,11 @@ it("discovers metadata keys from schemas and loaded workflows and updates only U
     groupKey: "component",
   })
   shown.rerender({ ...search, groupBy: "metadata", groupKey: "component" })
-  expect(await screen.findByRole("region", { name: "api" })).toBeVisible()
+  expect(await screen.findByRole("region", { name: "Api" })).toBeVisible()
   expect(getServiceHistory).toHaveBeenCalledTimes(1)
   shown.rerender({ ...search, groupBy: "metadata", groupKey: "type" })
   expect(
-    await screen.findByRole("region", { name: "custom-type" })
+    await screen.findByRole("region", { name: "Custom Type" })
   ).toBeVisible()
   await userEvent.selectOptions(selector, "type")
   expect(shown.change).toHaveBeenLastCalledWith({
@@ -436,7 +440,7 @@ it("keeps missing and empty metadata distinct and subscribes to every workflow t
   })
   vi.mocked(getServiceHistory).mockResolvedValue({ ...response, items })
   const shown = show()
-  await screen.findByRole("heading", { name: "build" })
+  await screen.findByRole("heading", { name: "Build" })
   shown.rerender({ ...search, groupBy: "metadata", groupKey: "environment" })
   expect(await screen.findByRole("region", { name: "Not set" })).toBeVisible()
   expect(screen.getByRole("region", { name: 'Empty value ("")' })).toBeVisible()
@@ -446,6 +450,57 @@ it("keeps missing and empty metadata distinct and subscribes to every workflow t
   expect(screen.getAllByRole("link", { name: /^History for / })).toHaveLength(2)
   expect(useLive).toHaveBeenCalledWith({ scope: "type", id: "team/release" })
   expect(useLive).toHaveBeenCalledWith({ scope: "type", id: "team/data" })
+})
+
+it("uses capitalized code/config names and metadata labels without changing IDs or grouping values", async () => {
+  vi.mocked(getTeams).mockResolvedValue([
+    {
+      team: "team",
+      typeCount: 1,
+      presentation: {
+        typeOrder: [],
+        groupingKeys: [],
+        listColumns: [],
+        defaultFilters: {},
+        labels: { component: "Component" },
+        names: {
+          team: "Demo",
+          "team/release/build": "Five Minute Demo",
+          "dataflow-demo": "Dataflow Demo",
+        },
+      },
+    },
+  ])
+  vi.mocked(getServiceHistory).mockResolvedValue({
+    ...response,
+    items: [
+      {
+        ...response.items[0]!,
+        workflow: {
+          ...response.items[0]!.workflow,
+          metadata: { type: "release", values: { component: "dataflow-demo" } },
+        },
+      },
+    ],
+  })
+  const shown = show()
+  expect(
+    await screen.findByRole("heading", { name: "Demo Service History" })
+  ).toBeVisible()
+  expect(
+    await screen.findByRole("heading", { name: "Five Minute Demo" })
+  ).toBeVisible()
+  expect(screen.getByRole("option", { name: "Component" })).toHaveValue(
+    "metadata:component"
+  )
+  shown.rerender({ ...search, groupBy: "metadata", groupKey: "component" })
+  expect(
+    await screen.findByRole("region", { name: "Dataflow Demo" })
+  ).toBeVisible()
+  expect(
+    screen.getByRole("link", { name: "History for team/release/build" })
+  ).toHaveAttribute("href", "/t/team/release/w/build/history")
+  expect(getServiceHistory).toHaveBeenCalledTimes(1)
 })
 
 it("hides cached metadata grouping keys and containers after access is revoked", async () => {
@@ -462,7 +517,7 @@ it("hides cached metadata grouping keys and containers after access is revoked",
     },
   ])
   const shown = show()
-  await screen.findByRole("option", { name: "private-key" })
+  await screen.findByRole("option", { name: "Private Key" })
   vi.mocked(getServiceHistory).mockRejectedValue(
     new ApiError(new Response(null, { status: 403 }), { title: "Revoked" })
   )
@@ -471,9 +526,9 @@ it("hides cached metadata grouping keys and containers after access is revoked",
   })
   expect(await screen.findByRole("alert")).toHaveTextContent("Revoked")
   expect(
-    screen.queryByRole("option", { name: "private-key" })
+    screen.queryByRole("option", { name: "Private Key" })
   ).not.toBeInTheDocument()
   expect(
-    screen.queryByRole("heading", { name: "build" })
+    screen.queryByRole("heading", { name: "Build" })
   ).not.toBeInTheDocument()
 })

@@ -842,6 +842,17 @@ saved in the URL and changes presentation without repeating the history request.
 Live updates remain subscribed to every loaded workflow type, even when one
 metadata container combines several types.
 
+Service names use capitalized display labels, not renamed identifiers.
+Team `presentation.labels` supplies metadata-key labels such as **Component**.
+The optional `presentation.names` dictionary supplies exact resource/grouping
+labels, for example `"demo": "Demo"`,
+`"demo/release/five-minute-demo": "Five Minute Demo"` and
+`"dataflow-demo": "Dataflow Demo"`. Unconfigured names turn hyphens/underscores
+into spaces and capitalize word initials without lowercasing existing acronyms.
+These names appear in service navigation, team headings, containers and workflow
+cards/tables. IDs, URLs, metadata values, filters, schedules and run history
+remain unchanged. The sample team configurations are authoritative for these labels.
+
 To browse the published samples, open **Service history** in the navigation,
 select `demo`, `platform` or `commerce`, then a workflow type (or **All workflow
 types**). Direct team views are `/t/demo/services`, `/t/platform/services` and

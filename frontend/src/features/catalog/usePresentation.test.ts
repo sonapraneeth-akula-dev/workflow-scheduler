@@ -9,6 +9,7 @@ import {
   metadataValue,
   orderTypes,
   presentationLabel,
+  presentationName,
   usePresentation,
 } from "./usePresentation"
 
@@ -153,6 +154,32 @@ describe("scoped team presentation", () => {
       config
     )
     expect(new Set(groups.map((group) => group.id)).size).toBe(4)
+  })
+
+  it("uses explicit capitalized names while preserving raw IDs, grouping values and acronyms", () => {
+    const named = {
+      ...config,
+      names: {
+        team: "Demo",
+        "team/release/five-minute-demo": "Five Minute Demo",
+        "dataflow-demo": "Dataflow Demo",
+      },
+    }
+    expect(presentationName(named, "team")).toBe("Demo")
+    expect(
+      presentationName(
+        named,
+        "five-minute-demo",
+        "team/release/five-minute-demo"
+      )
+    ).toBe("Five Minute Demo")
+    expect(presentationName(named, "dataflow-demo")).toBe("Dataflow Demo")
+    expect(presentationName(null, "API-service")).toBe("API Service")
+    expect(presentationName(null, "team_name")).toBe("Team Name")
+    expect(presentationName(named, "toString")).toBe("ToString")
+    expect(named.names["team/release/five-minute-demo"]).toBe(
+      "Five Minute Demo"
+    )
   })
 
   it("never resolves inherited JavaScript property names as metadata or labels", () => {

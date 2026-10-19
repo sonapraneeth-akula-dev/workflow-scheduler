@@ -96,7 +96,7 @@ describe("catalogue views", () => {
     ])
     show(<TeamList />)
     expect(screen.getByText("Loading teams...")).toBeInTheDocument()
-    expect(await screen.findByRole("link", { name: "team" })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: "Team" })).toHaveAttribute(
       "href",
       "/t/team"
     )
@@ -113,7 +113,7 @@ describe("catalogue views", () => {
 
   it("links team run choices to their own scoped listing", async () => {
     show(<TeamList destination="runs" search={{ status: "Failed" }} />)
-    expect(await screen.findByRole("link", { name: "team" })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: "Team" })).toHaveAttribute(
       "href",
       "/t/team/runs"
     )
@@ -124,18 +124,18 @@ describe("catalogue views", () => {
       { team: "team", typeCount: 1, presentation: null },
     ])
     show(<TeamList />)
-    await screen.findByRole("link", { name: "team" })
+    await screen.findByRole("link", { name: "Team" })
     vi.mocked(getTeams).mockRejectedValueOnce(new Error("Offline"))
     fireEvent.click(screen.getByRole("button", { name: "Refresh teams" }))
     expect(await screen.findByRole("alert")).toHaveTextContent("Offline")
-    expect(screen.getByRole("link", { name: "team" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Team" })).toBeInTheDocument()
     vi.mocked(getTeams).mockRejectedValueOnce(
       new ApiError(new Response(null, { status: 403 }), { title: "Denied" })
     )
     fireEvent.click(screen.getByRole("button", { name: "Refresh teams" }))
     await waitFor(() =>
       expect(
-        screen.queryByRole("link", { name: "team" })
+        screen.queryByRole("link", { name: "Team" })
       ).not.toBeInTheDocument()
     )
     expect(screen.getByRole("alert")).toHaveTextContent("Denied")

@@ -24,6 +24,12 @@ const count = z.union([
     .transform(Number)
     .pipe(z.int().nonnegative()),
 ])
+const displayName = z
+  .string()
+  .regex(/^[^\p{Cc}]+$/u)
+  .refine(
+    (value) => value.trim().length > 0 && Array.from(value).length <= 1024
+  )
 const presentationSchema = z.object({
   typeOrder: z.array(name).refine((keys) => new Set(keys).size === keys.length),
   groupingKeys: z
@@ -34,6 +40,7 @@ const presentationSchema = z.object({
     .refine((keys) => new Set(keys).size === keys.length),
   defaultFilters: z.record(z.string().min(1), z.string()),
   labels: z.record(z.string().min(1), z.string().min(1)),
+  names: z.record(displayName, displayName).optional(),
 })
 const teams = z.array(
   z.object({

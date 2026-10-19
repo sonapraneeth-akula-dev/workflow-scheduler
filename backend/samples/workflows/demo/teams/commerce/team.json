@@ -5,7 +5,14 @@
   "presentation": {
     "typeOrder": ["validation", "data"],
     "listColumns": ["environment", "component"],
-    "labels": { "environment": "Environment", "component": "Service" }
+    "labels": { "environment": "Environment", "component": "Service" },
+    "names": {
+      "commerce": "Commerce",
+      "commerce/validation/checkout-total": "Checkout Total",
+      "commerce/validation/payment-guard": "Payment Guard",
+      "commerce/data/catalog-integrity": "Catalog Integrity",
+      "commerce/data/ledger-balance": "Ledger Balance"
+    }
   },
   "types": [
     {
