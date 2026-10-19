@@ -7,9 +7,11 @@ import type { GraphPosition } from "./layout"
 export function NodePolicyIcons({
   optional,
   retries,
+  retryCount,
 }: {
   optional: boolean
   retries: string | null
+  retryCount?: number
 }) {
   return (
     <span
@@ -26,6 +28,15 @@ export function NodePolicyIcons({
           <RotateCcwIcon className="size-3.5" focusable="false" />
         </span>
       ) : null}
+      {retryCount !== undefined && retryCount > 0 ? (
+        <span
+          className="inline-flex items-center gap-0.5 text-xs font-semibold text-foreground"
+          title={`${retryCount} recorded ${retryCount === 1 ? "retry" : "retries"}`}
+        >
+          <RotateCcwIcon className="size-3.5" focusable="false" />
+          {retryCount}
+        </span>
+      ) : null}
     </span>
   )
 }
@@ -35,6 +46,7 @@ export const GraphNode = memo(function GraphNode({
   status,
   optional,
   retries,
+  retryCount,
   taskCount,
   mode,
   selected,
@@ -46,6 +58,7 @@ export const GraphNode = memo(function GraphNode({
   status: number
   optional: boolean
   retries: string | null
+  retryCount?: number
   taskCount: number
   mode: "Series" | "Parallel"
   selected: boolean
@@ -56,7 +69,7 @@ export const GraphNode = memo(function GraphNode({
   const descriptionId = useId()
   const label = executionStatuses[status]
   if (label === undefined) throw new Error("Unknown graph execution status.")
-  const description = `${taskCount} ${taskCount === 1 ? "task" : "tasks"}, ${mode === "Series" ? "sequential" : "parallel"}. ${optional ? "Optional node: soft-failure policy; still runs." : "Required node: hard-failure policy."} ${retries ?? "No retries configured."}`
+  const description = `${taskCount} ${taskCount === 1 ? "task" : "tasks"}, ${mode === "Series" ? "sequential" : "parallel"}. ${optional ? "Optional node: soft-failure policy; still runs." : "Required node: hard-failure policy."} ${retries ?? "No retries configured."}${retryCount === undefined ? "" : ` Recorded retries: ${retryCount}.`}`
   return (
     <button
       type="button"
@@ -76,7 +89,11 @@ export const GraphNode = memo(function GraphNode({
         <span className="min-w-0 flex-1 truncate font-medium">
           {position.key}
         </span>
-        <NodePolicyIcons optional={optional} retries={retries} />
+        <NodePolicyIcons
+          optional={optional}
+          retries={retries}
+          retryCount={retryCount}
+        />
       </span>
       <span className="flex w-full items-center justify-between gap-1">
         <StatusBadge status={label} />

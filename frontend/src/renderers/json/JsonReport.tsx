@@ -1,10 +1,11 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ErrorNotice } from "@/components/ErrorNotice"
+import { JsonNumberSupportError, parseJson } from "@/lib/json"
 import { BlobText } from "../BlobText"
 import type { ReportRendererProps } from "../types"
 
-function JsonNode({
+export function JsonTree({
   value,
   label,
   root = false,
@@ -15,12 +16,17 @@ function JsonNode({
 }) {
   const [open, setOpen] = useState(root)
   const [visible, setVisible] = useState(100)
-  if (value === null || typeof value !== "object") {
+  const rawNumber =
+    typeof JSON.isRawJSON === "function" && JSON.isRawJSON(value)
+      ? value.rawJSON
+      : undefined
+  if (value === null || typeof value !== "object" || rawNumber !== undefined) {
     return (
       <div className="break-words">
         <span className="font-medium">{label}: </span>
         <span className="whitespace-pre-wrap">
-          {typeof value === "string" ? JSON.stringify(value) : String(value)}
+          {rawNumber ??
+            (typeof value === "string" ? JSON.stringify(value) : String(value))}
         </span>
       </div>
     )
@@ -38,7 +44,7 @@ function JsonNode({
       {open && (
         <div className="ml-4 border-l pl-3">
           {entries.slice(0, visible).map(([key, child]) => (
-            <JsonNode
+            <JsonTree
               key={key}
               label={Array.isArray(value) ? `[${key}]` : JSON.stringify(key)}
               value={child}
@@ -62,13 +68,19 @@ function JsonNode({
 function JsonContent({ text, title }: { text: string; title: string }) {
   let value: unknown
   try {
-    value = JSON.parse(text)
-  } catch {
+    value = parseJson(text)
+  } catch (error) {
     return (
-      <ErrorNotice error={new Error("Report content is not valid JSON.")} />
+      <ErrorNotice
+        error={
+          error instanceof JsonNumberSupportError
+            ? error
+            : new Error("Report content is not valid JSON.")
+        }
+      />
     )
   }
-  return <JsonNode value={value} label={title} root />
+  return <JsonTree value={value} label={title} root />
 }
 
 export default function JsonReport({ content, title }: ReportRendererProps) {

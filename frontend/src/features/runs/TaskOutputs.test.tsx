@@ -1,5 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ApiError } from "@/lib/api/client"
@@ -40,13 +47,13 @@ const result: TaskOutputsResult = {
   attempt: 1,
   outputs: { html: "<script>alert(1)</script>", null: null },
 }
-function show() {
+function show(nodeKey?: string) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <TaskOutputs runId={runId} />
+      <TaskOutputs runId={runId} nodeKey={nodeKey} />
     </QueryClientProvider>
   )
 }
@@ -117,6 +124,45 @@ describe("TaskOutputs", () => {
     vi.mocked(getTimeline).mockResolvedValue({ ...timeline, attempts: [] })
     show()
     expect(screen.getByText("Loading task outputs...")).toBeVisible()
+    expect(
+      await screen.findByText("No dispatched attempts recorded.")
+    ).toBeVisible()
+    expect(getTaskOutputs).not.toHaveBeenCalled()
+  })
+  it("filters graph attempts by exact node and defaults to its latest recorded attempt", async () => {
+    vi.mocked(getTimeline).mockResolvedValue({
+      ...timeline,
+      attempts: [
+        ...timeline.attempts,
+        { ...row, nodeKey: "work-other", taskKey: "work-other/task" },
+      ],
+    })
+    vi.mocked(getTaskOutputs).mockResolvedValue({
+      ...result,
+      attempt: 2,
+      outputs: { task: { inputs: { value: 3 }, outputs: { total: 9 } } },
+    })
+    show("work")
+    const tree = await screen.findByLabelText("Attempt JSON outputs")
+    expect(tree).toHaveTextContent("Recorded JSON: Object")
+    expect(screen.getByLabelText("Output attempt")).toHaveValue(
+      '["work/task",2]'
+    )
+    expect(screen.getAllByRole("option")).toHaveLength(2)
+    expect(getTaskOutputs).toHaveBeenCalledWith(
+      runId,
+      expect.objectContaining({ taskKey: "work/task", attempt: 2 }),
+      expect.any(AbortSignal)
+    )
+    expect(screen.getByText(/Missing inputs are not inferred/)).toBeVisible()
+    fireEvent.click(within(tree).getByText('"task": Object (2)'))
+    await waitFor(() =>
+      expect(within(tree).getByText('"inputs": Object (1)')).toBeVisible()
+    )
+    expect(within(tree).getByText('"outputs": Object (1)')).toBeVisible()
+  })
+  it("does not borrow another node's attempts when this node has no recorded attempts", async () => {
+    show("missing")
     expect(
       await screen.findByText("No dispatched attempts recorded.")
     ).toBeVisible()

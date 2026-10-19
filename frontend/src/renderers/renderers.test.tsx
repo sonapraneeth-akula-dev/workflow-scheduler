@@ -196,6 +196,22 @@ describe("Markdown report", () => {
 })
 
 describe("JSON report", () => {
+  it("renders large JSON numbers as exact leaf tokens, not rounded values or rawJSON objects", async () => {
+    render(
+      <JsonReport
+        title="Exact"
+        content={
+          new Blob([
+            '{"large":9223372036854775807,"nested":{"rawJSON":"ordinary property"}}',
+          ])
+        }
+      />
+    )
+    expect(await screen.findByText("9223372036854775807")).toBeVisible()
+    expect(screen.queryByText("9223372036854776000")).not.toBeInTheDocument()
+    expect(screen.getByText('"nested": Object (1)')).toBeVisible()
+    expect(screen.queryByText('"large": Object (1)')).not.toBeInTheDocument()
+  })
   it("renders an expandable typed tree preserving own special keys and exact strings", async () => {
     const { container } = render(
       <JsonReport

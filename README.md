@@ -770,6 +770,50 @@ and eight task-level rows. **Logs** also contain each task's input/output trace.
 The direct, serverless script prints the same report JSON instead of uploading
 it, because that mode has no configured report storage.
 
+### Manual JSON, retry and failure demo
+
+`backend\samples\workflows\demo\teams\demo\release\json-failure-demo\workflow.cs`
+adds an unscheduled, synthetic-only demo: `sample` selects the scenario once,
+`fetch` retries transient failures with a three-second backoff (at most two
+retries), `optional-check` can soft-fail, `validate` can hard-fail, and `report`
+uses `Always` dependencies to publish a JSON report after either outcome.
+Existing demos and their schedules are unchanged.
+
+Use `mode=random` (default), `success`, `retry` (two retries and an optional
+failure), or `failure` (one retry, optional failure and required failure).
+`seed=0` generates and records a random seed once; supply a nonzero seed to
+reproduce a random scenario. No failure is resampled during retries.
+
+```powershell
+dotnet run --file .\backend\samples\workflows\demo\teams\demo\release\json-failure-demo\workflow.cs -- --var mode=retry
+```
+
+Publish this directory with the same CLI command and SDK inputs shown above,
+using a separate work directory and **omitting `--schedule-source-path`**.
+Open `/t/demo/release/w/json-failure-demo/history` and trigger a run with the
+desired variables. **Reports** renders the stored JSON as an expandable tree.
+The report contains the sampled scenario, successful upstream traces and
+observed fetch attempt count; its `expectedRequiredOutcome` describes the
+sample, not an authoritative final run status. Failed-attempt outputs are
+retained separately rather than propagated to downstream node inputs.
+
+In **Graph**, select a node and expand **Inspect recorded inputs / outputs**.
+The attempt selector includes failed and retried attempts for that node, with
+no substitution between attempts or source runs. Inputs appear only when the
+workflow explicitly records them; these demos record both `inputs` and
+`outputs`. Refresh reads newly committed attempts during execution. A numbered
+retry icon on completed runs shows recorded retries, distinct from the
+unnumbered configured-policy icon. Active graphs do not poll attempt history.
+
+Workflow definitions, run history, structured task outputs and report metadata
+live in PostgreSQL. Report payloads and artifacts use the configured `IBlobStore`;
+the local AppHost defaults to filesystem blobs beneath its local data root
+(`%LOCALAPPDATA%\wf\blobs` unless overridden). Reports use
+`reports/<runId>/<reportId>` keys. SDK `ctx.Reports.PublishAsync("json", ...)`
+uploads through the authorized report pipeline; workflows never write directly
+to server filesystem paths. Direct, serverless execution prints the JSON
+instead because report storage is not configured there.
+
 ### Environment-separated workflow sources
 
 Publishable sources use

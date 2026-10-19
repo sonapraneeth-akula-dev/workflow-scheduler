@@ -13,6 +13,8 @@ import { ErrorNotice } from "@/components/ErrorNotice"
 import { StatusBadge } from "@/components/StatusBadge"
 import { Button } from "@/components/ui/button"
 import { getVersionPlan, type VersionPlan } from "@/features/taskplan/api"
+import { TaskOutputs } from "@/features/runs/TaskOutputs"
+import { getTimeline, type TimelineAttempt } from "@/features/runs/timeline-api"
 import { executionStatuses, type RunSnapshot } from "@/lib/live/runApi"
 import { GraphNode, NodePolicyIcons } from "./GraphNode"
 import { layoutGraph, type GraphLayout } from "./layout"
@@ -82,11 +84,24 @@ const GraphEdges = memo(function GraphEdges({
 export function RunGraph({
   plan,
   run,
+  attempts,
 }: {
   plan: VersionPlan
   run: RunSnapshot
+  attempts?: TimelineAttempt[]
 }) {
   const layout = useMemo(() => layoutGraph(plan.nodes), [plan.nodes])
+  const retryCounts = useMemo(() => {
+    if (attempts === undefined) return undefined
+    const counts = new Map<string, number>()
+    const tasks = new Set<string>()
+    for (const attempt of attempts) {
+      if (tasks.has(attempt.taskKey))
+        counts.set(attempt.nodeKey, (counts.get(attempt.nodeKey) ?? 0) + 1)
+      tasks.add(attempt.taskKey)
+    }
+    return counts
+  }, [attempts])
   const policies = useMemo(
     () =>
       new Map(
@@ -199,6 +214,7 @@ export function RunGraph({
           <RotateCcwIcon aria-hidden="true" className="size-3.5" />
           Retries (failure or platform; hover for policy)
         </span>
+        <span>Numbered retry icon: recorded retries after completion.</span>
       </div>
       {layout.nodes.length === 0 ? (
         <p>No declared nodes.</p>
@@ -224,6 +240,9 @@ export function RunGraph({
                 position={position}
                 status={run.nodes[position.key]!}
                 {...policies.get(position.key)!}
+                retryCount={
+                  retryCounts ? (retryCounts.get(position.key) ?? 0) : undefined
+                }
                 selected={selected === position.key}
                 tabIndex={active === position.key ? 0 : -1}
                 onFocus={focus}
@@ -305,6 +324,11 @@ export function RunGraph({
                         <NodePolicyIcons
                           optional={item.failure === "Soft"}
                           retries={policies.get(item.key)!.retries}
+                          retryCount={
+                            retryCounts
+                              ? (retryCounts.get(item.key) ?? 0)
+                              : undefined
+                          }
                         />
                         <span className="sr-only">
                           {item.failure === "Soft"
@@ -312,6 +336,9 @@ export function RunGraph({
                             : "Required node (hard failure)."}{" "}
                           {policies.get(item.key)!.retries ??
                             "No retries configured."}
+                          {retryCounts
+                            ? ` Recorded retries: ${retryCounts.get(item.key) ?? 0}.`
+                            : ""}
                         </span>
                       </td>
                       <td className="px-3 py-2 [overflow-wrap:anywhere]">
@@ -348,12 +375,16 @@ export function RunGraph({
               ? "Optional node: soft-failure policy; still runs."
               : "Required node: hard-failure policy."}
           </p>
+          {retryCounts ? (
+            <p>Recorded retries: {retryCounts.get(node.key) ?? 0}.</p>
+          ) : null}
           {run.reusedNodes[node.key] ? (
             <p className="break-all">
               <StatusBadge status="Reused" />{" "}
               <Link to="/runs/$id" params={{ id: run.reusedNodes[node.key]! }}>
                 Original outputs and attempts for {node.key}
-              </Link>
+              </Link>{" "}
+              No original attempt data is substituted into this run.
             </p>
           ) : null}
           <p>
@@ -429,9 +460,35 @@ export function RunGraph({
               </ol>
             </div>
           )}
+          {!run.reusedNodes[node.key] && node.tasks.length > 0 ? (
+            <NodeDataflow
+              key={`${run.runId}/${node.key}`}
+              runId={run.runId}
+              nodeKey={node.key}
+            />
+          ) : null}
         </section>
       ) : null}
     </section>
+  )
+}
+
+function NodeDataflow({ runId, nodeKey }: { runId: string; nodeKey: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <details
+      className="mt-4"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="cursor-pointer font-semibold">
+        Inspect recorded inputs / outputs
+      </summary>
+      {open ? (
+        <div className="mt-3">
+          <TaskOutputs runId={runId} nodeKey={nodeKey} />
+        </div>
+      ) : null}
+    </details>
   )
 }
 
@@ -440,6 +497,27 @@ export function LiveRunGraph({ run }: { run: RunSnapshot }) {
     queryKey: ["version-plan", run.workflowId, run.versionId],
     queryFn: ({ signal }) =>
       getVersionPlan(run.workflowId, run.versionId, signal),
+  })
+  const history = useQuery({
+    queryKey: ["graph-attempts", run.runId],
+    enabled: run.status >= 3,
+    queryFn: async ({ signal }) => {
+      const timeline = await getTimeline(run.runId, signal)
+      if (
+        timeline.lastSeq < run.lastSeq ||
+        !["Succeeded", "Failed", "Aborted", "TimedOut"].includes(
+          timeline.status
+        )
+      )
+        throw new Error(
+          "The committed attempt history has not reached the terminal run state."
+        )
+      return timeline.attempts
+    },
+    staleTime: Infinity,
+    gcTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false,
   })
   if (query.error)
     return (
@@ -451,5 +529,27 @@ export function LiveRunGraph({ run }: { run: RunSnapshot }) {
       </div>
     )
   if (!query.data) return <p role="status">Loading pinned graph layout...</p>
-  return <RunGraph key={run.runId} plan={query.data} run={run} />
+  return (
+    <>
+      {run.status >= 3 && history.isPending ? (
+        <p role="status">Loading recorded retry history...</p>
+      ) : null}
+      {history.error ? (
+        <div>
+          <ErrorNotice error={history.error} />
+          <Button variant="outline" onClick={() => void history.refetch()}>
+            Retry recorded attempt history
+          </Button>
+        </div>
+      ) : null}
+      <RunGraph
+        key={run.runId}
+        plan={query.data}
+        run={run}
+        attempts={
+          history.isSuccess && !history.isFetching ? history.data : undefined
+        }
+      />
+    </>
+  )
 }
