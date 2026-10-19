@@ -828,6 +828,9 @@ Its separate **Date / time (IST)** column uses India Standard Time
 browser timezone. Cancellation audit times in this table use the same timezone;
 the original timestamp and full precision remain in each time's `datetime` and
 tooltip. Other pages retain their existing local-time display.
+The separate **Run ID** column contains the execution UUID and opens that run's
+details; it is not a test-definition ID. Schedule events without an execution
+show **No run** instead of a fabricated identifier.
 **Executed version** shows the semantic version from that run's immutable
 registration (for example `1.2.3`), not today's active release. The internal UUID
 stays in the version-details URL and tooltip; legacy missing registrations

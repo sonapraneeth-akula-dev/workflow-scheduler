@@ -207,7 +207,7 @@ export function HistoryTable({
               <tr>
                 {[
                   "Date / time (IST)",
-                  "Run",
+                  "Run ID",
                   "Status / Scheduling",
                   "Duration",
                   "Trigger",
@@ -247,10 +247,13 @@ export function HistoryTable({
                         {formatTimestamp(row.at, "Asia/Kolkata")}
                       </time>
                     </td>
-                    <th scope="row" className="space-y-2 p-3 font-normal">
+                    <th
+                      scope="row"
+                      className="p-3 font-normal whitespace-nowrap"
+                    >
                       {row.runId ? (
                         <Link
-                          className="block font-mono"
+                          className="font-mono"
                           to="/runs/$id"
                           params={{ id: row.runId }}
                         >

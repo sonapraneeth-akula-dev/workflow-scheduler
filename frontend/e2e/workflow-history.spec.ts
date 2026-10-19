@@ -21,6 +21,9 @@ async function openWorkflowHistory(page: Page) {
   ).toBeVisible()
   await expect(page.getByRole("table")).toBeVisible()
   await expect(
+    page.getByRole("columnheader", { name: "Run ID", exact: true })
+  ).toBeVisible()
+  await expect(
     page.getByRole("columnheader", { name: /Variables/ })
   ).toHaveCount(0)
 }
@@ -56,6 +59,13 @@ test("executed versions show semantic labels while preserving immutable version 
     .getByRole("row")
     .filter({ has: page.getByRole("link", { name: run.runId, exact: true }) })
   const version = row.getByRole("link", { name: run.version, exact: true })
+  await expect(
+    row.getByRole("rowheader").getByRole("link", {
+      name: run.runId,
+      exact: true,
+    })
+  ).toHaveAttribute("href", `/runs/${run.runId}`)
+  await expect(row.getByRole("rowheader").locator("time")).toHaveCount(0)
   await expect(version).toHaveAttribute(
     "href",
     new RegExp(`/versions/${run.versionId}$`)

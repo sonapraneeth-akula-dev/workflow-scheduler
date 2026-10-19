@@ -96,6 +96,21 @@ function page(items: HistoryRow[] = [row], nextCursor: string | null = null) {
 }
 describe("historical table", () => {
   beforeEach(() => vi.clearAllMocks())
+  it("labels execution UUIDs as Run ID in a separate column with their original run links", async () => {
+    vi.mocked(getHistory).mockResolvedValue(page())
+    show()
+    const table = await screen.findByRole("table")
+    expect(within(table).getAllByRole("columnheader")[1]).toHaveTextContent(
+      /^Run ID$/
+    )
+    const run = within(table).getByRole("rowheader", { name: row.runId! })
+    expect(within(run).getByRole("link", { name: row.runId! })).toHaveAttribute(
+      "href",
+      `/runs/${row.runId}`
+    )
+    expect(run.querySelector("time")).not.toBeInTheDocument()
+    expect(run).not.toHaveTextContent("IST")
+  })
   it.each([
     ["2026-10-18T23:59:59.007999Z", "19 Oct 2026, 05:29:59.007 IST"],
     ["2026-10-19T05:29:59.007999+05:30", "19 Oct 2026, 05:29:59.007 IST"],
@@ -208,6 +223,10 @@ describe("historical table", () => {
     )
     expect(screen.getByRole("table")).toHaveTextContent("overlap")
     expect(screen.getByRole("table")).toHaveTextContent("No run")
+    expect(screen.getByRole("rowheader", { name: "No run" })).toBeVisible()
+    expect(
+      screen.queryByRole("link", { name: /^019ed132/ })
+    ).not.toBeInTheDocument()
     expect(screen.getByRole("table")).toHaveTextContent("Not applicable")
     expect(screen.queryByText("0 ms")).not.toBeInTheDocument()
   })
