@@ -511,7 +511,7 @@ describe("live graph rendering", () => {
     }
   )
 
-  it("provides a keyboard-operable node table with live statuses and dependency conditions", async () => {
+  it("provides a keyboard-operable node table and preserves live selection when collapsed", async () => {
     const user = userEvent.setup()
     const { rerender } = render(<RunGraph plan={plan} run={run} />)
     expect(
@@ -559,10 +559,22 @@ describe("live graph rendering", () => {
       .closest("tr")
     expect(selected).toHaveTextContent("Succeeded")
     expect(selected).toHaveAttribute("data-selected", "true")
+    expect(
+      within(table).getByRole("button", { name: "Inspect node finish" })
+    ).toHaveFocus()
     await user.click(screen.getByText("Node list"))
     expect(
       screen.queryByRole("table", { name: "Run nodes" })
     ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("region", { name: "Selected node finish" })
+    ).toBeVisible()
+    await user.click(screen.getByText("Node list"))
+    expect(
+      within(await screen.findByRole("table", { name: "Run nodes" }))
+        .getByRole("button", { name: "Inspect node finish" })
+        .closest("tr")
+    ).toHaveAttribute("data-selected", "true")
   })
 
   it.each([

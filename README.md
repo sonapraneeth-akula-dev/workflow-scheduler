@@ -844,7 +844,13 @@ observed fetch attempt count; its `expectedRequiredOutcome` describes the
 sample, not an authoritative final run status. Failed-attempt outputs are
 retained separately rather than propagated to downstream node inputs.
 
-In **Graph**, select a node and expand **Inspect recorded inputs / outputs**.
+**Graph** uses balanced columns on screens at least 1280px wide: dependency
+graph on the left, node list and selected-node inspector on the right.
+Smaller screens stack the graph, list and inspector vertically. Expand **Node
+list** to see the table; graph/table scrolling stays inside each panel, and the
+table header stays visible while scrolling.
+
+Select a node and expand **Inspect recorded inputs / outputs**.
 The attempt selector includes failed and retried attempts for that node, with
 no substitution between attempts or source runs. Inputs appear only when the
 workflow explicitly records them; these demos record both `inputs` and

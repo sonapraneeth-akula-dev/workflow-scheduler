@@ -14,7 +14,9 @@ const trendsOrigin = process.env.WF_TRENDS_ORIGIN
 const dashboardOrigin = process.env.WF_DASHBOARD_ORIGIN
 const subscriptionOrigin = process.env.WF_SUBSCRIPTION_ORIGIN
 const jsonDataflowOrigin = process.env.WF_JSON_DATAFLOW_ORIGIN
+const graphLayoutOrigin = process.env.WF_GRAPH_LAYOUT_ORIGIN
 const fixtureOrigin =
+  graphLayoutOrigin ??
   jsonDataflowOrigin ??
   logsOrigin ??
   systemEventsOrigin ??
@@ -34,6 +36,7 @@ const fixtureOrigin =
 export default defineConfig({
   testDir: "./e2e",
   testIgnore: [
+    ...(!graphLayoutOrigin ? ["**/run-graph-layout.spec.ts"] : []),
     ...(!process.env.WF_FAILURE_RUNS ? ["**/run-failures.spec.ts"] : []),
     ...(!jsonDataflowOrigin ? ["**/json-dataflow.spec.ts"] : []),
     ...(!subscriptionOrigin ? ["**/subscriptions.spec.ts"] : []),
