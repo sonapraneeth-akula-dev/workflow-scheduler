@@ -11,13 +11,8 @@ namespace Wf.Integration.Tests.Auth;
 
 public sealed partial class AuthorizationMatrixTests
 {
-    [Theory]
-    [InlineData(null, 14)]
-    [InlineData("7d", 7)]
-    [InlineData("14d", 14)]
-    [InlineData("30d", 30)]
-    [InlineData("90d", 90)]
-    public async Task ServiceHistory_counts_all_statuses_across_series_and_manual_runs_with_real_daily_gaps(string? window, int days)
+    [Fact]
+    public async Task ServiceHistory_returns_latest_instances_across_series_and_manual_runs_without_a_date_cutoff()
     {
         var group = Guid.NewGuid();
         var seed = await Seed(RegistryRole.Viewer, group, false);
@@ -28,7 +23,7 @@ public sealed partial class AuthorizationMatrixTests
         await CatalogWorkflow(seed.OtherType + "/hidden");
         var clock = new ManualTimeProvider();
         var now = clock.GetUtcNow();
-        var first = now.Date.AddDays(1 - days);
+        var first = now.Date.AddDays(-45);
         var ids = new List<Guid>();
         foreach (var status in Enum.GetValues<RunStatus>())
             ids.Add(await ServiceHistoryRun(workflow, new(first, TimeSpan.Zero), status,
@@ -36,30 +31,21 @@ public sealed partial class AuthorizationMatrixTests
         var latest = await ServiceHistoryRun(workflow, now.AddMinutes(1), RunStatus.Succeeded, Guid.NewGuid(),
             now.AddMinutes(1).AddSeconds(1), now.AddMinutes(1).AddSeconds(2));
         ids.Add(latest);
-        await ServiceHistoryRun(workflow, new(first.AddTicks(-1), TimeSpan.Zero), RunStatus.Failed, null);
-        await ServiceHistoryRun(workflow, new(now.Date.AddDays(1), TimeSpan.Zero), RunStatus.Failed, null);
         await ServiceHistoryRun(seed.Team + "/sibling/hidden", now, RunStatus.Failed, null);
         await ServiceHistoryRun(seed.OtherType + "/hidden", now, RunStatus.Failed, null);
         await using var server = await Server.Start(database.DataSource,
             configureServices: services => services.AddSingleton<TimeProvider>(clock));
-        var path = $"/api/v1/service-history?team={seed.Team}" + (window is null ? "" : $"&window={window}");
+        var path = $"/api/v1/service-history?team={seed.Team}";
         using var response = await server.GetPath(path, server.Token(group: group));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.True(response.Headers.CacheControl!.NoStore);
         Assert.Equal("nosniff", Assert.Single(response.Headers.GetValues("X-Content-Type-Options")));
         var page = (await response.Content.ReadFromJsonAsync<ServiceHistoryPage>(TestContext.Current.CancellationToken))!;
         Assert.Equal(seed.Team, page.Team);
-        Assert.Equal(window ?? "14d", page.Window);
-        Assert.Equal(days, page.To.DayNumber - page.From.DayNumber);
+        Assert.Equal(10, page.RunLimit);
         Assert.Equal(2, page.Items.Count);
         var item = Assert.Single(page.Items, entry => entry.Workflow.Id == workflow);
-        Assert.Equal(days, item.Days.Count);
-        Assert.Equal(page.From, item.Days[0].Day);
-        Assert.Equal(page.To.AddDays(-1), item.Days[^1].Day);
-        Assert.All(Enum.GetNames<RunStatus>(), status => Assert.Equal(1, item.Days[0].Counts[status]));
-        Assert.Equal(1, item.Days[^1].Counts["Succeeded"]);
-        Assert.All(item.Days.Skip(1).SkipLast(1), day => Assert.Empty(day.Counts));
-        Assert.Equal(8, item.Days.Sum(day => day.Counts.Values.Sum()));
+        Assert.Equal(8, item.Runs.Count);
         Assert.Equal(ids.Order(), item.Runs.Select(run => run.Id).Order());
         Assert.Equal(latest, item.Runs[0].Id);
         Assert.Equal(now.AddMinutes(1).AddSeconds(1), item.Runs[0].StartedAt);
@@ -67,15 +53,18 @@ public sealed partial class AuthorizationMatrixTests
         Assert.All(Enum.GetNames<RunStatus>(), status => Assert.Contains(item.Runs, run => run.Status == status));
         var never = Assert.Single(page.Items, entry => entry.Workflow.Name == "b-never");
         Assert.Null(never.Workflow.LatestRun);
-        Assert.All(never.Days, day => Assert.Empty(day.Counts));
         Assert.Empty(never.Runs);
         var json = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         foreach (var secret in new[] { seed.Other, "hidden", "private-payload", "variables", "roleBindings", "packageUri" })
             Assert.DoesNotContain(secret, json);
     }
 
-    [Fact]
-    public async Task ServiceHistory_limits_instances_per_workflow_without_truncating_counts_and_preserves_precise_order()
+    [Theory]
+    [InlineData(null, 10)]
+    [InlineData("1", 1)]
+    [InlineData("25", 25)]
+    [InlineData("100", 100)]
+    public async Task ServiceHistory_limits_instances_per_workflow_and_preserves_precise_order(string? runLimit, int limit)
     {
         var group = Guid.NewGuid();
         var seed = await Seed(RegistryRole.Viewer, group, false);
@@ -98,15 +87,16 @@ public sealed partial class AuthorizationMatrixTests
         }
         await using var server = await Server.Start(database.DataSource,
             configureServices: services => services.AddSingleton<TimeProvider>(clock));
-        using var response = await server.GetPath("/api/v1/service-history?team=" + seed.Team, server.Token(group: group));
+        var path = "/api/v1/service-history?team=" + seed.Team + (runLimit is null ? "" : "&runLimit=" + runLimit);
+        using var response = await server.GetPath(path, server.Token(group: group));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var page = (await response.Content.ReadFromJsonAsync<ServiceHistoryPage>(TestContext.Current.CancellationToken))!;
         Assert.Equal(2, page.Items.Count);
+        Assert.Equal(limit, page.RunLimit);
         foreach (var item in page.Items)
         {
             var instances = expected[item.Workflow.Id];
-            Assert.Equal(instances.Count, item.Days.Sum(day => day.Counts.Values.Sum()));
-            Assert.Equal(instances.OrderByDescending(run => run.CreatedAt).ThenByDescending(run => run.Id).Take(50),
+            Assert.Equal(instances.OrderByDescending(run => run.CreatedAt).ThenByDescending(run => run.Id).Take(limit),
                 item.Runs);
         }
     }
@@ -123,17 +113,14 @@ public sealed partial class AuthorizationMatrixTests
         using var response = await server.GetPath(path, jwt);
         var first = (await response.Content.ReadFromJsonAsync<ServiceHistoryPage>(TestContext.Current.CancellationToken))!;
         Assert.Equal(["a", "c"], first.Items.Select(item => item.Workflow.Name));
-        Assert.Equal("14d", first.Window);
-        Assert.All(first.Items, item => Assert.Equal(14, item.Days.Count));
+        Assert.Equal(10, first.RunLimit);
         Assert.All(first.Items, item => Assert.Empty(item.Runs));
         Assert.NotNull(first.NextCursor);
         await CatalogWorkflow(seed.Type + "/b");
         using var nextResponse = await server.GetPath(path + "&cursor=" + first.NextCursor, jwt);
         var next = (await nextResponse.Content.ReadFromJsonAsync<ServiceHistoryPage>(TestContext.Current.CancellationToken))!;
         Assert.Equal("e", Assert.Single(next.Items).Workflow.Name);
-        Assert.Equal(first.From, next.From);
-        Assert.Equal(first.To, next.To);
-        Assert.Equal(14, next.Items[0].Days.Count);
+        Assert.Equal(first.RunLimit, next.RunLimit);
         Assert.Null(next.NextCursor);
         foreach (var token in new[]
         {
@@ -158,6 +145,13 @@ public sealed partial class AuthorizationMatrixTests
     [InlineData("?team=demo&window=")]
     [InlineData("?team=demo&window=14d&window=14d")]
     [InlineData("?team=demo&window=7d&window=30d")]
+    [InlineData("?team=demo&runLimit=0")]
+    [InlineData("?team=demo&runLimit=101")]
+    [InlineData("?team=demo&runLimit=-1")]
+    [InlineData("?team=demo&runLimit=1.5")]
+    [InlineData("?team=demo&runLimit=10&runLimit=20")]
+    [InlineData("?team=demo&runLimit=")]
+    [InlineData("?team=demo&runLimit=all")]
     [InlineData("?team=demo&team=other")]
     [InlineData("?team=demo&status=Running")]
     [InlineData("?team=demo&limit=101")]

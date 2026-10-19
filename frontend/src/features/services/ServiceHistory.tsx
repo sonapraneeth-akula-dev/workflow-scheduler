@@ -14,6 +14,7 @@ import {
 } from "@/features/catalog/api"
 import { useCatalogLive } from "@/features/catalog/useCatalogLive"
 import { formatTimestamp } from "@/lib/timestamps"
+import { useServiceHistoryPreferences } from "@/lib/ServiceHistoryPreferences"
 import {
   getServiceHistory,
   serviceSearchSchema,
@@ -85,10 +86,12 @@ function WorkflowGroup({
   label,
   entries,
   view,
+  runLimit,
 }: {
   label: string
   entries: ServiceWorkflow[]
   view: ServiceSearch["view"]
+  runLimit: number
 }) {
   const id = useId()
   return (
@@ -106,7 +109,7 @@ function WorkflowGroup({
       </div>
       {view === "cards" ? (
         <ul className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {entries.map(({ workflow, days, runs }) => (
+          {entries.map(({ workflow, runs }) => (
             <li
               key={workflow.id}
               className="min-w-0 space-y-4 border bg-background p-3"
@@ -129,7 +132,7 @@ function WorkflowGroup({
                 <p className="font-medium">Last run</p>
                 <LastRun workflow={workflow} />
               </div>
-              <RunHistoryStrip days={days} runs={runs} />
+              <RunHistoryStrip runs={runs} runLimit={runLimit} />
               <WorkflowActions workflow={workflow} />
             </li>
           ))}
@@ -161,7 +164,7 @@ function WorkflowGroup({
               </tr>
             </thead>
             <tbody>
-              {entries.map(({ workflow, days, runs }) => (
+              {entries.map(({ workflow, runs }) => (
                 <tr
                   key={workflow.id}
                   className="border-b last:border-0 odd:bg-card even:bg-muted/50"
@@ -181,7 +184,7 @@ function WorkflowGroup({
                     <LastRun workflow={workflow} />
                   </td>
                   <td className="min-w-64 p-3">
-                    <RunHistoryStrip days={days} runs={runs} />
+                    <RunHistoryStrip runs={runs} runLimit={runLimit} />
                   </td>
                   <td className="p-3">
                     <WorkflowActions workflow={workflow} />
@@ -205,6 +208,7 @@ export function ServiceHistory({
   search: ServiceSearch
   onChange: (next: ServiceSearch) => void
 }) {
+  const history = useServiceHistoryPreferences()
   const types = useQuery({
     queryKey: ["catalog", "team", team, "filter-types"],
     queryFn: ({ signal }) => getTypes(team, signal),
@@ -216,11 +220,11 @@ export function ServiceHistory({
       team,
       "service-history",
       search.type,
-      search.window,
+      history.runLimit,
     ],
     initialPageParam: null as ServiceCursor,
     queryFn: ({ pageParam, signal }) =>
-      getServiceHistory(team, search.type, search.window, pageParam, signal),
+      getServiceHistory(team, search.type, history.runLimit, pageParam, signal),
     getNextPageParam: (page): ServiceCursor | undefined =>
       page.nextCursor
         ? { cursor: page.nextCursor, afterId: page.items.at(-1)!.workflow.id }
@@ -260,7 +264,7 @@ export function ServiceHistory({
             {team} service history
           </h1>
           <p className="text-sm text-muted-foreground">
-            Run instances: last 14 days (UTC)
+            Run instances: latest {history.runLimit} runs per workflow
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -359,9 +363,10 @@ export function ServiceHistory({
           ? `metadata key "${search.groupKey}"`
           : "workflow type"}
         . Each colored icon is one run, newest first; select it to open that
-        instance in a new tab. Up to 50 recent runs per workflow are shown;
-        History contains the full list. Success rates include all completed runs
-        in the window.
+        instance in a new tab. Up to {history.runLimit} recent runs per workflow
+        are shown, regardless of age; change this in your account Settings.
+        History contains the full list. Success rates use the completed runs
+        shown.
       </p>
       <div
         className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"
@@ -379,6 +384,7 @@ export function ServiceHistory({
           </span>
         ))}
       </div>
+      {history.error ? <ErrorNotice error={history.error} /> : null}
       {query.isPending ? <p role="status">Loading service history...</p> : null}
       {query.error ? <ErrorNotice error={query.error} /> : null}
       {types.error ? <ErrorNotice error={types.error} /> : null}
@@ -396,6 +402,7 @@ export function ServiceHistory({
         )
         .map(([value, entries]) => (
           <WorkflowGroup
+            runLimit={history.runLimit}
             key={value === undefined ? "missing" : JSON.stringify(value)}
             label={
               value === undefined

@@ -39,7 +39,7 @@ test("navbar discovers team/type service views and restores format with individu
     page.getByRole("combobox", { name: "Workflow type", exact: true })
   ).toHaveValue(type)
   await expect(
-    page.getByText("Run instances: last 14 days (UTC)")
+    page.getByText("Run instances: latest 10 runs per workflow")
   ).toBeVisible()
   await expect(page.getByLabel("Health window")).toHaveCount(0)
   const group = page.getByRole("region", { name: type, exact: true })
@@ -99,7 +99,7 @@ test("navbar discovers team/type service views and restores format with individu
   await expect.poll(() => new URL(page.url()).pathname).toBe(historyPath)
 })
 
-test("legacy service URLs use two weeks in both formats without dropping metadata grouping", async ({
+test("legacy service URLs use the personal run count without a date cutoff or dropping metadata grouping", async ({
   page,
 }) => {
   await page.goto("/service-history")
@@ -117,20 +117,18 @@ test("legacy service URLs use two weeks in both formats without dropping metadat
       const request = new URL(response.url())
       return (
         request.pathname === "/api/v1/service-history" &&
-        request.searchParams.get("window") === "14d" &&
+        request.searchParams.get("runLimit") === "10" &&
+        !request.searchParams.has("window") &&
         response.ok()
       )
     })
     await page.goto(url.toString())
     const response = await (await health).json()
-    expect(response.window).toBe("14d")
+    expect(response.runLimit).toBe(10)
     expect(response.items.length).toBeGreaterThan(0)
     for (const item of response.items) {
-      expect(item.days).toHaveLength(14)
-      expect(item.days[0].day).toBe(response.from)
-      expect(Date.parse(response.to) - Date.parse(response.from)).toBe(
-        14 * 86400000
-      )
+      expect(item.runs.length).toBeLessThanOrEqual(10)
+      expect(item).not.toHaveProperty("days")
     }
     await expect(page.getByLabel("Container grouping")).toHaveValue(
       "metadata:environment"
@@ -149,8 +147,58 @@ test("legacy service URLs use two weeks in both formats without dropping metadat
     await expect(page.locator("main tbody tr [data-run-id]")).toHaveCount(
       totalRuns
     )
-    expect(new URL(page.url()).searchParams.get("window")).toBe("14d")
+    expect(new URL(page.url()).searchParams.has("window")).toBe(false)
   }
+})
+
+test("personal Settings changes the recent run count and persists across reloads", async ({
+  page,
+}) => {
+  await page.goto("/t/demo/services")
+  await expect(
+    page.getByText("Run instances: latest 10 runs per workflow")
+  ).toBeVisible()
+  await page.getByRole("button", { name: /^Account menu for / }).click()
+  await page.getByRole("menuitem", { name: "Settings", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Settings", exact: true })
+  const count = dialog.getByRole("spinbutton", {
+    name: "Recent runs per workflow",
+  })
+  await expect(count).toHaveValue("10")
+  await count.fill("25")
+  await dialog
+    .getByRole("button", { name: "Save service history settings" })
+    .click()
+  await expect(dialog.getByRole("status")).toHaveText(
+    "Personal run-count setting saved."
+  )
+  await dialog.getByRole("button", { name: "Close account dialog" }).click()
+  await expect(
+    page.getByText("Run instances: latest 25 runs per workflow")
+  ).toBeVisible()
+  await page.reload()
+  await expect(
+    page.getByText("Run instances: latest 25 runs per workflow")
+  ).toBeVisible()
+  const card = page
+    .getByRole("link", {
+      name: /^History for demo\/release\/five-minute-demo$/,
+    })
+    .locator("..")
+    .locator("..")
+  await expect(card.locator("[data-run-id]")).toHaveCount(25)
+  await page.getByRole("radio", { name: "Table format" }).click()
+  await expect(page.locator("main tbody tr [data-run-id]")).toHaveCount(25)
+  await page.getByRole("button", { name: /^Account menu for / }).click()
+  await page.getByRole("menuitem", { name: "Settings", exact: true }).click()
+  await expect(count).toHaveValue("25")
+  await count.fill("10")
+  await dialog
+    .getByRole("button", { name: "Save service history settings" })
+    .click()
+  await expect(dialog.getByRole("status")).toHaveText(
+    "Personal run-count setting saved."
+  )
 })
 
 test("metadata container grouping survives format changes and reload without dropping workflows", async ({

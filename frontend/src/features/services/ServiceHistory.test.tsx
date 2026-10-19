@@ -14,6 +14,10 @@ import { getTypes } from "@/features/catalog/api"
 import { useLive } from "@/lib/live/useLive"
 import { getServiceHistory, type ServiceSearch } from "./api"
 import { ServiceHistory } from "./ServiceHistory"
+import {
+  ServiceHistoryPreferences,
+  profilePreferenceKey,
+} from "@/lib/ServiceHistoryPreferences"
 
 vi.mock("./api", async (original) => ({
   ...(await original<typeof import("./api")>()),
@@ -49,13 +53,12 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
 }))
-const search: ServiceSearch = { window: "14d", view: "cards", groupBy: "type" }
+const search: ServiceSearch = { view: "cards", groupBy: "type" }
+const session = { displayName: "Local developer", isDevelopment: true }
 const response: Awaited<ReturnType<typeof getServiceHistory>> = {
   team: "team",
   type: null,
-  window: "14d",
-  from: "2026-10-05",
-  to: "2026-10-19",
+  runLimit: 10,
   nextCursor: null,
   items: ["build", "never"].map((name) => ({
     workflow: {
@@ -80,11 +83,6 @@ const response: Awaited<ReturnType<typeof getServiceHistory>> = {
               endedAt: null,
             },
     },
-    days: Array.from({ length: 14 }, (_, index) => ({
-      day: `2026-10-${String(5 + index).padStart(2, "0")}`,
-      counts:
-        name === "never" ? {} : index === 13 ? { Succeeded: 2, Failed: 1 } : {},
-    })),
     runs:
       name === "never"
         ? []
@@ -106,7 +104,9 @@ function show() {
   const change = vi.fn()
   const tree = (next = search) => (
     <QueryClientProvider client={client}>
-      <ServiceHistory team="team" search={next} onChange={change} />
+      <ServiceHistoryPreferences session={session}>
+        <ServiceHistory team="team" search={next} onChange={change} />
+      </ServiceHistoryPreferences>
     </QueryClientProvider>
   )
   const rendered = render(tree())
@@ -118,6 +118,7 @@ function show() {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  localStorage.clear()
   vi.mocked(getServiceHistory).mockResolvedValue(response)
   vi.mocked(getTypes).mockResolvedValue([
     {
@@ -150,7 +151,7 @@ it("renders individual run outcomes with exact new-tab links, last run and full 
   expect(card.querySelectorAll('[data-run-status="Succeeded"]')).toHaveLength(2)
   expect(card.querySelectorAll('[data-run-status="Failed"]')).toHaveLength(1)
   expect(within(card).getByRole("group")).toHaveAccessibleName(
-    "Run history: 3 runs in 14 UTC days, newest first"
+    "Run history: 3 recent runs, newest first"
   )
   const runLinks = within(card).getAllByRole("link", {
     name: /Opens in a new tab/,
@@ -172,7 +173,7 @@ it("renders individual run outcomes with exact new-tab links, last run and full 
   expect(card.querySelector("details")).toBeNull()
   const never = screen.getByRole("heading", { name: "never" }).closest("li")!
   expect(never.querySelectorAll("[data-run-id]")).toHaveLength(0)
-  expect(within(never).getByText("No runs in the last 14 days")).toBeVisible()
+  expect(within(never).getByText("No runs", { exact: true })).toBeVisible()
   expect(within(never).getByText("No completed runs")).toBeVisible()
   expect(
     within(never).getByRole("button", { name: "View last run" })
@@ -219,7 +220,7 @@ it("switches to the striped semantic table without changing the cached health qu
   expect(getServiceHistory).toHaveBeenCalledTimes(1)
 })
 
-it("keeps a fixed two-week health window while changing type and view through the URL callback", async () => {
+it("uses the personal default run count while changing type and view through the URL callback", async () => {
   const shown = show()
   await screen.findByText("build", { exact: true })
   await userEvent.selectOptions(
@@ -228,38 +229,50 @@ it("keeps a fixed two-week health window while changing type and view through th
   )
   expect(shown.change).toHaveBeenLastCalledWith({ ...search, type: "release" })
   expect(screen.queryByLabelText("Health window")).not.toBeInTheDocument()
-  expect(screen.getByText("Run instances: last 14 days (UTC)")).toBeVisible()
+  expect(
+    screen.getByText("Run instances: latest 10 runs per workflow")
+  ).toBeVisible()
+  expect(getServiceHistory).toHaveBeenCalledWith(
+    "team",
+    undefined,
+    10,
+    null,
+    expect.any(AbortSignal)
+  )
   await userEvent.click(screen.getByRole("radio", { name: "Table format" }))
   expect(shown.change).toHaveBeenLastCalledWith({ ...search, view: "table" })
 })
 
-it("labels the 50-run limit while calculating success across the full window", async () => {
+it("uses a saved personal run limit and calculates success from the shown instances", async () => {
+  localStorage.setItem(profilePreferenceKey(session)!, "25")
   const entry = response.items[0]!
   vi.mocked(getServiceHistory).mockResolvedValue({
     ...response,
+    runLimit: 25,
     items: [
       {
         ...entry,
-        days: entry.days.map((day, index) => ({
-          ...day,
-          counts: index === 13 ? { Succeeded: 60, Failed: 20 } : {},
-        })),
-        runs: Array.from({ length: 50 }, (_, index) => ({
+        runs: Array.from({ length: 25 }, (_, index) => ({
           ...entry.runs[0]!,
           id: `019ed132-2f44-7000-8000-${(100 - index).toString(16).padStart(12, "0")}`,
-          status: "Succeeded",
+          status: index < 20 ? "Succeeded" : "Failed",
         })),
       },
     ],
   })
   show()
-  expect(
-    await screen.findByText("Latest 50 of 80 runs / 14 days")
-  ).toBeVisible()
+  expect(await screen.findByText("Latest 25 runs / up to 25")).toBeVisible()
   expect(
     screen.getAllByRole("link", { name: /Opens in a new tab/ })
-  ).toHaveLength(50)
-  expect(screen.getByText("75% completed successfully")).toBeVisible()
+  ).toHaveLength(25)
+  expect(screen.getByText("80% completed successfully")).toBeVisible()
+  expect(getServiceHistory).toHaveBeenCalledWith(
+    "team",
+    undefined,
+    25,
+    null,
+    expect.any(AbortSignal)
+  )
 })
 
 it("distinguishes every outcome with an accessible status icon and matching color", async () => {

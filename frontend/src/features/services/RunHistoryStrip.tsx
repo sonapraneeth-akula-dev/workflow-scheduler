@@ -22,32 +22,17 @@ const outcomes = {
 }
 
 export function RunHistoryStrip({
-  days,
   runs,
-}: Pick<ServiceWorkflow, "days" | "runs">) {
-  const total = days.reduce(
-    (sum, day) =>
-      sum +
-      Object.values(day.counts).reduce((count, value) => count + value, 0),
-    0
-  )
-  const completed = days.reduce(
-    (sum, { counts }) =>
-      sum +
-      (counts.Succeeded ?? 0) +
-      (counts.Failed ?? 0) +
-      (counts.TimedOut ?? 0) +
-      (counts.Aborted ?? 0),
-    0
-  )
-  const succeeded = days.reduce(
-    (sum, day) => sum + (day.counts.Succeeded ?? 0),
-    0
-  )
+  runLimit,
+}: Pick<ServiceWorkflow, "runs"> & { runLimit: number }) {
+  const completed = runs.filter((run) =>
+    ["Succeeded", "Failed", "TimedOut", "Aborted"].includes(run.status)
+  ).length
+  const succeeded = runs.filter((run) => run.status === "Succeeded").length
   return (
     <div
       role="group"
-      aria-label={`Run history: ${total} runs in ${days.length} UTC days, newest first`}
+      aria-label={`Run history: ${runs.length} recent runs, newest first`}
       data-run-history
       className="min-w-40 space-y-2"
     >
@@ -75,16 +60,14 @@ export function RunHistoryStrip({
           })}
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          No runs in the last {days.length} days
-        </p>
+        <p className="text-sm text-muted-foreground">No runs</p>
       )}
       <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span>
-          {total > runs.length ? `Latest ${runs.length} of ${total}` : total}{" "}
-          {total === 1 ? "run" : "runs"} / {days.length} days
+          Latest {runs.length} {runs.length === 1 ? "run" : "runs"} / up to{" "}
+          {runLimit}
         </span>
-        <span title="All completed runs in this window, including those not shown">
+        <span title="Completed runs among the recent instances shown">
           {completed
             ? `${new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 1 }).format(succeeded / completed)} completed successfully`
             : "No completed runs"}

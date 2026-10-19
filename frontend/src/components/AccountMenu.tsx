@@ -12,11 +12,19 @@ import { cn } from "cn"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { getProfileAccess } from "@/lib/auth/profile-access"
 import type { Session } from "@/lib/auth/session"
 import type { ThemePreference } from "@/lib/useThemePreference"
+import { useServiceHistoryPreferences } from "@/lib/ServiceHistoryPreferences"
 
 const menuItem =
   "flex cursor-pointer items-center gap-2 px-3 py-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-50 [&_svg]:size-4"
@@ -156,6 +164,9 @@ function AccountSettings({
   onThemeChange: (value: ThemePreference) => void
   themeError?: Error | null
 }) {
+  const history = useServiceHistoryPreferences()
+  const [saved, setSaved] = useState(false)
+  const runLimitId = "service-run-limit"
   return (
     <div className="flex flex-col gap-3">
       <h3 id="appearance-heading" className="font-semibold">
@@ -180,6 +191,48 @@ function AccountSettings({
         system preference.
       </p>
       {themeError ? <ErrorNotice error={themeError} /> : null}
+      <form
+        aria-label="Personal service history settings"
+        onSubmit={(event) => {
+          event.preventDefault()
+          const value = Number(
+            new FormData(event.currentTarget).get("runLimit")
+          )
+          setSaved(history.setRunLimit(value))
+        }}
+      >
+        <FieldGroup>
+          <Field data-invalid={history.error !== null}>
+            <FieldLabel htmlFor={runLimitId}>
+              Recent runs per workflow
+            </FieldLabel>
+            <Input
+              id={runLimitId}
+              name="runLimit"
+              type="number"
+              min={1}
+              max={100}
+              step={1}
+              required
+              key={history.runLimit}
+              defaultValue={history.runLimit}
+              aria-invalid={history.error !== null}
+              aria-describedby="service-run-limit-description"
+              onChange={() => setSaved(false)}
+            />
+            <FieldDescription id="service-run-limit-description">
+              Show the latest 1-100 runs, regardless of age. Default: 10. Saved
+              for your profile in this browser; other profiles keep their own
+              setting.
+            </FieldDescription>
+          </Field>
+          {history.error ? <ErrorNotice error={history.error} /> : null}
+          {saved ? (
+            <p role="status">Personal run-count setting saved.</p>
+          ) : null}
+          <Button type="submit">Save service history settings</Button>
+        </FieldGroup>
+      </form>
     </div>
   )
 }
@@ -326,7 +379,7 @@ export function AccountMenu({
             <Dialog.Description className="text-sm text-muted-foreground">
               {panel === "profile"
                 ? "Your identity and current server-verified access."
-                : "Preferences for this browser."}
+                : "Personal preferences for this browser."}
             </Dialog.Description>
             {panel === "profile" ? (
               <ProfileDetails session={session} />

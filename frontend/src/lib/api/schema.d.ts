@@ -41,13 +41,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Authorized, team-scoped workflows with daily counts and the latest 50 run instances per workflow across all series and manual runs. window=7d|14d|30d|90d (default 14d) includes the current UTC run day; from inclusive, to exclusive. Each day records all named run statuses; no runs means empty counts, not success. Run instances share the counts' snapshot and window, ordered by createdAt then id descending. Uses the same exact team/type, keyset cursor and metadata filters as the workflow catalogue. No payloads or capabilities. */
+        /** @description Authorized, team-scoped workflows with their latest run instances across all series and manual runs, without a date cutoff. runLimit=1..100 (default 10) applies separately to each workflow; fewer runs means fewer instances, never fabricated outcomes. Run instances are ordered by createdAt then id descending. Uses the same exact team/type, keyset cursor and metadata filters as the workflow catalogue. No payloads or capabilities. */
         get: {
             parameters: {
                 query: {
                     team: string;
                     type?: string;
-                    window?: string;
+                    runLimit?: number;
                     cursor?: string;
                     limit?: number;
                     "meta.*"?: string;
@@ -6194,17 +6194,13 @@ export interface components {
         ServiceHistoryPage: {
             team: string;
             type: null | string;
-            window: string;
-            /** Format: date */
-            from: string;
-            /** Format: date */
-            to: string;
+            /** Format: int32 */
+            runLimit: number | string;
             items: components["schemas"]["ServiceWorkflow"][];
             nextCursor: null | string;
         };
         ServiceWorkflow: {
             workflow: components["schemas"]["CatalogWorkflow"];
-            days: components["schemas"]["WorkflowHealthDay"][];
             runs: components["schemas"]["CatalogLatestRun"][];
         };
         SubscriptionPage: {
@@ -6411,13 +6407,6 @@ export interface components {
         };
         /** @enum {string} */
         VariableType: "String" | "Int" | "Long" | "Double" | "Bool" | "Enum" | "StringList" | "Duration" | "Secret";
-        WorkflowHealthDay: {
-            /** Format: date */
-            day: string;
-            counts: {
-                [key: string]: number | string;
-            };
-        };
         WorkflowMetadata: {
             type: string;
             values: {

@@ -24,16 +24,10 @@ function page() {
   return {
     team: "team",
     type: null,
-    window: "14d",
-    from: "2026-10-05",
-    to: "2026-10-19",
+    runLimit: 10,
     items: [
       {
         workflow,
-        days: Array.from({ length: 14 }, (_, index) => ({
-          day: `2026-10-${String(5 + index).padStart(2, "0")}`,
-          counts: index ? {} : { Succeeded: 1 },
-        })),
         runs: [
           {
             id: "019ed132-2f44-7000-8000-000000000002",
@@ -53,19 +47,19 @@ function respond(data: unknown) {
   get.mockResolvedValue({ data, response: new Response() })
 }
 
-it("uses exact team, optional type, explicit window, bounded page and cancellation", async () => {
+it("uses exact team, optional type, personal run limit, bounded page and cancellation", async () => {
   const data = page()
   respond(data)
   const signal = new AbortController().signal
-  expect(
-    await getServiceHistory("team", undefined, "14d", null, signal)
-  ).toEqual(data)
+  expect(await getServiceHistory("team", undefined, 10, null, signal)).toEqual(
+    data
+  )
   expect(get).toHaveBeenCalledWith("/api/v1/service-history", {
     params: {
       query: {
         team: "team",
         type: undefined,
-        window: "14d",
+        runLimit: 10,
         limit: 50,
         cursor: undefined,
       },
@@ -77,55 +71,10 @@ it("uses exact team, optional type, explicit window, bounded page and cancellati
 it.each([
   (data: ReturnType<typeof page>) => ({ ...data, team: "foreign" }),
   (data: ReturnType<typeof page>) => ({ ...data, type: "foreign" }),
-  (data: ReturnType<typeof page>) => ({ ...data, window: "30d" }),
-  (data: ReturnType<typeof page>) => ({ ...data, to: data.from }),
+  (data: ReturnType<typeof page>) => ({ ...data, runLimit: 25 }),
   (data: ReturnType<typeof page>) => ({
     ...data,
     items: [{ ...data.items[0], workflow: { ...workflow, team: "foreign" } }],
-  }),
-  (data: ReturnType<typeof page>) => ({
-    ...data,
-    items: [{ ...data.items[0], days: [] }],
-  }),
-  (data: ReturnType<typeof page>) => ({
-    ...data,
-    items: [{ ...data.items[0], days: data.items[0]!.days.toReversed() }],
-  }),
-  (data: ReturnType<typeof page>) => ({
-    ...data,
-    items: [
-      {
-        ...data.items[0],
-        days: data.items[0]!.days.map((day) => ({
-          ...day,
-          counts: { Succeeded: -1 },
-        })),
-      },
-    ],
-  }),
-  (data: ReturnType<typeof page>) => ({
-    ...data,
-    items: [
-      {
-        ...data.items[0],
-        days: data.items[0]!.days.map((day) => ({
-          ...day,
-          counts: { Unknown: 1 },
-        })),
-      },
-    ],
-  }),
-  (data: ReturnType<typeof page>) => ({
-    ...data,
-    items: [
-      {
-        ...data.items[0],
-        days: data.items[0]!.days.map((day) => ({
-          ...day,
-          counts: { Succeeded: Number.MAX_SAFE_INTEGER },
-        })),
-      },
-    ],
   }),
   (data: ReturnType<typeof page>) => ({
     ...data,
@@ -136,21 +85,16 @@ it.each([
     items: [],
     nextCursor: "next",
   }),
-])(
-  "rejects inconsistent scopes, periods, days, counts and cursors",
-  async (change) => {
-    respond(change(page()))
-    await expect(
-      getServiceHistory("team", undefined, "14d", null)
-    ).rejects.toThrow()
-  }
-)
+])("rejects inconsistent scopes, limits and cursors", async (change) => {
+  respond(change(page()))
+  await expect(getServiceHistory("team", undefined, 10, null)).rejects.toThrow()
+})
 
 it("validates explicit type, continued cursor and Unicode code-point order", async () => {
   const data = { ...page(), type: "release", nextCursor: "next" }
   respond(data)
   await expect(
-    getServiceHistory("team", "release", "14d", {
+    getServiceHistory("team", "release", 10, {
       cursor: "next",
       afterId: "team/release/0",
     })
@@ -173,23 +117,19 @@ it("validates explicit type, continued cursor and Unicode code-point order", asy
     ],
   })
   await expect(
-    getServiceHistory("team", "release", "14d", null)
+    getServiceHistory("team", "release", 10, null)
   ).resolves.toHaveProperty("items.length", 2)
   respond({
     ...data,
     items: [{ ...data.items[0], workflow: { ...workflow, type: "foreign" } }],
   })
-  await expect(
-    getServiceHistory("team", "release", "14d", null)
-  ).rejects.toThrow()
+  await expect(getServiceHistory("team", "release", 10, null)).rejects.toThrow()
 })
 
 it.each([
   { id: "not-a-run-id" },
   { status: "Unknown" },
-  { status: "Failed" },
-  { createdAt: "2026-10-04T23:59:59Z" },
-  { createdAt: "2026-10-19T00:00:00Z" },
+  { createdAt: "not-a-timestamp" },
   { createdAt: "2026-10-05T12:00:00.0000001Z" },
   { startedAt: "invalid" },
 ])("rejects invalid or inconsistent run instances: %j", async (change) => {
@@ -203,16 +143,13 @@ it.each([
       },
     ],
   })
-  await expect(
-    getServiceHistory("team", undefined, "14d", null)
-  ).rejects.toThrow()
+  await expect(getServiceHistory("team", undefined, 10, null)).rejects.toThrow()
 })
 
-it("requires exact bounded counts, unique IDs and newest-first microsecond/UUID order", async () => {
+it("requires unique IDs and newest-first microsecond/UUID order without rejecting older runs", async () => {
   const data = page()
   const item = data.items[0]!
   const original = item.runs[0]!
-  item.days[0]!.counts = { Succeeded: 2 }
   item.runs = [
     {
       ...original,
@@ -227,64 +164,60 @@ it("requires exact bounded counts, unique IDs and newest-first microsecond/UUID 
   ]
   respond(data)
   await expect(
-    getServiceHistory("team", undefined, "14d", null)
+    getServiceHistory("team", undefined, 10, null)
   ).resolves.toHaveProperty("items.0.runs.length", 2)
   item.runs.reverse()
   respond(data)
-  await expect(
-    getServiceHistory("team", undefined, "14d", null)
-  ).rejects.toThrow()
+  await expect(getServiceHistory("team", undefined, 10, null)).rejects.toThrow()
   item.runs[1]!.createdAt = item.runs[0]!.createdAt
   respond(data)
   await expect(
-    getServiceHistory("team", undefined, "14d", null)
+    getServiceHistory("team", undefined, 10, null)
   ).resolves.toBeDefined()
   item.runs.reverse()
   respond(data)
-  await expect(
-    getServiceHistory("team", undefined, "14d", null)
-  ).rejects.toThrow()
+  await expect(getServiceHistory("team", undefined, 10, null)).rejects.toThrow()
   item.runs = [original, original]
   respond(data)
-  await expect(
-    getServiceHistory("team", undefined, "14d", null)
-  ).rejects.toThrow()
+  await expect(getServiceHistory("team", undefined, 10, null)).rejects.toThrow()
   item.runs = []
   respond(data)
   await expect(
-    getServiceHistory("team", undefined, "14d", null)
-  ).rejects.toThrow()
-  item.days[0]!.counts = {}
-  respond(data)
-  await expect(
-    getServiceHistory("team", undefined, "14d", null)
+    getServiceHistory("team", undefined, 10, null)
   ).resolves.toBeDefined()
 })
 
-it("accepts 50 recent instances with larger full-window counts but rejects over-cap or incomplete lists", async () => {
+it("accepts the configured run limit, rejects oversized responses and permits fewer actual runs", async () => {
   const data = page()
   const item = data.items[0]!
   const original = item.runs[0]!
-  item.days[0]!.counts = { Succeeded: 80 }
-  item.runs = Array.from({ length: 51 }, (_, index) => ({
+  item.runs = Array.from({ length: 11 }, (_, index) => ({
     ...original,
     id: `019ed132-2f44-7000-8000-${(100 - index).toString(16).padStart(12, "0")}`,
   }))
   respond(data)
-  await expect(
-    getServiceHistory("team", undefined, "14d", null)
-  ).rejects.toThrow()
+  await expect(getServiceHistory("team", undefined, 10, null)).rejects.toThrow()
   item.runs.pop()
   respond(data)
   await expect(
-    getServiceHistory("team", undefined, "14d", null)
-  ).resolves.toHaveProperty("items.0.runs.length", 50)
+    getServiceHistory("team", undefined, 10, null)
+  ).resolves.toHaveProperty("items.0.runs.length", 10)
   item.runs.pop()
   respond(data)
   await expect(
-    getServiceHistory("team", undefined, "14d", null)
-  ).rejects.toThrow()
+    getServiceHistory("team", undefined, 10, null)
+  ).resolves.toHaveProperty("items.0.runs.length", 9)
 })
+
+it.each([0, 101, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+  "rejects invalid personal run limit %s before requesting data",
+  async (limit) => {
+    await expect(
+      getServiceHistory("team", undefined, limit, null)
+    ).rejects.toThrow()
+    expect(get).not.toHaveBeenCalled()
+  }
+)
 
 it.each([401, 403, 503])(
   "surfaces HTTP %i without an empty or healthy fallback",
@@ -294,25 +227,23 @@ it.each([401, 403, 503])(
       error: { title: "Service history unavailable" },
     })
     await expect(
-      getServiceHistory("team", undefined, "14d", null)
+      getServiceHistory("team", undefined, 10, null)
     ).rejects.toMatchObject({ status })
   }
 )
 
-it("validates copied format and period choices", () => {
+it("validates copied format choices", () => {
   expect(serviceSearchSchema.parse({})).toEqual({
-    window: "14d",
     view: "cards",
     groupBy: "type",
   })
-  expect(serviceSearchSchema.safeParse({ window: "365d" }).success).toBe(false)
   expect(serviceSearchSchema.safeParse({ view: "grid" }).success).toBe(false)
 })
 
 it.each(["7d", "14d", "30d", "90d"])(
-  "normalizes saved %s periods to the fixed two-week view",
+  "drops the obsolete saved %s period so personal run count takes precedence",
   (window) => {
-    expect(serviceSearchSchema.parse({ window }).window).toBe("14d")
+    expect(serviceSearchSchema.parse({ window })).not.toHaveProperty("window")
   }
 )
 

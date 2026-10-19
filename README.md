@@ -821,15 +821,19 @@ run ID and timestamp; clicking it opens that exact run in a new tab.
 disabled for never-run workflows; **History** opens that workflow's run history.
 Timestamps keep their full source precision in the time element while displaying
 local time with millisecond precision.
-Both formats show the latest **50 runs per workflow** within the fixed
-**last 14 UTC days**, including today, newest first. When more runs exist,
-the count explicitly says **Latest 50 of N**; **History** retains the full list.
-Success rates use all completed runs in the window, not only the displayed 50.
+Both formats show the latest **10 runs per workflow** by default, newest first,
+with **no date cutoff**. Open your account menu -> **Settings** -> **Recent runs
+per workflow** to save a count from **1 to 100**. This personal preference is
+saved separately for each signed-in account and tenant in this browser; the
+explicit local-development identity has its own preference. It is not synced
+between devices. **History** retains the full list.
+Success rates use the completed instances currently shown.
 Workflows without runs remain visible with an explicit empty state.
-Older saved `7d`, `30d` and `90d` view URLs normalize to `14d`; the service-history
-API defaults to `14d` while retaining explicit legacy periods for API clients.
-Each API item includes bounded `runs` plus untruncated daily `days` counts,
-read from the same database snapshot.
+Older saved view URLs ignore the obsolete `window` parameter; personal run
+count takes precedence. The service-history API uses `runLimit=1..100`
+(default `10`) independently of the workflow page `limit`. It no longer accepts
+the daily `window` filter or returns daily aggregates; each item contains
+bounded `runs` across all retained history.
 **Container grouping** defaults to workflow type. Select a metadata key such as
 `environment` or `component` to create a container per exact metadata value.
 Keys come from authorized type schemas and loaded workflow metadata; missing

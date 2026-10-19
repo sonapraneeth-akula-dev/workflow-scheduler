@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { getSession, signIn, signOut } from "@/lib/auth/session"
 import { useThemePreference } from "@/lib/useThemePreference"
+import { ServiceHistoryPreferences } from "@/lib/ServiceHistoryPreferences"
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   {
@@ -36,7 +37,14 @@ function RootLayout() {
   })
   const theme = useThemePreference()
   return (
-    <>
+    <ServiceHistoryPreferences
+      key={JSON.stringify([
+        session.data?.isDevelopment,
+        session.data?.tenantId,
+        session.data?.accountId,
+      ])}
+      session={session.data ?? null}
+    >
       <a
         className="sr-only focus:not-sr-only focus:fixed focus:bg-background focus:p-3"
         href="#main"
@@ -82,6 +90,6 @@ function RootLayout() {
           <p>Sign in to manage workflow schedules.</p>
         ) : null}
       </main>
-    </>
+    </ServiceHistoryPreferences>
   )
 }
