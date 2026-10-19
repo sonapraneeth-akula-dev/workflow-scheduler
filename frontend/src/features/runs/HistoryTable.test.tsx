@@ -30,12 +30,17 @@ vi.mock("@tanstack/react-router", () => ({
     to,
     params,
     children,
+    title,
   }: {
     to: string
     params: Record<string, string>
     children: ReactNode
+    title?: string
   }) => (
-    <a href={to.replace(/\$([a-z]+)/g, (_, key: string) => params[key]!)}>
+    <a
+      title={title}
+      href={to.replace(/\$([a-z]+)/g, (_, key: string) => params[key]!)}
+    >
       {children}
     </a>
   ),
@@ -47,6 +52,7 @@ const row: HistoryRow = {
   seriesId: "019ed132-2f44-7000-8000-000000000003",
   runId: "019ed132-2f44-7000-8000-000000000010",
   versionId: "019ed132-2f44-7000-8000-000000000001",
+  version: "1.2.3-rc.1+build.7",
   status: "Aborted",
   startedAt: "2026-10-16T07:00:00Z",
   endedAt: "2026-10-16T07:00:01Z",
@@ -128,10 +134,15 @@ describe("historical table", () => {
     expect(table).not.toHaveTextContent("Variables")
     expect(table).not.toHaveTextContent("credential")
     expect(table).not.toHaveTextContent("count (Long)")
-    expect(screen.getByRole("link", { name: row.versionId! })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: row.version! })).toHaveAttribute(
       "href",
       `/t/team/release/w/build/versions/${row.versionId}`
     )
+    expect(screen.getByRole("link", { name: row.version! })).toHaveAttribute(
+      "title",
+      `Immutable version ID: ${row.versionId}`
+    )
+    expect(table).not.toHaveTextContent(row.versionId!)
     expect(screen.getByRole("link", { name: row.runId! })).toHaveAttribute(
       "href",
       `/runs/${row.runId}`
@@ -145,6 +156,7 @@ describe("historical table", () => {
           kind: "Fire",
           runId: null,
           versionId: null,
+          version: null,
           status: null,
           durationMs: null,
           trigger: null,
@@ -205,6 +217,7 @@ describe("historical table", () => {
           kind: "Fire",
           runId: null,
           versionId: null,
+          version: null,
           status: null,
           startedAt: null,
           endedAt: null,

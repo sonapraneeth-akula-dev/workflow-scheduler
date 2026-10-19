@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import AxeBuilder from "@axe-core/playwright"
+import { z } from "zod"
 
 async function openWorkflowHistory(page: Page) {
   await page.goto("/service-history")
@@ -16,6 +17,53 @@ async function openWorkflowHistory(page: Page) {
     page.getByRole("columnheader", { name: /Variables/ })
   ).toHaveCount(0)
 }
+
+test("executed versions show semantic labels while preserving immutable version links", async ({
+  page,
+}) => {
+  const response = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/v1/runs/history" &&
+      response.ok()
+  )
+  await openWorkflowHistory(page)
+  const history = z
+    .object({
+      items: z.array(
+        z.object({
+          runId: z.uuid().nullable(),
+          versionId: z.uuid().nullable(),
+          version: z.string().nullable(),
+        })
+      ),
+    })
+    .parse(await (await response).json())
+  const run = history.items.find(
+    (row) => row.runId && row.versionId && row.version
+  )
+  if (!run?.runId || !run.versionId || !run.version)
+    throw new Error("The published workflow has no recorded executed version.")
+  expect(run.version).toMatch(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)*$/)
+  const row = page
+    .getByRole("table")
+    .getByRole("row")
+    .filter({ has: page.getByRole("link", { name: run.runId, exact: true }) })
+  const version = row.getByRole("link", { name: run.version, exact: true })
+  await expect(version).toHaveAttribute(
+    "href",
+    new RegExp(`/versions/${run.versionId}$`)
+  )
+  await expect(version).toHaveAttribute(
+    "title",
+    `Immutable version ID: ${run.versionId}`
+  )
+  await expect(row).not.toContainText(run.versionId)
+  await version.click()
+  await expect(page).toHaveURL(new RegExp(`/versions/${run.versionId}$`))
+  await expect(
+    page.getByRole("heading", { name: "Task Plan", exact: true })
+  ).toBeVisible()
+})
 
 for (const width of [320, 768, 2000]) {
   test(`workflow header stays compact and usable at ${width}px`, async ({

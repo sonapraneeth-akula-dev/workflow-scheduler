@@ -823,6 +823,10 @@ schedule starts need no reason. Skipped/missed schedule entries retain their
 recorded explanation, or explicitly report an unavailable scheduling reason.
 The history table omits variables; it focuses on outcomes, timing, versions
 and cancellation audit.
+**Executed version** shows the semantic version from that run's immutable
+registration (for example `1.2.3`), not today's active release. The internal UUID
+stays in the version-details URL and tooltip; legacy missing registrations
+display **Version not recorded** rather than a guessed current version.
 
 Open a queued/running run and select **Cancel run** (Operator/Admin permission).
 A reason and confirmation are required. The authenticated actor's name/ID,

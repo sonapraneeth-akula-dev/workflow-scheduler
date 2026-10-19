@@ -143,8 +143,9 @@ public static class RunHistoryEndpoints
                     FROM workflow_versions w CROSS JOIN LATERAL jsonb_array_elements(COALESCE(w.manifest->'variables','[]')) v
                     WHERE w.id=p.version_id AND w.workflow_id=p.workflow_id
                         AND r.variables ? (v->>'key')),'[]'::jsonb)::text AS variable_schema,
-                sf.schedule_id,sf.fire_at,sf.outcome,sf.reason,sf.config_version_id
+                sf.schedule_id,sf.fire_at,sf.outcome,sf.reason,sf.config_version_id,executed.semver
             FROM page p
+            LEFT JOIN workflow_versions executed ON p.kind=0 AND executed.id=p.version_id AND executed.workflow_id=p.workflow_id
             LEFT JOIN runs r ON p.kind=0 AND r.run_day=p.run_day AND r.id=p.run_id
             LEFT JOIN LATERAL (
                 SELECT convert_from(e.payload,'UTF8')::jsonb->'Abort' AS record FROM run_events e
@@ -189,7 +190,8 @@ public static class RunHistoryEndpoints
             rows.Add((new(kind == 0 ? "Run" : "Fire", at, reader.GetString(3), Uuid(4), Uuid(5), Uuid(6),
                 status?.ToString(), started, ended, started is not null && ended is not null ? (ended.Value - started.Value).TotalMilliseconds : null,
                 trigger?.ToString(), reader.IsDBNull(11) ? null : RunMetadata.FromStored(reader.GetString(11)),
-                abort, RunHistoryQuery.Variables(reader.GetString(19)), fire), new(at, reader.GetGuid(1), kind)));
+                abort, RunHistoryQuery.Variables(reader.GetString(19)), fire)
+            { Version = reader.IsDBNull(25) ? null : reader.GetString(25) }, new(at, reader.GetGuid(1), kind)));
         }
         var more = rows.Count > filter.Runs.Limit;
         if (more) rows.RemoveAt(rows.Count - 1);

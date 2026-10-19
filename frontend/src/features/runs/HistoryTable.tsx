@@ -315,10 +315,11 @@ export function HistoryTable({
                       {row.versionId ? (
                         <Link
                           className="font-mono"
+                          title={`Immutable version ID: ${row.versionId}`}
                           to="/t/$team/$type/w/$wf/versions/$v"
                           params={{ team, type, wf, v: row.versionId }}
                         >
-                          {row.versionId}
+                          {row.version ?? "Version not recorded"}
                         </Link>
                       ) : (
                         "Not applicable"

@@ -39,6 +39,7 @@ const rowSchema = z.object({
   seriesId: z.uuid().nullable(),
   runId: z.uuid().nullable(),
   versionId: z.uuid().nullable(),
+  version: z.string().min(1).max(256).nullable(),
   status: z.enum(runStatuses).nullable(),
   startedAt: instantSchema.nullable(),
   endedAt: instantSchema.nullable(),
@@ -160,6 +161,7 @@ export async function getHistory(
           : !row.fire ||
             !["Skipped", "Missed"].includes(row.fire.outcome) ||
             row.versionId !== null ||
+            row.version !== null ||
             row.status !== null ||
             row.trigger !== null ||
             row.startedAt !== null ||

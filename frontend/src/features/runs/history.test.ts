@@ -13,6 +13,7 @@ export const historyRow: HistoryRow = {
   seriesId: "019ed132-2f44-7000-8000-000000000003",
   runId: "019ed132-2f44-7000-8000-000000000010",
   versionId: "019ed132-2f44-7000-8000-000000000001",
+  version: "1.2.3-rc.1+build.7",
   status: "Aborted",
   startedAt: "2026-10-16T07:00:00.000002Z",
   endedAt: "2026-10-16T07:00:01.000003Z",
@@ -87,6 +88,7 @@ describe("history contracts", () => {
       kind: "Fire",
       runId: null,
       versionId: null,
+      version: null,
       status: null,
       startedAt: null,
       endedAt: null,
@@ -121,6 +123,10 @@ describe("history contracts", () => {
     { kind: "Other" },
     { status: "Unknown" },
     { versionId: null },
+    { version: "" },
+    { version: 1 },
+    { version: undefined },
+    { version: "x".repeat(257) },
     { durationMs: -1 },
     { durationMs: 1000 },
     { startedAt: null },
@@ -152,6 +158,10 @@ describe("history contracts", () => {
     await expect(
       getHistory(scope, { outcome: "Skipped" }, null)
     ).rejects.toThrow("inconsistent")
+  })
+  it("does not invent semantic versions for retained runs without a version registration", async () => {
+    respond([{ ...historyRow, version: null }])
+    expect((await getHistory(scope, {}, null)).items[0]?.version).toBeNull()
   })
   it("checks microsecond ordering and page boundaries in both directions", async () => {
     const older = { ...historyRow, at: "2026-10-16T07:00:00.000000Z" }

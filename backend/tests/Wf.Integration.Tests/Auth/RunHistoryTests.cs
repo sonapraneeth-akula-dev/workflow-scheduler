@@ -160,6 +160,7 @@ public sealed class RunHistoryTests(AuthorizationDatabase database, ITestOutputH
         var row = Assert.Single(aborted);
         Assert.Equal(run.Snapshot.RunId, row.RunId);
         Assert.Equal(version, row.VersionId);
+        Assert.Equal("1.0.0", row.Version);
         Assert.Equal("Aborted", row.Status);
         Assert.Equal(record.By, row.Abort!.By);
         Assert.Equal(record.ByName, row.Abort.ByName);
@@ -185,6 +186,49 @@ public sealed class RunHistoryTests(AuthorizationDatabase database, ITestOutputH
         var searchJson = await searchResponse.Content.ReadAsStringAsync(Token);
         Assert.DoesNotContain("private-env", searchJson);
         Assert.DoesNotContain("variables", searchJson);
+    }
+
+    [Theory]
+    [InlineData("1.2.3")]
+    [InlineData("1.2.3-rc.1+build.7")]
+    public async Task RunHistory_shows_the_executed_semver_not_the_new_active_version_even_after_deletion(string semver)
+    {
+        var seed = await Seed();
+        var original = Guid.CreateVersion7();
+        await Version(seed, original, semver);
+        var run = await Create(seed.Workflow, original);
+        var series = Guid.CreateVersion7();
+        await Execute("UPDATE runs SET series_id=$2 WHERE id=$1", run.Snapshot.RunId, series);
+        var latest = Guid.CreateVersion7();
+        await Version(seed, latest, "9.0.0");
+        await Execute("UPDATE workflows SET active_version_id=$2,latest_version_id=$2,deleted_at=now() WHERE id=$1", seed.Workflow, latest);
+        await using var server = await Server();
+        var jwt = server.Jwt(seed.Group);
+        foreach (var path in new[]
+        {
+            "/api/v1/workflows/" + seed.Workflow + "/history",
+            "/api/v1/runs/history?workflowId=" + seed.Workflow,
+            "/api/v1/series/" + series + "/history"
+        })
+        {
+            var row = Assert.Single(await All(server, path, jwt));
+            Assert.Equal(run.Snapshot.RunId, row.RunId);
+            Assert.Equal(original, row.VersionId);
+            Assert.Equal(semver, row.Version);
+        }
+    }
+
+    [Fact]
+    public async Task RunHistory_retained_runs_without_a_version_registration_do_not_invent_a_semver()
+    {
+        var seed = await Seed();
+        var version = Guid.CreateVersion7();
+        var run = await Create(seed.Workflow, version);
+        await using var server = await Server();
+        var row = Assert.Single(await All(server, "/api/v1/workflows/" + seed.Workflow + "/history", server.Jwt(seed.Group)));
+        Assert.Equal(version, row.VersionId);
+        Assert.Equal(run.Snapshot.RunId, row.RunId);
+        Assert.Null(row.Version);
     }
 
     [Fact]
@@ -240,6 +284,7 @@ public sealed class RunHistoryTests(AuthorizationDatabase database, ITestOutputH
         {
             Assert.Null(row.RunId);
             Assert.Null(row.VersionId);
+            Assert.Null(row.Version);
             Assert.Null(row.Status);
             Assert.Empty(row.Variables);
             Assert.Equal(config, row.Fire!.ScheduleConfigVersionId);
@@ -400,6 +445,8 @@ public sealed class RunHistoryTests(AuthorizationDatabase database, ITestOutputH
         Assert.False(schemas.GetProperty("RunHistoryVariable").GetProperty("properties").TryGetProperty("value", out _));
         Assert.True(schemas.GetProperty("RunHistoryFire").GetProperty("properties").TryGetProperty("scheduleConfigVersionId", out _));
         Assert.True(schemas.GetProperty("RunHistoryPage").GetProperty("properties").TryGetProperty("currentScheduleId", out _));
+        Assert.Contains(schemas.GetProperty("RunHistoryRow").GetProperty("required").EnumerateArray(),
+            property => property.GetString() == "version");
         Assert.Contains(schemas.GetProperty("RunQueryRow").GetProperty("required").EnumerateArray(),
             property => property.GetString() == "metadata");
     }
@@ -429,17 +476,17 @@ public sealed class RunHistoryTests(AuthorizationDatabase database, ITestOutputH
         return run;
     }
 
-    private async Task Version(Seeded seed, Guid version)
+    private async Task Version(Seeded seed, Guid version, string semver = "1.0.0")
     {
-        await Execute("INSERT INTO workflows(id,type_id) VALUES($1,$2)", seed.Workflow, seed.Team + "/release");
+        await Execute("INSERT INTO workflows(id,type_id) VALUES($1,$2) ON CONFLICT(id) DO NOTHING", seed.Workflow, seed.Team + "/release");
         await Execute("""
             INSERT INTO workflow_versions(id,workflow_id,semver,manifest,package_uri,package_sha256,package_size,
                 source_uri,source_sha256,source_size,git_commit,git_author,registered_by,sdk_version)
-            VALUES($1,$2,'1.0.0','{"metadata":{"values":{"env":"old"}},
+            VALUES($1,$2,$3,'{"metadata":{"values":{"env":"old"}},
                 "variables":[{"key":"environment","type":"String","default":"private-default"},{"key":"count","type":"Int"},
                 {"key":"token","type":"Secret"}]}','packages/'||repeat('00',32)||'.zip',decode(repeat('00',32),'hex'),1,
                 'sources/'||repeat('00',32),decode(repeat('00',32),'hex'),1,repeat('a',40),'history','history','1.0.0')
-            """, version, seed.Workflow);
+            """, version, seed.Workflow, semver);
     }
 
     private async Task Execute(string sql, params object[] parameters) => await Scalar(sql, parameters);

@@ -234,6 +234,7 @@ test("workflow and series history show actual committed abort attribution and re
       })
       .parse(await aborted.json())
     let versionId = ""
+    let version = ""
     await expect
       .poll(async () => {
         const result = await request.get(
@@ -251,6 +252,7 @@ test("workflow and series history show actual committed abort attribution and re
               z.object({
                 runId: z.uuid().nullable(),
                 versionId: z.uuid().nullable(),
+                version: z.string().nullable(),
                 trigger: z.string().nullable(),
                 abort: z
                   .object({
@@ -265,6 +267,7 @@ test("workflow and series history show actual committed abort attribution and re
           .parse(JSON.parse(text))
         const row = history.items.find((item) => item.runId === runId)
         versionId = row?.versionId ?? ""
+        version = row?.version ?? ""
         return (
           row?.abort?.reason === reason &&
           row.abort.by === receipt.by &&
@@ -299,7 +302,7 @@ test("workflow and series history show actual committed abort attribution and re
       receipt.at
     )
     await expect(
-      row.getByRole("link", { name: versionId, exact: true })
+      row.getByRole("link", { name: version, exact: true })
     ).toHaveAttribute(
       "href",
       `/t/ui-tests/release/w/workflow/versions/${versionId}`
@@ -327,10 +330,7 @@ test("workflow and series history show actual committed abort attribution and re
       page.getByRole("heading", { name: "Workflow history", exact: true })
     ).toBeVisible()
     await expect(page.getByRole("table")).toContainText(reason)
-    await page
-      .getByRole("link", { name: versionId, exact: true })
-      .first()
-      .focus()
+    await page.getByRole("link", { name: version, exact: true }).first().focus()
     await page.keyboard.press("Enter")
     await expect(
       page.getByRole("heading", { name: "Task Plan", exact: true })

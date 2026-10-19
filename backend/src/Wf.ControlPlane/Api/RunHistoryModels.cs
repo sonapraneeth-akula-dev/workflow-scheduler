@@ -14,7 +14,11 @@ public sealed record RunHistoryFire(Guid ScheduleId, DateTimeOffset FireAt, stri
     Guid? ScheduleConfigVersionId);
 public sealed record RunHistoryRow(string Kind, DateTimeOffset At, string WorkflowId, Guid? SeriesId, Guid? RunId,
     Guid? VersionId, string? Status, DateTimeOffset? StartedAt, DateTimeOffset? EndedAt, double? DurationMs,
-    string? Trigger, RunMetadata? Metadata, LiveAbort? Abort, RunHistoryVariable[] Variables, RunHistoryFire? Fire);
+    string? Trigger, RunMetadata? Metadata, LiveAbort? Abort, RunHistoryVariable[] Variables, RunHistoryFire? Fire)
+{
+    [JsonRequired]
+    public string? Version { get; init; }
+}
 public sealed record RunHistoryPage(RunHistoryRow[] Items, string? NextCursor)
 {
     [JsonRequired]

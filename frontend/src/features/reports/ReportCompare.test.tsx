@@ -49,6 +49,7 @@ const row = (runId: string): HistoryRow => ({
   workflowId: "team/build/basic",
   at: "2026-10-16T07:00:00Z",
   versionId: seriesId,
+  version: "1.0.0",
   status: "Succeeded",
   startedAt: null,
   endedAt: null,

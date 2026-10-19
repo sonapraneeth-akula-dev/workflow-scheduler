@@ -6023,6 +6023,7 @@ export interface components {
             abort: null | components["schemas"]["LiveAbort"];
             variables: components["schemas"]["RunHistoryVariable"][];
             fire: null | components["schemas"]["RunHistoryFire"];
+            version: null | string;
         };
         RunHistoryVariable: {
             key: string;
