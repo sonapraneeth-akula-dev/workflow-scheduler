@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import AxeBuilder from "@axe-core/playwright"
 
 async function openWorkflowHistory(page: Page) {
   await page.goto("/service-history")
@@ -83,3 +84,54 @@ test("workflow header links open registered releases and metric content", async 
   ).toContainText("(UTC). Top")
   await expect(page.getByRole("alert")).toHaveCount(0)
 })
+
+for (const width of [320, 768, 1440, 2000]) {
+  test(`history filters align labels and controls without overflow at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await openWorkflowHistory(page)
+    const form = page.getByRole("form", {
+      name: "History filters",
+      exact: true,
+    })
+    const controls = form.locator("select, input")
+    await expect(controls).toHaveCount(4)
+    const bounds = await controls.evaluateAll((elements) =>
+      elements.map((element) => {
+        const control = element.getBoundingClientRect()
+        const label = document
+          .querySelector(`label[for="${CSS.escape(element.id)}"]`)!
+          .getBoundingClientRect()
+        return {
+          control: { y: control.y, height: control.height },
+          label: { y: label.y, bottom: label.bottom },
+        }
+      })
+    )
+    expect(bounds.every(({ control }) => control.height === 36)).toBe(true)
+    expect(bounds.every(({ control, label }) => label.bottom < control.y)).toBe(
+      true
+    )
+    if (width >= 1280) {
+      expect(new Set(bounds.map(({ label }) => label.y)).size).toBe(1)
+      expect(new Set(bounds.map(({ control }) => control.y)).size).toBe(1)
+      const submit = await form
+        .getByRole("button", { name: "Filter history", exact: true })
+        .boundingBox()
+      expect(submit!.y).toBe(bounds[0]!.control.y)
+      expect(submit!.height).toBe(36)
+    }
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth)
+    ).toBeLessThanOrEqual(width)
+    expect(
+      (
+        await new AxeBuilder({ page })
+          .include('form[aria-label="History filters"]')
+          .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+          .analyze()
+      ).violations
+    ).toEqual([])
+  })
+}

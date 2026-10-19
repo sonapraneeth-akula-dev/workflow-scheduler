@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react"
+import { useId, useState, type FormEvent } from "react"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ErrorNotice } from "@/components/ErrorNotice"
@@ -7,6 +7,8 @@ import { StatusBadge } from "@/components/StatusBadge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { NativeSelect } from "@/components/ui/native-select"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
 import { accessDenied, runStatuses } from "@/features/catalog/api"
 import { TriggerBadge } from "./TriggerBadge"
 import { RunNowButton } from "@/features/series/RunNowButton"
@@ -26,6 +28,7 @@ export function HistoryFilters({
   onChange: (search: HistorySearch) => void
 }) {
   const [error, setError] = useState<string>()
+  const id = useId()
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const values: Record<string, string> = {}
@@ -44,46 +47,87 @@ export function HistoryFilters({
     <form
       aria-label="History filters"
       onSubmit={submit}
-      className="flex min-w-0 flex-wrap items-end gap-3"
+      className="flex min-w-0 flex-col gap-3"
     >
-      <label className="flex flex-col gap-1">
-        Run status
-        <NativeSelect name="status" defaultValue={search.status ?? ""}>
-          <option value="">All statuses and fire facts</option>
-          {runStatuses.map((status) => (
-            <option key={status}>{status}</option>
-          ))}
-        </NativeSelect>
-      </label>
-      <label className="flex min-w-0 flex-col gap-1">
-        Aborted by (principal UUID)
-        <input
-          name="abortedBy"
-          defaultValue={search.abortedBy ?? ""}
-          className="min-w-0 rounded border bg-background p-2"
-        />
-      </label>
-      <label className="flex flex-col gap-1">
-        Outcome
-        <NativeSelect name="outcome" defaultValue={search.outcome ?? ""}>
-          <option value="">Runs and retained fire facts</option>
-          <option value="Run">Runs only</option>
-          <option>Skipped</option>
-          <option>Missed</option>
-        </NativeSelect>
-      </label>
-      <label className="flex flex-col gap-1">
-        History order
-        <NativeSelect name="sort" defaultValue={search.sort ?? "createdAtDesc"}>
-          <option value="createdAtDesc">Newest first</option>
-          <option value="createdAtAsc">Oldest first</option>
-        </NativeSelect>
-      </label>
-      <Button type="submit">Filter history</Button>
-      <Button type="button" variant="outline" onClick={() => onChange({})}>
-        Clear history filters
-      </Button>
-      {error ? <p role="alert">{error}</p> : null}
+      <FieldGroup className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-[repeat(4,minmax(0,1fr))_auto]">
+        <Field className="min-w-0">
+          <FieldLabel htmlFor={`${id}-status`} className="whitespace-nowrap">
+            Run status
+          </FieldLabel>
+          <NativeSelect
+            id={`${id}-status`}
+            name="status"
+            className="w-full"
+            defaultValue={search.status ?? ""}
+          >
+            <option value="">All statuses and fire facts</option>
+            {runStatuses.map((status) => (
+              <option key={status}>{status}</option>
+            ))}
+          </NativeSelect>
+        </Field>
+        <Field className="min-w-0" data-invalid={error !== undefined}>
+          <FieldLabel htmlFor={`${id}-abortedBy`} className="whitespace-nowrap">
+            Aborted by (principal UUID)
+          </FieldLabel>
+          <Input
+            id={`${id}-abortedBy`}
+            name="abortedBy"
+            defaultValue={search.abortedBy ?? ""}
+            aria-invalid={error !== undefined}
+            aria-describedby={error ? `${id}-error` : undefined}
+            className="h-9"
+          />
+        </Field>
+        <Field className="min-w-0">
+          <FieldLabel htmlFor={`${id}-outcome`} className="whitespace-nowrap">
+            Outcome
+          </FieldLabel>
+          <NativeSelect
+            id={`${id}-outcome`}
+            name="outcome"
+            className="w-full"
+            defaultValue={search.outcome ?? ""}
+          >
+            <option value="">Runs and retained fire facts</option>
+            <option value="Run">Runs only</option>
+            <option>Skipped</option>
+            <option>Missed</option>
+          </NativeSelect>
+        </Field>
+        <Field className="min-w-0">
+          <FieldLabel htmlFor={`${id}-sort`} className="whitespace-nowrap">
+            History order
+          </FieldLabel>
+          <NativeSelect
+            id={`${id}-sort`}
+            name="sort"
+            className="w-full"
+            defaultValue={search.sort ?? "createdAtDesc"}
+          >
+            <option value="createdAtDesc">Newest first</option>
+            <option value="createdAtAsc">Oldest first</option>
+          </NativeSelect>
+        </Field>
+        <div className="flex flex-wrap items-center gap-2 self-end sm:col-span-2 xl:col-span-1">
+          <Button type="submit" className="h-9">
+            Filter history
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-9"
+            onClick={() => onChange({})}
+          >
+            Clear history filters
+          </Button>
+        </div>
+      </FieldGroup>
+      {error ? (
+        <p id={`${id}-error`} role="alert">
+          {error}
+        </p>
+      ) : null}
     </form>
   )
 }
