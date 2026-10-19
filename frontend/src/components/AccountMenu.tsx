@@ -24,7 +24,10 @@ import { ErrorNotice } from "@/components/ErrorNotice"
 import { getProfileAccess } from "@/lib/auth/profile-access"
 import type { Session } from "@/lib/auth/session"
 import type { ThemePreference } from "@/lib/useThemePreference"
-import { useServiceHistoryPreferences } from "@/lib/ServiceHistoryPreferences"
+import {
+  maximumServiceRunLimit,
+  useServiceHistoryPreferences,
+} from "@/lib/ServiceHistoryPreferences"
 
 const menuItem =
   "flex cursor-pointer items-center gap-2 px-3 py-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-50 [&_svg]:size-4"
@@ -211,7 +214,7 @@ function AccountSettings({
               name="runLimit"
               type="number"
               min={1}
-              max={100}
+              max={maximumServiceRunLimit}
               step={1}
               required
               key={history.runLimit}
@@ -221,9 +224,9 @@ function AccountSettings({
               onChange={() => setSaved(false)}
             />
             <FieldDescription id="service-run-limit-description">
-              Show the latest 1-100 runs, regardless of age. Default: 10. Saved
-              for your profile in this browser; other profiles keep their own
-              setting.
+              Show the latest 1-{maximumServiceRunLimit} runs, regardless of
+              age. Default: 10. Saved for your profile in this browser; other
+              profiles keep their own setting.
             </FieldDescription>
           </Field>
           {history.error ? <ErrorNotice error={history.error} /> : null}

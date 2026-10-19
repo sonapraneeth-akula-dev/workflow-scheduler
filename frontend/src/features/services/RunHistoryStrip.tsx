@@ -34,10 +34,10 @@ export function RunHistoryStrip({
       role="group"
       aria-label={`Run history: ${runs.length} recent runs, newest first`}
       data-run-history
-      className="min-w-40 space-y-2"
+      className="w-max max-w-full space-y-2"
     >
       {runs.length ? (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex max-w-69 flex-wrap gap-1">
           {runs.map((run) => {
             const { icon: Icon, color } = outcomes[run.status]
             const label = `${run.status} run ${run.id}, ${formatTimestamp(run.createdAt)} (${run.createdAt}). Opens in a new tab.`
@@ -68,9 +68,17 @@ export function RunHistoryStrip({
           {runLimit}
         </span>
         <span title="Completed runs among the recent instances shown">
-          {completed
-            ? `${new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 1 }).format(succeeded / completed)} completed successfully`
-            : "No completed runs"}
+          {completed ? (
+            <>
+              {new Intl.NumberFormat(undefined, {
+                style: "percent",
+                maximumFractionDigits: 1,
+              }).format(succeeded / completed)}
+              <span className="sr-only"> completed successfully</span>
+            </>
+          ) : (
+            "No completed runs"
+          )}
         </span>
       </div>
     </div>

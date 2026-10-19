@@ -154,6 +154,7 @@ it("saves a configurable run count for the personal profile without changing oth
     name: "Recent runs per workflow",
   })
   expect(input).toHaveValue(10)
+  expect(input).toHaveAttribute("max", "30")
   fireEvent.change(input, { target: { value: "25" } })
   fireEvent.click(
     within(dialog).getByRole("button", {
@@ -169,4 +170,15 @@ it("saves a configurable run count for the personal profile without changing oth
       profilePreferenceKey({ ...session, accountId: "other" })!
     )
   ).toBeNull()
+  const updatedInput = within(dialog).getByRole("spinbutton", {
+    name: "Recent runs per workflow",
+  })
+  fireEvent.change(updatedInput, { target: { value: "31" } })
+  expect(updatedInput).toBeInvalid()
+  fireEvent.submit(updatedInput.closest("form")!)
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    "Choose a whole number of runs from 1 to 30."
+  )
+  expect(localStorage.getItem(profilePreferenceKey(session)!)).toBe("25")
+  expect(within(dialog).queryByRole("status")).not.toBeInTheDocument()
 })

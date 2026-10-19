@@ -8,7 +8,8 @@ import {
 import { z } from "zod"
 import type { Session } from "@/lib/auth/session"
 
-export const serviceRunLimitSchema = z.int().min(1).max(100)
+export const maximumServiceRunLimit = 30
+export const serviceRunLimitSchema = z.int().min(1).max(maximumServiceRunLimit)
 const defaultRunLimit = 10
 interface PreferenceState {
   runLimit: number
@@ -44,7 +45,7 @@ function readPreference(session: Session | null): PreferenceState {
     return {
       runLimit: defaultRunLimit,
       error: new Error(
-        "Your saved run-count preference could not be read. Showing 10 runs until you save a valid setting.",
+        `Your saved run-count preference could not be read. Showing 10 runs until you save a valid setting from 1 to ${maximumServiceRunLimit}.`,
         { cause }
       ),
     }
@@ -76,7 +77,9 @@ export function ServiceHistoryPreferences({
     if (!result.success) {
       setState((previous) => ({
         ...previous,
-        error: new Error("Choose a whole number of runs from 1 to 100."),
+        error: new Error(
+          `Choose a whole number of runs from 1 to ${maximumServiceRunLimit}.`
+        ),
       }))
       return false
     }

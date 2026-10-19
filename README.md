@@ -882,14 +882,19 @@ Timestamps keep their full source precision in the time element while displaying
 local time with millisecond precision.
 Both formats show the latest **10 runs per workflow** by default, newest first,
 with **no date cutoff**. Open your account menu -> **Settings** -> **Recent runs
-per workflow** to save a count from **1 to 100**. This personal preference is
+per workflow** to save a count from **1 to 30**. The hard maximum is 30 in
+personal settings and the API; larger saved values show an error and use the
+default 10 until a valid preference is saved. This personal preference is
 saved separately for each signed-in account and tenant in this browser; the
 explicit local-development identity has its own preference. It is not synced
 between devices. **History** retains the full list.
-Success rates use the completed instances currently shown.
+Success rates use the completed instances currently shown. The percentage sits
+beside the recent-run count; its accessible label explains completed success.
+Run icons wrap after at most ten per row, growing card height rather than
+reserving extra column width for larger preferences.
 Workflows without runs remain visible with an explicit empty state.
 Older saved view URLs ignore the obsolete `window` parameter; personal run
-count takes precedence. The service-history API uses `runLimit=1..100`
+count takes precedence. The service-history API uses `runLimit=1..30`
 (default `10`) independently of the workflow page `limit`. It no longer accepts
 the daily `window` filter or returns daily aggregates; each item contains
 bounded `runs` across all retained history.

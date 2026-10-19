@@ -183,7 +183,9 @@ it("renders individual run outcomes with exact new-tab links, last run and full 
       new RegExp(response.items[0]!.runs[index]!.status)
     )
   })
-  expect(within(card).getByText("66.7% completed successfully")).toBeVisible()
+  expect(within(card).getByText("66.7%", { exact: true })).toHaveTextContent(
+    "66.7% completed successfully"
+  )
   expect(screen.queryByText("Daily health details")).not.toBeInTheDocument()
   expect(card.querySelector("details")).toBeNull()
   const never = screen.getByRole("heading", { name: "Never" }).closest("li")!
@@ -283,7 +285,9 @@ it("uses a saved personal run limit and calculates success from the shown instan
   expect(
     screen.getAllByRole("link", { name: /Opens in a new tab/ })
   ).toHaveLength(25)
-  expect(screen.getByText("80% completed successfully")).toBeVisible()
+  expect(screen.getByText("80%", { exact: true })).toHaveTextContent(
+    "80% completed successfully"
+  )
   expect(getServiceHistory).toHaveBeenCalledWith(
     "team",
     undefined,
@@ -408,7 +412,7 @@ it("automatically refreshes on run updates and reconnect resync, with a separate
     delta: { scope: "type", id: "team/release", items: [] },
   }
   shown.rerender(search)
-  expect(await screen.findByText("100% completed successfully")).toBeVisible()
+  expect(await screen.findByText("100%", { exact: true })).toBeVisible()
   await waitFor(() => expect(shown.client.isFetching()).toBe(0))
   const calls = vi.mocked(getServiceHistory).mock.calls.length
   snapshot = { ...snapshot, delta: null, resyncVersion: 1 }

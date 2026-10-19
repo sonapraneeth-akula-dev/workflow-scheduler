@@ -116,7 +116,7 @@ function WorkflowGroup({
         </span>
       </div>
       {view === "cards" ? (
-        <ul className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        <ul className="grid min-w-0 items-start gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {entries.map(({ workflow, runs }) => (
             <li
               key={workflow.id}
@@ -197,7 +197,7 @@ function WorkflowGroup({
                   <td className="p-3">
                     <LastRun workflow={workflow} />
                   </td>
-                  <td className="w-88 min-w-64 p-3">
+                  <td className="w-px p-3">
                     <RunHistoryStrip runs={runs} runLimit={runLimit} />
                   </td>
                   <td className="p-3">

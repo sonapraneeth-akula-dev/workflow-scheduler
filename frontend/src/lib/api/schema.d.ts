@@ -41,7 +41,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Authorized, team-scoped workflows with their latest run instances across all series and manual runs, without a date cutoff. runLimit=1..100 (default 10) applies separately to each workflow; fewer runs means fewer instances, never fabricated outcomes. Run instances are ordered by createdAt then id descending. Uses the same exact team/type, keyset cursor and metadata filters as the workflow catalogue. No payloads or capabilities. */
+        /** @description Authorized, team-scoped workflows with their latest run instances across all series and manual runs, without a date cutoff. runLimit=1..30 (default 10) applies separately to each workflow; fewer runs means fewer instances, never fabricated outcomes. Run instances are ordered by createdAt then id descending. Uses the same exact team/type, keyset cursor and metadata filters as the workflow catalogue. No payloads or capabilities. */
         get: {
             parameters: {
                 query: {

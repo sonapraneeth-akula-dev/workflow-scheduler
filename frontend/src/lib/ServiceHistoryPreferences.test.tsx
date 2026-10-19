@@ -56,7 +56,7 @@ it("isolates accounts, tenants and the explicit development profile", () => {
   expect(show().result.current.runLimit).toBe(30)
 })
 
-it.each([0, 101, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+it.each([0, 31, 100, 101, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
   "rejects invalid count %s without modifying the existing preference",
   (count) => {
     const { result } = show()
@@ -67,12 +67,12 @@ it.each([0, 101, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
       expect(result.current.setRunLimit(count)).toBe(false)
     })
     expect(result.current.runLimit).toBe(20)
-    expect(result.current.error?.message).toMatch(/whole number.*1 to 100/)
+    expect(result.current.error?.message).toMatch(/whole number.*1 to 30/)
     expect(localStorage.getItem(profilePreferenceKey(account)!)).toBe("20")
   }
 )
 
-it.each(["not-json", "null", '"25"', "0", "101"])(
+it.each(["not-json", "null", '"25"', "0", "31", "100", "101"])(
   "surfaces malformed saved value %s, then allows explicit recovery",
   (value) => {
     localStorage.setItem(profilePreferenceKey(account)!, value)
@@ -102,13 +102,13 @@ it("surfaces unavailable browser storage without falsely reporting a saved prefe
 it("synchronizes only the current profile's storage changes", () => {
   const { result } = show()
   const key = profilePreferenceKey(account)!
-  localStorage.setItem(key, "35")
+  localStorage.setItem(key, "30")
   act(() => {
     window.dispatchEvent(
       new StorageEvent("storage", { key, storageArea: localStorage })
     )
   })
-  expect(result.current.runLimit).toBe(35)
+  expect(result.current.runLimit).toBe(30)
   act(() => {
     window.dispatchEvent(
       new StorageEvent("storage", {
@@ -117,7 +117,7 @@ it("synchronizes only the current profile's storage changes", () => {
       })
     )
   })
-  expect(result.current.runLimit).toBe(35)
+  expect(result.current.runLimit).toBe(30)
   localStorage.removeItem(key)
   act(() => {
     window.dispatchEvent(
@@ -125,4 +125,17 @@ it("synchronizes only the current profile's storage changes", () => {
     )
   })
   expect(result.current.runLimit).toBe(10)
+})
+
+it("rejects a saved count above 30 received from another tab", () => {
+  const { result } = show()
+  const key = profilePreferenceKey(account)!
+  localStorage.setItem(key, "31")
+  act(() => {
+    window.dispatchEvent(
+      new StorageEvent("storage", { key, storageArea: localStorage })
+    )
+  })
+  expect(result.current.runLimit).toBe(10)
+  expect(result.current.error?.message).toMatch(/valid setting from 1 to 30/)
 })

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.OpenApi;
@@ -23,19 +24,23 @@ public static partial class CatalogEndpoints
             .Produces<ServiceHistoryPage>().ProducesProblem(400).ProducesProblem(401)
             .ProducesProblem(500).ProducesProblem(503)
             .WithDescription("Authorized, team-scoped workflows with their latest run instances across all series and manual runs, without a date cutoff. " +
-                "runLimit=1..100 (default 10) applies separately to each workflow; fewer runs means fewer instances, never fabricated outcomes. " +
+                "runLimit=1..30 (default 10) applies separately to each workflow; fewer runs means fewer instances, never fabricated outcomes. " +
                 "Run instances are ordered by createdAt then id descending. " +
                 "Uses the same exact team/type, keyset cursor and metadata filters as the workflow catalogue. No payloads or capabilities.")
             .AddOpenApiOperationTransformer((operation, _, _) =>
             {
                 operation.Parameters ??= [];
                 foreach (var name in new[] { "team", "type", "runLimit", "cursor", "limit", "meta.*", "defaults" })
+                {
+                    var schema = new OpenApiSchema { Type = name is "limit" or "runLimit" ? JsonSchemaType.Integer :
+                        name == "defaults" ? JsonSchemaType.Boolean : JsonSchemaType.String };
+                    if (name == "runLimit") { schema.Minimum = "1"; schema.Maximum = "30"; schema.Default = JsonValue.Create(10); }
                     operation.Parameters.Add(new OpenApiParameter
                     {
                         Name = name, In = ParameterLocation.Query, Required = name == "team",
-                        Schema = new OpenApiSchema { Type = name is "limit" or "runLimit" ? JsonSchemaType.Integer :
-                            name == "defaults" ? JsonSchemaType.Boolean : JsonSchemaType.String }
+                        Schema = schema
                     });
+                }
                 return Task.CompletedTask;
             });
     }
@@ -54,8 +59,8 @@ public static partial class CatalogEndpoints
             if (context.Request.Query.TryGetValue("runLimit", out var values) &&
                 (values.Count != 1 ||
                  !int.TryParse(values[0], NumberStyles.None, CultureInfo.InvariantCulture, out runLimit) ||
-                 runLimit is < 1 or > 100))
-                throw new ArgumentException("The run limit must be a whole number from 1 to 100.");
+                 runLimit is < 1 or > 30))
+                throw new ArgumentException("The run limit must be a whole number from 1 to 30.");
             if (filter.Team is null) throw new ArgumentException("Choose an exact team for service history.");
         }
         catch (ArgumentException error)

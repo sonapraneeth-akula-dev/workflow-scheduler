@@ -312,9 +312,107 @@ test("recent-run count and success rate stay adjacent in compact cards and table
       expect(layout.lineOffset).toBeLessThanOrEqual(1)
       expect(layout.gap).toBeGreaterThanOrEqual(8)
       expect(layout.gap).toBeLessThanOrEqual(13)
-      if (view === "table") expect(layout.columnWidth).toBeLessThanOrEqual(353)
+      if (view === "table") expect(layout.columnWidth).toBeLessThanOrEqual(301)
     }
   }
+})
+
+test("personal run settings cap at 30 and additional icons wrap without reserving width", async ({
+  page,
+}) => {
+  await page.route("**/api/v1/service-history?**", async (route) => {
+    const response = await route.fetch()
+    const data: {
+      runLimit: number
+      items: { runs: { id: string; createdAt: string }[] }[]
+    } = await response.json()
+    expect(data.runLimit).toBeLessThanOrEqual(30)
+    const entry = data.items[0]
+    const original = entry?.runs[0]
+    if (!entry || !original) throw new Error("The seeded run is missing.")
+    entry.runs = Array.from({ length: data.runLimit }, (_, index) => ({
+      ...original,
+      id:
+        index === 0
+          ? original.id
+          : `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+      createdAt:
+        index === 0
+          ? original.createdAt
+          : new Date(
+              new Date(original.createdAt).getTime() - index * 1000
+            ).toISOString(),
+    }))
+    await route.fulfill({ response, json: data })
+  })
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  await page.goto("/t/report-tests/services")
+  const strip = page.locator("main [data-run-history]").first()
+  await expect(strip.locator("[data-run-id]")).toHaveCount(10)
+  const initial = (await strip.boundingBox())!
+  const card = page.locator("main ul > li").first()
+  const initialCard = (await card.boundingBox())!
+  await page.getByRole("button", { name: /^Account menu for / }).click()
+  await page.getByRole("menuitem", { name: "Settings", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Settings", exact: true })
+  const count = dialog.getByRole("spinbutton", {
+    name: "Recent runs per workflow",
+  })
+  await expect(count).toHaveAttribute("max", "30")
+  await count.fill("31")
+  const save = dialog.getByRole("button", {
+    name: "Save service history settings",
+  })
+  await save.click()
+  expect(
+    await count.evaluate(
+      (element) =>
+        element instanceof HTMLInputElement && element.validity.rangeOverflow
+    )
+  ).toBe(true)
+  await expect(dialog.getByRole("status")).toHaveCount(0)
+  await count.fill("30")
+  await save.click()
+  await expect(dialog.getByRole("status")).toHaveText(
+    "Personal run-count setting saved."
+  )
+  await dialog.getByRole("button", { name: "Close account dialog" }).click()
+  await expect(strip.locator("[data-run-id]")).toHaveCount(30)
+  const expanded = (await strip.boundingBox())!
+  expect(expanded.width).toBeLessThanOrEqual(initial.width + 1)
+  expect(expanded.height).toBeGreaterThanOrEqual(initial.height + 55)
+  expect((await card.boundingBox())!.height).toBeGreaterThanOrEqual(
+    initialCard.height + 55
+  )
+  for (const view of ["cards", "table"]) {
+    if (view === "table")
+      await page.getByRole("radio", { name: "Table format" }).click()
+    const layout = await strip.evaluate((element) => {
+      const icons = Array.from(
+        element.querySelectorAll("[data-run-id]"),
+        (icon) => icon.getBoundingClientRect()
+      )
+      return {
+        rows: new Set(icons.map((icon) => icon.top)).size,
+        maxSize: Math.max(...icons.map((icon) => icon.width)),
+        columnWidth: element.closest("td")?.getBoundingClientRect().width,
+      }
+    })
+    expect(layout.rows).toBe(3)
+    expect(layout.maxSize).toBe(24)
+    if (view === "table") expect(layout.columnWidth).toBeLessThanOrEqual(301)
+  }
+  await page.getByRole("radio", { name: "Card format" }).click()
+  await page.setViewportSize({ width: 320, height: 1000 })
+  await page.reload()
+  await expect(strip.locator("[data-run-id]")).toHaveCount(30)
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth)
+  ).toBeLessThanOrEqual(320)
+  const audit = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"])
+    .analyze()
+  expect(audit.violations).toEqual([])
 })
 
 for (const width of [320, 768, 2000]) {

@@ -63,7 +63,7 @@ public sealed partial class AuthorizationMatrixTests
     [InlineData(null, 10)]
     [InlineData("1", 1)]
     [InlineData("25", 25)]
-    [InlineData("100", 100)]
+    [InlineData("30", 30)]
     public async Task ServiceHistory_limits_instances_per_workflow_and_preserves_precise_order(string? runLimit, int limit)
     {
         var group = Guid.NewGuid();
@@ -146,6 +146,8 @@ public sealed partial class AuthorizationMatrixTests
     [InlineData("?team=demo&window=14d&window=14d")]
     [InlineData("?team=demo&window=7d&window=30d")]
     [InlineData("?team=demo&runLimit=0")]
+    [InlineData("?team=demo&runLimit=31")]
+    [InlineData("?team=demo&runLimit=100")]
     [InlineData("?team=demo&runLimit=101")]
     [InlineData("?team=demo&runLimit=-1")]
     [InlineData("?team=demo&runLimit=1.5")]

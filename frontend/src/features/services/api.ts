@@ -2,7 +2,10 @@ import { z } from "zod"
 import { ApiError, publicApi } from "@/lib/api/client"
 import { catalogWorkflowSchema } from "@/features/catalog/api"
 import { instantMicros, instantSchema } from "@/features/runs/search"
-import { serviceRunLimitSchema } from "@/lib/ServiceHistoryPreferences"
+import {
+  maximumServiceRunLimit,
+  serviceRunLimitSchema,
+} from "@/lib/ServiceHistoryPreferences"
 
 export const serviceSearchSchema = z
   .object({
@@ -40,7 +43,7 @@ const servicePageSchema = z.object({
               endedAt: instantSchema.nullable(),
             })
           )
-          .max(100),
+          .max(maximumServiceRunLimit),
       })
     )
     .max(50),

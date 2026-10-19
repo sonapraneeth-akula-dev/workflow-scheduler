@@ -209,7 +209,29 @@ it("accepts the configured run limit, rejects oversized responses and permits fe
   ).resolves.toHaveProperty("items.0.runs.length", 9)
 })
 
-it.each([0, 101, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+it("accepts at most 30 returned run instances", async () => {
+  const data = { ...page(), runLimit: 30 }
+  const item = data.items[0]!
+  const original = item.runs[0]!
+  item.runs = Array.from({ length: 30 }, (_, index) => ({
+    ...original,
+    id: `019ed132-2f44-7000-8000-${(100 - index).toString(16).padStart(12, "0")}`,
+  }))
+  respond(data)
+  await expect(
+    getServiceHistory("team", undefined, 30, null)
+  ).resolves.toHaveProperty("items.0.runs.length", 30)
+  item.runs.push({
+    ...original,
+    id: "019ed132-2f44-7000-8000-000000000001",
+  })
+  respond(data)
+  await expect(getServiceHistory("team", undefined, 30, null)).rejects.toThrow()
+  respond({ ...data, runLimit: 31 })
+  await expect(getServiceHistory("team", undefined, 30, null)).rejects.toThrow()
+})
+
+it.each([0, 31, 100, 101, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
   "rejects invalid personal run limit %s before requesting data",
   async (limit) => {
     await expect(

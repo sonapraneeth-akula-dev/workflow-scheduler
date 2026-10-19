@@ -61,21 +61,25 @@ explanation rather than pretending to log out the fixed local identity.
 
 Service history is available from the navbar's team/type dropdown, populated
 from the authorized catalogue rather than hardcoded team names. `/service-history`
-chooses a team; `/t/<team>/services` restores `type`, `window` and `view` from its
-URL. Workflow cards are grouped by `metadata.type`; a button group switches to
-a striped semantic table without refetching the same health data. Both views
-show name, latest run status/time, retained run history and a daily health bar.
-The shared catalogue's keyset paging, access checks and live invalidation apply.
+chooses a team; `/t/<team>/services` restores `type`, `view` and container grouping
+from its URL. Cards and striped tables show each workflow's latest status/time,
+recent run icons and completed-run success percentage. Icons wrap after at most
+ten per row; additional runs grow card height rather than reserve empty width.
 
-`GET /api/v1/service-history?team=...&type=...&window=30d` aggregates actual runs
-across every series and manual trigger for each authorized workflow in that
-bounded page. Windows are 7/30/90 UTC run days, including today; empty days
-remain neutral. A failed/timed-out outcome takes precedence over aborted, active
-and succeeded states within a day. Active-only periods never imply success.
-Daily details expose exact status counts and links to the corresponding team
-run listing with explicit inclusive/exclusive UTC boundaries. The success
-percentage counts completed runs only; it is not an uptime measurement.
-Transient failures remain visible with retry; revoked access hides cached data.
+Account **Settings** saves **1-30 recent runs per workflow**, default **10**, for
+the current profile in this browser. The shared validation rejects values above
+30 in settings, saved preferences and API calls. Invalid saved values show an
+error and use 10 until explicitly corrected.
+`GET /api/v1/service-history?team=...&type=...&runLimit=30` returns at most 30 actual
+runs per authorized workflow across all series and manual triggers, without a
+date cutoff. The obsolete `window` parameter is ignored in saved UI URLs.
+**History** opens the full run list.
+
+The shared catalogue's keyset paging and access checks apply. Each loaded
+workflow type subscribes to live updates; run changes and reconnection refetch
+history automatically. **Refresh service history** manually reloads history,
+workflow types and display names. Transient failures remain visible with retry;
+revoked access hides cached data.
 
 ## Run locally
 
