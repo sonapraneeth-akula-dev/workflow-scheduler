@@ -4,6 +4,7 @@ import { expect, test } from "@playwright/test"
 import { z } from "zod"
 import { scheduleSchema } from "../src/lib/api/client"
 import { parseJson } from "../src/lib/json"
+import { expectInstant } from "./instants"
 
 test("confirmed Operator abort requires a reason and shows actual immutable attribution in live banner and history", async ({
   page,
@@ -95,8 +96,7 @@ test("confirmed Operator abort requires a reason and shows actual immutable attr
     await expect(banner).toContainText("The run is cancelled (Aborted).")
     await expect(banner).toContainText(receipt.by)
     await expect(banner).toContainText(receipt.byName)
-    await expect(banner.locator("time")).toHaveAttribute("datetime", receipt.at)
-    await expect(banner.locator("time")).toHaveAttribute("title", receipt.at)
+    await expectInstant(banner.locator("time"), receipt.at)
     await expect(banner).toContainText(reason)
     await expect(banner).toContainText("UI")
     await expect(
@@ -130,7 +130,7 @@ test("confirmed Operator abort requires a reason and shows actual immutable attr
     }
     await page.reload()
     await expect(banner).toContainText(reason)
-    await expect(banner.locator("time")).toHaveAttribute("datetime", receipt.at)
+    await expectInstant(banner.locator("time"), receipt.at)
     await page
       .getByRole("link", { name: "Series history", exact: true })
       .click()
@@ -141,8 +141,8 @@ test("confirmed Operator abort requires a reason and shows actual immutable attr
     await expect(row).toContainText("Aborted")
     await expect(row).toContainText(reason)
     await expect(row).toContainText(receipt.by)
-    await expect(row.locator(`time[datetime="${receipt.at}"]`)).toHaveAttribute(
-      "title",
+    await expectInstant(
+      row.getByRole("cell").last().locator("time"),
       receipt.at
     )
     const after = await request.get(`/api/v1/schedules/${schedule.id}`)

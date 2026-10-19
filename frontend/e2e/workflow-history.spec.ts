@@ -1,14 +1,21 @@
 import { expect, test, type Page } from "@playwright/test"
 import AxeBuilder from "@axe-core/playwright"
 import { z } from "zod"
+import { catalogWorkflowSchema } from "../src/features/catalog/api"
 
 async function openWorkflowHistory(page: Page) {
-  await page.goto("/service-history")
-  await page.locator('main a[href^="/t/"][href*="/services"]').first().click()
-  await page
-    .getByRole("link", { name: /^History for / })
-    .first()
-    .click()
+  const response = await page.request.get("/api/v1/workflows", {
+    params: { team: "ui-tests", type: "release", limit: 50 },
+  })
+  expect(response.status()).toBe(200)
+  const { items } = z
+    .object({ items: z.array(catalogWorkflowSchema) })
+    .parse(await response.json())
+  const workflow = items.find((item) => item.latestRun !== null)
+  if (!workflow) throw new Error("The catalogue has no recorded workflow run.")
+  await page.goto(
+    `/t/${workflow.team}/${workflow.type}/w/${workflow.name}/history`
+  )
   await expect(
     page.getByRole("heading", { name: "Workflow history", exact: true })
   ).toBeVisible()

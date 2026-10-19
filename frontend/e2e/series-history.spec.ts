@@ -5,6 +5,7 @@ import { expect, test, type Page } from "@playwright/test"
 import { z } from "zod"
 import { scheduleSchema, seriesFiresSchema } from "../src/lib/api/client"
 import { parseJson } from "../src/lib/json"
+import { expectInstant, instantTicks } from "./instants"
 
 test("actual catch-up run is badged while its retained source remains Missed", async ({
   page,
@@ -235,6 +236,7 @@ test("workflow and series history show actual committed abort attribution and re
       .parse(await aborted.json())
     let versionId = ""
     let version = ""
+    let recordedAt = ""
     await expect
       .poll(async () => {
         const result = await request.get(
@@ -268,10 +270,11 @@ test("workflow and series history show actual committed abort attribution and re
         const row = history.items.find((item) => item.runId === runId)
         versionId = row?.versionId ?? ""
         version = row?.version ?? ""
+        recordedAt = row?.abort?.at ?? ""
         return (
           row?.abort?.reason === reason &&
           row.abort.by === receipt.by &&
-          row.abort.at === receipt.at &&
+          instantTicks(row.abort.at) === instantTicks(receipt.at) &&
           row.trigger === "Manual"
         )
       })
@@ -297,8 +300,8 @@ test("workflow and series history show actual committed abort attribution and re
     await expect(table).not.toContainText("9223372036854775807")
     const row = table.getByRole("row").filter({ hasText: runId })
     await expect(row).toContainText(receipt.by)
-    await expect(row.locator(`time[datetime="${receipt.at}"]`)).toHaveAttribute(
-      "title",
+    await expectInstant(
+      row.locator(`time[datetime="${recordedAt}"]`),
       receipt.at
     )
     await expect(
