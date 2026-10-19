@@ -827,6 +827,15 @@ and cancellation audit.
 registration (for example `1.2.3`), not today's active release. The internal UUID
 stays in the version-details URL and tooltip; legacy missing registrations
 display **Version not recorded** rather than a guessed current version.
+Workflow authors manually set SemVer in `Workflow.Define("team/type/name",
+"1.0.1", ...)`. Changed workflow source, package or manifest cannot overwrite
+an existing version: registration rejects reused versions with HTTP 409.
+Increase the code-owned version before publishing (PATCH for compatible fixes,
+MINOR/MAJOR as required by the API compatibility validator); versions are never
+automatically derived from Git or incremented by the UI. The real CLI publication
+integration test changes task code without a bump and requires rejection, then
+changes the version string and requires successful registration without rewriting
+the original version.
 
 Open a queued/running run and select **Cancel run** (Operator/Admin permission).
 A reason and confirmation are required. The authenticated actor's name/ID,

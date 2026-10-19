@@ -294,6 +294,37 @@ public sealed partial class PublishRegistrationTests(RegistrationDatabase databa
             Assert.Empty(invalidPublish.Output);
             Assert.Equal(1L, await Value("SELECT count(*) FROM workflow_versions WHERE workflow_id=$1", workflow));
             Assert.Equal(version, await Value("SELECT active_version_id FROM workflows WHERE id=$1", workflow));
+
+            File.Delete(schedules);
+            var changedSource = script.Replace("ctx.Outputs[\"answer\"] = 42", "ctx.Outputs[\"answer\"] = 43", StringComparison.Ordinal);
+            Assert.NotEqual(script, changedSource);
+            await File.WriteAllTextAsync(Path.Combine(source, "workflow.cs"), changedSource, new UTF8Encoding(false), Token);
+            var missingBump = await Process(arguments, server.AccessToken());
+            Assert.Equal(1, missingBump.Exit);
+            Assert.Contains("HTTP 409", missingBump.Error);
+            Assert.Empty(missingBump.Output);
+            Assert.Equal(1L, await Value("SELECT count(*) FROM workflow_versions WHERE workflow_id=$1", workflow));
+            Assert.Equal(version, await Value("SELECT active_version_id FROM workflows WHERE id=$1", workflow));
+            Assert.Equal(version, await Value("SELECT latest_version_id FROM workflows WHERE id=$1", workflow));
+            Assert.Equal("1.0.0", await Value("SELECT semver FROM workflow_versions WHERE id=$1", version));
+            Assert.Equal(1L, await Value("SELECT count(*) FROM audit_log WHERE target_id=$1", workflow));
+
+            var bumpedSource = changedSource.Replace("\"1.0.0\"", "\"1.0.1\"", StringComparison.Ordinal);
+            Assert.NotEqual(changedSource, bumpedSource);
+            await File.WriteAllTextAsync(Path.Combine(source, "workflow.cs"), bumpedSource, new UTF8Encoding(false), Token);
+            var bumped = await Process(arguments, server.AccessToken());
+            Assert.True(bumped.Exit == 0, bumped.Error);
+            Assert.Contains("Registered: " + workflow + "@1.0.1", bumped.Output);
+            Assert.Empty(bumped.Error);
+            var nextVersion = Assert.IsType<Guid>(await Value("SELECT active_version_id FROM workflows WHERE id=$1", workflow));
+            Assert.NotEqual(version, nextVersion);
+            Assert.Equal(nextVersion, await Value("SELECT latest_version_id FROM workflows WHERE id=$1", workflow));
+            Assert.Equal("1.0.1", await Value("SELECT semver FROM workflow_versions WHERE id=$1", nextVersion));
+            Assert.Equal("1.0.0", await Value("SELECT semver FROM workflow_versions WHERE id=$1", version));
+            Assert.Equal(2L, await Value("SELECT count(*) FROM workflow_versions WHERE workflow_id=$1", workflow));
+            Assert.Equal(2L, await Value("SELECT count(*) FROM audit_log WHERE target_id=$1", workflow));
+            Assert.Equal(true, await Value("SELECT package_sha256<>$2 FROM workflow_versions WHERE id=$1", nextVersion, Convert.FromHexString(sha)));
+            output.WriteLine("Changed actual workflow task code: same code-owned SemVer rejected with 409 and no version/audit/pointer writes; manual Workflow.Define version bump to 1.0.1 accepted.");
         }
         finally
         {
