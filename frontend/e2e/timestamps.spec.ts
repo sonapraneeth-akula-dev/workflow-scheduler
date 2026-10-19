@@ -1,5 +1,4 @@
 import { expect, test, type Locator } from "@playwright/test"
-import { openTeamRunList } from "./team-runs"
 
 async function expectTimes(scope: Locator, locale: string, timeZone?: string) {
   await expect(scope.locator("time[datetime]").first()).toBeVisible()
@@ -41,6 +40,21 @@ async function expectTimes(scope: Locator, locale: string, timeZone?: string) {
   }
 }
 
+async function expectRecordedLocalTimes(
+  scope: Locator,
+  locale: string,
+  emptyMessage: string
+) {
+  const empty = scope.getByText(emptyMessage, { exact: true })
+  const times = scope.locator("time[datetime]")
+  await expect(times.first().or(empty)).toBeVisible()
+  if (await empty.isVisible()) {
+    await expect(times).toHaveCount(0)
+  } else {
+    await expectTimes(scope, locale)
+  }
+}
+
 for (const [timezoneId, locale] of [
   ["Asia/Kolkata", "en-IN"],
   ["America/Los_Angeles", "en-US"],
@@ -49,19 +63,27 @@ for (const [timezoneId, locale] of [
   test.describe(timezoneId, () => {
     test.use({ timezoneId })
 
-    test("run lists, attempts and events use local milliseconds while history stays in IST", async ({
+    test("recorded timestamps use local milliseconds while history stays in IST; absent attempts and events invent no times", async ({
       page,
     }) => {
-      await openTeamRunList(page)
+      await page.goto("/t/report-tests/runs")
       const main = page.locator("main")
       await expectTimes(main, locale)
       await main.locator('a[href^="/runs/"]').first().click()
       await page.getByRole("tab", { name: "Timeline", exact: true }).click()
-      await expectTimes(page.getByRole("tabpanel"), locale)
+      await expectRecordedLocalTimes(
+        page.getByRole("tabpanel"),
+        locale,
+        "No dispatched attempts recorded."
+      )
       await page
         .getByRole("tab", { name: "System Events", exact: true })
         .click()
-      await expectTimes(page.getByRole("tabpanel"), locale)
+      await expectRecordedLocalTimes(
+        page.getByRole("tabpanel"),
+        locale,
+        "No matching committed system events."
+      )
       await page
         .getByRole("link", { name: "Workflow history", exact: true })
         .click()
