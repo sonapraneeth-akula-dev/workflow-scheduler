@@ -16,20 +16,33 @@ const colors = [
   "#0891b2",
 ]
 
-export function Plot({ data, title }: { data: ChartData; title: string }) {
+export function Plot({
+  data,
+  title,
+  xAxis = "number",
+}: {
+  data: ChartData
+  title: string
+  xAxis?: "number" | "utc-date"
+}) {
   const container = useRef<HTMLDivElement>(null)
   const [error, setError] = useState<unknown>(null)
   const table = useMemo(
     () => ({
-      columns: ["X", ...data.series.map((series) => series.label)],
+      columns: [
+        xAxis === "utc-date" ? "UTC creation day" : "X",
+        ...data.series.map((series) => series.label),
+      ],
       rows: data.x.map((x, index) => [
-        String(x),
+        xAxis === "utc-date"
+          ? new Date(Number(x) * 1000).toISOString().slice(0, 10)
+          : String(x),
         ...data.series.map((series) =>
           series.values[index] === null ? "" : String(series.values[index])
         ),
       ]),
     }),
-    [data]
+    [data, xAxis]
   )
   useEffect(() => {
     const target = container.current!
@@ -69,9 +82,15 @@ export function Plot({ data, title }: { data: ChartData; title: string }) {
         {
           width: Math.max(1, target.clientWidth),
           height: 320,
+          ...(xAxis === "utc-date"
+            ? {
+                tzDate: (timestamp: number) =>
+                  uPlot.tzDate(new Date(timestamp * 1000), "Etc/UTC"),
+              }
+            : {}),
           scales: {
             x: {
-              time: false,
+              time: xAxis === "utc-date",
               range:
                 data.type === "bar" ? [-0.5, data.x.length - 0.5] : undefined,
             },
@@ -95,25 +114,35 @@ export function Plot({ data, title }: { data: ChartData; title: string }) {
               fill:
                 data.type === "bar" ? colors[index % colors.length] : undefined,
               paths: path,
-              points: { show: false },
+              points: { show: xAxis === "utc-date" },
+              spanGaps: false,
             })),
           ],
           axes: [
             {
               stroke: foreground,
               grid: { stroke: border },
-              ...(data.type === "bar"
+              ...(xAxis === "utc-date"
                 ? {
                     values: (_: uPlot, splits: number[]) =>
                       splits.map((value) =>
-                        Number.isInteger(value) &&
-                        value >= 0 &&
-                        value < data.x.length
-                          ? String(data.x[value])
-                          : ""
+                        new Date(value * 1000).toISOString().slice(0, 10)
                       ),
+                    size: 70,
+                    space: 100,
                   }
-                : {}),
+                : data.type === "bar"
+                  ? {
+                      values: (_: uPlot, splits: number[]) =>
+                        splits.map((value) =>
+                          Number.isInteger(value) &&
+                          value >= 0 &&
+                          value < data.x.length
+                            ? String(data.x[value])
+                            : ""
+                        ),
+                    }
+                  : {}),
             },
             { stroke: foreground, grid: { stroke: border } },
           ],
@@ -142,7 +171,7 @@ export function Plot({ data, title }: { data: ChartData; title: string }) {
       plot?.destroy()
       target.replaceChildren()
     }
-  }, [data])
+  }, [data, xAxis])
   return (
     <section className="min-w-0 space-y-3" aria-label={`${title} chart`}>
       {error ? <ErrorNotice error={error} /> : null}

@@ -61,8 +61,73 @@ public sealed partial class DashboardEndpointTests(RollupDatabase database, ITes
             Assert.Equal($"/runs/{latest:D}", row.RunHref);
             Assert.Equal(row, Assert.Single(response.Rankings.Cpu));
             Assert.Equal(row, Assert.Single(response.Rankings.Ram));
+            Assert.Equal(kind == "workflow", response.Trends is not null);
         }
         Assert.NotEqual(old, latest);
+    }
+
+    [Fact]
+    public async Task Workflow_trends_use_exact_run_quantiles_all_statuses_daily_gaps_and_node_resource_maxima()
+    {
+        var scope = await Registry();
+        await Seed(scope, Today.AddDays(-1), 3, 5, 0, 0, 0);
+        await Seed(scope, Today.AddDays(-1).AddHours(1), 4, 7, 10, 20, 30);
+        await Seed(scope, Today, 5, 8, 20, 150, 128);
+        await Seed(scope, Today.AddHours(1), 6, 9, 100, 200, 512);
+        await Seed(scope, Today.AddHours(2), 3, 5, null, null, null);
+        foreach (short status in new short[] { 0, 1, 2 })
+            await Seed(scope, Today.AddHours(status + 3), status, 3, 9999, 9999, 9999);
+        await Seed(scope, Today.AddDays(-8), 3, 5, 9999, 9999, 9999);
+        await Seed(scope, Today.AddDays(1), 3, 5, 9999, 9999, 9999);
+        var foreign = await Registry();
+        await Seed(foreign, Today, 3, 5, 99999, 99999, 99999);
+        await using var api = await MetricsApiServer.Start(database.DataSource, Token, timeProvider: new Clock());
+        var response = await Read(api, scope, "workflow", DashboardQuery.Encode(scope.Workflow), "?window=7d&top=1");
+        var trends = Assert.IsType<WorkflowTrends>(response.Trends);
+        Assert.Equal((8L, 5L, 4L), (trends.Total.Runs, trends.Total.Completed, trends.Total.DurationCount));
+        Assert.Equal(new WorkflowStatusCounts(1, 1, 1, 2, 1, 1, 1), trends.Total.Status);
+        Assert.Equal(0.6, trends.Total.FailureRate);
+        Assert.Equal(15000, trends.Total.P50Ms);
+        Assert.Equal(76000, trends.Total.P90Ms!.Value, 5);
+        Assert.Equal(97600, trends.Total.P99Ms!.Value, 5);
+        Assert.Equal(99760, trends.Total.P999Ms!.Value, 5);
+        Assert.Equal(200, trends.Total.CpuMaxPercent);
+        Assert.Equal(512, trends.Total.RamPeakMb);
+        Assert.Equal(Enumerable.Range(-6, 7).Select(offset => DateOnly.FromDateTime(Today.AddDays(offset).UtcDateTime)),
+            trends.Days.Select(day => day.Day));
+        foreach (var day in trends.Days.Take(5))
+        {
+            Assert.Equal(0, day.Metrics.Runs);
+            Assert.Null(day.Metrics.FailureRate);
+            Assert.Null(day.Metrics.P999Ms);
+            Assert.Null(day.Metrics.CpuMaxPercent);
+        }
+        Assert.Equal(5000, trends.Days[5].Metrics.P50Ms);
+        Assert.Equal(20, trends.Days[5].Metrics.CpuMaxPercent);
+        Assert.Equal(60000, trends.Days[6].Metrics.P50Ms);
+        Assert.NotEqual(trends.Days.Average(day => day.Metrics.P50Ms ?? 0), trends.Total.P50Ms);
+    }
+
+    [Fact]
+    public async Task Workflow_trends_preserve_zero_unknown_and_retained_resources_without_inventing_run_latency()
+    {
+        var scope = await Registry();
+        await Seed(scope, Today, 3, 5, -1, 0, 0);
+        await Seed(scope, Today.AddHours(1), 4, 7, null, null, null);
+        await using var api = await MetricsApiServer.Start(database.DataSource, Token, timeProvider: new Clock());
+        var response = await Read(api, scope, "workflow", DashboardQuery.Encode(scope.Workflow), "?window=7d");
+        Assert.Equal(0, response.Trends!.Total.P999Ms);
+        Assert.Equal(1, response.Trends.Total.DurationCount);
+        Assert.Equal(0, response.Trends.Total.CpuMaxPercent);
+        Assert.Equal(0, response.Trends.Total.RamPeakMb);
+        await Execute("DELETE FROM task_attempts a USING runs r WHERE a.run_day=r.run_day AND a.run_id=r.id AND r.workflow_id=$1", scope.Workflow);
+        await Execute("DELETE FROM node_runs n USING runs r WHERE n.run_day=r.run_day AND n.run_id=r.id AND r.workflow_id=$1", scope.Workflow);
+        await Execute("DELETE FROM runs WHERE workflow_id=$1", scope.Workflow);
+        var retained = await Read(api, scope, "workflow", DashboardQuery.Encode(scope.Workflow), "?window=7d");
+        Assert.Equal(0, retained.Trends!.Total.Runs);
+        Assert.Null(retained.Trends.Total.P999Ms);
+        Assert.Null(retained.Trends.Total.FailureRate);
+        Assert.Equal(0, retained.Trends.Total.CpuMaxPercent);
     }
 
     [Fact]
@@ -152,6 +217,10 @@ public sealed partial class DashboardEndpointTests(RollupDatabase database, ITes
         var empty = await Read(api, scope, "workflow", DashboardQuery.Encode(scope.Workflow));
         Assert.Empty(empty.Rankings.Slowest);
         Assert.Empty(empty.Rankings.FailureRate);
+        Assert.Equal(30, empty.Trends!.Days.Length);
+        Assert.Equal(0, empty.Trends.Total.Runs);
+        Assert.Null(empty.Trends.Total.P999Ms);
+        Assert.Null(empty.Trends.Total.FailureRate);
         await Execute("ALTER TABLE dashboard_rollups RENAME COLUMN durations_ms TO unavailable_dashboard_durations");
         try
         {

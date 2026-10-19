@@ -20,8 +20,15 @@ public sealed record DashboardRow(string WorkflowId, string NodeKey, long Observ
     double? CpuMaxPercent, decimal? RamPeakMb, Guid LatestRunId, string RunHref);
 public sealed record DashboardRankings(ImmutableArray<DashboardRow> Slowest, ImmutableArray<DashboardRow> FailureRate,
     ImmutableArray<DashboardRow> Cpu, ImmutableArray<DashboardRow> Ram);
+public sealed record WorkflowStatusCounts(long Queued, long Running, long Aborting, long Succeeded,
+    long Failed, long Aborted, long TimedOut);
+public sealed record WorkflowMetrics(long Runs, long Completed, long DurationCount, WorkflowStatusCounts Status,
+    double? FailureRate, double? P50Ms, double? P90Ms, double? P99Ms, double? P999Ms,
+    double? CpuMaxPercent, decimal? RamPeakMb);
+public sealed record WorkflowDay(DateOnly Day, WorkflowMetrics Metrics);
+public sealed record WorkflowTrends(WorkflowMetrics Total, ImmutableArray<WorkflowDay> Days);
 public sealed record DashboardResponse(string Scope, string Id, string Window, DateOnly From, DateOnly To, int Top,
-    string ObservationKind, DashboardRankings Rankings);
+    string ObservationKind, DashboardRankings Rankings, WorkflowTrends? Trends = null);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(DashboardResponse))]
@@ -100,6 +107,9 @@ public static class DashboardEndpoints
                 "without invented duration. Missing measurements stay null and are excluded from their ranking. " +
                 "CPU and RAM are maxima across all attempts including failed retries; RAM in MiB. " +
                 "Ties use ordinal workflow/node order. LatestRunId/RunHref identify a contributing run, not a p95 exemplar. " +
+                "Workflow dashboards also return UTC daily trends and whole-window totals: all current run statuses, " +
+                "terminal-run execution latency (started to ended, excluding queue time), exact p50/p90/p99/p99.9, " +
+                "failure fraction of terminal runs, and maximum node CPU/RAM. Missing days have zero counts and null measurements. " +
                 "No metadata, variables, errors, output or storage capabilities. Unknown/foreign identities return 403.")
             .AddOpenApiOperationTransformer((operation, _, _) =>
             {
@@ -164,21 +174,28 @@ public static class DashboardEndpoints
                 if (!context.User.IsInRole(AuthExtensions.Admin)) exists.Parameters.AddWithValue(types.ToArray());
                 if (await exists.ExecuteScalarAsync(context.RequestAborted) is not true) return Denied();
             }
-            var rows = await Query(source, filter, types, workflow, series, context.RequestAborted);
+            await using var connection = await source.OpenConnectionAsync(context.RequestAborted);
+            await using var transaction = await connection.BeginTransactionAsync(
+                System.Data.IsolationLevel.RepeatableRead, context.RequestAborted);
+            var rows = await Query(connection, filter, types, workflow, series, context.RequestAborted);
+            var trends = scope == "workflow"
+                ? await QueryTrends(connection, filter, context.RequestAborted) : null;
             if (scope == "node" && rows.Count == 0)
             {
-                await using var exists = source.CreateCommand("""
+                await using var exists = connection.CreateCommand();
+                exists.CommandText = """
                     SELECT EXISTS(SELECT 1 FROM node_runs n JOIN runs r ON r.run_day=n.run_day AND r.id=n.run_id
                         WHERE r.workflow_id=$1 AND n.node_key=$2)
                     OR EXISTS(SELECT 1 FROM workflow_versions w, jsonb_array_elements(w.manifest->'nodes') n
                         WHERE w.workflow_id=$1 AND n->>'key'=$2)
-                    """);
+                    """;
                 exists.Parameters.AddWithValue(workflow!);
                 exists.Parameters.AddWithValue(filter.NodeKey!);
                 if (await exists.ExecuteScalarAsync(context.RequestAborted) is not true) return Denied();
             }
+            await transaction.CommitAsync(context.RequestAborted);
             return Results.Json(new DashboardResponse(scope, id, filter.Window.Name, filter.Window.From, filter.Window.To,
-                filter.Top, scope == "machine" ? "TaskAttempt" : "Node", DashboardQuery.Rank(rows, filter.Top)),
+                filter.Top, scope == "machine" ? "TaskAttempt" : "Node", DashboardQuery.Rank(rows, filter.Top), trends),
                 DashboardJson.Default.DashboardResponse);
         }
         catch (NpgsqlException error)
@@ -214,31 +231,21 @@ public static class DashboardEndpoints
         predicates.Add("r.scope=" + P(scope, NpgsqlDbType.Text));
         predicates.Add("r.scope_id=" + P(series ?? (filter.Scope == "machine" ? filter.ResourceId!.Value : Guid.Empty), NpgsqlDbType.Uuid));
         if (filter.NodeKey is not null) predicates.Add("r.node_key=" + P(filter.NodeKey, NpgsqlDbType.Text));
-        query.CommandText = "WITH selected AS MATERIALIZED (SELECT * FROM dashboard_rollups r WHERE " +
-            string.Join(" AND ", predicates) + """
-            ), aggregate AS (
-                SELECT workflow_id,node_key,sum(observations)::bigint AS observations,sum(failures)::bigint AS failures,
-                    sum(soft_failures)::bigint AS soft_failures,sum(duration_count)::bigint AS duration_count,
-                    max(cpu_max_pct) AS cpu,max(ram_peak_mb) AS ram,max(latest_run_id::text COLLATE "C")::uuid AS latest_run_id
-                FROM selected GROUP BY workflow_id,node_key
-            )
-            SELECT m.workflow_id,m.node_key,m.observations,m.failures,m.soft_failures,m.duration_count,
-                (SELECT percentile_cont(ARRAY[0.5,0.95]) WITHIN GROUP (ORDER BY duration_ms)
-                    FROM selected s CROSS JOIN LATERAL unnest(s.durations_ms) d(duration_ms)
-                    WHERE s.workflow_id=m.workflow_id AND s.node_key=m.node_key),
-                m.cpu,m.ram,m.latest_run_id FROM aggregate m
-            """;
+        query.CommandText = """
+            SELECT r.workflow_id,r.node_key,r.observations,r.failures,r.soft_failures,r.duration_count,
+                r.durations_ms,r.cpu_max_pct,r.ram_peak_mb,r.latest_run_id
+            FROM dashboard_rollups r WHERE
+            """ + " " + string.Join(" AND ", predicates);
         return query;
 
         string P(object value, NpgsqlDbType type) => RunQueryEndpoints.Parameter(query, value, type);
     }
 
-    private static async Task<List<DashboardRow>> Query(NpgsqlDataSource source, DashboardQuery filter, List<string> types,
+    private static async Task<List<DashboardRow>> Query(NpgsqlConnection connection, DashboardQuery filter, List<string> types,
         string? workflow, Guid? series, CancellationToken token)
     {
-        await using var connection = await source.OpenConnectionAsync(token);
         await using var query = CreateQuery(connection, filter, types, workflow, series);
-        var rows = new List<DashboardRow>();
+        var rows = new List<(DashboardRow Row, double[] Durations)>();
         await using (var reader = await query.ExecuteReaderAsync(token))
         {
             while (await reader.ReadAsync(token))
@@ -247,21 +254,124 @@ public static class DashboardEndpoints
                 var failed = reader.GetInt64(3);
                 var soft = reader.GetInt64(4);
                 var observed = reader.GetInt64(5);
-                var durations = reader.IsDBNull(6) ? null : reader.GetFieldValue<double[]>(6);
+                var durations = reader.GetFieldValue<double[]>(6);
                 double? cpu = reader.IsDBNull(7) ? null : reader.GetDouble(7);
                 decimal? ram = reader.IsDBNull(8) ? null : reader.GetDecimal(8);
                 if (count <= 0 || failed < 0 || soft < 0 || failed + soft > count || observed < 0 || observed > count ||
-                    (observed == 0) != (durations is null) || durations is { Length: not 2 } ||
-                    durations is not null && (durations.Any(value => !double.IsFinite(value) || value < 0) || durations[0] > durations[1]) ||
+                    observed != durations.LongLength || durations.Any(value => !double.IsFinite(value) || value < 0) ||
                     cpu is { } value && (!double.IsFinite(value) || value < 0) || ram < 0)
                     throw new InvalidDataException("Invalid committed dashboard aggregate.");
                 var run = reader.GetGuid(9);
                 var key = reader.GetString(1);
-                rows.Add(new(reader.GetString(0), key, count, failed, soft, observed, (double)failed / count,
-                    durations?[0], durations?[1], cpu, ram, run, $"/runs/{run:D}"));
+                rows.Add((new(reader.GetString(0), key, count, failed, soft, observed, (double)failed / count,
+                    null, null, cpu, ram, run, $"/runs/{run:D}"), durations));
             }
         }
-        return rows;
+        return rows.GroupBy(item => (item.Row.WorkflowId, item.Row.NodeKey)).Select(group =>
+        {
+            var items = group.Select(item => item.Row).ToArray();
+            var durations = group.SelectMany(item => item.Durations).ToArray();
+            Array.Sort(durations);
+            var count = items.Sum(item => item.Observations);
+            var failures = items.Sum(item => item.Failures);
+            var latest = items.MaxBy(item => item.LatestRunId.ToString("D"), StringComparer.Ordinal)!;
+            return latest with
+            {
+                Observations = count, Failures = failures, SoftFailures = items.Sum(item => item.SoftFailures),
+                DurationCount = durations.LongLength, FailureRate = (double)failures / count,
+                P50Ms = Percentile(durations, 0.5), P95Ms = Percentile(durations, 0.95),
+                CpuMaxPercent = items.Max(item => item.CpuMaxPercent), RamPeakMb = items.Max(item => item.RamPeakMb)
+            };
+        }).ToList();
+    }
+
+    private static double? Percentile(double[] sorted, double fraction)
+    {
+        // Match PostgreSQL percentile_cont over sorted source observations.
+        if (sorted.Length == 0) return null;
+        var position = (sorted.Length - 1) * fraction;
+        var lower = (int)position;
+        var upper = (int)Math.Ceiling(position);
+        return sorted[lower] + (position - lower) * (sorted[upper] - sorted[lower]);
+    }
+
+    private static async Task<WorkflowTrends> QueryTrends(NpgsqlConnection connection, DashboardQuery filter, CancellationToken token)
+    {
+        await using var query = connection.CreateCommand();
+        query.Parameters.AddWithValue(filter.Window.From);
+        query.Parameters.AddWithValue(filter.Window.To);
+        query.Parameters.AddWithValue(filter.WorkflowId!);
+        query.CommandText = """
+            WITH daily AS MATERIALIZED (
+                SELECT run_day AS day,count(*) AS runs,
+                    count(*) FILTER(WHERE status BETWEEN 3 AND 6) AS completed,
+                    count(*) FILTER(WHERE status=0) AS queued,count(*) FILTER(WHERE status=1) AS running,
+                    count(*) FILTER(WHERE status=2) AS aborting,count(*) FILTER(WHERE status=3) AS succeeded,
+                    count(*) FILTER(WHERE status=4) AS failed,count(*) FILTER(WHERE status=5) AS aborted,
+                    count(*) FILTER(WHERE status=6) AS timed_out,
+                    coalesce(array_agg(greatest(0,date_part('epoch',ended_at-started_at)*1000))
+                        FILTER(WHERE status BETWEEN 3 AND 6 AND started_at IS NOT NULL AND ended_at IS NOT NULL),
+                        '{}'::double precision[]) AS durations
+                FROM runs WHERE run_day >= $1 AND run_day < $2 AND workflow_id=$3 GROUP BY run_day
+            ), metrics AS (
+                SELECT day,runs,completed,cardinality(durations)::bigint AS measured,
+                    queued,running,aborting,succeeded,failed,aborted,timed_out,
+                    (SELECT percentile_cont(ARRAY[0.5,0.9,0.99,0.999]) WITHIN GROUP(ORDER BY duration_ms)
+                        FROM unnest(durations) d(duration_ms)) AS quantiles
+                FROM daily
+                UNION ALL
+                SELECT NULL,coalesce(sum(runs),0)::bigint,coalesce(sum(completed),0)::bigint,
+                    coalesce(sum(cardinality(durations)),0)::bigint,coalesce(sum(queued),0)::bigint,
+                    coalesce(sum(running),0)::bigint,coalesce(sum(aborting),0)::bigint,coalesce(sum(succeeded),0)::bigint,
+                    coalesce(sum(failed),0)::bigint,coalesce(sum(aborted),0)::bigint,coalesce(sum(timed_out),0)::bigint,
+                    (SELECT percentile_cont(ARRAY[0.5,0.9,0.99,0.999]) WITHIN GROUP(ORDER BY duration_ms)
+                        FROM daily CROSS JOIN LATERAL unnest(durations) d(duration_ms))
+                FROM daily
+            ), resources AS (
+                SELECT day,max(cpu_max_pct) AS cpu,max(ram_peak_mb) AS ram
+                FROM dashboard_rollups WHERE day >= $1 AND day < $2 AND workflow_id=$3
+                    AND scope='workflow' AND scope_id='00000000-0000-0000-0000-000000000000'
+                GROUP BY GROUPING SETS ((day),())
+            )
+            SELECT coalesce(m.day,r.day),coalesce(m.runs,0),coalesce(m.completed,0),coalesce(m.measured,0),
+                coalesce(m.queued,0),coalesce(m.running,0),coalesce(m.aborting,0),coalesce(m.succeeded,0),
+                coalesce(m.failed,0),coalesce(m.aborted,0),coalesce(m.timed_out,0),m.quantiles,r.cpu,r.ram
+            FROM metrics m FULL JOIN resources r
+                ON coalesce(m.day,'-infinity'::date)=coalesce(r.day,'-infinity'::date)
+            """;
+        var days = new Dictionary<DateOnly, WorkflowMetrics>();
+        WorkflowMetrics? total = null;
+        await using (var reader = await query.ExecuteReaderAsync(token))
+        {
+            while (await reader.ReadAsync(token))
+            {
+                var runs = reader.GetInt64(1);
+                var completed = reader.GetInt64(2);
+                var measured = reader.GetInt64(3);
+                var counts = Enumerable.Range(4, 7).Select(reader.GetInt64).ToArray();
+                var quantiles = reader.IsDBNull(11) ? null : reader.GetFieldValue<double[]>(11);
+                double? cpu = reader.IsDBNull(12) ? null : reader.GetDouble(12);
+                decimal? ram = reader.IsDBNull(13) ? null : reader.GetDecimal(13);
+                if (runs < 0 || counts.Any(count => count < 0) || counts.Sum() != runs ||
+                    completed != counts.Skip(3).Sum() || measured < 0 || measured > completed ||
+                    (measured == 0) != (quantiles is null) || quantiles is { Length: not 4 } ||
+                    quantiles is not null && (quantiles.Any(value => !double.IsFinite(value) || value < 0) ||
+                        !quantiles.SequenceEqual(quantiles.Order())) ||
+                    cpu is { } value && (!double.IsFinite(value) || value < 0) || ram < 0)
+                    throw new InvalidDataException("Invalid committed workflow trend aggregate.");
+                var metrics = new WorkflowMetrics(runs, completed, measured,
+                    new(counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], counts[6]),
+                    completed == 0 ? null : (double)counts.Skip(4).Sum() / completed,
+                    quantiles?[0], quantiles?[1], quantiles?[2], quantiles?[3], cpu, ram);
+                if (reader.IsDBNull(0)) total = metrics;
+                else days.Add(reader.GetFieldValue<DateOnly>(0), metrics);
+            }
+        }
+        var empty = new WorkflowMetrics(0, 0, 0, new(0, 0, 0, 0, 0, 0, 0), null, null, null, null, null, null, null);
+        return new(total ?? throw new InvalidDataException("Missing workflow trend total."),
+            Enumerable.Range(0, filter.Window.To.DayNumber - filter.Window.From.DayNumber)
+                .Select(offset => filter.Window.From.AddDays(offset))
+                .Select(day => new WorkflowDay(day, days.GetValueOrDefault(day, empty))).ToImmutableArray());
     }
 
     private static IResult Denied() => Results.Problem(TeamAuthorizationExtensions.Forbidden());

@@ -3880,7 +3880,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Fresh Viewer-scoped node rankings. scope=workflow|schedule|node|machine; workflow/node id is canonical unpadded base64url UTF8 of team/type/workflow[/node], schedule/machine id a lowercase UUID. window=7d|30d|90d (default 30d), UTC creation days including today; top=1..50 (default 10). Terminal runs only. Workflow/schedule/node observations are terminal node occurrences; machine observations are terminal task attempts executed on that exact agent, NEVER whole-node timings or other agents' resources. Machine results include only currently granted workflow types, without global machine metadata. Schedule history survives deletion. Slowest ranks exact source p95; failures count hard failure, timeout and cancellation, soft failures separately. Rates are 0..1 fractions; skipped/reused occurrences count without invented duration. Missing measurements stay null and are excluded from their ranking. CPU and RAM are maxima across all attempts including failed retries; RAM in MiB. Ties use ordinal workflow/node order. LatestRunId/RunHref identify a contributing run, not a p95 exemplar. No metadata, variables, errors, output or storage capabilities. Unknown/foreign identities return 403. */
+        /** @description Fresh Viewer-scoped node rankings. scope=workflow|schedule|node|machine; workflow/node id is canonical unpadded base64url UTF8 of team/type/workflow[/node], schedule/machine id a lowercase UUID. window=7d|30d|90d (default 30d), UTC creation days including today; top=1..50 (default 10). Terminal runs only. Workflow/schedule/node observations are terminal node occurrences; machine observations are terminal task attempts executed on that exact agent, NEVER whole-node timings or other agents' resources. Machine results include only currently granted workflow types, without global machine metadata. Schedule history survives deletion. Slowest ranks exact source p95; failures count hard failure, timeout and cancellation, soft failures separately. Rates are 0..1 fractions; skipped/reused occurrences count without invented duration. Missing measurements stay null and are excluded from their ranking. CPU and RAM are maxima across all attempts including failed retries; RAM in MiB. Ties use ordinal workflow/node order. LatestRunId/RunHref identify a contributing run, not a p95 exemplar. Workflow dashboards also return UTC daily trends and whole-window totals: all current run statuses, terminal-run execution latency (started to ended, excluding queue time), exact p50/p90/p99/p99.9, failure fraction of terminal runs, and maximum node CPU/RAM. Missing days have zero counts and null measurements. No metadata, variables, errors, output or storage capabilities. Unknown/foreign identities return 403. */
         get: {
             parameters: {
                 query?: {
@@ -5533,6 +5533,7 @@ export interface components {
             top: number | string;
             observationKind: string;
             rankings: components["schemas"]["DashboardRankings"];
+            trends?: null | components["schemas"]["WorkflowTrends"];
         };
         DashboardRow: {
             workflowId: string;
@@ -6411,17 +6412,65 @@ export interface components {
         };
         /** @enum {string} */
         VariableType: "String" | "Int" | "Long" | "Double" | "Bool" | "Enum" | "StringList" | "Duration" | "Secret";
+        WorkflowDay: {
+            /** Format: date */
+            day: string;
+            metrics: components["schemas"]["WorkflowMetrics"];
+        };
         WorkflowMetadata: {
             type: string;
             values: {
                 [key: string]: string;
             };
         };
+        WorkflowMetrics: {
+            /** Format: int64 */
+            runs: number | string;
+            /** Format: int64 */
+            completed: number | string;
+            /** Format: int64 */
+            durationCount: number | string;
+            status: components["schemas"]["WorkflowStatusCounts"];
+            /** Format: double */
+            failureRate: null | number | string;
+            /** Format: double */
+            p50Ms: null | number | string;
+            /** Format: double */
+            p90Ms: null | number | string;
+            /** Format: double */
+            p99Ms: null | number | string;
+            /** Format: double */
+            p999Ms: null | number | string;
+            /** Format: double */
+            cpuMaxPercent: null | number | string;
+            /** Format: double */
+            ramPeakMb: null | number | string;
+        };
         WorkflowSourceDiff: {
             path: string;
             before: string;
             after: string;
             changed: boolean;
+        };
+        WorkflowStatusCounts: {
+            /** Format: int64 */
+            queued: number | string;
+            /** Format: int64 */
+            running: number | string;
+            /** Format: int64 */
+            aborting: number | string;
+            /** Format: int64 */
+            succeeded: number | string;
+            /** Format: int64 */
+            failed: number | string;
+            /** Format: int64 */
+            aborted: number | string;
+            /** Format: int64 */
+            timedOut: number | string;
+        };
+        WorkflowTrends: {
+            total: components["schemas"]["WorkflowMetrics"];
+            days: components["schemas"]["WorkflowDay"][];
         };
         WorkflowVariable: {
             key: string;

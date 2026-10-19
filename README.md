@@ -1078,6 +1078,22 @@ PostgreSQL responses in Chromium, Firefox and WebKit, including 90-day
 response-to-painted-chart/table rendering below 500 ms, URL restoration,
 history navigation, actual denial and desktop-light/mobile-dark accessibility.
 
+Workflow dashboards at `/dashboards/workflow/<base64url-workflow-id>` show four
+daily UTC line plots: execution latency (p50/p90/p99/p99.9 together), failure rate,
+maximum node CPU and peak node RAM. `p999` means p99.9, not the 999th percentile.
+Latency uses completed runs' started-to-ended time, excluding queue time; missing
+timestamps remain unmeasured. Whole-window percentiles come from source durations,
+not averages of daily percentiles. Failure rate includes failed, aborted and
+timed-out runs among completed runs. A separate bar chart counts every current
+run status, including queued/running/aborting, for runs created in the selected
+7/30/90-day window. Resource maxima include failed retries; gaps remain null and
+measured zero stays zero. Sample counts and accessible chart-data tables explain
+the measurements. Existing node-ranking tables retain run drill-down links;
+schedule, node and machine dashboards retain categorical ranking bars rather
+than misleading lines between unrelated nodes. The existing dashboard API adds
+`trends` only for workflow scope (null for other scopes), with gap-filled days
+and exact whole-window totals read from the same database snapshot as rankings.
+
 Secret variables accept `secret://<store>/<name>` through the existing
 `SecretReference` contract and `.Secret("token", "secret://local/deploy-token")`.
 `SecretReference.Parse` requires a qualified reference; `Store` and `SecretName`

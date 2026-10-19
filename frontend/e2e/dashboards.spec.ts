@@ -61,14 +61,46 @@ test("workflow rankings have exact accessible charts/tables and a slow node open
   })
   await expect(table.getByRole("row")).toHaveCount(2)
   await expect(table.locator("tbody")).toContainText("96,500 ms")
-  await expect(page.locator("canvas")).toHaveCount(4)
+  await expect(page.locator("canvas")).toHaveCount(5)
   const oracle = await request.get(
     `/api/v1/dashboards/workflow/${fixture.workflowId}?window=30d&top=1`,
     { headers: { Authorization: `Bearer ${fixture.viewerToken}` } }
   )
   expect(oracle.status()).toBe(200)
-  const expected = dashboardSchema.parse(await oracle.json()).rankings
-    .slowest[0]!
+  const dashboard = dashboardSchema.parse(await oracle.json())
+  const expected = dashboard.rankings.slowest[0]!
+  expect(dashboard.trends?.total).toMatchObject({
+    runs: 2,
+    completed: 2,
+    durationCount: 2,
+    status: { succeeded: 1, failed: 1 },
+    p50Ms: 65000,
+    p90Ms: 93000,
+    p99Ms: 99300,
+    p999Ms: 99930,
+  })
+  const latency = page.getByRole("region", {
+    name: "Workflow execution latency (ms)",
+    exact: true,
+  })
+  await expect(latency.getByRole("img")).toHaveAttribute(
+    "aria-label",
+    "Workflow execution latency (ms): line chart"
+  )
+  await latency.getByText("Chart data table", { exact: true }).click()
+  await expect(latency.getByRole("table")).toContainText("UTC creation day")
+  await expect(latency.getByRole("table")).toContainText("p99.9 (p999)")
+  const status = page.getByRole("region", {
+    name: "Workflow status counts",
+    exact: true,
+  })
+  await expect(status.getByRole("img")).toHaveAttribute(
+    "aria-label",
+    "Workflow status counts: bar chart"
+  )
+  await status.getByText("Chart data table", { exact: true }).click()
+  await expect(status.getByRole("table")).toContainText("Succeeded")
+  await expect(status.getByRole("table")).toContainText("Failed")
   await expect(
     table.getByRole("link", { name: "Latest contribution", exact: true })
   ).toHaveAttribute("href", expected.runHref)

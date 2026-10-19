@@ -6,7 +6,12 @@ import { NativeSelect } from "@/components/ui/native-select"
 import { Plot } from "@/renderers/chart/ChartReport"
 import type { ChartData } from "@/renderers/chart/chartData"
 import { trendWindowSchema, type TrendWindow } from "@/features/series/api"
-import { encodeDashboardId, getDashboard, type DashboardResource } from "./api"
+import {
+  encodeDashboardId,
+  getDashboard,
+  type Dashboard,
+  type DashboardResource,
+} from "./api"
 
 const numbers = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
 const percent = new Intl.NumberFormat(undefined, {
@@ -24,6 +29,119 @@ const rankings = [
   { key: "cpu", title: "Highest CPU", metric: "cpuMaxPercent", unit: "%" },
   { key: "ram", title: "Highest RAM", metric: "ramPeakMb", unit: "MiB" },
 ] as const
+
+function WorkflowCharts({
+  trends,
+}: {
+  trends: NonNullable<Dashboard["trends"]>
+}) {
+  const { total, days } = trends
+  const x = days.map(({ day }) => Date.parse(day) / 1000)
+  const lines = [
+    {
+      title: "Workflow execution latency (ms)",
+      series: [
+        ["p50", "p50Ms"],
+        ["p90", "p90Ms"],
+        ["p99", "p99Ms"],
+        ["p99.9 (p999)", "p999Ms"],
+      ],
+    },
+    {
+      title: "Workflow failure rate (%)",
+      series: [["Failed, aborted or timed out (%)", "failureRate"]],
+    },
+    {
+      title: "Daily maximum node CPU (%)",
+      series: [["Maximum node CPU (%)", "cpuMaxPercent"]],
+    },
+    {
+      title: "Daily maximum node RAM (MiB)",
+      series: [["Peak node RAM (MiB)", "ramPeakMb"]],
+    },
+  ] as const
+  const statuses = [
+    ["Queued", "queued"],
+    ["Running", "running"],
+    ["Aborting", "aborting"],
+    ["Succeeded", "succeeded"],
+    ["Failed", "failed"],
+    ["Aborted", "aborted"],
+    ["Timed out", "timedOut"],
+  ] as const
+  return (
+    <section aria-label="Workflow trends" className="min-w-0 space-y-5">
+      <h2 className="text-xl font-semibold">Workflow trends</h2>
+      <p className="text-sm text-muted-foreground">
+        Daily UTC creation buckets. Execution latency is started-to-ended time,
+        excluding queue time, for completed runs with both timestamps. p999
+        means p99.9; small samples make tail percentiles less representative.
+        Failure rate counts failed, aborted and timed-out runs among completed
+        runs. Resource lines show maximum node measurements, not whole-workflow
+        totals. Gaps mean no measurement, not zero.
+      </p>
+      <p>
+        {numbers.format(total.runs)} runs; {numbers.format(total.completed)}{" "}
+        completed; {numbers.format(total.durationCount)} measured execution
+        durations.
+      </p>
+      {lines.map(({ title, series }) => {
+        const chart: ChartData = {
+          type: "line",
+          x,
+          series: series.map(([label, key]) => ({
+            label,
+            values: days.map(({ metrics }) => {
+              const value = metrics[key]
+              return key === "failureRate" && value !== null
+                ? value * 100
+                : value
+            }),
+          })),
+        }
+        return (
+          <section key={title} aria-label={title} className="min-w-0 space-y-3">
+            <h3 className="text-lg font-semibold">{title}</h3>
+            {chart.series.some((line) =>
+              line.values.some((value) => value !== null)
+            ) ? (
+              <Plot data={chart} title={title} xAxis="utc-date" />
+            ) : (
+              <p>No recorded measurements in this window.</p>
+            )}
+          </section>
+        )
+      })}
+      <section
+        aria-label="Workflow status counts"
+        className="min-w-0 space-y-3"
+      >
+        <h3 className="text-lg font-semibold">Workflow status counts</h3>
+        <p className="text-sm text-muted-foreground">
+          Current status of every run created in this window, including active
+          runs. Refresh to update; not a history of status transitions.
+        </p>
+        {total.runs > 0 ? (
+          <Plot
+            title="Workflow status counts"
+            data={{
+              type: "bar",
+              x: statuses.map(([label]) => label),
+              series: [
+                {
+                  label: "Runs",
+                  values: statuses.map(([, key]) => total.status[key]),
+                },
+              ],
+            }}
+          />
+        ) : (
+          <p>No runs created in this window.</p>
+        )}
+      </section>
+    </section>
+  )
+}
 
 export function DashboardPage({
   scope,
@@ -91,7 +209,8 @@ export function DashboardPage({
         </Button>
       </div>
       <p className="text-sm text-muted-foreground">
-        UTC creation days, including today; completed runs only.{" "}
+        Node rankings use UTC creation days, including today, and completed runs
+        only.{" "}
         {scope === "machine"
           ? "Observations are terminal task attempts on this exact machine, restricted to your currently permitted workflow types."
           : "Observations are terminal node occurrences."}{" "}
@@ -113,6 +232,7 @@ export function DashboardPage({
               .slice(0, 10)}{" "}
             (UTC). Top {data.top} per ranking.
           </p>
+          {data.trends ? <WorkflowCharts trends={data.trends} /> : null}
           {data.rankings.failureRate.length === 0 ? (
             <p role="status">No completed observations in this window.</p>
           ) : null}
@@ -146,7 +266,9 @@ export function DashboardPage({
                   <p>No recorded observations for this ranking.</p>
                 ) : (
                   <>
-                    <Plot data={chart} title={`${title} (${unit})`} />
+                    {scope !== "workflow" ? (
+                      <Plot data={chart} title={`${title} (${unit})`} />
+                    ) : null}
                     <div
                       role="region"
                       aria-label={`Scrollable ${title.toLowerCase()} table`}

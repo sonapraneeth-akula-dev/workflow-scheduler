@@ -118,6 +118,56 @@ const rowSchema = z
   )
 export type DashboardRow = z.infer<typeof rowSchema>
 const list = z.array(rowSchema).max(50)
+const workflowMetricsSchema = z
+  .strictObject({
+    runs: count,
+    completed: count,
+    durationCount: count,
+    status: z.strictObject({
+      queued: count,
+      running: count,
+      aborting: count,
+      succeeded: count,
+      failed: count,
+      aborted: count,
+      timedOut: count,
+    }),
+    failureRate: z.number().min(0).max(1).nullable(),
+    p50Ms: measurement,
+    p90Ms: measurement,
+    p99Ms: measurement,
+    p999Ms: measurement,
+    cpuMaxPercent: measurement,
+    ramPeakMb: measurement,
+  })
+  .refine((metrics) => {
+    const status = metrics.status
+    const quantiles = [
+      metrics.p50Ms,
+      metrics.p90Ms,
+      metrics.p99Ms,
+      metrics.p999Ms,
+    ]
+    return (
+      Object.values(status).reduce((sum, n) => sum + n, 0) === metrics.runs &&
+      status.succeeded + status.failed + status.aborted + status.timedOut ===
+        metrics.completed &&
+      metrics.durationCount <= metrics.completed &&
+      (metrics.completed === 0
+        ? metrics.failureRate === null
+        : metrics.failureRate !== null &&
+          Math.abs(
+            metrics.failureRate -
+              (status.failed + status.aborted + status.timedOut) /
+                metrics.completed
+          ) < 1e-12) &&
+      (metrics.durationCount === 0
+        ? quantiles.every((n) => n === null)
+        : quantiles.every(
+            (n, i) => n !== null && (i === 0 || n >= quantiles[i - 1]!)
+          ))
+    )
+  }, "Workflow counts, failure fraction and latency quantiles must agree.")
 export const dashboardSchema = z.strictObject({
   scope: dashboardScopeSchema,
   id: z.string(),
@@ -132,6 +182,17 @@ export const dashboardSchema = z.strictObject({
     cpu: list,
     ram: list,
   }),
+  trends: z
+    .strictObject({
+      total: workflowMetricsSchema,
+      days: z
+        .array(
+          z.strictObject({ day: z.iso.date(), metrics: workflowMetricsSchema })
+        )
+        .min(7)
+        .max(90),
+    })
+    .nullable(),
 })
 export type Dashboard = z.infer<typeof dashboardSchema>
 const metrics = {
@@ -162,6 +223,7 @@ export async function getDashboard(
     data.window !== search.window ||
     data.top !== search.top ||
     data.observationKind !== (scope === "machine" ? "TaskAttempt" : "Node") ||
+    (scope === "workflow") !== (data.trends !== null) ||
     Date.parse(data.to) - Date.parse(data.from) !==
       Number(data.window.slice(0, -1)) * 86400000 ||
     (data.rankings.failureRate.length === 0 &&
@@ -170,6 +232,31 @@ export async function getDashboard(
       ))
   )
     throw new Error("The API returned a different dashboard scope or window.")
+  if (data.trends) {
+    const { total, days } = data.trends
+    if (
+      days.length !== Number(window.slice(0, -1)) ||
+      days.some(
+        (row, i) => Date.parse(row.day) !== Date.parse(data.from) + i * 86400000
+      ) ||
+      (["runs", "completed", "durationCount"] as const).some(
+        (key) =>
+          days.reduce((sum, row) => sum + row.metrics[key], 0) !== total[key]
+      ) ||
+      (Object.keys(total.status) as (keyof typeof total.status)[]).some(
+        (key) =>
+          days.reduce((sum, row) => sum + row.metrics.status[key], 0) !==
+          total.status[key]
+      ) ||
+      (["cpuMaxPercent", "ramPeakMb"] as const).some((key) => {
+        const values = days.flatMap((row) =>
+          row.metrics[key] === null ? [] : [row.metrics[key]]
+        )
+        return total[key] !== (values.length ? Math.max(...values) : null)
+      })
+    )
+      throw new Error("The API returned inconsistent workflow trends.")
+  }
   const identity =
     scope === "workflow" || scope === "node"
       ? decodeDashboardId(id).split("/")

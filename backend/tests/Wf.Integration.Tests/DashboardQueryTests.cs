@@ -8,6 +8,45 @@ namespace Wf.Integration.Tests;
 public sealed partial class DashboardEndpointTests
 {
     [Fact]
+    public async Task Workflow_trends_cover_180000_runs_even_without_node_observations()
+    {
+        var scope = await Registry();
+        await Execute("SELECT ensure_run_partitions($1)", DateOnly.FromDateTime(Today.UtcDateTime));
+        await using var seed = database.DataSource.CreateCommand("""
+            INSERT INTO runs(run_day,id,workflow_id,version_id,series_id,trigger,triggered_by,variables,metadata,
+                status,created_at,started_at,ended_at,deadline_at)
+            SELECT $1,
+                (lpad(to_hex((extract(epoch FROM $4::timestamptz)*1000)::bigint+n),12,'0')||
+                    '70008000000000000000')::uuid,$2,$3,$3,0,'trends-performance','{}','{}',
+                CASE WHEN n%5=4 THEN 4 ELSE 3 END::smallint,$4,$4,$4+(n%100+1)*interval '1 second',$4+interval '1 day'
+            FROM generate_series(0,179999) n
+            """);
+        seed.Parameters.AddWithValue(DateOnly.FromDateTime(Today.UtcDateTime));
+        seed.Parameters.AddWithValue(scope.Workflow);
+        seed.Parameters.AddWithValue(scope.Series);
+        seed.Parameters.AddWithValue(Today);
+        seed.CommandTimeout = 180;
+        await seed.ExecuteNonQueryAsync(Token);
+        await Execute("ANALYZE runs");
+        await using var api = await MetricsApiServer.Start(database.DataSource, Token, timeProvider: new Clock());
+        for (var i = 0; i < 3; i++) await Read(api, scope, "workflow", DashboardQuery.Encode(scope.Workflow), "?window=90d");
+        var timings = new List<double>();
+        for (var i = 0; i < 10; i++)
+        {
+            var started = Stopwatch.GetTimestamp();
+            var response = await Read(api, scope, "workflow", DashboardQuery.Encode(scope.Workflow), "?window=90d");
+            timings.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            Assert.Empty(response.Rankings.Slowest);
+            Assert.Equal(180000, response.Trends!.Total.Runs);
+            Assert.Equal(50500, response.Trends.Total.P50Ms!.Value, 5);
+            Assert.Equal(90100, response.Trends.Total.P90Ms!.Value, 5);
+            Assert.Equal(99010, response.Trends.Total.P99Ms!.Value, 5);
+            Assert.Equal(100000, response.Trends.Total.P999Ms!.Value, 5);
+        }
+        output.WriteLine($"Workflow trends only: max={timings.Max():F2}ms, median={timings.Order().ElementAt(5):F2}ms");
+    }
+
+    [Fact]
     public async Task Multi_node_rankings_windows_top_ties_nulls_and_schedule_isolation_match_known_answers()
     {
         var scope = await Registry();
@@ -167,6 +206,18 @@ public sealed partial class DashboardEndpointTests
                 Assert.Equal(128, alpha.RamPeakMb);
                 Assert.Equal(alpha, response.Rankings.FailureRate[0]);
                 Assert.StartsWith("/runs/", alpha.RunHref);
+                if (kind == "workflow")
+                {
+                    var trends = Assert.IsType<WorkflowTrends>(response.Trends);
+                    Assert.Equal((180000L, 180000L, 180000L),
+                        (trends.Total.Runs, trends.Total.Completed, trends.Total.DurationCount));
+                    Assert.Equal(50500, trends.Total.P50Ms!.Value, 5);
+                    Assert.Equal(90100, trends.Total.P90Ms!.Value, 5);
+                    Assert.Equal(99010, trends.Total.P99Ms!.Value, 5);
+                    Assert.Equal(100000, trends.Total.P999Ms!.Value, 5);
+                    Assert.Equal(90, trends.Days.Length);
+                    Assert.All(trends.Days, day => Assert.Equal(2000, day.Metrics.Runs));
+                }
                 if (kind == "node")
                 {
                     Assert.Single(response.Rankings.Cpu);
@@ -231,6 +282,21 @@ public sealed partial class DashboardEndpointTests
             Assert.Equal(88, row.DurationCount);
             Assert.Equal(96, row.CpuMaxPercent);
             Assert.Equal(96, row.RamPeakMb);
+            if (kind == "workflow")
+            {
+                await using var oracle = database.DataSource.CreateCommand("""
+                    SELECT percentile_cont(ARRAY[0.5,0.9,0.99,0.999]) WITHIN GROUP (
+                        ORDER BY greatest(0,date_part('epoch',ended_at-started_at)*1000))
+                    FROM runs WHERE id=ANY($1) AND started_at IS NOT NULL AND ended_at IS NOT NULL
+                    """);
+                oracle.Parameters.AddWithValue(ids.ToArray());
+                var quantiles = (double[])(await oracle.ExecuteScalarAsync(Token))!;
+                var actual = response.Trends!.Total;
+                Assert.Equal(quantiles[0], actual.P50Ms!.Value, 9);
+                Assert.Equal(quantiles[1], actual.P90Ms!.Value, 9);
+                Assert.Equal(quantiles[2], actual.P99Ms!.Value, 9);
+                Assert.Equal(quantiles[3], actual.P999Ms!.Value, 9);
+            }
         }
     }
 

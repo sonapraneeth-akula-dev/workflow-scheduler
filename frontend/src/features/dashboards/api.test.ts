@@ -40,6 +40,53 @@ function fixture(): Dashboard {
     top: 10,
     observationKind: "Node",
     rankings: { slowest: [row], failureRate: [row], cpu: [row], ram: [row] },
+    trends: {
+      total: {
+        runs: 4,
+        completed: 4,
+        durationCount: 2,
+        status: {
+          queued: 0,
+          running: 0,
+          aborting: 0,
+          succeeded: 3,
+          failed: 1,
+          aborted: 0,
+          timedOut: 0,
+        },
+        failureRate: 0.25,
+        p50Ms: 10,
+        p90Ms: 18,
+        p99Ms: 19.8,
+        p999Ms: 19.98,
+        cpuMaxPercent: 150,
+        ramPeakMb: 512,
+      },
+      days: Array.from({ length: 7 }, (_, i) => ({
+        day: `2026-10-${11 + i}`,
+        metrics: {
+          runs: i === 6 ? 4 : 0,
+          completed: i === 6 ? 4 : 0,
+          durationCount: i === 6 ? 2 : 0,
+          status: {
+            queued: 0,
+            running: 0,
+            aborting: 0,
+            succeeded: i === 6 ? 3 : 0,
+            failed: i === 6 ? 1 : 0,
+            aborted: 0,
+            timedOut: 0,
+          },
+          failureRate: i === 6 ? 0.25 : null,
+          p50Ms: i === 6 ? 10 : null,
+          p90Ms: i === 6 ? 18 : null,
+          p99Ms: i === 6 ? 19.8 : null,
+          p999Ms: i === 6 ? 19.98 : null,
+          cpuMaxPercent: i === 6 ? 150 : null,
+          ramPeakMb: i === 6 ? 512 : null,
+        },
+      })),
+    },
   }
 }
 describe("validated scoped dashboard API", () => {
@@ -146,6 +193,7 @@ describe("validated scoped dashboard API", () => {
         break
       case "kind":
         data.observationKind = "TaskAttempt"
+        data.trends = null
         break
       case "count":
         row.softFailures = 4
@@ -243,6 +291,7 @@ describe("validated scoped dashboard API", () => {
     data.scope = "machine"
     data.id = uuid
     data.observationKind = "TaskAttempt"
+    data.trends = null
     const rows = ["team/type/a", "team/type/a-"].map((workflowId) => ({
       ...data.rankings.slowest[0]!,
       workflowId,
@@ -260,6 +309,63 @@ describe("validated scoped dashboard API", () => {
   it("rejects success-shaped empty observations accompanied by measured rankings", async () => {
     const data = fixture()
     data.rankings.failureRate = []
+    get.mockResolvedValue({ response: new Response(), data })
+    await expect(getDashboard("workflow", id, "7d")).rejects.toThrow()
+  })
+  it.each([
+    "missing",
+    "foreign",
+    "gap",
+    "order",
+    "total",
+    "status",
+    "samples",
+    "rate",
+    "quantiles",
+    "unknown",
+    "cpu",
+    "private",
+  ])("rejects inconsistent workflow trends: %s", async (mutation) => {
+    const data = fixture()
+    const trends = data.trends!
+    switch (mutation) {
+      case "missing":
+        data.trends = null
+        break
+      case "foreign":
+        data.scope = "node"
+        break
+      case "gap":
+        trends.days.pop()
+        break
+      case "order":
+        trends.days.reverse()
+        break
+      case "total":
+        trends.total.runs++
+        break
+      case "status":
+        trends.total.status.queued++
+        break
+      case "samples":
+        trends.total.durationCount = 5
+        break
+      case "rate":
+        trends.days[6]!.metrics.failureRate = 1
+        break
+      case "quantiles":
+        trends.total.p999Ms = 1
+        break
+      case "unknown":
+        trends.days[0]!.metrics.p999Ms = 0
+        break
+      case "cpu":
+        trends.total.cpuMaxPercent = 200
+        break
+      case "private":
+        Object.assign(trends.total, { variables: "private" })
+        break
+    }
     get.mockResolvedValue({ response: new Response(), data })
     await expect(getDashboard("workflow", id, "7d")).rejects.toThrow()
   })

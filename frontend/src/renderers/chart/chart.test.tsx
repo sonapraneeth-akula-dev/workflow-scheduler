@@ -10,11 +10,12 @@ import {
 import type uPlot from "uplot"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { parseChart } from "./chartData"
-import ChartReport from "./ChartReport"
+import ChartReport, { Plot } from "./ChartReport"
 
 const { FakePlot } = vi.hoisted(() => {
   class FakePlot {
     static instances: FakePlot[] = []
+    static tzDate = vi.fn((date: Date) => date)
     static paths = {
       bars: vi.fn<(options: uPlot.Series.BarsPathBuilderOpts) => () => void>(
         () => vi.fn()
@@ -156,5 +157,46 @@ describe("owned uPlot chart and tabular alternative", () => {
     render(<ChartReport title="Bad" content={new Blob(["{"])} />)
     expect(await screen.findByRole("alert")).toHaveTextContent("not valid JSON")
     expect(FakePlot.instances).toHaveLength(0)
+  })
+  it("uses UTC calendar axes and date table cells without changing numeric report axes or null gaps", async () => {
+    const x = [Date.UTC(2026, 9, 16) / 1000, Date.UTC(2026, 9, 17) / 1000]
+    render(
+      <Plot
+        title="Daily latency"
+        xAxis="utc-date"
+        data={{
+          type: "line",
+          x,
+          series: [{ label: "p999", values: [null, 0] }],
+        }}
+      />
+    )
+    await waitFor(() => expect(FakePlot.instances).toHaveLength(1))
+    const plot = FakePlot.instances[0]!
+    expect(plot.options.scales?.x?.time).toBe(true)
+    expect(plot.options.series[1]).toMatchObject({
+      points: { show: true },
+      spanGaps: false,
+    })
+    expect(plot.data).toEqual([x, [null, 0]])
+    const tzDate = plot.options.tzDate!
+    tzDate(x[0]!)
+    expect(FakePlot.tzDate).toHaveBeenCalledWith(
+      new Date("2026-10-16T00:00:00Z"),
+      "Etc/UTC"
+    )
+    const values = plot.options.axes![0]!.values
+    if (typeof values !== "function")
+      throw new Error("UTC axis formatter missing.")
+    expect(values({} as uPlot, x, 0, 86400, 100)).toEqual([
+      "2026-10-16",
+      "2026-10-17",
+    ])
+    fireEvent.click(screen.getByText("Chart data table"))
+    const table = screen.getByRole("table")
+    expect(table).toHaveTextContent("UTC creation day")
+    expect(table).toHaveTextContent("2026-10-16")
+    expect(table).toHaveTextContent("2026-10-17")
+    expect(table).not.toHaveTextContent(String(x[0]))
   })
 })

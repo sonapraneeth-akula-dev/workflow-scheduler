@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ApiError } from "@/lib/api/client"
+import type { ChartData } from "@/renderers/chart/chartData"
 import type { TrendWindow } from "@/features/series/api"
 import { DashboardPage } from "./DashboardPage"
 import {
@@ -50,8 +51,12 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
 }))
+const { chart } = vi.hoisted(() => ({ chart: vi.fn() }))
 vi.mock("@/renderers/chart/ChartReport", () => ({
-  Plot: ({ title }: { title: string }) => <div role="img" aria-label={title} />,
+  Plot: (props: { title: string; data: ChartData; xAxis?: string }) => {
+    chart(props)
+    return <div role="img" aria-label={props.title} />
+  },
 }))
 const id = encodeDashboardId("team/type/workflow")
 const uuid = "019ed132-2f44-7000-8000-000000000001"
@@ -81,6 +86,53 @@ function fixture(): Dashboard {
     top: 10,
     observationKind: "Node",
     rankings: { slowest: [row], failureRate: [row], cpu: [row], ram: [row] },
+    trends: {
+      total: {
+        runs: 4,
+        completed: 4,
+        durationCount: 2,
+        status: {
+          queued: 0,
+          running: 0,
+          aborting: 0,
+          succeeded: 3,
+          failed: 1,
+          aborted: 0,
+          timedOut: 0,
+        },
+        failureRate: 0.25,
+        p50Ms: 10,
+        p90Ms: 18,
+        p99Ms: 19.8,
+        p999Ms: 19.98,
+        cpuMaxPercent: 150,
+        ramPeakMb: 512,
+      },
+      days: Array.from({ length: 7 }, (_, i) => ({
+        day: `2026-10-${11 + i}`,
+        metrics: {
+          runs: i === 6 ? 4 : 0,
+          completed: i === 6 ? 4 : 0,
+          durationCount: i === 6 ? 2 : 0,
+          status: {
+            queued: 0,
+            running: 0,
+            aborting: 0,
+            succeeded: i === 6 ? 3 : 0,
+            failed: i === 6 ? 1 : 0,
+            aborted: 0,
+            timedOut: 0,
+          },
+          failureRate: i === 6 ? 0.25 : null,
+          p50Ms: i === 6 ? 10 : null,
+          p90Ms: i === 6 ? 18 : null,
+          p99Ms: i === 6 ? 19.8 : null,
+          p999Ms: i === 6 ? 19.98 : null,
+          cpuMaxPercent: i === 6 ? 150 : null,
+          ramPeakMb: i === 6 ? 512 : null,
+        },
+      })),
+    },
   }
 }
 function show(scope: DashboardScope = "workflow", resourceId = id) {
@@ -113,12 +165,55 @@ describe("accessible metric dashboard", () => {
     vi.resetAllMocks()
     read.mockResolvedValue(fixture())
   })
-  it("renders four exact ranked charts and linked table alternatives with honest scope semantics", async () => {
+  it("renders four true daily lines, one status bar and linked ranking tables", async () => {
     show()
     const table = await screen.findByRole("table", {
       name: "Slowest nodes: values and run drill-down",
     })
-    expect(screen.getAllByRole("img")).toHaveLength(4)
+    expect(screen.getAllByRole("img")).toHaveLength(5)
+    expect(chart.mock.calls.map(([props]) => props.data.type)).toEqual([
+      "line",
+      "line",
+      "line",
+      "line",
+      "bar",
+    ])
+    const latency = chart.mock.calls[0]![0]
+    expect(latency.xAxis).toBe("utc-date")
+    expect(latency.data.x).toEqual(
+      Array.from({ length: 7 }, (_, i) => Date.UTC(2026, 9, 11 + i) / 1000)
+    )
+    expect(latency.data.series).toEqual([
+      { label: "p50", values: [null, null, null, null, null, null, 10] },
+      { label: "p90", values: [null, null, null, null, null, null, 18] },
+      { label: "p99", values: [null, null, null, null, null, null, 19.8] },
+      {
+        label: "p99.9 (p999)",
+        values: [null, null, null, null, null, null, 19.98],
+      },
+    ])
+    expect(chart.mock.calls[1]![0].data.series[0].values).toEqual([
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      25,
+    ])
+    expect(chart.mock.calls[4]![0].data).toEqual({
+      type: "bar",
+      x: [
+        "Queued",
+        "Running",
+        "Aborting",
+        "Succeeded",
+        "Failed",
+        "Aborted",
+        "Timed out",
+      ],
+      series: [{ label: "Runs", values: [0, 0, 0, 3, 1, 0, 0] }],
+    })
     expect(screen.getAllByRole("table")).toHaveLength(4)
     expect(within(table).getAllByRole("row")).toHaveLength(2)
     expect(table).toHaveTextContent("20 ms")
@@ -151,6 +246,11 @@ describe("accessible metric dashboard", () => {
   it("announces empty windows without inventing charts or values", async () => {
     const data = fixture()
     data.rankings = { slowest: [], failureRate: [], cpu: [], ram: [] }
+    const empty = data.trends!.days[0]!.metrics
+    data.trends = {
+      total: empty,
+      days: data.trends!.days.map(({ day }) => ({ day, metrics: empty })),
+    }
     read.mockResolvedValue(data)
     show()
     expect(
@@ -229,11 +329,46 @@ describe("accessible metric dashboard", () => {
     })
   })
   it("allows scoped machine analytics without demanding broader inventory permission", async () => {
+    read.mockResolvedValue({ ...fixture(), trends: null })
     show("machine", uuid)
     await screen.findByRole("table", {
       name: "Slowest nodes: values and run drill-down",
     })
     expect(read.mock.calls[0]?.slice(0, 2)).toEqual(["machine", uuid])
     expect(screen.getByText(/exact machine, restricted/)).toBeInTheDocument()
+    expect(chart.mock.calls.map(([props]) => props.data.type)).toEqual([
+      "bar",
+      "bar",
+      "bar",
+      "bar",
+    ])
+  })
+  it("keeps measured zero as a line value without manufacturing missing latency or CPU", async () => {
+    const data = fixture()
+    for (const metrics of [data.trends!.total, data.trends!.days[6]!.metrics]) {
+      Object.assign(metrics, {
+        durationCount: 0,
+        p50Ms: null,
+        p90Ms: null,
+        p99Ms: null,
+        p999Ms: null,
+        cpuMaxPercent: null,
+        ramPeakMb: 0,
+      })
+    }
+    read.mockResolvedValue(data)
+    show()
+    await screen.findByRole("img", { name: "Workflow status counts" })
+    expect(
+      screen.queryByRole("img", { name: "Workflow execution latency (ms)" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("img", { name: "Daily maximum node CPU (%)" })
+    ).not.toBeInTheDocument()
+    expect(
+      chart.mock.calls
+        .find(([props]) => props.title === "Daily maximum node RAM (MiB)")![0]
+        .data.series[0].values.at(-1)
+    ).toBe(0)
   })
 })
