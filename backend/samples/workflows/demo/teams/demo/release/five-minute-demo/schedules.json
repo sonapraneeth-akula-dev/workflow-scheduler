@@ -11,7 +11,7 @@
   "instances": [
     {
       "id": "every-five-minutes",
-      "cron": "*/5 * * * *",
+      "cron": "0 * * * *",
       "timezone": "Etc/UTC",
       "overlap": "Skip",
       "catchUp": "Latest"

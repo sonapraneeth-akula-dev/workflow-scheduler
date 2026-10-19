@@ -698,7 +698,7 @@ timeouts and aborts return 1. Ctrl+C requests an abort and allows cleanup.
 durations and secret-reference names use plain text, other types use JSON.
 All policies and variables validate before tasks start.
 
-### Five-minute .NET 10 dataflow demo
+### Hourly .NET 10 dataflow demo
 
 `backend\samples\workflows\demo\teams\demo\release\five-minute-demo\workflow.cs`
 is a file-based .NET 10 workflow with four nodes and eight real SDK tasks:
@@ -706,6 +706,8 @@ is a file-based .NET 10 workflow with four nodes and eight real SDK tasks:
 `shipping` (select-service, quote) branches, which join at `invoice` (total,
 publish-report). It performs only local arithmetic and report publication:
 no deployment, external request, credential or business-system side effect.
+The original `five-minute-demo` workflow name and `every-five-minutes` schedule
+key are retained for identity/history continuity; the cron now runs hourly.
 
 Each task records explicit `inputs` and `outputs` objects under its task name.
 Those records are the actual node outputs passed through declared `.Input`
@@ -731,7 +733,7 @@ $commit = git rev-parse HEAD
 dotnet run --project .\backend\src\Wf.Cli -- publish `
   .\backend\samples\workflows\demo\teams\demo\release\five-minute-demo `
   --engine http://127.0.0.1:5000 --git-commit $commit --git-author 'Local development' `
-  --change-note 'Local five-minute dataflow demo; source retained with registration' `
+  --change-note 'Local hourly dataflow demo; source retained with registration' `
   --schedule-source-path backend/samples/workflows/demo/teams/demo/release/five-minute-demo/schedules.json `
   --input .\backend\src\Wf.Sdk --input .\backend\src\Wf.Contracts `
   --input .\backend\src\Wf.Engine.Core --input .\backend\src\Wf.Validation `
@@ -741,8 +743,8 @@ Remove-Item Env:\WF_ACCESS_TOKEN
 
 The supplied Git hash identifies the source checkout; commit the sample first
 if exact Git provenance is required for your publication. Registration also
-retains the exact script and schedule bytes. The code schedule fires at UTC
-minutes 00, 05, 10, etc., uses `Skip` to prevent overlapping runs, and remains
+retains the exact script and schedule bytes. The code schedule uses `0 * * * *`
+and fires once per hour at UTC minute 00, uses `Skip` to prevent overlapping runs, and remains
 stored in PostgreSQL across restarts. The AppHost/engine and agent must remain
 running for execution; this is the scheduler's own schedule, not a terminal job.
 
