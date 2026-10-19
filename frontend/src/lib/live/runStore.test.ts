@@ -107,6 +107,27 @@ const ready = async (store: RunStore) =>
   waitFor(() => expect(store.getSnapshot().status).toBe("live"))
 
 describe("ordered authoritative run recovery", () => {
+  it("hydrates condition decisions and retains them through later state changes", async () => {
+    const f = fixture("connecting")
+    f.reads.snapshot.mockResolvedValueOnce({
+      ...snapshot,
+      conditionOutcomes: { build: "Matched" },
+    })
+    f.emit({ status: "live" })
+    await ready(f.store)
+    f.emitEvents({ ...change(1), state: 10, conditionOutcome: "NotMatched" })
+    expect(f.store.getSnapshot().run?.conditionOutcomes).toEqual({
+      build: "Matched",
+      "build/task": "NotMatched",
+    })
+    f.emitEvents({ ...change(2), entity: 1, key: "build", state: 10 })
+    expect(f.store.getSnapshot().run?.conditionOutcomes).toEqual({
+      build: "Matched",
+      "build/task": "NotMatched",
+    })
+    f.stop()
+  })
+
   it("advances progress sequence without changing graph references, waits, placement, status or timers", async () => {
     const f = fixture("connecting")
     f.reads.snapshot.mockResolvedValueOnce({

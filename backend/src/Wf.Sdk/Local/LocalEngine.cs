@@ -32,11 +32,12 @@ public sealed class LocalEngine
     private abstract record Message;
     private sealed record AbortMessage(AbortRecord Record, TaskCompletionSource<AbortRecord>? Reply = null) : Message;
     private sealed record Completed(string Key, Exception? Error) : Message;
-    private sealed class Attempt(CancellationTokenSource cancellation, DateTimeOffset startedAt, int number)
+    private sealed class Attempt(CancellationTokenSource cancellation, DateTimeOffset startedAt, int number, NodeOutputs outputs)
     {
         public CancellationTokenSource Cancellation { get; } = cancellation;
         public DateTimeOffset StartedAt { get; } = startedAt;
         public int Number { get; } = number;
+        public NodeOutputs Outputs { get; } = outputs;
         public CancellationCause Cause { get; set; }
         public Task CancellationCompleted { get; set; } = Task.CompletedTask;
     }
@@ -85,6 +86,7 @@ public sealed class LocalEngine
         if (grace < TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(cancellationGrace));
         var diagnostics = PolicyRules.Validate(workflow.Nodes, workflow.RunTimeout);
+        ConditionRules.Validate(workflow.Nodes, workflow.Variables);
         var errors = diagnostics.Where(d => d.Severity == PolicyDiagnosticSeverity.Error).ToArray();
         if (errors.Length != 0)
             throw new ArgumentException(string.Join(Environment.NewLine, errors.Select(d => d.Message)), nameof(workflow));
@@ -159,10 +161,12 @@ public sealed class LocalEngine
 
     private DateTimeOffset Now => time.GetUtcNow();
     private void Emit(EventEntity entity, string? key, int state, AbortRecord? abort = null,
-        ExecutionStatus? attemptStatus = null, DateTimeOffset? attemptEndedAt = null, FailureCategory? failureCategory = null)
+        ExecutionStatus? attemptStatus = null, DateTimeOffset? attemptEndedAt = null, FailureCategory? failureCategory = null,
+        ConditionOutcome? condition = null)
     {
         var committed = run.CreateEvent(entity, key, state, Now, abort) with
-            { AttemptStatus = attemptStatus, AttemptEndedAt = attemptEndedAt, FailureCategory = failureCategory };
+            { AttemptStatus = attemptStatus, AttemptEndedAt = attemptEndedAt, FailureCategory = failureCategory,
+                ConditionOutcome = condition };
         run.Apply(committed);
         renderer.Render(committed);
     }
@@ -250,6 +254,35 @@ public sealed class LocalEngine
                 var state = run.Snapshot.Tasks[key];
                 if (state == ExecutionStatus.Pending || (state == ExecutionStatus.Retrying && retryReady.Remove(key)))
                 {
+                    if (state == ExecutionStatus.Pending && task.When is { } condition)
+                    {
+                        var outcome = Evaluate(condition);
+                        if (outcome == ConditionOutcome.NotMatched)
+                        {
+                            Emit(EventEntity.Task, key, (int)ExecutionStatus.Skipped, condition: outcome);
+                            continue;
+                        }
+                        Emit(EventEntity.Task, key, (int)ExecutionStatus.Ready,
+                            condition: outcome == ConditionOutcome.Matched ? outcome : null);
+                        if (outcome is ConditionOutcome.MissingValue or ConditionOutcome.InvalidType)
+                        {
+                            renderer.Log($"{key}: condition failed ({outcome}); ValidationError.");
+                            var plan = FailurePropagation.Plan(node, task.Key, node.Tasks.ToDictionary(
+                                item => item.Key, item => run.Snapshot.Tasks[$"{node.Key}/{item.Key}"]));
+                            foreach (var change in plan.Changes)
+                            {
+                                RemoveTimer(new(TimerScope.Retry, $"{node.Key}/{change.Task}"));
+                                retryReady.Remove($"{node.Key}/{change.Task}");
+                                Emit(EventEntity.Task, $"{node.Key}/{change.Task}", (int)change.Status,
+                                    failureCategory: change.Task == task.Key ? FailureCategory.ValidationError : null,
+                                    condition: change.Task == task.Key ? outcome : null);
+                            }
+                            foreach (var sibling in plan.CancelRunning)
+                                CancelAttempt($"{node.Key}/{sibling}", CancellationCause.HardFailure);
+                            if (task.Failure == FailurePolicy.Hard) break;
+                            continue;
+                        }
+                    }
                     StartAttempt(node, task);
                     running++;
                 }
@@ -268,10 +301,10 @@ public sealed class LocalEngine
         Emit(EventEntity.Task, key, (int)ExecutionStatus.Running);
         var budget = budgets.GetValueOrDefault(key);
         budgets[key] = (budget.Author, budget.Platform, budget.Attempts + 1);
-        var attempt = new Attempt(new(), Now, budget.Attempts + 1);
+        var attempt = new Attempt(new(), Now, budget.Attempts + 1, outputs[node.Key].ForAttempt());
         active.Add(key, attempt);
         timers.Track(new(new(TimerScope.Attempt, key), DeadlineAt: Add(attempt.StartedAt, task.Policy.AttemptTimeout)));
-        var context = new TaskContext(attempt.Cancellation.Token, variables, outputs[node.Key], outputs,
+        var context = new TaskContext(attempt.Cancellation.Token, variables, attempt.Outputs, outputs,
             node.Inputs, message => renderer.Log($"{key}: {message}"), reports, artifacts, abort: run.Snapshot.Abort,
             attempt: new(checked((uint)attempt.Number)), runId: run.Snapshot.RunId);
         if (time is DryRunClock)
@@ -298,6 +331,13 @@ public sealed class LocalEngine
         _ = DisposeCancellationAsync(attempt);
         var node = workflow.Nodes.Single(n => n.Key == completed.Key[..completed.Key.IndexOf('/')]);
         var task = node.Tasks.Single(t => $"{node.Key}/{t.Key}" == completed.Key);
+        if (completed.Error is null && attempt.Cause == CancellationCause.None)
+            try { outputs[node.Key].Commit(attempt.Outputs); }
+            catch (InvalidOperationException commitError)
+            {
+                completed = completed with { Error = new TaskFailureException(commitError.Message,
+                    retryable: false, category: FailureCategory.ValidationError) };
+            }
         var cancelled = attempt.Cause is CancellationCause.Abort or CancellationCause.HardFailure;
         var failed = completed.Error is not null || attempt.Cause != CancellationCause.None;
         var category = failed ? FailureClassifier.Classify(completed.Error, FailureCategory.TaskError,
@@ -416,10 +456,33 @@ public sealed class LocalEngine
             CancelAttempt(key, CancellationCause.Abort);
     }
 
-    private void ChangeNode(NodeStateChange change, FailureCategory? failureCategory = null)
+    private ConditionOutcome Evaluate(Condition condition) =>
+        ConditionEvaluator.Evaluate(condition, run.Snapshot.Variables, (node, key) =>
+            outputs.TryGetValue(node, out var values) && values.Values.TryGetValue(key, out var value) ? value : null);
+
+    private void ChangeNode(NodeStateChange change, FailureCategory? failureCategory = null, ConditionOutcome? condition = null)
     {
-        if (change.Status == ExecutionStatus.Skipped)
-            foreach (var task in workflow.Nodes.Single(n => n.Key == change.Node).Tasks)
+        var node = workflow.Nodes.Single(node => node.Key == change.Node);
+        if (change.Status == ExecutionStatus.Ready && node.When is { } when)
+        {
+            condition = Evaluate(when);
+            if (condition == ConditionOutcome.Matched)
+            {
+                Emit(EventEntity.Node, node.Key, (int)ExecutionStatus.Ready, condition: condition);
+                return;
+            }
+            if (condition == ConditionOutcome.NotMatched)
+                change = new(node.Key, ExecutionStatus.Skipped);
+            else
+            {
+                renderer.Log($"{node.Key}: condition failed ({condition}); ValidationError.");
+                Emit(EventEntity.Node, node.Key, (int)ExecutionStatus.Ready);
+                change = new(node.Key, node.Failure == FailurePolicy.Soft ? ExecutionStatus.SoftFailed : ExecutionStatus.Failed);
+                failureCategory = FailureCategory.ValidationError;
+            }
+        }
+        if (change.Status == ExecutionStatus.Skipped || condition is ConditionOutcome.MissingValue or ConditionOutcome.InvalidType)
+            foreach (var task in node.Tasks)
             {
                 var key = $"{change.Node}/{task.Key}";
                 if (!TransitionTable.IsTerminal(run.Snapshot.Tasks[key]))
@@ -429,7 +492,7 @@ public sealed class LocalEngine
                     Emit(EventEntity.Task, key, (int)ExecutionStatus.Skipped);
                 }
             }
-        Emit(EventEntity.Node, change.Node, (int)change.Status, failureCategory: failureCategory);
+        Emit(EventEntity.Node, change.Node, (int)change.Status, failureCategory: failureCategory, condition: condition);
     }
 
     private void CancelAttempt(string key, CancellationCause cause)

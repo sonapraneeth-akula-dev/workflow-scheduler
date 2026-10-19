@@ -757,14 +757,14 @@ All policies and variables validate before tasks start.
 The default local sample is
 `data-science/linear-regression/nyc-housing`: team **Data Science**, workflow
 type **Linear Regression**, workflow **NYC Housing Prices**. Its graph is a
-single readable chain, with one task per node:
+single readable chain:
 
 | Node | Task | Result |
 | --- | --- | --- |
-| Dataset | Download if missing | Verified source snapshot and fixed training/validation/test CSVs |
+| Dataset | Check cache -> Download if missing -> Load and report | Verified source snapshot and fixed training/validation/test CSVs; download task **Skipped** on cache hit |
 | Train | Fit linear regression | Price predicted from building area, using 100 gradient-descent epochs |
 | Validate | Measure validation error | Validation R², MAE and RMSE, without fitting on validation rows |
-| Test | Evaluate held-out test | Final metrics, actual/predicted chart and every test prediction |
+| Test | Evaluate held-out test | Final metrics, actual/predicted chart and every test prediction; node **Skipped** when `runFinalTest=false` |
 
 Data comes from NYC Department of Finance's public NYC Open Data rolling sales
 dataset `usep-8jbt`, with no credentials required. The sample selects tax-class-1
@@ -773,10 +773,11 @@ It retains one latest sale per property and orders property IDs by SHA-256 for
 reproducible 70% training, 15% validation and 15% final-test splits. The fixed
 snapshot does not silently refresh when upstream data changes.
 
-The dataset task checks the cache before making any HTTP request. A cache hit
+The cache-check task checks disk before making any HTTP request. A cache hit
 verifies SHA-256 hashes for the source and all three CSVs, reports **reuse** and
-does not download. This is an explicit conditional branch inside the task, not
-an engine-level `Skipped` task status. Concurrent runs share a file lock;
+sets `cacheMissing=false`. The engine marks `download-if-missing` **Skipped**
+without creating an attempt; `load-and-report` still runs and provides the dataset
+to training. Concurrent runs share a file lock;
 interrupted downloads never publish a valid cache manifest. A damaged cache
 fails explicitly rather than silently training on altered data.
 
@@ -788,7 +789,7 @@ Linux AppHost agents and the local Docker Compose stack use
 `/var/lib/wf-agent/datasets/nyc-housing-v1` inside their persistent agent volume.
 For a **single-node local Docker Swarm**, mount a named volume at
 `/var/lib/wf-agent` and set `WF_DATASET_ROOT=/var/lib/wf-agent/datasets`.
-Run affinity keeps all four tasks on one worker, so a run never passes a native
+Run affinity keeps every task on one worker, so a run never passes a native
 disk path to a Linux worker or reads another worker's independent volume.
 Multi-node Swarm can cache separately on each worker; to reuse one download
 across workers, mount shared storage at the same path on every eligible worker.
@@ -822,6 +823,32 @@ dotnet run --file .\backend\samples\workflows\demo\teams\data-science\linear-reg
 Direct execution prints reports; registered execution publishes them through
 the normal authorized report pipeline. The previous demo sources below remain
 as explicit opt-in examples/test fixtures, not the default local workflow set.
+
+### Node and task conditions
+
+Use `.When(Condition.Variable("enabled"))` on a node, or
+`.Task("download", handler, when: Condition.Output("dataset", "cacheMissing"))`
+on a task. Conditions compare a Boolean variable or output with `true` by default;
+pass `expected: false` to invert the check. Variables must be declared as `Bool`.
+Cross-node outputs require a declared `.Input("source", "flag")` and dependency.
+Only later **series** tasks may condition on their own node's committed outputs;
+parallel sibling outputs cannot provide stable pre-dispatch conditions.
+
+False conditions produce durable **Skipped** states, with no task code, attempt,
+retry budget or placement reservation consumed. A skipped task does not block the
+next series task. A node with every task skipped is also skipped. Existing edge
+semantics remain: `OnSuccess` does not accept a skipped dependency;
+`DependencyCondition.Always` does. Skipped work does not create outputs.
+Missing values and non-Boolean outputs fail explicitly as `ValidationError`
+(respecting soft-failure policy), rather than being treated as false.
+Decisions appear in the run graph and event/snapshot APIs, persist through
+recovery, and are not re-evaluated for retries. Reruns evaluate conditions again
+for work that is not reused. Definitions without conditions retain their behavior.
+
+For the housing sample, `runFinalTest` defaults to `true`. Supply
+`--var runFinalTest=false` during direct execution, or override that Boolean in
+the trigger form/API, to skip the final-test node and its reports while keeping
+training and validation.
 
 ### Archived hourly .NET 10 dataflow example
 

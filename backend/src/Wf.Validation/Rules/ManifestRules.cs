@@ -36,6 +36,7 @@ public static class ManifestRules
             CheckNodes(manifest, file, errors, cancellationToken);
             CheckVariables(manifest, file, errors, cancellationToken);
             errors.AddRange(HttpOperationRules.Validate(manifest, file, cancellationToken));
+            errors.AddRange(ConditionRules.Validate(manifest, file));
         }
         cancellationToken.ThrowIfCancellationRequested();
         return errors.OrderBy(error => error.RuleId, StringComparer.Ordinal)

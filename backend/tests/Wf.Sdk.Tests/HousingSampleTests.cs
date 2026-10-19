@@ -71,6 +71,7 @@ public sealed class HousingSampleTests : IDisposable
     {
         var handler = new SourceHandler();
         using var http = new HttpClient(handler);
+        Assert.Null(await HousingData.TryLoadAsync(directory, _ => { }, TestContext.Current.CancellationToken));
         var first = await HousingData.EnsureAsync(directory, http, _ => { }, TestContext.Current.CancellationToken);
         var before = Directory.GetFiles(directory).Where(path => Path.GetFileName(path) != "cache.lock")
             .ToDictionary(path => Path.GetFileName(path)!, File.GetLastWriteTimeUtc);
@@ -84,12 +85,15 @@ public sealed class HousingSampleTests : IDisposable
         Assert.Equal(140, cached.TrainingRows);
         Assert.Equal(30, cached.ValidationRows);
         Assert.Equal(30, cached.TestRows);
+        Assert.Equal(cached, await HousingData.TryLoadAsync(directory, messages.Add, TestContext.Current.CancellationToken));
         Assert.Contains(messages, message => message.Contains("CACHE HIT", StringComparison.Ordinal));
         foreach (var (file, modified) in before)
             Assert.Equal(modified, File.GetLastWriteTimeUtc(Path.Combine(directory, file!)));
         await File.AppendAllTextAsync(Path.Combine(directory, "test.csv"), "\ncorrupt", TestContext.Current.CancellationToken);
         await Assert.ThrowsAsync<InvalidDataException>(() =>
             HousingData.EnsureAsync(directory, offline, messages.Add, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            HousingData.TryLoadAsync(directory, messages.Add, TestContext.Current.CancellationToken));
     }
 
     [Fact]

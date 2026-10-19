@@ -16,43 +16,47 @@ public sealed class StageBuilder
     public StageBuilder RunsOn(Func<PlacementVariables, PlacementSelector> configure) { node.RunsOn(configure); return this; }
     public StageBuilder Affinity(PlacementAffinity value) { node.Affinity(value); return this; }
     public StageBuilder WhenUnavailable(WhenUnavailable value) { node.WhenUnavailable(value); return this; }
+    public StageBuilder When(Condition condition) { node.When(condition); return this; }
 
-    public StageBuilder Task(string key, Action<TaskContext> execute, FailurePolicy failure = FailurePolicy.Hard)
+    public StageBuilder Task(string key, Action<TaskContext> execute, FailurePolicy failure = FailurePolicy.Hard,
+        Condition? when = null)
     {
-        node.Task(key, execute, failure);
+        node.Task(key, execute, failure, when);
         return this;
     }
 
-    public StageBuilder Task(string key, Func<TaskContext, Task> execute, FailurePolicy failure = FailurePolicy.Hard)
+    public StageBuilder Task(string key, Func<TaskContext, Task> execute, FailurePolicy failure = FailurePolicy.Hard,
+        Condition? when = null)
     {
-        node.Task(key, execute, failure);
+        node.Task(key, execute, failure, when);
         return this;
     }
 
     public StageBuilder Task(string key, Action<TaskContext> execute, Action<PolicyBuilder> configure,
-        FailurePolicy failure = FailurePolicy.Hard)
+        FailurePolicy failure = FailurePolicy.Hard, Condition? when = null)
     {
-        node.Task(key, execute, configure, failure);
+        node.Task(key, execute, configure, failure, when);
         return this;
     }
 
     public StageBuilder Task(string key, Func<TaskContext, Task> execute, Action<PolicyBuilder> configure,
-        FailurePolicy failure = FailurePolicy.Hard)
+        FailurePolicy failure = FailurePolicy.Hard, Condition? when = null)
     {
-        node.Task(key, execute, configure, failure);
+        node.Task(key, execute, configure, failure, when);
         return this;
     }
 
-    public StageBuilder Task(string key, HttpOperationTask operation, FailurePolicy failure = FailurePolicy.Hard)
+    public StageBuilder Task(string key, HttpOperationTask operation, FailurePolicy failure = FailurePolicy.Hard,
+        Condition? when = null)
     {
-        node.Task(key, operation, failure);
+        node.Task(key, operation, failure, when);
         return this;
     }
 
     public StageBuilder Task(string key, HttpOperationTask operation, Action<PolicyBuilder> configure,
-        FailurePolicy failure = FailurePolicy.Hard)
+        FailurePolicy failure = FailurePolicy.Hard, Condition? when = null)
     {
-        node.Task(key, operation, configure, failure);
+        node.Task(key, operation, configure, failure, when);
         return this;
     }
 }

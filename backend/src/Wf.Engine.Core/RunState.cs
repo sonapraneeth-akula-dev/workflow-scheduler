@@ -20,6 +20,8 @@ public sealed record RunSnapshot(Guid RunId, RunStatus Status, long LastSequence
     public Guid? PlacementAgentId { get; init; }
     public ImmutableDictionary<string, string> TaskWaitReasons { get; init; } =
         ImmutableDictionary<string, string>.Empty;
+    public ImmutableDictionary<string, ConditionOutcome> ConditionOutcomes { get; init; } =
+        ImmutableDictionary<string, ConditionOutcome>.Empty;
 }
 
 public sealed class RunState
@@ -56,6 +58,10 @@ public sealed class RunState
         ArgumentNullException.ThrowIfNull(snapshot.Tasks);
         ArgumentNullException.ThrowIfNull(snapshot.Variables);
         ArgumentNullException.ThrowIfNull(snapshot.TaskWaitReasons);
+        ArgumentNullException.ThrowIfNull(snapshot.ConditionOutcomes);
+        if (snapshot.ConditionOutcomes.Any(pair => !Enum.IsDefined(pair.Value) ||
+            !(snapshot.Nodes.ContainsKey(pair.Key) || snapshot.Tasks.ContainsKey(pair.Key))))
+            throw new ArgumentException("Run snapshot contains an invalid condition decision.", nameof(snapshot));
         if (snapshot.Placement is { } placement &&
             (placement.Machine is { } machine && (!placement.SingleMachine || string.IsNullOrWhiteSpace(machine) ||
                 machine.Length > 200 || machine.Any(char.IsControl))) ||
@@ -149,7 +155,12 @@ public sealed class RunState
             },
             _ => throw new ArgumentOutOfRangeException(nameof(@event))
         };
-        Snapshot = Snapshot with { Metrics = metrics };
+        Snapshot = Snapshot with
+        {
+            Metrics = metrics,
+            ConditionOutcomes = @event.ConditionOutcome is { } outcome
+                ? Snapshot.ConditionOutcomes.SetItem(@event.Key!, outcome) : Snapshot.ConditionOutcomes
+        };
         events.Add(@event);
     }
 
@@ -161,6 +172,10 @@ public sealed class RunState
             Reject("Event timestamps must use UTC.");
         try { @event.ValidateSelection(); }
         catch (ArgumentException) { Reject("Agent selection metadata is invalid."); }
+        try { @event.ValidateCondition(); }
+        catch (ArgumentException) { Reject("Condition decision metadata is invalid."); }
+        if (@event.ConditionOutcome is not null && Snapshot.ConditionOutcomes.ContainsKey(@event.Key!))
+            Reject("An execution condition can be decided only once per entity.");
         if (@event.Progress is { } progress)
         {
             try { Wf.Contracts.Progress.TaskProgressProtocol.Validate(progress); }
@@ -236,7 +251,16 @@ public sealed class RunState
                 var entities = @event.Entity == EventEntity.Node ? Snapshot.Nodes : Snapshot.Tasks;
                 if (@event.Key is null || !entities.ContainsKey(@event.Key))
                     Reject($"Unknown {@event.Entity} key '{@event.Key}'.");
-                if (!(@event.Entity == EventEntity.Task && @event.WaitingReason is not null &&
+                if (@event.Entity == EventEntity.Node)
+                {
+                    if ((ExecutionStatus)@event.State == ExecutionStatus.Skipped &&
+                        entities[@event.Key!] == ExecutionStatus.Running &&
+                        Snapshot.Tasks.Any(pair => pair.Key.StartsWith(@event.Key + "/", StringComparison.Ordinal) &&
+                            pair.Value != ExecutionStatus.Skipped))
+                        Reject("A running node can be skipped only when every task was skipped.");
+                    TransitionTable.RequireNode(entities[@event.Key!], (ExecutionStatus)@event.State, log);
+                }
+                else if (!(@event.WaitingReason is not null &&
                     entities[@event.Key!] == ExecutionStatus.Ready &&
                     !Snapshot.TaskWaitReasons.ContainsKey(@event.Key!)))
                     TransitionTable.Require(entities[@event.Key!], (ExecutionStatus)@event.State, log);

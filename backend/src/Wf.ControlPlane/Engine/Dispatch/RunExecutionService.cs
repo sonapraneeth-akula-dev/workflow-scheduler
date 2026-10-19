@@ -68,6 +68,7 @@ public sealed class RunExecutionService(NpgsqlDataSource source, RunRecovery rec
         var definition = await ReadAsync(connection, run, token);
         var now = time.GetUtcNow();
         var nodes = definition.Nodes;
+        Dictionary<string, Dictionary<string, JsonElement>>? committedOutputs = null;
         var timedOut = now >= definition.Deadline;
         if (run.Snapshot.Status == RunStatus.Queued)
             await Emit(EventEntity.Run, null, (int)RunStatus.Running);
@@ -166,7 +167,24 @@ public sealed class RunExecutionService(NpgsqlDataSource source, RunRecovery rec
                     if (node.Mode == NodeExecutionMode.Series) break;
                     continue;
                 }
-                if (status == ExecutionStatus.Pending) await Emit(EventEntity.Task, key, (int)ExecutionStatus.Ready);
+                if (status == ExecutionStatus.Pending)
+                {
+                    var outcome = task.When is null ? (ConditionOutcome?)null : await Evaluate(task.When);
+                    if (outcome == ConditionOutcome.NotMatched)
+                    {
+                        await Emit(EventEntity.Task, key, (int)ExecutionStatus.Skipped, condition: outcome);
+                        continue;
+                    }
+                    await Emit(EventEntity.Task, key, (int)ExecutionStatus.Ready,
+                        condition: outcome == ConditionOutcome.Matched ? outcome : null);
+                    if (outcome is ConditionOutcome.MissingValue or ConditionOutcome.InvalidType)
+                    {
+                        await Emit(EventEntity.Task, key, (int)(task.Failure == FailurePolicy.Soft
+                            ? ExecutionStatus.SoftFailed : ExecutionStatus.Failed), FailureCategory.ValidationError, outcome);
+                        if (task.Failure == FailurePolicy.Hard) break;
+                        continue;
+                    }
+                }
                 var attempt = 1;
                 short authorRetries = 0, platformRetries = 0;
                 if (status == ExecutionStatus.Retrying)
@@ -191,7 +209,7 @@ public sealed class RunExecutionService(NpgsqlDataSource source, RunRecovery rec
                 if (deadlines.TryGetValue(node.Key, out var nodeDeadline) && nodeDeadline < deadline) deadline = nodeDeadline;
                 if (!Cleanup(node) && definition.Deadline < deadline) deadline = definition.Deadline;
                 if (deadline <= now) return null;
-                var outputs = await OutputsAsync(connection, run.Snapshot.RunId, token);
+                var outputs = committedOutputs ??= await OutputsAsync(connection, run.Snapshot.RunId, token);
                 var inputs = node.Inputs.GroupBy(input => input.Node, StringComparer.Ordinal).ToDictionary(
                     group => group.Key, group => outputs.TryGetValue(group.Key, out var sourceOutputs)
                         ? group.Where(input => sourceOutputs.ContainsKey(input.Key))
@@ -240,20 +258,46 @@ public sealed class RunExecutionService(NpgsqlDataSource source, RunRecovery rec
         }
         return null;
 
-        async Task Emit(EventEntity entity, string? key, int state, FailureCategory? category = null) =>
-            await RunStore.AppendAsync(connection, run,
-                run.CreateEvent(entity, key, state, now) with { FailureCategory = category }, token);
-
-        async Task ChangeNode(NodeStateChange change)
+        async Task<ConditionOutcome> Evaluate(Condition condition)
         {
-            if (change.Status == ExecutionStatus.Skipped)
-                foreach (var task in nodes.Single(node => node.Key == change.Node).Tasks)
+            var outputs = committedOutputs ??= await OutputsAsync(connection, run.Snapshot.RunId, token);
+            return ConditionEvaluator.Evaluate(condition, run.Snapshot.Variables, (node, key) =>
+                outputs.TryGetValue(node, out var values) && values.TryGetValue(key, out var value) ? value : null);
+        }
+
+        async Task Emit(EventEntity entity, string? key, int state, FailureCategory? category = null,
+            ConditionOutcome? condition = null) =>
+            await RunStore.AppendAsync(connection, run,
+                run.CreateEvent(entity, key, state, now) with { FailureCategory = category, ConditionOutcome = condition }, token);
+
+        async Task ChangeNode(NodeStateChange change, FailureCategory? category = null, ConditionOutcome? condition = null)
+        {
+            var node = nodes.Single(node => node.Key == change.Node);
+            if (change.Status == ExecutionStatus.Ready && node.When is { } when)
+            {
+                condition = await Evaluate(when);
+                if (condition == ConditionOutcome.Matched)
+                {
+                    await Emit(EventEntity.Node, node.Key, (int)ExecutionStatus.Ready, condition: condition);
+                    return;
+                }
+                if (condition == ConditionOutcome.NotMatched)
+                    change = new(node.Key, ExecutionStatus.Skipped);
+                else
+                {
+                    await Emit(EventEntity.Node, node.Key, (int)ExecutionStatus.Ready);
+                    change = new(node.Key, node.Failure == FailurePolicy.Soft ? ExecutionStatus.SoftFailed : ExecutionStatus.Failed);
+                    category = FailureCategory.ValidationError;
+                }
+            }
+            if (change.Status == ExecutionStatus.Skipped || condition is ConditionOutcome.MissingValue or ConditionOutcome.InvalidType)
+                foreach (var task in node.Tasks)
                 {
                     var key = change.Node + "/" + task.Key;
                     if (!TransitionTable.IsTerminal(run.Snapshot.Tasks[key]))
                         await Emit(EventEntity.Task, key, (int)ExecutionStatus.Skipped);
                 }
-            await Emit(EventEntity.Node, change.Node, (int)change.Status);
+            await Emit(EventEntity.Node, change.Node, (int)change.Status, category, condition);
         }
 
         Task Cancel(string key, FailureCategory category) => RunStore.ExecuteAsync(connection, """

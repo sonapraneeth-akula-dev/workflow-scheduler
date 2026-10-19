@@ -13,6 +13,7 @@ public sealed class NodeOutputs
     private readonly string node;
     private readonly object sync = new();
     private ImmutableDictionary<string, JsonElement> values = ImmutableDictionary<string, JsonElement>.Empty;
+    private ImmutableDictionary<string, JsonElement> changes = ImmutableDictionary<string, JsonElement>.Empty;
 
     public NodeOutputs(string node)
     {
@@ -44,6 +45,18 @@ public sealed class NodeOutputs
         Store(key, JsonSerializer.SerializeToElement(value, typeInfo));
     }
 
+    internal NodeOutputs ForAttempt() => new(node) { values = Values };
+
+    internal void Commit(NodeOutputs attempt)
+    {
+        lock (sync)
+        {
+            var candidate = values.SetItems(attempt.changes);
+            ValidateSize(candidate);
+            values = candidate;
+        }
+    }
+
     private JsonElement Read(string key)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
@@ -58,13 +71,18 @@ public sealed class NodeOutputs
         lock (sync)
         {
             var candidate = values.SetItem(key, value.Clone());
-            // ponytail: serialize the 64 KiB-bounded snapshot; track byte deltas if profiling warrants it.
-            var size = JsonSerializer.SerializeToUtf8Bytes(candidate,
-                OutputJsonContext.Default.ImmutableDictionaryStringJsonElement).Length;
-            if (size > MaxBytes)
-                throw new InvalidOperationException($"Node '{node}' outputs are {size} bytes; limit is {MaxBytes} bytes. Publish an artifact instead.");
+            ValidateSize(candidate);
             values = candidate;
+            changes = changes.SetItem(key, candidate[key]);
         }
+    }
+
+    private void ValidateSize(ImmutableDictionary<string, JsonElement> candidate)
+    {
+        var size = JsonSerializer.SerializeToUtf8Bytes(candidate,
+            OutputJsonContext.Default.ImmutableDictionaryStringJsonElement).Length;
+        if (size > MaxBytes)
+            throw new InvalidOperationException($"Node '{node}' outputs are {size} bytes; limit is {MaxBytes} bytes. Publish an artifact instead.");
     }
 }
 

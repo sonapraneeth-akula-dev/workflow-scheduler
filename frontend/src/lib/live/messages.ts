@@ -4,6 +4,12 @@ import { logIdentitySchema } from "./logs"
 
 const id = z.uuid()
 const timestamp = z.iso.datetime({ offset: true })
+export const conditionOutcomeSchema = z.enum([
+  "Matched",
+  "NotMatched",
+  "MissingValue",
+  "InvalidType",
+])
 export const liveAbortSchema = z.object({
   by: z.string().min(1),
   byName: z.string().min(1),
@@ -20,6 +26,7 @@ export const liveEventSchema = z
     state: z.int().nonnegative(),
     abort: liveAbortSchema.nullable(),
     waitingReason: z.literal("WaitingForMachine").nullable().optional(),
+    conditionOutcome: conditionOutcomeSchema.nullable().optional(),
     agentId: z.uuid().nullable().optional(),
     selectionReason: z
       .enum(["WarmHost", "LeastLoaded", "RoundRobin", "Affinity"])
@@ -39,6 +46,27 @@ export const liveEventSchema = z
   })
   .superRefine((event, context) => {
     if (
+      event.conditionOutcome &&
+      (event.entity === 0 ||
+        !event.key ||
+        event.attempt ||
+        event.agentId ||
+        event.waitingReason ||
+        event.progress ||
+        event.selectionReason ||
+        event.plannedAgentId ||
+        (event.conditionOutcome === "Matched"
+          ? event.state !== 1
+          : event.conditionOutcome === "NotMatched"
+            ? event.state !== 10
+            : event.state !== 6 && event.state !== 7))
+    )
+      context.addIssue({
+        code: "custom",
+        message:
+          "A condition decision must identify a ready, skipped or failed entity without an attempt.",
+      })
+    if (
       event.progress &&
       (event.entity !== 2 ||
         !event.key ||
@@ -47,6 +75,7 @@ export const liveEventSchema = z
         event.abort ||
         event.agentId ||
         event.waitingReason ||
+        event.conditionOutcome ||
         event.selectionReason ||
         event.plannedAgentId)
     )

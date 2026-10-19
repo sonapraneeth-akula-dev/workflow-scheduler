@@ -18,6 +18,27 @@ const delta = (change: unknown) => ({
 })
 
 describe("bounded remote operation System Events", () => {
+  it.each([
+    ["Matched", 1],
+    ["NotMatched", 10],
+    ["MissingValue", 7],
+    ["InvalidType", 6],
+  ])(
+    "accepts durable %s condition decisions without attempts",
+    (conditionOutcome, state) => {
+      const change = {
+        ...event,
+        state,
+        conditionOutcome,
+        attempt: null,
+        progress: null,
+      }
+      expect(parseRunDelta(delta(change)).events[0]).toEqual(change)
+      expect(() => parseRunDelta(delta({ ...change, attempt: 1 }))).toThrow()
+      expect(() => parseRunDelta(delta({ ...change, state: 3 }))).toThrow()
+    }
+  )
+
   it("accepts every fixed phase and retains the per-attempt identity", () => {
     for (let phase = 1; phase <= 9; phase++) {
       const change = { ...event, progress: { ...event.progress, phase } }

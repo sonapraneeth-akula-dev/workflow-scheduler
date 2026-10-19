@@ -43,26 +43,35 @@ public static class HousingData
         return Path.Combine(root, "nyc-housing-v1");
     }
 
+    public static async Task<Dataset?> TryLoadAsync(string directory, Action<string> log, CancellationToken token)
+    {
+        Directory.CreateDirectory(directory);
+        await using var cacheLock = await LockAsync(Path.Combine(directory, "cache.lock"), token);
+        return await ReadCacheAsync(directory, log, token);
+    }
+
+    private static async Task<Dataset?> ReadCacheAsync(string directory, Action<string> log, CancellationToken token)
+    {
+        var manifestPath = Path.Combine(directory, "manifest.json");
+        if (!File.Exists(manifestPath)) return null;
+        var manifest = JsonSerializer.Deserialize<Manifest>(await File.ReadAllBytesAsync(manifestPath, token), Json)
+            ?? throw new InvalidDataException("Dataset cache manifest is empty.");
+        if (manifest.Format != 1 || manifest.Source != Source || manifest.Sha256.Count != DataFiles.Length)
+            throw new InvalidDataException("Dataset cache manifest does not match this workflow.");
+        foreach (var name in DataFiles)
+            if (!manifest.Sha256.TryGetValue(name, out var expected) ||
+                !File.Exists(Path.Combine(directory, name)) ||
+                Hash(await File.ReadAllBytesAsync(Path.Combine(directory, name), token)) != expected)
+                throw new InvalidDataException($"Dataset cache verification failed for {name}. Remove only this dataset cache to download again.");
+        log("CACHE HIT: verified source, training, validation and test files; no HTTP request.");
+        return Describe(directory, true, manifest);
+    }
+
     public static async Task<Dataset> EnsureAsync(string directory, HttpClient http, Action<string> log, CancellationToken token)
     {
         Directory.CreateDirectory(directory);
         await using var cacheLock = await LockAsync(Path.Combine(directory, "cache.lock"), token);
-        var manifestPath = Path.Combine(directory, "manifest.json");
-        if (File.Exists(manifestPath))
-        {
-            var manifest = JsonSerializer.Deserialize<Manifest>(await File.ReadAllBytesAsync(manifestPath, token), Json)
-                ?? throw new InvalidDataException("Dataset cache manifest is empty.");
-            if (manifest.Format != 1 || manifest.Source != Source || manifest.Sha256.Count != DataFiles.Length)
-                throw new InvalidDataException("Dataset cache manifest does not match this workflow.");
-            foreach (var name in DataFiles)
-                if (!manifest.Sha256.TryGetValue(name, out var expected) ||
-                    !File.Exists(Path.Combine(directory, name)) ||
-                    Hash(await File.ReadAllBytesAsync(Path.Combine(directory, name), token)) != expected)
-                    throw new InvalidDataException($"Dataset cache verification failed for {name}. Remove only this dataset cache to download again.");
-            log("CACHE HIT: verified source, training, validation and test files; no HTTP request.");
-            return Describe(directory, true, manifest);
-        }
-
+        if (await ReadCacheAsync(directory, log, token) is { } cached) return cached;
         log("CACHE MISS: downloading official NYC residential sales and preparing fixed 70/15/15 splits.");
         using var response = await http.GetAsync(Source, HttpCompletionOption.ResponseHeadersRead, token);
         response.EnsureSuccessStatusCode();

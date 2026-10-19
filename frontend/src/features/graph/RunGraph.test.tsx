@@ -108,6 +108,32 @@ const run: RunSnapshot = {
 describe("live graph rendering", () => {
   beforeEach(() => vi.clearAllMocks())
 
+  it("explains node and task skips from durable condition decisions", () => {
+    render(
+      <RunGraph
+        plan={plan}
+        run={{
+          ...run,
+          nodes: { ...run.nodes, finish: 10 },
+          tasks: { "finish/sdk": 10 },
+          conditionOutcomes: {
+            finish: "NotMatched",
+            "finish/sdk": "NotMatched",
+          },
+        }}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: /finish/i }))
+    const selected = screen.getByRole("region", {
+      name: "Selected node finish",
+    })
+    expect(
+      within(selected).getAllByText(
+        "Condition: false; skipped without an attempt."
+      )
+    ).toHaveLength(2)
+  })
+
   it("uses compact open chevrons aligned to the endpoint with matching semantic strokes", () => {
     const { container } = render(<RunGraph plan={plan} run={run} />)
     const marker = container.querySelector("marker")!

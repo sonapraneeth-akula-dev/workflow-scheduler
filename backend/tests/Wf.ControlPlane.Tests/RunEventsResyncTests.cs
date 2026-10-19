@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Wf.Contracts;
 using Wf.Contracts.Events;
+using Wf.Contracts.Definition;
 using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Live;
 
@@ -98,7 +99,7 @@ public sealed class RunEventsResyncTests
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(page, RunEventsJsonContext.Default.RunEventsPage));
         Assert.Equal(long.MaxValue, json.RootElement.GetProperty("lastSeq").GetInt64());
         var item = json.RootElement.GetProperty("events")[0];
-        Assert.Equal(new[] { "abort", "agentId", "at", "attempt", "entity", "key", "plannedAgentId", "progress", "selectionReason", "seq", "state", "waitingReason" },
+        Assert.Equal(new[] { "abort", "agentId", "at", "attempt", "conditionOutcome", "entity", "key", "plannedAgentId", "progress", "selectionReason", "seq", "state", "waitingReason" },
             item.EnumerateObject().Select(property => property.Name).Order());
         Assert.Equal(at.ToString("O", CultureInfo.InvariantCulture), item.GetProperty("at").GetString());
         Assert.Equal(long.MaxValue, item.GetProperty("seq").GetInt64());
@@ -113,8 +114,21 @@ public sealed class RunEventsResyncTests
             null, 0, 0, ImmutableDictionary<string, int>.Empty, ImmutableDictionary<string, int>.Empty, null, null,
             null, ImmutableDictionary<string, Guid>.Empty);
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(response, RunEventsJsonContext.Default.RunSnapshotResponse));
-        Assert.Equal(new[] { "abort", "endedAt", "lastSeq", "nodes", "parentRunId", "placement", "placementAgentId", "reusedNodes", "runId", "seriesId", "status", "taskWaitReasons", "tasks", "versionId", "workflowId" },
+        Assert.Equal(new[] { "abort", "conditionOutcomes", "endedAt", "lastSeq", "nodes", "parentRunId", "placement", "placementAgentId", "reusedNodes", "runId", "seriesId", "status", "taskWaitReasons", "tasks", "versionId", "workflowId" },
             json.RootElement.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void Live_condition_projection_is_fixed_and_never_includes_input_values()
+    {
+        var change = new RunEvent(Guid.CreateVersion7(), 1, DateTimeOffset.UtcNow,
+            EventEntity.Task, "dataset/download", (int)ExecutionStatus.Skipped)
+            { ConditionOutcome = ConditionOutcome.NotMatched };
+        var projected = LiveEvent.From(change);
+        Assert.Equal("NotMatched", projected.ConditionOutcome);
+        Assert.Null(projected.Attempt);
+        var invalid = change with { State = (int)ExecutionStatus.Running };
+        Assert.Throws<ArgumentException>(() => LiveEvent.From(invalid));
     }
 
     private static IQueryCollection Query(string text)

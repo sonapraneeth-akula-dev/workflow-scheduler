@@ -29,18 +29,20 @@ public sealed record LiveEvent(
     [property: Key("attempt")] int? Attempt = null,
     [property: Key("progress")] LiveProgress? Progress = null,
     [property: Key("selectionReason")] string? SelectionReason = null,
-    [property: Key("plannedAgentId")] Guid? PlannedAgentId = null)
+    [property: Key("plannedAgentId")] Guid? PlannedAgentId = null,
+    [property: Key("conditionOutcome")] string? ConditionOutcome = null)
 {
     public static LiveEvent From(RunEvent change)
     {
         change.ValidateSelection();
+        change.ValidateCondition();
         return new(change.Sequence,
         change.At.ToString("O", CultureInfo.InvariantCulture), (int)change.Entity, change.Key, change.State,
         change.Abort is not { } abort ? null : new(abort.By, abort.ByName,
             abort.At.ToString("O", CultureInfo.InvariantCulture), abort.Reason, abort.Source.ToString()),
         change.WaitingReason, change.AgentId, change.Attempt, change.Progress is not { } progress ? null :
             new(progress.Sequence, (int)progress.Phase, progress.OccurredAt.ToString("O", CultureInfo.InvariantCulture)),
-        change.SelectionReason, change.PlannedAgentId);
+        change.SelectionReason, change.PlannedAgentId, change.ConditionOutcome?.ToString());
     }
 }
 

@@ -67,7 +67,7 @@ public sealed class CommandInbox(NpgsqlDataSource dataSource, TimeProvider time)
         _ = RunState.Restore(snapshot, [], _ => { });
         if (snapshot.Status != RunStatus.Queued || snapshot.LastSequence != 0 || snapshot.Abort is not null ||
             snapshot.EndedAt is not null || snapshot.AbortTargets is { Length: > 0 } ||
-            snapshot.PlacementAgentId is not null || !snapshot.TaskWaitReasons.IsEmpty ||
+            snapshot.PlacementAgentId is not null || !snapshot.TaskWaitReasons.IsEmpty || !snapshot.ConditionOutcomes.IsEmpty ||
             snapshot.Nodes.Values.Any(state => state != ExecutionStatus.Pending && !(rerun && state == ExecutionStatus.Reused)) ||
             snapshot.Tasks.Values.Any(state => state != ExecutionStatus.Pending && !(rerun && state == ExecutionStatus.Reused)) ||
             command.VersionId == Guid.Empty ||

@@ -102,8 +102,8 @@ public static class DryRunHost
         var nodes = workflow.Nodes.Select(node => new NodeDefinition(node.Key, node.Dependencies,
             node.Tasks.Select(task => new TaskDefinition(task.Key, task.Failure,
                 new(task.Policy.AttemptTimeout, task.Policy.Retry, task.Policy.AutoRetry),
-                task.Placement, task.HttpOperation, task.Action)).ToImmutableArray(),
-            node.Mode, node.MaxParallel, node.Failure, node.Inputs, node.Timeout, node.Placement, node.WhenUnavailable))
+                task.Placement, task.HttpOperation, task.Action, task.When)).ToImmutableArray(),
+            node.Mode, node.MaxParallel, node.Failure, node.Inputs, node.Timeout, node.Placement, node.WhenUnavailable, node.When))
             .ToImmutableArray();
         var mocked = new WorkflowDefinition(workflow.Name, workflow.Version, nodes, handlers.ToImmutable(),
             workflow.Variables, workflow.Metadata, workflow.RunTimeout, workflow.Placement);

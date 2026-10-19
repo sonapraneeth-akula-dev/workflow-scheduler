@@ -1,7 +1,11 @@
 import { z } from "zod"
 import { ApiError, publicApi } from "@/lib/api/client"
 import type { components } from "@/lib/api/schema"
-import { liveAbortSchema, liveEventSchema } from "./messages"
+import {
+  conditionOutcomeSchema,
+  liveAbortSchema,
+  liveEventSchema,
+} from "./messages"
 
 export const executionStatuses = [
   "Pending",
@@ -61,8 +65,20 @@ const runSnapshotSchema = z
     taskWaitReasons: z
       .record(z.string(), z.literal("WaitingForMachine"))
       .optional(),
+    conditionOutcomes: z.record(z.string(), conditionOutcomeSchema).optional(),
   })
   .superRefine((snapshot, context) => {
+    if (
+      Object.keys(snapshot.conditionOutcomes ?? {}).some(
+        (key) =>
+          !Object.hasOwn(snapshot.nodes, key) &&
+          !Object.hasOwn(snapshot.tasks, key)
+      )
+    )
+      context.addIssue({
+        code: "custom",
+        message: "A condition decision has no matching entity.",
+      })
     if (
       Object.keys(snapshot.tasks).some(
         (key) => !Object.hasOwn(snapshot.nodes, key.slice(0, key.indexOf("/")))

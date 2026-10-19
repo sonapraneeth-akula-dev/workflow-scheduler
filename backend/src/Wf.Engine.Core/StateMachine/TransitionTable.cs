@@ -26,6 +26,8 @@ public static class TransitionTable
 
     public static bool CanTransition(RunStatus from, RunStatus to) => RunTransitions.Contains((from, to));
     public static bool CanTransition(ExecutionStatus from, ExecutionStatus to) => ExecutionTransitions.Contains((from, to));
+    public static bool CanTransitionNode(ExecutionStatus from, ExecutionStatus to) =>
+        CanTransition(from, to) || from == ExecutionStatus.Running && to == ExecutionStatus.Skipped;
 
     public static bool IsTerminal(RunStatus status) =>
         Enum.IsDefined(status) && !RunTransitions.Any(edge => edge.From == status);
@@ -36,6 +38,8 @@ public static class TransitionTable
         Require(CanTransition(from, to), $"Run transition {from} -> {to} is invalid.", log);
     public static void Require(ExecutionStatus from, ExecutionStatus to, Action<string> log) =>
         Require(CanTransition(from, to), $"Execution transition {from} -> {to} is invalid.", log);
+    public static void RequireNode(ExecutionStatus from, ExecutionStatus to, Action<string> log) =>
+        Require(CanTransitionNode(from, to), $"Node transition {from} -> {to} is invalid.", log);
 
     private static void Require(bool allowed, string message, Action<string> log)
     {

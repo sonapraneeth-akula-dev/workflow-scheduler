@@ -44,6 +44,19 @@ const placement = z
   })
   .nullable()
 const failure = z.enum(["Hard", "Soft"])
+const condition = z
+  .object({
+    variableKey: z.string().min(1).nullable().optional(),
+    nodeKey: z.string().min(1).nullable().optional(),
+    outputKey: z.string().min(1).nullable().optional(),
+    expected: z.boolean(),
+  })
+  .strict()
+  .refine((value) =>
+    value.variableKey
+      ? !value.nodeKey && !value.outputKey
+      : !!value.nodeKey && !!value.outputKey
+  )
 const categories = z.enum([
   "TaskError",
   "Timeout",
@@ -56,6 +69,7 @@ const categories = z.enum([
 ])
 const task = z.object({
   key,
+  when: condition.nullable().optional(),
   action: z
     .object({
       kind: z.enum(["SdkFunction", "Command", "Http", "HttpOperation"]),
@@ -111,6 +125,7 @@ export const versionPlanSchema = z
     nodes: z.array(
       z.object({
         key,
+        when: condition.nullable().optional(),
         dependencies: z.array(
           z.object({
             node: key,
@@ -151,6 +166,14 @@ export const versionPlanSchema = z
 
 export type VersionPlan = z.infer<typeof versionPlanSchema>
 export type PlanPlacement = z.infer<typeof placement>
+export type PlanCondition = z.infer<typeof condition>
+
+export function describeCondition(value: PlanCondition): string {
+  const source = value.variableKey
+    ? `variable ${value.variableKey}`
+    : `output ${value.nodeKey}/${value.outputKey}`
+  return `${source} equals ${value.expected}; false skips without an attempt.`
+}
 
 export async function getVersionPlan(
   workflowId: string,

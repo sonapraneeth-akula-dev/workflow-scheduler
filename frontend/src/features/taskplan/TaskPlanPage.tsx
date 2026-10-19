@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { Button } from "@/components/ui/button"
-import { getVersionPlan, type PlanPlacement } from "./api"
+import { describeCondition, getVersionPlan, type PlanPlacement } from "./api"
 import { VersionRegistration } from "@/features/versions/VersionRegistration"
 
 function selector(value: { literal: string | null; variable: string | null }) {
@@ -97,6 +97,9 @@ export function TaskPlanPage({
                 {node.timeout ?? "run deadline"}.
               </p>
               <p>Planned placement: {describePlacement(node.placement)}.</p>
+              {node.when ? (
+                <p>Condition: {describeCondition(node.when)}</p>
+              ) : null}
               <p>
                 Dependencies:{" "}
                 {node.dependencies.length
@@ -120,6 +123,9 @@ export function TaskPlanPage({
                     className="min-w-0 rounded border p-3 break-words"
                   >
                     <h3 className="inline font-semibold">{task.key}</h3>
+                    {task.when ? (
+                      <p>Condition: {describeCondition(task.when)}</p>
+                    ) : null}
                     <p>
                       {task.action
                         ? `${task.action.kind}: ${task.action.declaration}`

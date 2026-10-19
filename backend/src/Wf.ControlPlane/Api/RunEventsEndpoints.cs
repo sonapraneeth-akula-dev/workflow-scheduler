@@ -212,7 +212,8 @@ public static partial class RunEventsEndpoints
             restored.EndedAt?.ToString("O", CultureInfo.InvariantCulture), header.ParentRunId, reused)
             {
                 Placement = restored.Placement, PlacementAgentId = restored.PlacementAgentId,
-                TaskWaitReasons = restored.TaskWaitReasons
+                TaskWaitReasons = restored.TaskWaitReasons,
+                ConditionOutcomes = restored.ConditionOutcomes.ToDictionary(pair => pair.Key, pair => pair.Value.ToString())
             },
             RunEventsJsonContext.Default.RunSnapshotResponse);
     }

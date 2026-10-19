@@ -256,6 +256,9 @@ export class RunStore {
           lastSeq: event.seq,
           [field]: { ...run[field], [event.key]: event.state },
           taskWaitReasons,
+          conditionOutcomes: event.conditionOutcome
+            ? { ...run.conditionOutcomes, [event.key]: event.conditionOutcome }
+            : run.conditionOutcomes,
           placementAgentId:
             run.placement?.singleMachine && event.agentId
               ? event.agentId

@@ -82,6 +82,10 @@ public static class RuleCatalog
         "A machine selector is invalid or cannot be satisfied by registered machines.",
         "Use known machine IDs and satisfiable OS, pool, name, label and count constraints.");
 
+    public static readonly ValidationRule InvalidCondition = new("WFV028",
+        "An execution condition or its reference is invalid.",
+        "Use one declared Boolean variable or output input. Only later series tasks may read their own node's outputs.");
+
     public static ImmutableArray<ValidationRule> All { get; } =
         [DirectoryNotFound, WorkflowNotFound, BuildFailed, DescribeFailed, DependencyCycle, UnknownDependency,
             DuplicateKey, VariableType, VariableRequired, VersionBump, ScheduleShape, ScheduleExpression,
@@ -89,5 +93,5 @@ public static class RuleCatalog
             TeamRegistryRules.TypeQuota, TeamRegistryRules.InvalidMetadataSchema, TeamRegistryRules.UnknownType,
             TeamRegistryRules.InvalidMetadata, HttpOperationRules.InvalidContract, HttpOperationRules.UnsafeRetry,
             HttpOperationRules.InsufficientRetention, PresentationValidator.InvalidPresentation, TriggerVariable, ScheduleVersionPin,
-            MachineSelector];
+            MachineSelector, InvalidCondition];
 }

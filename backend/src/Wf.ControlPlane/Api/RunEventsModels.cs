@@ -14,6 +14,7 @@ public sealed record RunSnapshotResponse(Guid RunId, string WorkflowId, Guid Ver
     public RunPlacement? Placement { get; init; }
     public Guid? PlacementAgentId { get; init; }
     public IReadOnlyDictionary<string, string> TaskWaitReasons { get; init; } = new Dictionary<string, string>();
+    public IReadOnlyDictionary<string, string> ConditionOutcomes { get; init; } = new Dictionary<string, string>();
 }
 
 public static class RunEventsQuery

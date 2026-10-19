@@ -313,7 +313,9 @@ public sealed partial class HostedRunExecutionTests(HostedExecutionDatabase data
                 Id = (agentId ?? Guid.NewGuid()).ToString("D"), Name = agentName ?? team, Os = "windows", Arch = "x64", Cores = 4,
                 RamMb = 16384, MaxTasks = checked((uint)maxTasks), Pool = team, Version = "1.0.0", ProtocolVersion = 1
             }, runtime.Token);
-            var run = new RunState(Guid.CreateVersion7(), definition.Nodes, definition.Metadata, Assert.Fail, runtime.Clock.Now);
+            var run = new RunState(Guid.CreateVersion7(), definition.Nodes, definition.Metadata, Assert.Fail, runtime.Clock.Now,
+                definition.Variables.Where(variable => variable.Default is not null)
+                    .ToDictionary(variable => variable.Key, variable => variable.Default!.Value, StringComparer.Ordinal));
             run = RunState.Restore(run.Snapshot with { Placement = placement }, [], Assert.Fail);
             runtime.RunId = run.Snapshot.RunId;
             await runtime.Store.CreateAsync(run, definition.Name, version, DateTimeOffset.UtcNow.Add(definition.RunTimeout), runtime.Token);
@@ -363,7 +365,7 @@ public sealed partial class HostedRunExecutionTests(HostedExecutionDatabase data
             (await Store.PendingAsync(Session, Token)).Select(item => item.Command).ToArray();
 
         public async Task Complete(DispatchCommand command, TaskOutcome outcome = TaskOutcome.Succeeded,
-            string? category = null, bool nonRetryable = false, AgentSession? session = null)
+            string? category = null, bool nonRetryable = false, AgentSession? session = null, string? outputs = null)
         {
             Clock.Now = Clock.Now.AddMilliseconds(1);
             await Store.AcceptAsync(session ?? Session, new()
@@ -378,6 +380,7 @@ public sealed partial class HostedRunExecutionTests(HostedExecutionDatabase data
                 {
                     Task = command.Task.Clone(), At = Timestamp.FromDateTimeOffset(Clock.Now), Outcome = outcome,
                     ReservationEpoch = command.ReservationEpoch,
+                    OutputsJson = outputs is null ? ByteString.Empty : ByteString.CopyFromUtf8(outputs),
                     Error = category is null ? null : new() { Category = category, Message = "simulated agent result", NonRetryable = nonRetryable }
                 }
             }, Token);

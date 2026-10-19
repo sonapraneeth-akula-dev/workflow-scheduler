@@ -17,9 +17,12 @@ public sealed record TaskDefinition
     public HttpOperationDefinition? HttpOperation { get; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public TaskAction? Action { get; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Condition? When { get; }
 
     public TaskDefinition(string key, FailurePolicy failure = FailurePolicy.Hard, ExecutionPolicy? policy = null,
-        PlacementPolicy? placement = null, HttpOperationDefinition? httpOperation = null, TaskAction? action = null)
+        PlacementPolicy? placement = null, HttpOperationDefinition? httpOperation = null, TaskAction? action = null,
+        Condition? when = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         if (!Enum.IsDefined(failure))
@@ -30,6 +33,7 @@ public sealed record TaskDefinition
         Placement = placement;
         HttpOperation = httpOperation;
         Action = action;
+        When = when;
     }
 }
 
@@ -47,11 +51,14 @@ public sealed record NodeDefinition
     public PlacementPolicy? Placement { get; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public WhenUnavailable WhenUnavailable { get; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Condition? When { get; }
 
     public NodeDefinition(string key, ImmutableArray<DependencyDefinition> dependencies, ImmutableArray<TaskDefinition> tasks,
         NodeExecutionMode mode = NodeExecutionMode.Series, int? maxParallel = null,
         FailurePolicy failure = FailurePolicy.Hard, ImmutableArray<InputBinding> inputs = default,
-        TimeSpan? timeout = null, PlacementPolicy? placement = null, WhenUnavailable whenUnavailable = WhenUnavailable.Queue)
+        TimeSpan? timeout = null, PlacementPolicy? placement = null, WhenUnavailable whenUnavailable = WhenUnavailable.Queue,
+        Condition? when = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         if (dependencies.IsDefault || tasks.IsDefault)
@@ -78,5 +85,6 @@ public sealed record NodeDefinition
         Timeout = timeout;
         Placement = placement;
         WhenUnavailable = whenUnavailable;
+        When = when;
     }
 }

@@ -91,9 +91,9 @@ public static class SelectorValidator
             var placement = PlacementPolicy.Inherit(manifest.Placement, node.Placement);
             return new NodeDefinition(node.Key, node.Dependencies,
                 node.Tasks.Select(task => new TaskDefinition(task.Key, task.Failure, task.Policy,
-                    PlacementPolicy.Inherit(placement, task.Placement), task.HttpOperation, task.Action)).ToImmutableArray(),
+                    PlacementPolicy.Inherit(placement, task.Placement), task.HttpOperation, task.Action, task.When)).ToImmutableArray(),
                 node.Mode, node.MaxParallel, node.Failure, node.Inputs, node.Timeout,
-                node.Placement?.Selector?.Count is not null ? node.Placement : null, node.WhenUnavailable);
+                node.Placement?.Selector?.Count is not null ? node.Placement : null, node.WhenUnavailable, node.When);
         }).ToImmutableArray();
     }
 }

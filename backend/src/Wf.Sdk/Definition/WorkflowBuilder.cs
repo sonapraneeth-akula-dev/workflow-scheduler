@@ -126,6 +126,7 @@ public sealed class WorkflowBuilder
         var definitions = nodes.Select(n => n.Build(defaults, workflowPlacement)).ToImmutableArray();
         DagValidator.Validate(definitions);
         PlacementResolver.Validate(definitions, variables);
+        ConditionRules.Validate(definitions, variables);
         var tasks = ImmutableDictionary.CreateBuilder<string, Func<TaskContext, Task>>(StringComparer.Ordinal);
         foreach (var node in nodes)
             foreach (var task in node.Handlers)

@@ -10,6 +10,34 @@ namespace Wf.Validation.Tests;
 public sealed class ManifestRulesTests
 {
     [Fact]
+    [RuleCoverage("WFV028", true)]
+    public void Boolean_conditions_reference_declared_values_or_prior_series_outputs() =>
+        Assert.Empty(Check("""
+            {"variables":[{"key":"enabled","type":"Bool"}],"nodes":[
+              {"key":"source","when":{"variableKey":"enabled"},"tasks":[{"key":"check"},
+                {"key":"download","when":{"nodeKey":"source","outputKey":"missing","expected":false}}]},
+              {"key":"consumer","dependencies":[{"node":"source"}],"inputs":[{"node":"source","key":"flag"}],
+                "when":{"nodeKey":"source","outputKey":"flag"}}]}
+            """));
+
+    [Theory]
+    [InlineData("""{"variableKey":"unknown"}""")]
+    [InlineData("""{"variableKey":"text"}""")]
+    [InlineData("""{"nodeKey":"work","outputKey":"flag"}""")]
+    [InlineData("""{"nodeKey":"unknown","outputKey":"flag"}""")]
+    [InlineData("""{"variableKey":"enabled","outputKey":"flag"}""")]
+    [InlineData("""{"variableKey":"enabled","expected":"true"}""")]
+    [InlineData("""{"variableKey":"enabled","extra":true}""")]
+    [InlineData("""{}""")]
+    [InlineData("""true""")]
+    [RuleCoverage("WFV028", false)]
+    public void Bad_condition_references_and_shapes_have_a_stable_error(string condition) =>
+        AssertError(Assert.Single(Check($$"""
+            {"variables":[{"key":"enabled","type":"Bool"},{"key":"text","type":"String"}],
+             "nodes":[{"key":"work","when":{{condition}}}]}
+            """)), "WFV028", "$.nodes[0].when");
+
+    [Fact]
     [RuleCoverage("WFV005", true)]
     [RuleCoverage("WFV006", true)]
     public void AcyclicGraphAndKnownDependenciesAreValid() =>

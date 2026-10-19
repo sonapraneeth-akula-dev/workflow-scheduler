@@ -13,7 +13,11 @@ import { CircleDashedIcon, RotateCcwIcon } from "lucide-react"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { StatusBadge } from "@/components/StatusBadge"
 import { Button } from "@/components/ui/button"
-import { getVersionPlan, type VersionPlan } from "@/features/taskplan/api"
+import {
+  describeCondition,
+  getVersionPlan,
+  type VersionPlan,
+} from "@/features/taskplan/api"
 import { TaskOutputs } from "@/features/runs/TaskOutputs"
 import type { TimelineAttempt } from "@/features/runs/timeline-api"
 import { completedTimelineQuery } from "@/features/runs/timeline-query"
@@ -21,6 +25,13 @@ import { executionStatuses, type RunSnapshot } from "@/lib/live/runApi"
 import { GraphNode, NodePolicyIcons } from "./GraphNode"
 import { layoutGraph, type GraphLayout } from "./layout"
 import { describeNodeRetries, retryableFailures } from "./policies"
+
+const conditionDescriptions = {
+  Matched: "true; execution enabled.",
+  NotMatched: "false; skipped without an attempt.",
+  MissingValue: "required value missing; ValidationError.",
+  InvalidType: "value is not Boolean; ValidationError.",
+} as const
 
 const GraphEdges = memo(function GraphEdges({
   layout,
@@ -372,6 +383,14 @@ export function RunGraph({
           className="min-w-0 border bg-card p-3 text-sm break-words"
         >
           <h3 className="font-semibold">Node: {node.key}</h3>
+          {run.conditionOutcomes?.[node.key] ? (
+            <p>
+              Condition:{" "}
+              {conditionDescriptions[run.conditionOutcomes[node.key]!]}
+            </p>
+          ) : node.when ? (
+            <p>Condition: {describeCondition(node.when)}</p>
+          ) : null}
           <p className="text-muted-foreground">
             {node.tasks.length} {node.tasks.length === 1 ? "task" : "tasks"}{" "}
             {node.tasks.length === 1 ? "runs" : "run"}{" "}
@@ -431,6 +450,18 @@ export function RunGraph({
                       )}
                       {task.failure === "Soft" ? (
                         <p>Soft-failure task.</p>
+                      ) : null}
+                      {run.conditionOutcomes?.[`${node.key}/${task.key}`] ? (
+                        <p>
+                          Condition:{" "}
+                          {
+                            conditionDescriptions[
+                              run.conditionOutcomes[`${node.key}/${task.key}`]!
+                            ]
+                          }
+                        </p>
+                      ) : task.when ? (
+                        <p>Condition: {describeCondition(task.when)}</p>
                       ) : null}
                       <p className="mt-1 text-xs text-muted-foreground">
                         Failure retries:{" "}

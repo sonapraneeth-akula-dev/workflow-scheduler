@@ -5516,6 +5516,13 @@ export interface components {
             items: components["schemas"]["CatalogWorkflow"][];
             nextCursor: null | string;
         };
+        Condition: {
+            variableKey?: null | string;
+            nodeKey?: null | string;
+            outputKey?: null | string;
+            /** @default true */
+            expected: boolean;
+        };
         DashboardRankings: {
             slowest: components["schemas"]["DashboardRow"][];
             failureRate: components["schemas"]["DashboardRow"][];
@@ -5621,6 +5628,7 @@ export interface components {
             selectionReason?: null | string;
             /** Format: uuid */
             plannedAgentId?: null | string;
+            conditionOutcome?: null | string;
         };
         LiveProgress: null | {
             /** Format: uint32 */
@@ -5977,6 +5985,7 @@ export interface components {
                 selectionReason?: null | string;
                 /** Format: uuid */
                 plannedAgentId?: null | string;
+                conditionOutcome?: null | string;
             }[];
         };
         RunEventsPage: {
@@ -6141,6 +6150,9 @@ export interface components {
             /** Format: uuid */
             placementAgentId?: null | string;
             taskWaitReasons?: {
+                [key: string]: string;
+            };
+            conditionOutcomes?: {
                 [key: string]: string;
             };
         };
@@ -6350,6 +6362,7 @@ export interface components {
             timeout: null | string;
             placement: null | components["schemas"]["TaskPlanPlacement"];
             tasks: components["schemas"]["TaskPlanTask"][];
+            when?: null | components["schemas"]["Condition"];
         };
         TaskPlanPlacement: {
             selector: null | components["schemas"]["TaskPlanSelector"];
@@ -6378,6 +6391,7 @@ export interface components {
             failure: components["schemas"]["FailurePolicy"];
             policy: components["schemas"]["TaskPlanExecutionPolicy"];
             placement: null | components["schemas"]["TaskPlanPlacement"];
+            when?: null | components["schemas"]["Condition"];
         };
         TaskResourceLimits: {
             /**

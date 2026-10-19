@@ -5,6 +5,8 @@ All notable frontend changes are documented here, using Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Node/task condition plans and durable condition decisions in the live run
+  graph, including explicit skip, missing-value and Boolean-type reasons.
 - Run Metrics tab with bounded CPU/RAM/network resource charts, exact integer
   counter tables, per-attempt/machine scopes, explicit unavailable reasons and
   integrity/authorization-aware refresh and cursor navigation.
