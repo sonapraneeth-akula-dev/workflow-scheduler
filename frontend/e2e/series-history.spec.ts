@@ -284,7 +284,10 @@ test("workflow and series history show actual committed abort attribution and re
     await expect(table).toContainText(reason)
     await expect(table).toContainText("Aborted")
     await expect(table).toContainText("Manual")
-    await expect(table).toContainText("sequence (Long)")
+    await expect(table).not.toContainText("sequence (Long)")
+    await expect(
+      table.getByRole("columnheader", { name: /Variables/ })
+    ).toHaveCount(0)
     await expect(table).not.toContainText("9223372036854775807")
     const row = table.getByRole("row").filter({ hasText: runId })
     await expect(row).toContainText(receipt.by)

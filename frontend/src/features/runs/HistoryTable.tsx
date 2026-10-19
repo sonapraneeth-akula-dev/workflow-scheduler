@@ -181,9 +181,7 @@ export function HistoryTable({
       ) : null}
       <p className="text-sm text-muted-foreground">
         Times shown in your local timezone. Duration requires recorded start and
-        end times. Variables show recorded names and types only; all values and
-        defaults are omitted. Secret entries are redacted. Status and aborted-by
-        filters exclude fire-only facts.
+        end times. Status and aborted-by filters exclude fire-only facts.
       </p>
       {query.isPending ? <p role="status">Loading run history...</p> : null}
       {query.error ? <ErrorNotice error={query.error} /> : null}
@@ -197,8 +195,8 @@ export function HistoryTable({
         >
           <table className="w-full text-left text-sm">
             <caption className="sr-only">
-              Historical runs, versions, trigger, recorded variable names, fire
-              reasons and committed abort attribution
+              Historical runs, versions, trigger, fire reasons and committed
+              abort attribution
             </caption>
             <thead className="border-b">
               <tr>
@@ -207,7 +205,6 @@ export function HistoryTable({
                   "Status / Fire outcome",
                   "Duration",
                   "Trigger",
-                  "Variables (names/types only)",
                   "Executed version",
                   "Committed abort",
                 ].map((label) => (
@@ -276,20 +273,6 @@ export function HistoryTable({
                         <TriggerBadge trigger={row.trigger} />
                       ) : (
                         "No run trigger"
-                      )}
-                    </td>
-                    <td className="p-3">
-                      {row.variables.length ? (
-                        <ul className="space-y-1">
-                          {row.variables.map((variable) => (
-                            <li key={variable.key} className="break-words">
-                              {variable.key} ({variable.type})
-                              {variable.redacted ? " - [redacted]" : ""}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        "None recorded"
                       )}
                     </td>
                     <td className="p-3">

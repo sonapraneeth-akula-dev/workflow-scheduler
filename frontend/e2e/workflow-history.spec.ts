@@ -11,6 +11,10 @@ async function openWorkflowHistory(page: Page) {
   await expect(
     page.getByRole("heading", { name: "Workflow history", exact: true })
   ).toBeVisible()
+  await expect(page.getByRole("table")).toBeVisible()
+  await expect(
+    page.getByRole("columnheader", { name: /Variables/ })
+  ).toHaveCount(0)
 }
 
 for (const width of [320, 768, 2000]) {

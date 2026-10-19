@@ -135,7 +135,7 @@ test("Run now from paused schedule and series history creates only same-series M
     for (const id of runIds) {
       const row = table.getByRole("row").filter({ hasText: id! })
       await expect(row).toContainText("Manual")
-      await expect(row).toContainText("sequence (Long)")
+      await expect(row).not.toContainText("sequence (Long)")
     }
     expect(
       await (await request.get(`/api/v1/schedules/${schedule.id}`)).text()

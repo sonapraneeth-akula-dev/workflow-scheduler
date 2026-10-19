@@ -110,7 +110,7 @@ describe("historical table", () => {
       screen.queryByRole("button", { name: "Run now" })
     ).not.toBeInTheDocument()
   })
-  it("renders exact committed abort, names/types only and immutable executed version links", async () => {
+  it("renders exact committed abort and version links without variable columns or values", async () => {
     vi.mocked(getHistory).mockResolvedValue(page())
     show()
     const table = await screen.findByRole("table")
@@ -124,8 +124,10 @@ describe("historical table", () => {
       table.querySelector(`time[datetime="${row.abort!.at}"]`)
     ).toHaveAttribute("title", row.abort!.at)
     expect(table).toHaveTextContent("Stop deployment")
-    expect(table).toHaveTextContent("credential (Secret) - [redacted]")
-    expect(table).toHaveTextContent("count (Long)")
+    expect(screen.getAllByRole("columnheader")).toHaveLength(6)
+    expect(table).not.toHaveTextContent("Variables")
+    expect(table).not.toHaveTextContent("credential")
+    expect(table).not.toHaveTextContent("count (Long)")
     expect(screen.getByRole("link", { name: row.versionId! })).toHaveAttribute(
       "href",
       `/t/team/release/w/build/versions/${row.versionId}`
