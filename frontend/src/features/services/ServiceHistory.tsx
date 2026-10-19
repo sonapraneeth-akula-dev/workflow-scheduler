@@ -1,7 +1,7 @@
 import { useId } from "react"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { LayoutGridIcon, ListIcon } from "lucide-react"
+import { ExternalLinkIcon, LayoutGridIcon, ListIcon } from "lucide-react"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { StatusBadge } from "@/components/StatusBadge"
 import { Button } from "@/components/ui/button"
@@ -31,16 +31,24 @@ import {
 import { RunHistoryStrip } from "./RunHistoryStrip"
 
 function WorkflowActions({ workflow }: { workflow: CatalogWorkflow }) {
+  const newTabDescription = useId()
   return (
     <div className="flex flex-wrap gap-2">
+      <span id={newTabDescription} hidden>
+        Opens in a new tab.
+      </span>
       {workflow.latestRun ? (
         <Button asChild variant="outline">
           <Link
             to="/runs/$id"
             params={{ id: workflow.latestRun.id }}
+            target="_blank"
+            rel="noopener noreferrer"
             aria-label={`View last run for ${workflow.id}`}
+            aria-describedby={newTabDescription}
           >
             View last run
+            <ExternalLinkIcon aria-hidden="true" data-icon="inline-end" />
           </Link>
         </Button>
       ) : (
@@ -56,9 +64,13 @@ function WorkflowActions({ workflow }: { workflow: CatalogWorkflow }) {
             type: workflow.type,
             wf: workflow.name,
           }}
+          target="_blank"
+          rel="noopener noreferrer"
           aria-label={`History for ${workflow.id}`}
+          aria-describedby={newTabDescription}
         >
           History
+          <ExternalLinkIcon aria-hidden="true" data-icon="inline-end" />
         </Link>
       </Button>
     </div>

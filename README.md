@@ -878,6 +878,10 @@ Each status-colored icon represents one run, with a distinct status symbol,
 run ID and timestamp; clicking it opens that exact run in a new tab.
 **View last run** opens the exact latest run and is
 disabled for never-run workflows; **History** opens that workflow's run history.
+These page-content navigation buttons, along with workflow history's
+**Workflow versions** and **Metrics dashboard** buttons, open new tabs.
+Each shows an outgoing-link icon and announces its new-tab behavior to screen
+readers. Navbar links stay in the current tab; action buttons are unchanged.
 Timestamps keep their full source precision in the time element while displaying
 local time with millisecond precision.
 Both formats show the latest **10 runs per workflow** by default, newest first,

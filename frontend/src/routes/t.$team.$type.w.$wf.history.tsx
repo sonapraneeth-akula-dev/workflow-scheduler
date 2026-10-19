@@ -1,4 +1,6 @@
+import { useId } from "react"
 import { createFileRoute, Link } from "@tanstack/react-router"
+import { ExternalLinkIcon } from "lucide-react"
 import { HistoryFilters, HistoryTable } from "@/features/runs/HistoryTable"
 import { historySearchSchema } from "@/features/runs/history"
 import { TriggerDialog } from "@/features/runs/TriggerDialog"
@@ -13,6 +15,7 @@ export const Route = createFileRoute("/t/$team/$type/w/$wf/history")({
 })
 
 function WorkflowHistory() {
+  const newTabDescription = useId()
   const { team, type, wf } = Route.useParams()
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
@@ -34,13 +37,20 @@ function WorkflowHistory() {
             aria-label="Related workflow pages"
             className="flex flex-wrap gap-2"
           >
+            <span id={newTabDescription} hidden>
+              Opens in a new tab.
+            </span>
             <Button variant="outline" size="sm" asChild>
               <Link
                 to="/t/$team/$type/w/$wf/versions"
                 params={{ team, type, wf }}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-describedby={newTabDescription}
                 title="Registered semantic versions, comparisons and activation"
               >
                 Workflow versions
+                <ExternalLinkIcon aria-hidden="true" data-icon="inline-end" />
               </Link>
             </Button>
             <Button variant="outline" size="sm" asChild>
@@ -50,9 +60,13 @@ function WorkflowHistory() {
                   scope: "workflow",
                   id: encodeDashboardId(workflowId),
                 }}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-describedby={newTabDescription}
                 title="Completed-run and task failure, duration, CPU and memory metrics"
               >
                 Metrics dashboard
+                <ExternalLinkIcon aria-hidden="true" data-icon="inline-end" />
               </Link>
             </Button>
           </nav>

@@ -172,38 +172,65 @@ for (const width of [320, 768, 2000]) {
   })
 }
 
-test("workflow header links open registered releases and metric content", async ({
+test("workflow header link buttons open new tabs with outgoing icons and preserve history", async ({
   page,
 }) => {
   await openWorkflowHistory(page)
-  await page
-    .getByRole("link", { name: "Workflow versions", exact: true })
-    .click()
+  const historyUrl = page.url()
+  const versions = page.getByRole("link", {
+    name: "Workflow versions",
+    exact: true,
+  })
+  const metrics = page.getByRole("link", {
+    name: "Metrics dashboard",
+    exact: true,
+  })
+  for (const link of [versions, metrics]) {
+    await expect(link).toHaveAttribute("target", "_blank")
+    await expect(link).toHaveAttribute("rel", "noopener noreferrer")
+    await expect(link).toHaveAccessibleDescription("Opens in a new tab.")
+    await expect(link.locator('svg[data-icon="inline-end"]')).toBeVisible()
+  }
+  const versionsPopup = page.waitForEvent("popup")
+  await versions.focus()
+  await page.keyboard.press("Enter")
+  const versionsPage = await versionsPopup
+  expect(await versionsPage.evaluate(() => window.opener === null)).toBe(true)
   await expect(
-    page.getByRole("heading", { name: "Versions", exact: true })
+    versionsPage.getByRole("heading", { name: "Versions", exact: true })
   ).toBeVisible()
-  await expect(page.getByText("Loading version history...")).toHaveCount(0)
   await expect(
-    page.getByText("Active version:", { exact: false })
-  ).toBeVisible()
-  await expect(page.getByRole("alert")).toHaveCount(0)
-  await page.goBack()
-  await page
-    .getByRole("link", { name: "Metrics dashboard", exact: true })
-    .click()
-  await expect(
-    page.getByRole("heading", { name: "workflow dashboard", exact: true })
-  ).toBeVisible()
-  await expect(
-    page.getByText("Checking dashboard access and loading rankings...")
+    versionsPage.getByText("Loading version history...")
   ).toHaveCount(0)
   await expect(
-    page
+    versionsPage.getByText("Active version:", { exact: false })
+  ).toBeVisible()
+  await expect(versionsPage.getByRole("alert")).toHaveCount(0)
+  await versionsPage.close()
+  await expect(page).toHaveURL(historyUrl)
+  const metricsPopup = page.waitForEvent("popup")
+  await metrics.click()
+  const metricsPage = await metricsPopup
+  expect(await metricsPage.evaluate(() => window.opener === null)).toBe(true)
+  await expect(
+    metricsPage.getByRole("heading", {
+      name: "workflow dashboard",
+      exact: true,
+    })
+  ).toBeVisible()
+  await expect(
+    metricsPage.getByText("Checking dashboard access and loading rankings...")
+  ).toHaveCount(0)
+  await expect(
+    metricsPage
       .getByRole("region", { name: "Metric dashboard" })
       .getByRole("status")
       .first()
   ).toContainText("(UTC). Top")
-  await expect(page.getByRole("alert")).toHaveCount(0)
+  await expect(metricsPage.getByRole("alert")).toHaveCount(0)
+  await metricsPage.close()
+  await expect(page).toHaveURL(historyUrl)
+  await expect(page.getByRole("table")).toBeVisible()
 })
 
 for (const width of [320, 768, 1440, 2000]) {

@@ -10,9 +10,9 @@ test("navbar discovers team/type service views and restores format with individu
     name: "Service history teams",
     exact: true,
   })
-  const teamItem = menu
-    .locator('[role="menuitem"][aria-haspopup="menu"]')
-    .first()
+  const teamItem = menu.locator(
+    '[role="menuitem"][aria-haspopup="menu"][data-team="ui-tests"]'
+  )
   await expect(teamItem).toBeVisible()
   const team = (await teamItem.getAttribute("data-team"))!
   const teamName = (await teamItem.textContent())!.trim()
@@ -52,11 +52,23 @@ test("navbar discovers team/type service views and restores format with individu
   await expect(page.getByLabel("Health window")).toHaveCount(0)
   const group = page.getByRole("region", { name: typeName, exact: true })
   await expect(group).toBeVisible()
-  const card = group.locator("ul > li").first()
+  const card = group
+    .locator("ul > li")
+    .filter({ has: page.getByRole("link", { name: /^View last run for / }) })
+    .first()
   await expect(card.getByRole("link", { name: /^History for / })).toBeVisible()
   await expect(
     card.getByRole("link", { name: /^View last run for / })
   ).toBeVisible()
+  for (const link of [
+    card.getByRole("link", { name: /^History for / }),
+    card.getByRole("link", { name: /^View last run for / }),
+  ]) {
+    await expect(link).toHaveAttribute("target", "_blank")
+    await expect(link).toHaveAttribute("rel", "noopener noreferrer")
+    await expect(link).toHaveAccessibleDescription("Opens in a new tab.")
+    await expect(link.locator('svg[data-icon="inline-end"]')).toBeVisible()
+  }
   await expect(page.getByText("Daily health details")).toHaveCount(0)
   const strip = card.locator("[data-run-history]")
   await expect(strip).toBeVisible()
@@ -82,7 +94,11 @@ test("navbar discovers team/type service views and restores format with individu
   expect(new URL(page.url()).searchParams.get("view")).toBe("table")
   await page.reload()
   await expect(group.getByRole("table")).toBeVisible()
-  const row = group.getByRole("table").locator("tbody tr").first()
+  const row = group
+    .getByRole("table")
+    .locator("tbody tr")
+    .filter({ has: page.getByRole("link", { name: /^View last run for / }) })
+    .first()
   await expect(row.locator("[data-run-history]")).toBeVisible()
   await expect(row.locator("[data-run-id]").first()).toHaveAttribute(
     "target",
@@ -91,20 +107,35 @@ test("navbar discovers team/type service views and restores format with individu
   const lastRun = row.getByRole("link", { name: /^View last run for / })
   const lastRunPath = await lastRun.getAttribute("href")
   expect(lastRunPath).toMatch(/^\/runs\/[0-9a-f-]+$/)
+  const serviceUrl = page.url()
+  const lastRunPopup = page.waitForEvent("popup")
   await lastRun.click()
-  await expect.poll(() => new URL(page.url()).pathname).toBe(lastRunPath)
-  await page.goBack()
-  const history = group
-    .getByRole("table")
-    .locator("tbody tr")
-    .first()
-    .getByRole("link", { name: /^History for / })
+  const lastRunPage = await lastRunPopup
+  await expect.poll(() => new URL(lastRunPage.url()).pathname).toBe(lastRunPath)
+  expect(await lastRunPage.evaluate(() => window.opener === null)).toBe(true)
+  await expect(page).toHaveURL(serviceUrl)
+  await lastRunPage.close()
+  const history = row.getByRole("link", { name: /^History for / })
   const historyPath = await history.getAttribute("href")
   expect(historyPath).toContain(
     `/t/${encodeURIComponent(team)}/${encodeURIComponent(type)}/w/`
   )
+  const historyPopup = page.waitForEvent("popup")
   await history.click()
-  await expect.poll(() => new URL(page.url()).pathname).toBe(historyPath)
+  const historyPage = await historyPopup
+  await expect.poll(() => new URL(historyPage.url()).pathname).toBe(historyPath)
+  await expect(
+    historyPage.getByRole("heading", { name: "Workflow history", exact: true })
+  ).toBeVisible()
+  await expect(page).toHaveURL(serviceUrl)
+  await historyPage.close()
+  const navbarRuns = page
+    .getByRole("navigation", { name: "Main navigation", exact: true })
+    .getByRole("link", { name: "Runs", exact: true })
+  await expect(navbarRuns).not.toHaveAttribute("target", "_blank")
+  await expect(navbarRuns.locator('svg[data-icon="inline-end"]')).toHaveCount(0)
+  await navbarRuns.click()
+  await expect.poll(() => new URL(page.url()).pathname).toBe("/runs")
 })
 
 test("legacy service URLs use the personal run count without a date cutoff or dropping metadata grouping", async ({

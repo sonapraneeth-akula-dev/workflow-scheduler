@@ -153,6 +153,19 @@ it("renders individual run outcomes with exact new-tab links, last run and full 
       name: "View last run for team/release/build",
     })
   ).toHaveAttribute("href", "/runs/019ed132-2f44-7000-8000-000000000002")
+  for (const name of [
+    "View last run for team/release/build",
+    "History for team/release/build",
+  ]) {
+    const link = within(card).getByRole("link", { name })
+    expect(link).toHaveAttribute("target", "_blank")
+    expect(link).toHaveAttribute("rel", "noopener noreferrer")
+    expect(link).toHaveAccessibleDescription("Opens in a new tab.")
+    expect(link.querySelector('svg[data-icon="inline-end"]')).toHaveAttribute(
+      "aria-hidden",
+      "true"
+    )
+  }
   expect(card.querySelector("time")).toHaveAttribute(
     "datetime",
     "2026-10-18T00:00:00Z"
@@ -224,6 +237,14 @@ it("switches to the striped semantic table without changing the cached health qu
       name: "View last run for team/release/build",
     })
   ).toHaveAttribute("href", "/runs/019ed132-2f44-7000-8000-000000000002")
+  for (const link of within(table).getAllByRole("link", {
+    name: /^(View last run|History) for /,
+  })) {
+    expect(link).toHaveAttribute("target", "_blank")
+    expect(link).toHaveAttribute("rel", "noopener noreferrer")
+    expect(link).toHaveAccessibleDescription("Opens in a new tab.")
+    expect(link.querySelector('svg[data-icon="inline-end"]')).toBeVisible()
+  }
   expect(
     within(table).getByRole("button", { name: "View last run" })
   ).toBeDisabled()
