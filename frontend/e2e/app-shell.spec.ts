@@ -68,6 +68,21 @@ for (const width of [320, 768, 1440, 2000]) {
     await page.goto("/runs")
     const navigation = page.getByRole("navigation", { name: "Main navigation" })
     await expect(navigation).toBeVisible()
+    await expect(navigation.locator("a, button").first()).toHaveAccessibleName(
+      "Service history menu"
+    )
+    if (width >= 640) {
+      const services = await navigation
+        .getByRole("button", { name: "Service history menu" })
+        .boundingBox()
+      const runs = await navigation
+        .getByRole("link", { name: "Runs", exact: true })
+        .boundingBox()
+      expect(services!.x + services!.width).toBeLessThanOrEqual(runs!.x)
+      expect(services!.y + services!.height / 2).toBe(
+        runs!.y + runs!.height / 2
+      )
+    }
     const bounds = await navigation.boundingBox()
     expect(bounds).not.toBeNull()
     expect(

@@ -17,6 +17,7 @@ export function AppHeader({ children }: { children: ReactNode }) {
           aria-label="Main navigation"
           className="col-span-2 row-start-2 flex flex-wrap items-center justify-center gap-4 justify-self-center lg:col-span-1 lg:col-start-2 lg:row-start-1"
         >
+          <ServiceHistoryNav />
           <Link
             to="/runs"
             className="inline-flex min-h-10 items-center px-2"
@@ -26,7 +27,6 @@ export function AppHeader({ children }: { children: ReactNode }) {
           >
             Runs
           </Link>
-          <ServiceHistoryNav />
           <Link
             to="/machines"
             className="inline-flex min-h-10 items-center px-2"
