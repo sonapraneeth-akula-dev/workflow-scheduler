@@ -32,9 +32,13 @@ const rankings = [
 
 function WorkflowCharts({
   trends,
+  embedded,
 }: {
   trends: NonNullable<Dashboard["trends"]>
+  embedded: boolean
 }) {
+  const Heading = embedded ? "h3" : "h2"
+  const ChartHeading = embedded ? "h4" : "h3"
   const { total, days } = trends
   const x = days.map(({ day }) => Date.parse(day) / 1000)
   const lines = [
@@ -71,7 +75,7 @@ function WorkflowCharts({
   ] as const
   return (
     <section aria-label="Workflow trends" className="min-w-0 space-y-5">
-      <h2 className="text-xl font-semibold">Workflow trends</h2>
+      <Heading className="text-xl font-semibold">Workflow trends</Heading>
       <p className="text-sm text-muted-foreground">
         Daily UTC creation buckets. Execution latency is started-to-ended time,
         excluding queue time, for completed runs with both timestamps. p999
@@ -101,7 +105,9 @@ function WorkflowCharts({
         }
         return (
           <section key={title} aria-label={title} className="min-w-0 space-y-3">
-            <h3 className="text-lg font-semibold">{title}</h3>
+            <ChartHeading className="text-lg font-semibold">
+              {title}
+            </ChartHeading>
             {chart.series.some((line) =>
               line.values.some((value) => value !== null)
             ) ? (
@@ -116,7 +122,9 @@ function WorkflowCharts({
         aria-label="Workflow status counts"
         className="min-w-0 space-y-3"
       >
-        <h3 className="text-lg font-semibold">Workflow status counts</h3>
+        <ChartHeading className="text-lg font-semibold">
+          Workflow status counts
+        </ChartHeading>
         <p className="text-sm text-muted-foreground">
           Current status of every run created in this window, including active
           runs. Refresh to update; not a history of status transitions.
@@ -149,11 +157,15 @@ export function DashboardPage({
   window = "30d",
   top = 10,
   onChange,
+  embedded = false,
 }: DashboardResource & {
   window?: TrendWindow
   top?: number
   onChange: (search: { window: TrendWindow; top: number }) => void
+  embedded?: boolean
 }) {
+  const Heading = embedded ? "h2" : "h1"
+  const RankingHeading = embedded ? "h3" : "h2"
   const query = useQuery({
     queryKey: ["dashboards", scope, id, window, top],
     queryFn: ({ signal }) => getDashboard(scope, id, window, top, signal),
@@ -164,7 +176,9 @@ export function DashboardPage({
   const data = query.isSuccess && !query.isFetching ? query.data : undefined
   return (
     <section aria-label="Metric dashboard" className="min-w-0 space-y-5">
-      <h1 className="text-2xl font-semibold capitalize">{scope} dashboard</h1>
+      <Heading className="text-2xl font-semibold capitalize">
+        {scope} dashboard
+      </Heading>
       <p className="text-sm break-all text-muted-foreground">Scope ID: {id}</p>
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1">
@@ -232,7 +246,9 @@ export function DashboardPage({
               .slice(0, 10)}{" "}
             (UTC). Top {data.top} per ranking.
           </p>
-          {data.trends ? <WorkflowCharts trends={data.trends} /> : null}
+          {data.trends ? (
+            <WorkflowCharts trends={data.trends} embedded={embedded} />
+          ) : null}
           {data.rankings.failureRate.length === 0 ? (
             <p role="status">No completed observations in this window.</p>
           ) : null}
@@ -261,7 +277,9 @@ export function DashboardPage({
                 aria-label={title}
                 className="min-w-0 space-y-3"
               >
-                <h2 className="text-xl font-semibold">{title}</h2>
+                <RankingHeading className="text-xl font-semibold">
+                  {title}
+                </RankingHeading>
                 {rows.length === 0 ? (
                   <p>No recorded observations for this ranking.</p>
                 ) : (

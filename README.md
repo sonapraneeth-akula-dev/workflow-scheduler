@@ -1093,6 +1093,12 @@ schedule, node and machine dashboards retain categorical ranking bars rather
 than misleading lines between unrelated nodes. The existing dashboard API adds
 `trends` only for workflow scope (null for other scopes), with gap-filled days
 and exact whole-window totals read from the same database snapshot as rankings.
+Workflow history also embeds the same dashboard in a **Metrics dashboard**
+accordion, collapsed by default. Dashboard code and reads load only when opened;
+closing it removes the charts, and reopening checks current Viewer access again.
+Its window/top controls are independent of run-history filters and remain selected
+while the accordion is collapsed. Navigating to another workflow resets the panel.
+The existing metrics-page link remains available.
 
 Secret variables accept `secret://<store>/<name>` through the existing
 `SecretReference` contract and `.Secret("token", "secret://local/deploy-token")`.

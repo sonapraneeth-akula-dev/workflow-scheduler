@@ -8,10 +8,12 @@ import {
   within,
 } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import userEvent from "@testing-library/user-event"
 import { ApiError } from "@/lib/api/client"
 import type { ChartData } from "@/renderers/chart/chartData"
 import type { TrendWindow } from "@/features/series/api"
 import { DashboardPage } from "./DashboardPage"
+import { WorkflowDashboardAccordion } from "./WorkflowDashboardAccordion"
 import {
   encodeDashboardId,
   getDashboard,
@@ -160,10 +162,136 @@ function show(scope: DashboardScope = "workflow", resourceId = id) {
   )
   return client
 }
+function showAccordion(workflowId = "team/type/workflow") {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const tree = (workflow: string) => (
+    <QueryClientProvider client={client}>
+      <h1>Workflow history</h1>
+      <WorkflowDashboardAccordion key={workflow} workflowId={workflow} />
+    </QueryClientProvider>
+  )
+  const rendered = render(tree(workflowId))
+  return {
+    client,
+    rerender: (workflow: string) => rendered.rerender(tree(workflow)),
+  }
+}
 describe("accessible metric dashboard", () => {
   beforeEach(() => {
     vi.resetAllMocks()
     read.mockResolvedValue(fixture())
+  })
+  it("keeps history metrics collapsed without reads, then embeds the existing dashboard with nested headings", async () => {
+    showAccordion()
+    const toggle = screen.getByText("Metrics dashboard", { exact: true })
+    expect(toggle.closest("details")).not.toHaveAttribute("open")
+    expect(
+      screen.queryByRole("region", { name: "Metric dashboard" })
+    ).not.toBeInTheDocument()
+    expect(read).not.toHaveBeenCalled()
+    await userEvent.click(toggle)
+    await screen.findByRole("img", { name: "Workflow execution latency (ms)" })
+    expect(read.mock.calls[0]?.slice(0, 4)).toEqual(["workflow", id, "30d", 10])
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Workflow history"
+    )
+    expect(
+      screen.getByRole("heading", { level: 2, name: "workflow dashboard" })
+    ).toBeVisible()
+    expect(
+      screen.getByRole("heading", { level: 3, name: "Workflow trends" })
+    ).toBeVisible()
+    expect(
+      screen.getByRole("heading", {
+        level: 4,
+        name: "Workflow execution latency (ms)",
+      })
+    ).toBeVisible()
+    expect(
+      screen.getByRole("heading", { level: 3, name: "Slowest nodes" })
+    ).toBeVisible()
+  })
+  it("preserves metric controls across collapse and rechecks access instead of exposing cached charts on reopen", async () => {
+    showAccordion()
+    const toggle = screen.getByText("Metrics dashboard", { exact: true })
+    await userEvent.click(toggle)
+    await screen.findByRole("img", { name: "Workflow execution latency (ms)" })
+    fireEvent.change(screen.getByLabelText("Dashboard window"), {
+      target: { value: "90d" },
+    })
+    await waitFor(() =>
+      expect(read.mock.calls.at(-1)?.slice(2, 4)).toEqual(["90d", 10])
+    )
+    await screen.findByRole("img", { name: "Workflow execution latency (ms)" })
+    fireEvent.change(screen.getByLabelText("Top rankings"), {
+      target: { value: "25" },
+    })
+    await waitFor(() =>
+      expect(read.mock.calls.at(-1)?.slice(2, 4)).toEqual(["90d", 25])
+    )
+    await screen.findByRole("img", { name: "Workflow execution latency (ms)" })
+    await userEvent.click(toggle)
+    await waitFor(() =>
+      expect(screen.queryByRole("img")).not.toBeInTheDocument()
+    )
+    const reads = read.mock.calls.length
+    read.mockRejectedValueOnce(
+      new ApiError(new Response(null, { status: 403 }), {
+        title: "Viewer permission denied.",
+      })
+    )
+    await userEvent.click(toggle)
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Viewer permission denied."
+    )
+    expect(read).toHaveBeenCalledTimes(reads + 1)
+    expect(screen.getByLabelText("Dashboard window")).toHaveValue("90d")
+    expect(screen.getByLabelText("Top rankings")).toHaveValue("25")
+    expect(screen.queryByRole("img")).not.toBeInTheDocument()
+    expect(screen.queryByRole("table")).not.toBeInTheDocument()
+  })
+  it("aborts an in-flight dashboard read when collapsed", async () => {
+    read.mockImplementationOnce(() => new Promise(() => {}))
+    showAccordion()
+    const toggle = screen.getByText("Metrics dashboard", { exact: true })
+    await userEvent.click(toggle)
+    await waitFor(() => expect(read).toHaveBeenCalledOnce())
+    const signal = read.mock.calls[0]![4]!
+    expect(signal.aborted).toBe(false)
+    await userEvent.click(toggle)
+    await waitFor(() => expect(signal.aborted).toBe(true))
+    expect(
+      screen.queryByRole("region", { name: "Metric dashboard" })
+    ).not.toBeInTheDocument()
+  })
+  it("resets the accordion and controls when navigating to another workflow", async () => {
+    const shown = showAccordion()
+    await userEvent.click(
+      screen.getByText("Metrics dashboard", { exact: true })
+    )
+    await screen.findByRole("img", { name: "Workflow execution latency (ms)" })
+    const reads = read.mock.calls.length
+    shown.rerender("team/type/another-workflow")
+    expect(
+      screen.getByText("Metrics dashboard", { exact: true }).closest("details")
+    ).not.toHaveAttribute("open")
+    expect(
+      screen.queryByRole("region", { name: "Metric dashboard" })
+    ).not.toBeInTheDocument()
+    expect(read).toHaveBeenCalledTimes(reads)
+    await userEvent.click(
+      screen.getByText("Metrics dashboard", { exact: true })
+    )
+    await waitFor(() =>
+      expect(read.mock.calls.at(-1)?.slice(0, 4)).toEqual([
+        "workflow",
+        encodeDashboardId("team/type/another-workflow"),
+        "30d",
+        10,
+      ])
+    )
   })
   it("renders four true daily lines, one status bar and linked ranking tables", async () => {
     show()

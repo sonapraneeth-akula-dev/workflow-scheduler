@@ -3,6 +3,7 @@ import { HistoryFilters, HistoryTable } from "@/features/runs/HistoryTable"
 import { historySearchSchema } from "@/features/runs/history"
 import { TriggerDialog } from "@/features/runs/TriggerDialog"
 import { encodeDashboardId } from "@/features/dashboards/api"
+import { WorkflowDashboardAccordion } from "@/features/dashboards/WorkflowDashboardAccordion"
 import { SubscribeMenu } from "@/features/subscriptions/SubscribeMenu"
 import { Button } from "@/components/ui/button"
 
@@ -59,6 +60,7 @@ function WorkflowHistory() {
           <SubscribeMenu scope="workflow" scopeId={workflowId} />
         </div>
       </section>
+      <WorkflowDashboardAccordion key={workflowId} workflowId={workflowId} />
       <HistoryFilters
         key={JSON.stringify(search)}
         search={search}

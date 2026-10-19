@@ -51,6 +51,90 @@ async function accessible(page: Page) {
   ).toBe(true)
 }
 
+test("workflow history lazily expands the same metrics, preserves history filters and hides denied cached charts", async ({
+  page,
+}) => {
+  test.setTimeout(60_000)
+  const [team, type, name] = fixture.workflow.split("/")
+  const target = `/t/${encodeURIComponent(team!)}/${encodeURIComponent(type!)}/w/${encodeURIComponent(name!)}/history?status=Failed`
+  const metricsReads: string[] = []
+  let historyReads = 0
+  page.on("request", (request) => {
+    const url = new URL(request.url())
+    if (url.pathname.startsWith("/api/v1/dashboards/"))
+      metricsReads.push(url.pathname)
+    if (url.pathname === "/api/v1/runs/history") historyReads++
+  })
+  await login(page, fixture.viewerToken, target)
+  const history = page.getByRole("table", {
+    name: /Historical runs, versions,/,
+  })
+  await expect(history).toBeVisible()
+  const toggle = page
+    .locator("summary")
+    .filter({ hasText: /^Metrics dashboard$/ })
+  await expect(toggle.locator("..")).not.toHaveAttribute("open")
+  expect(metricsReads).toEqual([])
+  const initialHistoryReads = historyReads
+  await toggle.focus()
+  await page.keyboard.press("Enter")
+  const dashboard = page.getByRole("region", {
+    name: "Metric dashboard",
+    exact: true,
+  })
+  await expect(dashboard.locator("canvas")).toHaveCount(5)
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Workflow history" })
+  ).toBeVisible()
+  await expect(
+    dashboard.getByRole("heading", { level: 2, name: "workflow dashboard" })
+  ).toBeVisible()
+  await expect(history).toBeVisible()
+  await dashboard.getByLabel("Dashboard window").selectOption("90d")
+  await expect(
+    dashboard
+      .getByRole("table", { name: "Slowest nodes: values and run drill-down" })
+      .locator("tbody")
+  ).toContainText("93,000 ms")
+  expect(new URL(page.url()).search).toBe("?status=Failed")
+  expect(historyReads).toBe(initialHistoryReads)
+  await toggle.click()
+  await expect(dashboard).toHaveCount(0)
+  await expect(history).toBeVisible()
+  const readsBeforeReopen = metricsReads.length
+  await toggle.focus()
+  await page.keyboard.press("Space")
+  await expect(dashboard.locator("canvas")).toHaveCount(5)
+  await expect(dashboard.getByLabel("Dashboard window")).toHaveValue("90d")
+  expect(metricsReads.length).toBeGreaterThan(readsBeforeReopen)
+  expect(
+    metricsReads.every(
+      (path) => path === `/api/v1/dashboards/workflow/${fixture.workflowId}`
+    )
+  ).toBe(true)
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.getByRole("button", { name: "Dark theme" }).click()
+  await accessible(page)
+  await page.route("**/api/v1/dashboards/**", async (route) => {
+    const response = await route.fetch({
+      headers: {
+        ...route.request().headers(),
+        authorization: `Bearer ${fixture.foreignToken}`,
+      },
+    })
+    expect(response.status()).toBe(403)
+    await route.fulfill({ response })
+  })
+  await dashboard.getByRole("button", { name: "Refresh dashboard" }).click()
+  await expect(dashboard.getByRole("alert")).toContainText(
+    /403|caller|permission|Forbidden/i
+  )
+  await expect(dashboard.locator("canvas")).toHaveCount(0)
+  await expect(dashboard.getByRole("table")).toHaveCount(0)
+  await expect(history).toBeVisible()
+  await accessible(page)
+})
+
 test("workflow rankings have exact accessible charts/tables and a slow node opens filtered real runs", async ({
   page,
   request,
