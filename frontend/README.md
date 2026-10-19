@@ -343,6 +343,13 @@ and related history/Task Plan links in a compact responsive summary. The graph
 follows immediately below its tabs; concise keyboard hints keep the full
 instructions available to assistive technology. Selecting a node opens its
 inspector beside the graph on wide screens and below it on smaller screens.
+Node cards show task counts, a dashed-circle icon for optional (soft-failure)
+nodes and a retry icon when any task enables eligible failure retries or
+platform recovery. Hover text and accessible descriptions distinguish those
+policies; an enabled platform recovery policy does not mean task errors retry.
+The inspector lists each task's live status, sequential/parallel execution,
+failure retry budget/categories, platform recovery and explicit pinned task-plan
+links. Optional nodes still execute; soft-failure policy is not a skip switch.
 Status, reconnect/permission failures, placement, queue and lineage information
 remain visible rather than being removed to achieve a denser layout.
 The run header's Back button returns through application history, preserving

@@ -6,6 +6,7 @@ import type { VersionPlan } from "@/features/taskplan/api"
 import { executionStatuses, type RunSnapshot } from "@/lib/live/runApi"
 import { layoutGraph } from "./layout"
 import { RunGraph } from "./RunGraph"
+import { describeNodeRetries, retryableFailures } from "./policies"
 
 vi.mock("./layout", async (original) => {
   const module = await original<typeof import("./layout")>()
@@ -16,12 +17,15 @@ vi.mock("@tanstack/react-router", () => ({
     to,
     params,
     children,
+    ...props
   }: {
     to: string
     params: Record<string, string>
     children: ReactNode
+    "aria-label"?: string
   }) => (
     <a
+      {...props}
       href={Object.entries(params).reduce(
         (path, [key, value]) =>
           path.replace(`$${key}`, encodeURIComponent(value)),
@@ -170,7 +174,7 @@ describe("live graph rendering", () => {
     const details = screen.getByRole("region", { name: "Selected node finish" })
     expect(details).toHaveTextContent("Dependencies: start (Always)")
     expect(
-      screen.getByRole("link", { name: "sdk: Task Plan" })
+      screen.getByRole("link", { name: "View task plan for sdk" })
     ).toHaveAttribute(
       "href",
       `/t/team/type/w/workflow/versions/${versionId}/tasks/finish%2Fsdk`
@@ -179,6 +183,218 @@ describe("live graph rendering", () => {
     expect(
       screen.getByRole("region", { name: "Selected node start" })
     ).toHaveTextContent("No declared tasks")
+  })
+
+  it("marks only soft-failure nodes optional, not required nodes containing a soft-failure task", () => {
+    const { container } = render(
+      <RunGraph
+        plan={{
+          ...plan,
+          nodes: [
+            { ...plan.nodes[0]!, failure: "Soft" },
+            {
+              ...plan.nodes[1]!,
+              tasks: [{ ...plan.nodes[1]!.tasks[0]!, failure: "Soft" }],
+            },
+          ],
+        }}
+        run={run}
+      />
+    )
+    const optional = screen.getByRole("button", { name: "start: Succeeded" })
+    expect(optional).toHaveAccessibleDescription(
+      "0 tasks, sequential. Optional node: soft-failure policy; still runs. No retries configured."
+    )
+    expect(
+      container.querySelectorAll(
+        '[title="Optional node: soft-failure policy; still runs."]'
+      )
+    ).toHaveLength(1)
+    expect(
+      screen.getByRole("button", { name: "finish: Running" })
+    ).toHaveAccessibleDescription(
+      "1 task, sequential. Required node: hard-failure policy. Failure retries: 0/1 tasks; platform recovery: 1/1 tasks."
+    )
+  })
+
+  it.each<{
+    label: string
+    retries: number
+    on: VersionPlan["nodes"][number]["tasks"][number]["policy"]["retry"]["on"]
+    autoRetry: boolean
+    eligible: number
+  }>([
+    {
+      label: "platform recovery only",
+      retries: 0,
+      on: ["TaskError", "Timeout"],
+      autoRetry: true,
+      eligible: 0,
+    },
+    {
+      label: "task failures without platform recovery",
+      retries: 2,
+      on: ["TaskError", "Timeout"],
+      autoRetry: false,
+      eligible: 2,
+    },
+    {
+      label: "authored agent failures without automatic recovery",
+      retries: 1,
+      on: ["AgentLost", "PlatformError"],
+      autoRetry: false,
+      eligible: 2,
+    },
+    {
+      label: "no budget",
+      retries: 0,
+      on: ["TaskError"],
+      autoRetry: false,
+      eligible: 0,
+    },
+    {
+      label: "no categories",
+      retries: 2,
+      on: [],
+      autoRetry: false,
+      eligible: 0,
+    },
+    {
+      label: "non-retryable categories",
+      retries: 2,
+      on: ["ValidationError", "Aborted", "ResourceLimit", "Placement"],
+      autoRetry: false,
+      eligible: 0,
+    },
+  ])(
+    "shows an accurate configured retry indicator for $label",
+    ({ retries, on, autoRetry, eligible }) => {
+      const original = plan.nodes[1]!.tasks[0]!
+      const task = {
+        ...original,
+        policy: {
+          ...original.policy,
+          autoRetry,
+          retry: { ...original.policy.retry, retries, on },
+        },
+      }
+      const node = { ...plan.nodes[1]!, tasks: [task] }
+      const description = describeNodeRetries(node)
+      expect(retryableFailures(task)).toHaveLength(eligible)
+      expect(description).toBe(
+        eligible || autoRetry
+          ? `Failure retries: ${eligible ? 1 : 0}/1 tasks; platform recovery: ${autoRetry ? 1 : 0}/1 tasks.`
+          : null
+      )
+      render(
+        <RunGraph plan={{ ...plan, nodes: [plan.nodes[0]!, node] }} run={run} />
+      )
+      const button = screen.getByRole("button", { name: "finish: Running" })
+      if (description) {
+        expect(
+          within(button).getByTitle(description).querySelector("svg")
+        ).toBeInTheDocument()
+        expect(button).toHaveAccessibleDescription(
+          expect.stringContaining(description)
+        )
+      } else {
+        expect(button.querySelectorAll("svg")).toHaveLength(1)
+        expect(button).toHaveAccessibleDescription(
+          expect.stringContaining("No retries configured.")
+        )
+      }
+    }
+  )
+
+  it("explains multiple tasks, parallel execution, live statuses and per-task retry policies", () => {
+    const first = plan.nodes[1]!.tasks[0]!
+    const second = {
+      ...first,
+      key: "notify",
+      failure: "Soft" as const,
+      policy: {
+        ...first.policy,
+        autoRetry: false,
+        retry: {
+          ...first.policy.retry,
+          retries: 2,
+          on: ["TaskError" as const],
+        },
+      },
+    }
+    const { rerender } = render(
+      <RunGraph
+        plan={{
+          ...plan,
+          nodes: [
+            plan.nodes[0]!,
+            {
+              ...plan.nodes[1]!,
+              mode: "Parallel",
+              maxParallel: 2,
+              tasks: [first, second],
+            },
+          ],
+        }}
+        run={{ ...run, tasks: { "finish/sdk": 3, "finish/notify": 6 } }}
+      />
+    )
+    const button = screen.getByRole("button", { name: "finish: Running" })
+    expect(button).toHaveTextContent("2 tasks")
+    expect(button).toHaveAccessibleDescription(
+      expect.stringContaining(
+        "Failure retries: 1/2 tasks; platform recovery: 1/2 tasks."
+      )
+    )
+    fireEvent.click(button)
+    const details = screen.getByRole("region", { name: "Selected node finish" })
+    expect(
+      within(details).getByRole("heading", { name: "Node: finish" })
+    ).toBeVisible()
+    expect(details).toHaveTextContent(
+      "2 tasks run in parallel, up to 2 at a time."
+    )
+    const tasks = within(details).getByRole("list", {
+      name: "Tasks in node finish",
+    })
+    const rows = within(tasks).getAllByRole("listitem")
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toHaveTextContent("sdk Running")
+    expect(rows[0]).toHaveTextContent(
+      "Failure retries: disabled. Platform recovery: enabled for agent/platform failures."
+    )
+    expect(rows[1]).toHaveTextContent("notify SoftFailed")
+    expect(rows[1]).toHaveTextContent("Soft-failure task.")
+    expect(rows[1]).toHaveTextContent(
+      "Failure retries: up to 2 (TaskError). Platform recovery: disabled."
+    )
+    expect(
+      within(rows[1]!).getByRole("link", { name: "View task plan for notify" })
+    ).toHaveAttribute(
+      "href",
+      `/t/team/type/w/workflow/versions/${versionId}/tasks/finish%2Fnotify`
+    )
+    rerender(
+      <RunGraph
+        plan={plan}
+        run={{ ...run, lastSeq: 2, tasks: { "finish/sdk": 5 } }}
+      />
+    )
+    expect(details).toHaveTextContent(
+      "1 task runs sequentially, in the order below."
+    )
+    expect(details).toHaveTextContent("sdk Succeeded")
+    expect(details).not.toHaveTextContent("notify")
+  })
+
+  it("does not invent a status for an unrecorded task", () => {
+    render(<RunGraph plan={plan} run={{ ...run, tasks: {} }} />)
+    fireEvent.click(screen.getByRole("button", { name: "finish: Running" }))
+    const details = screen.getByRole("region", { name: "Selected node finish" })
+    expect(details).toHaveTextContent("Status not recorded")
+    expect(
+      within(details).queryByText("Pending", { exact: true })
+    ).not.toBeInTheDocument()
   })
 
   it("links reused node inspection to its exact source rather than inventing attempts on the rerun", () => {
@@ -307,7 +523,7 @@ describe("live graph rendering", () => {
       within(table)
         .getAllByRole("columnheader")
         .map((cell) => cell.textContent)
-    ).toEqual(["Node", "Status", "Dependencies"])
+    ).toEqual(["Node", "Status", "Tasks", "Policies", "Dependencies"])
     expect(within(table).getAllByRole("row")).toHaveLength(
       plan.nodes.length + 1
     )
@@ -321,7 +537,7 @@ describe("live graph rendering", () => {
       screen.getByRole("region", { name: "Selected node finish" })
     ).toBeVisible()
     expect(
-      screen.getByRole("link", { name: "sdk: Task Plan" })
+      screen.getByRole("link", { name: "View task plan for sdk" })
     ).toHaveAttribute(
       "href",
       `/t/team/type/w/workflow/versions/${versionId}/tasks/finish%2Fsdk`

@@ -252,6 +252,8 @@ for (const colorScheme of ["light", "dark"] as const) {
     await expect(table.getByRole("columnheader")).toHaveText([
       "Node",
       "Status",
+      "Tasks",
+      "Policies",
       "Dependencies",
     ])
     await expect(table.getByRole("row")).toHaveCount(nodes.length + 1)

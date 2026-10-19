@@ -62,7 +62,9 @@ function RunDetail() {
               </Button>
               <h1 className="text-2xl font-semibold">Run</h1>
               {run ? (
-                <p className="font-medium break-words">{run.workflowId}</p>
+                <p className="min-w-0 font-medium [overflow-wrap:anywhere]">
+                  {run.workflowId}
+                </p>
               ) : null}
             </div>
             <p className="font-mono text-xs break-all text-muted-foreground">

@@ -24,6 +24,25 @@ test("keyboard graph navigation, icon/text statuses and list alternative are acc
   })
   await expect(graph.locator("[data-graph-node]")).toHaveCount(200)
   const node = (key: string) => graph.locator(`[data-graph-node="${key}"]`)
+  await expect(node("node-197")).toHaveAccessibleDescription(
+    "1 task, sequential. Required node: hard-failure policy. Failure retries: 1/1 tasks; platform recovery: 0/1 tasks."
+  )
+  await expect(node("node-198")).toHaveAccessibleDescription(
+    "1 task, sequential. Required node: hard-failure policy. No retries configured."
+  )
+  await expect(node("node-199")).toHaveAccessibleDescription(
+    "2 tasks, sequential. Optional node: soft-failure policy; still runs. Failure retries: 1/2 tasks; platform recovery: 1/2 tasks."
+  )
+  await expect(
+    node("node-199").getByTitle(
+      "Optional node: soft-failure policy; still runs."
+    )
+  ).toBeVisible()
+  await expect(
+    node("node-199").getByTitle(
+      "Failure retries: 1/2 tasks; platform recovery: 1/2 tasks."
+    )
+  ).toBeVisible()
   await expect(graph.locator('[data-graph-node][tabindex="0"]')).toHaveCount(1)
   await node("node-000").focus()
   await page.keyboard.press("ArrowDown")
@@ -46,8 +65,24 @@ test("keyboard graph navigation, icon/text statuses and list alternative are acc
   await expect(node("node-199")).toHaveAttribute("aria-pressed", "true")
   let details = page.getByRole("region", { name: "Selected node node-199" })
   await expect(details).toContainText("node-189 (OnSuccess)")
+  await expect(details).toContainText(
+    "2 tasks run sequentially, in the order below."
+  )
+  const tasks = details.getByRole("list", { name: "Tasks in node node-199" })
+  await expect(tasks.getByRole("listitem")).toHaveCount(2)
+  await expect(tasks.getByRole("listitem").first()).toContainText("work")
+  await expect(tasks.getByRole("listitem").first()).toContainText(
+    "Failure retries: disabled. Platform recovery: enabled for agent/platform failures."
+  )
+  await expect(tasks.getByRole("listitem").last()).toContainText("notify")
+  await expect(tasks.getByRole("listitem").last()).toContainText(
+    "Soft-failure task."
+  )
+  await expect(tasks.getByRole("listitem").last()).toContainText(
+    "Failure retries: up to 2 (TaskError, Timeout). Platform recovery: disabled."
+  )
   await expect(
-    details.getByRole("link", { name: "work: Task Plan" })
+    details.getByRole("link", { name: "View task plan for work" })
   ).toHaveAttribute("href", /\/tasks\/node-199%2Fwork$/)
   await page.keyboard.press("Home")
   await expect(node("node-000")).toBeFocused()
@@ -98,5 +133,13 @@ test("keyboard graph navigation, icon/text statuses and list alternative are acc
       page: document.documentElement.scrollWidth,
     }))
     expect(widths.page).toBeLessThanOrEqual(widths.viewport)
+    await page.screenshot({
+      path: test
+        .info()
+        .outputPath(
+          `graph-policies-${dark ? "mobile-dark" : "desktop-light"}.png`
+        ),
+      fullPage: true,
+    })
   }
 })

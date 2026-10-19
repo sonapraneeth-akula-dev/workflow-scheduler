@@ -4,8 +4,10 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using NpgsqlTypes;
 using Wf.Contracts;
+using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
 using Wf.Contracts.Registry;
+using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Events;
 using Wf.Engine.Core;
@@ -41,7 +43,13 @@ public sealed partial class AuthorizationMatrixTests
                         node.DependsOn($"node-{current - 10:D3}");
                         if (current % 10 > 0) node.DependsOn($"node-{current - 11:D3}");
                     }
+                    if (current == 197) node.NoAutoRetry().Retry(2);
+                    if (current == 198) node.NoAutoRetry();
+                    if (current == 199) node.OnFailure(FailurePolicy.Soft);
                     node.Task("work", DeclaredPlanTask);
+                    if (current == 199)
+                        node.Task("notify", DeclaredPlanTask, policy => policy.NoAutoRetry().Retry(2),
+                            FailurePolicy.Soft);
                 });
             }
         });
@@ -71,6 +79,7 @@ public sealed partial class AuthorizationMatrixTests
         using var writer = new SemaphoreSlim(1);
         await using var server = await Server.Start(database.DataSource, live: true, configure: app =>
         {
+            app.MapReservationQueueEndpoints();
             app.MapPost("/api/test/graph/stream", async (HttpContext context) =>
             {
                 await writer.WaitAsync(context.RequestAborted);

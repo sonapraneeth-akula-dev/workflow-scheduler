@@ -8,13 +8,15 @@ import {
 } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
+import { CircleDashedIcon, RotateCcwIcon } from "lucide-react"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { StatusBadge } from "@/components/StatusBadge"
 import { Button } from "@/components/ui/button"
 import { getVersionPlan, type VersionPlan } from "@/features/taskplan/api"
 import { executionStatuses, type RunSnapshot } from "@/lib/live/runApi"
-import { GraphNode } from "./GraphNode"
+import { GraphNode, NodePolicyIcons } from "./GraphNode"
 import { layoutGraph, type GraphLayout } from "./layout"
+import { describeNodeRetries, retryableFailures } from "./policies"
 
 const GraphEdges = memo(function GraphEdges({
   layout,
@@ -85,6 +87,21 @@ export function RunGraph({
   run: RunSnapshot
 }) {
   const layout = useMemo(() => layoutGraph(plan.nodes), [plan.nodes])
+  const policies = useMemo(
+    () =>
+      new Map(
+        plan.nodes.map((node) => [
+          node.key,
+          {
+            optional: node.failure === "Soft",
+            retries: describeNodeRetries(node),
+            taskCount: node.tasks.length,
+            mode: node.mode,
+          },
+        ])
+      ),
+    [plan.nodes]
+  )
   const [selected, select] = useState<string | null>(null)
   const [focused, focus] = useState<string | null>(null)
   const [listOpen, setListOpen] = useState(false)
@@ -172,6 +189,17 @@ export function RunGraph({
           </span>
         </p>
       </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground xl:col-span-full">
+        <span>Nodes group tasks. Select to inspect.</span>
+        <span className="inline-flex items-center gap-1">
+          <CircleDashedIcon aria-hidden="true" className="size-3.5" />
+          Optional (soft failure)
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <RotateCcwIcon aria-hidden="true" className="size-3.5" />
+          Retries (failure or platform; hover for policy)
+        </span>
+      </div>
       {layout.nodes.length === 0 ? (
         <p>No declared nodes.</p>
       ) : (
@@ -195,6 +223,7 @@ export function RunGraph({
                 key={position.key}
                 position={position}
                 status={run.nodes[position.key]!}
+                {...policies.get(position.key)!}
                 selected={selected === position.key}
                 tabIndex={active === position.key ? 0 : -1}
                 onFocus={focus}
@@ -221,11 +250,17 @@ export function RunGraph({
             >
               <table
                 aria-label="Run nodes"
-                className="w-full min-w-[32rem] text-left"
+                className="w-full min-w-[48rem] text-left"
               >
                 <thead className="border-b bg-secondary text-secondary-foreground">
                   <tr>
-                    {["Node", "Status", "Dependencies"].map((label) => (
+                    {[
+                      "Node",
+                      "Status",
+                      "Tasks",
+                      "Policies",
+                      "Dependencies",
+                    ].map((label) => (
                       <th
                         scope="col"
                         key={label}
@@ -262,6 +297,23 @@ export function RunGraph({
                           status={executionStatuses[run.nodes[item.key]!]!}
                         />
                       </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {item.tasks.length} (
+                        {item.mode === "Series" ? "sequential" : "parallel"})
+                      </td>
+                      <td className="relative px-3 py-2">
+                        <NodePolicyIcons
+                          optional={item.failure === "Soft"}
+                          retries={policies.get(item.key)!.retries}
+                        />
+                        <span className="sr-only">
+                          {item.failure === "Soft"
+                            ? "Optional node (soft failure)."
+                            : "Required node (hard failure)."}{" "}
+                          {policies.get(item.key)!.retries ??
+                            "No retries configured."}
+                        </span>
+                      </td>
                       <td className="px-3 py-2 [overflow-wrap:anywhere]">
                         {item.dependencies
                           .map(
@@ -281,9 +333,21 @@ export function RunGraph({
       {node ? (
         <section
           aria-label={`Selected node ${node.key}`}
-          className="min-w-0 border bg-card p-3 text-sm break-words xl:col-start-2 xl:row-span-2 xl:row-start-2"
+          className="min-w-0 self-start border bg-card p-3 text-sm break-words xl:col-start-2 xl:row-span-2 xl:row-start-3"
         >
-          <h3 className="font-semibold">{node.key}</h3>
+          <h3 className="font-semibold">Node: {node.key}</h3>
+          <p className="text-muted-foreground">
+            {node.tasks.length} {node.tasks.length === 1 ? "task" : "tasks"}{" "}
+            {node.tasks.length === 1 ? "runs" : "run"}{" "}
+            {node.mode === "Series"
+              ? "sequentially, in the order below."
+              : `in parallel${node.maxParallel ? `, up to ${node.maxParallel} at a time` : ""}.`}
+          </p>
+          <p>
+            {node.failure === "Soft"
+              ? "Optional node: soft-failure policy; still runs."
+              : "Required node: hard-failure policy."}
+          </p>
           {run.reusedNodes[node.key] ? (
             <p className="break-all">
               <StatusBadge status="Reused" />{" "}
@@ -302,30 +366,68 @@ export function RunGraph({
           {node.tasks.length === 0 ? (
             <p>No declared tasks.</p>
           ) : (
-            <ul className="mt-3 flex flex-col gap-2">
-              {node.tasks.map((task) => (
-                <li key={task.key}>
-                  {run.taskWaitReasons?.[`${node.key}/${task.key}`] ? (
-                    <span role="status">
-                      WaitingForMachine: no eligible machine has available
-                      capacity.{" "}
-                    </span>
-                  ) : null}
-                  <Link
-                    to="/t/$team/$type/w/$wf/versions/$v/tasks/$taskKey"
-                    params={{
-                      team,
-                      type,
-                      wf,
-                      v: plan.versionId,
-                      taskKey: `${node.key}/${task.key}`,
-                    }}
-                  >
-                    {task.key}: Task Plan
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            <div className="mt-3">
+              <h4 className="font-semibold">Tasks ({node.tasks.length})</h4>
+              <p className="text-xs text-muted-foreground">
+                Task plans show configuration, not task outputs. Retries depend
+                on failure category, remaining budget and deadline.
+              </p>
+              <ol
+                aria-label={`Tasks in node ${node.key}`}
+                className="mt-2 flex list-inside list-decimal flex-col gap-3"
+              >
+                {node.tasks.map((task) => {
+                  const status = run.tasks[`${node.key}/${task.key}`]
+                  const retryOn = retryableFailures(task)
+                  return (
+                    <li key={task.key}>
+                      <span className="font-medium">{task.key}</span>{" "}
+                      {status === undefined ? (
+                        <span className="text-xs text-muted-foreground">
+                          Status not recorded
+                        </span>
+                      ) : (
+                        <StatusBadge status={executionStatuses[status]!} />
+                      )}
+                      {task.failure === "Soft" ? (
+                        <p>Soft-failure task.</p>
+                      ) : null}
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Failure retries:{" "}
+                        {retryOn.length
+                          ? `up to ${task.policy.retry.retries} (${retryOn.join(", ")})`
+                          : "disabled"}
+                        . Platform recovery:{" "}
+                        {task.policy.autoRetry
+                          ? "enabled for agent/platform failures"
+                          : "disabled"}
+                        .
+                      </p>
+                      {run.taskWaitReasons?.[`${node.key}/${task.key}`] ? (
+                        <span role="status">
+                          WaitingForMachine: no eligible machine has available
+                          capacity.{" "}
+                        </span>
+                      ) : null}
+                      <Link
+                        to="/t/$team/$type/w/$wf/versions/$v/tasks/$taskKey"
+                        params={{
+                          team,
+                          type,
+                          wf,
+                          v: plan.versionId,
+                          taskKey: `${node.key}/${task.key}`,
+                        }}
+                        aria-label={`View task plan for ${task.key}`}
+                        className="text-xs text-primary underline underline-offset-4"
+                      >
+                        View task plan
+                      </Link>
+                    </li>
+                  )
+                })}
+              </ol>
+            </div>
           )}
         </section>
       ) : null}

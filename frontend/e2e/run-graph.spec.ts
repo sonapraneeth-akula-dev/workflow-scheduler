@@ -58,9 +58,11 @@ test("200-node pinned DAG retains cached layout and draws 60 fps during 100 comm
   await page.waitForTimeout(1500)
   const reads: string[] = []
   page.on("request", (request) => {
+    const path = new URL(request.url()).pathname
     if (
       request.method() === "GET" &&
-      new URL(request.url()).pathname.startsWith("/api/")
+      path.startsWith("/api/") &&
+      path !== `/api/v1/runs/${settings.run}/reservation-queue`
     )
       reads.push(request.url())
   })
