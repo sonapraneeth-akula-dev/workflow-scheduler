@@ -62,7 +62,7 @@ export function RunHistoryStrip({
       ) : (
         <p className="text-sm text-muted-foreground">No runs</p>
       )}
-      <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span>
           Latest {runs.length} {runs.length === 1 ? "run" : "runs"} / up to{" "}
           {runLimit}

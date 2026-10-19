@@ -284,6 +284,39 @@ test("metadata container grouping survives format changes and reload without dro
   await expect(histories).toHaveCount(count)
 })
 
+test("recent-run count and success rate stay adjacent in compact cards and table columns", async ({
+  page,
+}) => {
+  await page.goto("/t/report-tests/services")
+  const strip = page.locator("main [data-run-history]").first()
+  await expect(strip.locator("[data-run-id]")).toHaveCount(1)
+  for (const width of [1280, 2000]) {
+    await page.setViewportSize({ width, height: 1000 })
+    for (const view of ["cards", "table"]) {
+      await page
+        .getByRole("radio", {
+          name: view === "cards" ? "Card format" : "Table format",
+        })
+        .click()
+      const layout = await strip.evaluate((element) => {
+        const summary = element.lastElementChild!
+        const count = summary.firstElementChild!.getBoundingClientRect()
+        const success = summary.lastElementChild!.getBoundingClientRect()
+        const column = element.closest("td")?.getBoundingClientRect()
+        return {
+          gap: success.left - count.right,
+          lineOffset: Math.abs(success.top - count.top),
+          columnWidth: column?.width,
+        }
+      })
+      expect(layout.lineOffset).toBeLessThanOrEqual(1)
+      expect(layout.gap).toBeGreaterThanOrEqual(8)
+      expect(layout.gap).toBeLessThanOrEqual(13)
+      if (view === "table") expect(layout.columnWidth).toBeLessThanOrEqual(353)
+    }
+  }
+})
+
 for (const width of [320, 768, 2000]) {
   for (const colorScheme of ["light", "dark"] as const) {
     test(`${colorScheme} service cards and table remain accessible without page overflow at ${width}px`, async ({
@@ -318,6 +351,22 @@ for (const width of [320, 768, 2000]) {
         await expect(
           page.getByRole("link", { name: /^History for / }).first()
         ).toBeVisible()
+        const summary = await page
+          .locator("main [data-run-history]")
+          .first()
+          .evaluate((element) => {
+            const bounds = element.getBoundingClientRect()
+            const summary = element.lastElementChild!
+            return Array.from(summary.children).every((child) => {
+              const rect = child.getBoundingClientRect()
+              return (
+                rect.left >= bounds.left - 1 &&
+                rect.right <= bounds.right + 1 &&
+                rect.bottom <= bounds.bottom + 1
+              )
+            })
+          })
+        expect(summary).toBe(true)
         expect(
           await page.evaluate(() => document.documentElement.scrollWidth)
         ).toBeLessThanOrEqual(width)

@@ -197,7 +197,7 @@ function WorkflowGroup({
                   <td className="p-3">
                     <LastRun workflow={workflow} />
                   </td>
-                  <td className="min-w-64 p-3">
+                  <td className="w-88 min-w-64 p-3">
                     <RunHistoryStrip runs={runs} runLimit={runLimit} />
                   </td>
                   <td className="p-3">

@@ -12,6 +12,7 @@ import { beforeEach, expect, it, vi } from "vitest"
 import { ApiError } from "@/lib/api/client"
 import { getTeams, getTypes } from "@/features/catalog/api"
 import { useLive } from "@/lib/live/useLive"
+import type { LiveSnapshot } from "@/lib/live/subscriptions"
 import { getServiceHistory, type ServiceSearch } from "./api"
 import { ServiceHistory } from "./ServiceHistory"
 import {
@@ -119,6 +120,10 @@ function show() {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(useLive).mockReturnValue({
+    snapshot: null,
+    retry: vi.fn(),
+  })
   localStorage.clear()
   vi.mocked(getTeams).mockResolvedValue([
     { team: "team", typeCount: 1, presentation: null },
@@ -365,6 +370,65 @@ it("preserves cached cards on transient failure, retries, and hides all cached h
   expect(await screen.findByRole("alert")).toHaveTextContent("Viewer revoked")
   expect(screen.queryByText("Build", { exact: true })).not.toBeInTheDocument()
   expect(screen.queryByRole("img")).not.toBeInTheDocument()
+})
+
+it("manually refreshes run history, workflow types and display-name configuration", async () => {
+  const shown = show()
+  await screen.findByText("Build", { exact: true })
+  await waitFor(() => expect(shown.client.isFetching()).toBe(0))
+  await userEvent.click(
+    screen.getByRole("button", { name: "Refresh service history" })
+  )
+  await waitFor(() => {
+    expect(getServiceHistory).toHaveBeenCalledTimes(2)
+    expect(getTypes).toHaveBeenCalledTimes(2)
+    expect(getTeams).toHaveBeenCalledTimes(2)
+  })
+})
+
+it("automatically refreshes on run updates and reconnect resync, with a separate retry for failed live updates", async () => {
+  const retry = vi.fn()
+  let snapshot: LiveSnapshot = {
+    resource: { scope: "type", id: "team/release" },
+    status: "live",
+    error: null,
+    delta: null,
+    resyncVersion: 0,
+    reportVersion: 0,
+  }
+  vi.mocked(useLive).mockImplementation(() => ({ snapshot, retry }))
+  const shown = show()
+  await screen.findByText("Build", { exact: true })
+  await waitFor(() => expect(shown.client.isFetching()).toBe(0))
+  const updated = structuredClone(response)
+  updated.items[0]!.runs[0]!.status = "Succeeded"
+  vi.mocked(getServiceHistory).mockResolvedValue(updated)
+  snapshot = {
+    ...snapshot,
+    delta: { scope: "type", id: "team/release", items: [] },
+  }
+  shown.rerender(search)
+  expect(await screen.findByText("100% completed successfully")).toBeVisible()
+  await waitFor(() => expect(shown.client.isFetching()).toBe(0))
+  const calls = vi.mocked(getServiceHistory).mock.calls.length
+  snapshot = { ...snapshot, delta: null, resyncVersion: 1 }
+  shown.rerender(search)
+  await waitFor(() =>
+    expect(getServiceHistory).toHaveBeenCalledTimes(calls + 1)
+  )
+  snapshot = {
+    ...snapshot,
+    status: "error",
+    error: new Error("Live interrupted"),
+  }
+  shown.rerender(search)
+  expect(
+    await screen.findByText("Live updates unavailable for release.")
+  ).toBeVisible()
+  await userEvent.click(
+    screen.getByRole("button", { name: "Retry live updates for release" })
+  )
+  expect(retry).toHaveBeenCalledOnce()
 })
 
 it("announces an empty catalogue without inventing healthy workflow cards", async () => {

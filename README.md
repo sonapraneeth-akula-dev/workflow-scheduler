@@ -899,7 +899,11 @@ Keys come from authorized type schemas and loaded workflow metadata; missing
 values have a **Not set** container and empty values stay distinct. Grouping is
 saved in the URL and changes presentation without repeating the history request.
 Live updates remain subscribed to every loaded workflow type, even when one
-metadata container combines several types.
+metadata container combines several types. Run changes automatically reload the
+displayed history while the live connection is active; reconnecting resynchronizes
+it. **Refresh service history** manually reloads the displayed history, workflow
+types and display-name configuration without starting any runs. If live updates
+fail, use the displayed **Retry live updates** control to reconnect.
 
 Service names use capitalized display labels, not renamed identifiers.
 Team `presentation.labels` supplies metadata-key labels such as **Component**.
