@@ -12,6 +12,9 @@ process.env.VITE_ENTRA_SPA_CLIENT_ID = "60d24b19-f65a-4ed4-96cc-9174bfcacabc"
 process.env.VITE_ENTRA_API_SCOPE =
   "api://562b0870-4522-43da-8587-41e9b788f309/api.read"
 const cacheDir = resolve("node_modules", `.vite-run-timeline-${process.pid}`)
+const spec = process.argv.includes("--failures")
+  ? "run-failures.spec.ts"
+  : "run-timeline.spec.ts"
 const server = await createServer({
   cacheDir,
   logLevel: "warn",
@@ -26,14 +29,7 @@ try {
   )
   const child = spawn(
     "bun",
-    [
-      "x",
-      "--no-install",
-      "playwright",
-      "test",
-      "run-timeline.spec.ts",
-      "--reporter=line",
-    ],
+    ["x", "--no-install", "playwright", "test", spec, "--reporter=line"],
     {
       stdio: "inherit",
       env: {

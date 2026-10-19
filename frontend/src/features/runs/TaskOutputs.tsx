@@ -7,6 +7,7 @@ import { ApiError } from "@/lib/api/client"
 import { JsonTree } from "@/renderers/json/JsonReport"
 import { getTimeline } from "./timeline-api"
 import { getTaskOutputs } from "./outputs-api"
+import { FailureMessage } from "./FailureSummary"
 
 const identity = (attempt: { taskKey: string; attempt: number }) =>
   JSON.stringify([attempt.taskKey, attempt.attempt])
@@ -51,6 +52,11 @@ export function TaskOutputs({
     gcTime: 0,
   })
   const error = timeline.error ?? outputs.error
+  const failure = timeline.data?.failures?.find(
+    (failure) =>
+      failure.taskKey === selected?.taskKey &&
+      failure.attempt === selected?.attempt
+  )
   const denied = error instanceof ApiError && [401, 403].includes(error.status)
   const result =
     !error && !timeline.isFetching && !outputs.isFetching
@@ -95,6 +101,9 @@ export function TaskOutputs({
           Previously loaded outputs are hidden because access is no longer
           authorized.
         </p>
+      ) : null}
+      {!error && !timeline.isFetching && failure ? (
+        <FailureMessage failure={failure} />
       ) : null}
       {!timeline.error && !denied && timeline.data ? (
         attempts?.length === 0 ? (

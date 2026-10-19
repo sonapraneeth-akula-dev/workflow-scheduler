@@ -3178,7 +3178,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description One row per committed dispatched attempt, including reserved lifecycle-stage keys. Manifest task declaration order, then increasing attempt; absent manifest uses snapshot task enumeration. Timings reuse validated recorded metrics, not live clocks. Agent identity belongs to the exact durable dispatch attempt; missing legacy attribution is null. Never-started/skipped/reused work has no invented attempts. ResumedFrom is the verified seed's saved UTC time recorded before that attempt's dispatch delivery, not the task's latest checkpoint; missing historical or non-resumed attribution is null. Fresh Run Viewer authorization; no query parameters, variables, errors, outputs or machine capabilities. */
+        /** @description One row per committed dispatched attempt, including reserved lifecycle-stage keys. Manifest task declaration order, then increasing attempt; absent manifest uses snapshot task enumeration. Timings reuse validated recorded metrics, not live clocks. Agent identity belongs to the exact durable dispatch attempt; missing legacy attribution is null. Never-started/skipped/reused work has no invented attempts. ResumedFrom is the verified seed's saved UTC time recorded before that attempt's dispatch delivery, not the task's latest checkpoint; missing historical or non-resumed attribution is null. Failure messages reuse redacted durable attempt errors, with team/shared-infra display categories; these labels never alter scheduler retry categories. Missing messages remain explicitly unrecorded. Fresh Run Viewer authorization; no query parameters, variables, outputs or machine capabilities. */
         get: {
             parameters: {
                 query?: never;
@@ -5449,6 +5449,7 @@ export interface components {
             startedAt: null | string;
             /** Format: date-time */
             endedAt: null | string;
+            failureSummary?: null | components["schemas"]["RunFailureSummary"];
         };
         CatalogMetadataField: {
             key: string;
@@ -5985,6 +5986,34 @@ export interface components {
             lastSeq: number | string;
             events: components["schemas"]["LiveEvent"][];
         };
+        RunFailureDetail: {
+            type: string;
+            category: string;
+            message: string;
+            nodeKey: string;
+            taskKey: null | string;
+            /** Format: int32 */
+            attempt: null | number | string;
+            impact: string;
+            runtimeCategory: null | string;
+            ruleId: null | string;
+            messageRecorded: boolean;
+        };
+        RunFailureGroup: {
+            type: string;
+            category: string;
+            impact: string;
+            /** Format: int32 */
+            count: number | string;
+        };
+        RunFailureSummary: {
+            /** Format: int32 */
+            count: number | string;
+            /** Format: int32 */
+            recoveredCount: number | string;
+            primary: components["schemas"]["RunFailureDetail"];
+            groups: components["schemas"]["RunFailureGroup"][];
+        };
         RunHistoryFire: {
             /** Format: uuid */
             scheduleId: string;
@@ -6025,6 +6054,7 @@ export interface components {
             variables: components["schemas"]["RunHistoryVariable"][];
             fire: null | components["schemas"]["RunHistoryFire"];
             version: null | string;
+            failureSummary?: null | components["schemas"]["RunFailureSummary"];
         };
         RunHistoryVariable: {
             key: string;
@@ -6080,6 +6110,7 @@ export interface components {
             /** Format: date-time */
             endedAt: null | string;
             metadata: null | components["schemas"]["RunMetadata"];
+            failureSummary?: null | components["schemas"]["RunFailureSummary"];
         };
         RunSnapshotResponse: {
             /** Format: uuid */
@@ -6143,6 +6174,8 @@ export interface components {
             lastSeq: number | string;
             status: string;
             attempts: components["schemas"]["RunTimelineAttempt"][];
+            failureSummary?: null | components["schemas"]["RunFailureSummary"];
+            failures?: components["schemas"]["RunFailureDetail"][];
         };
         /** @enum {unknown} */
         ScheduleCatchUpPolicy: "None" | "Latest";

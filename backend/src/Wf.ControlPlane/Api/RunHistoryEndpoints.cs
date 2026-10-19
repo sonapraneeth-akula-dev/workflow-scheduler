@@ -195,6 +195,17 @@ public static class RunHistoryEndpoints
         }
         var more = rows.Count > filter.Runs.Limit;
         if (more) rows.RemoveAt(rows.Count - 1);
+        await reader.DisposeAsync();
+        var failures = await RunFailures.Summaries(context, source,
+            rows.Where(row => row.Row.Kind == "Run" && row.Row.RunId.HasValue).Select(row => row.Row.RunId!.Value));
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            rows[index] = (row.Row with
+            {
+                FailureSummary = row.Row.Kind == "Run" && row.Row.RunId is { } id ? failures.GetValueOrDefault(id) : null
+            }, row.Position);
+        }
         return Results.Ok(new RunHistoryPage(rows.Select(row => row.Row).ToArray(),
             more ? filter.Cursor(rows[^1].Position, types) : null) { CurrentScheduleId = scheduleId });
 

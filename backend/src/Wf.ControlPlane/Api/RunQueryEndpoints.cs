@@ -136,6 +136,10 @@ public static class RunQueryEndpoints
         }
         var more = items.Count > filter.Limit;
         if (more) items.RemoveAt(items.Count - 1);
+        await reader.DisposeAsync();
+        var failures = await RunFailures.Summaries(context, source, items.Select(item => item.Id));
+        for (var index = 0; index < items.Count; index++)
+            items[index] = items[index] with { FailureSummary = failures.GetValueOrDefault(items[index].Id) };
         return Results.Ok(new RunQueryPage(items, more ? filter.Cursor(items[^1].Id, types) : null));
     }
 

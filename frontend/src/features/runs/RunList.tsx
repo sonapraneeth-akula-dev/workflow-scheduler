@@ -8,8 +8,9 @@ import { Button } from "@/components/ui/button"
 import { accessDenied } from "@/features/catalog/api"
 import { getRuns, type RunPageCursor, type RunRow } from "./api"
 import { runFilterSchema, type RunSearch } from "./search"
+import { FailureSummary } from "./FailureSummary"
 
-const rowHeight = 128
+const rowHeight = 160
 const overscan = 3
 
 function groupValue(row: RunRow, filters: RunSearch): string | undefined {
@@ -136,6 +137,10 @@ function Results({ rows, filters }: { rows: RunRow[]; filters: RunSearch }) {
                   {formatTimestamp(row.createdAt)}
                 </time>
               </div>
+              <FailureSummary
+                summary={row.failureSummary}
+                status={row.status}
+              />
             </li>
           ))}
         </ol>

@@ -1,0 +1,11 @@
+{
+  "rules": [
+    { "id": "demo-network", "contains": "Synthetic infrastructure network failure", "category": "Network" },
+    { "id": "connection-refused", "contains": "connection refused", "category": "Network" },
+    { "id": "dns-resolution", "contains": "No such host is known", "category": "Network" },
+    { "id": "agent-unavailable", "contains": "agent connection lost", "category": "AgentAvailability" },
+    { "id": "placement-capacity", "contains": "no eligible machine", "category": "Capacity" },
+    { "id": "memory-limit", "contains": "out-of-memory", "category": "Capacity" },
+    { "id": "storage-unavailable", "contains": "blob storage unavailable", "category": "Storage" }
+  ]
+}

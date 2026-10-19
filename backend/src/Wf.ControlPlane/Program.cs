@@ -59,6 +59,8 @@ if (migrate)
 if (developmentAuth) builder.Configuration["Authentication:Mode"] = "Development";
 builder.Services.AddWorkflowAuthentication(builder.Configuration, builder.Environment);
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
+builder.Services.AddSingleton(FailureCatalog.Load(builder.Configuration["FailureClassification:Root"] ??
+    Path.Combine(AppContext.BaseDirectory, "failure-categories")));
 var workflowEnvironment = builder.Configuration["WF_WORKFLOW_ENVIRONMENT"] ?? (developmentAuth ? "dev" : "prod");
 builder.Services.AddSingleton(new Wf.ControlPlane.Registry.WorkflowEnvironmentPolicy(workflowEnvironment));
 builder.Services.AddTeamAuthorization();

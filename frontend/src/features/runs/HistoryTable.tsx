@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input"
 import { accessDenied, runStatuses } from "@/features/catalog/api"
 import { TriggerBadge } from "./TriggerBadge"
 import { RunNowButton } from "@/features/series/RunNowButton"
+import { FailureSummary } from "./FailureSummary"
 import {
   getHistory,
   historySearchSchema,
@@ -311,6 +312,12 @@ export function HistoryTable({
                           </Badge>
                         ) : null}
                       </div>
+                      {row.kind === "Run" ? (
+                        <FailureSummary
+                          summary={row.failureSummary}
+                          status={row.status}
+                        />
+                      ) : null}
                       {scheduleReason ? (
                         <p className="max-w-xs break-words">{scheduleReason}</p>
                       ) : null}

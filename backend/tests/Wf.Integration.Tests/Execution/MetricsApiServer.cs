@@ -41,6 +41,7 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
         builder.Configuration["AzureAd:ClientId"] = Audience;
         builder.Services.AddWorkflowAuthentication(builder.Configuration, builder.Environment);
         builder.Services.AddSingleton(source);
+        builder.Services.AddSingleton(FailureCatalog.Load(Path.Combine(AppContext.BaseDirectory, "failure-categories")));
         builder.Services.AddTeamAuthorization();
         builder.Services.AddWorkflowOpenApi();
         builder.Services.AddSingleton<RunStore>();

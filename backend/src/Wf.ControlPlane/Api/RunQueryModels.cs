@@ -14,6 +14,7 @@ public sealed record RunQueryRow(Guid Id, string WorkflowId, Guid VersionId, Gui
 {
     [JsonRequired]
     public RunMetadata? Metadata { get; init; }
+    public RunFailureSummary? FailureSummary { get; init; }
 }
 public sealed record RunMetadata(string Type, IReadOnlyDictionary<string, string> Values)
 {

@@ -7,17 +7,18 @@ using Wf.Contracts.Definition;
 using Wf.Sdk;
 
 var agentExecution = args.Contains("--task-host", StringComparer.Ordinal);
-var workflow = Workflow.Define("demo/release/json-failure-demo", "1.0.0", w => w
+var workflow = Workflow.Define("demo/release/json-failure-demo", "1.1.0", w => w
     .Type("release")
     .Metadata("environment", "dev")
     .Metadata("component", "dataflow-demo")
     .RunTimeout(TimeSpan.FromMinutes(5))
     .Defaults(p => p.Timeout(TimeSpan.FromSeconds(30)).NoAutoRetry())
     .Variables(v => v.String("mode", "random", allowed: ["random", "success", "retry", "failure"])
-        .Int("seed", 0))
+        .Int("seed", 0).String("failureType", "service", allowed: ["service", "infra"]))
     .Node("sample", n => n.Task("choose", ctx =>
     {
         var mode = ctx.Var<string>("mode");
+        var failureType = ctx.Var<string>("failureType");
         var requestedSeed = ctx.Var<int>("seed");
         var seed = requestedSeed == 0 ? RandomNumberGenerator.GetInt32(1, int.MaxValue) : requestedSeed;
         var random = new Random(seed);
@@ -30,9 +31,9 @@ var workflow = Workflow.Define("demo/release/json-failure-demo", "1.0.0", w => w
         };
         var requiredFailure = mode == "failure" || mode == "random" && random.Next(4) == 0;
         var optionalFailure = mode is "retry" or "failure" || mode == "random" && random.Next(2) == 0;
-        Record(ctx, new { mode, requestedSeed }, new
+        Record(ctx, new { mode, requestedSeed, failureType }, new
         {
-            mode, seed, transientFailures, requiredFailure, optionalFailure,
+            mode, seed, failureType, transientFailures, requiredFailure, optionalFailure,
             items = new[] { new { sku = "DEMO-001", quantity = 3, unitPriceCents = 1250 } }
         });
     }))
@@ -51,7 +52,9 @@ var workflow = Workflow.Define("demo/release/json-failure-demo", "1.0.0", w => w
                 items = sample.GetProperty("items")
             });
             if (failed)
-                throw new TaskFailureException("Synthetic transient fetch failure; a bounded retry will follow.",
+                throw new TaskFailureException(sample.GetProperty("failureType").GetString() == "infra"
+                    ? $"Synthetic infrastructure network failure: DEMO upstream connection refused on attempt {ctx.Attempt.Number}; a bounded retry will follow."
+                    : $"Synthetic transient fetch failure on attempt {ctx.Attempt.Number}; a bounded retry will follow.",
                     retryable: true, category: FailureCategory.TaskError);
         }, p => p.Timeout(TimeSpan.FromSeconds(30)).NoAutoRetry()
             .Retry(2, new(BackoffKind.Fixed, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3)),
@@ -81,8 +84,11 @@ var workflow = Workflow.Define("demo/release/json-failure-demo", "1.0.0", w => w
             Record(ctx, new { requiredFailure = failed, items = fetched.GetProperty("items") },
                 new { status = failed ? "Failed" : "Succeeded", totalCents, currency = "USD", simulated = true });
             if (failed)
-                throw new TaskFailureException("Synthetic required validation failure; the JSON report still runs.",
-                    retryable: false, category: FailureCategory.ValidationError);
+                throw new TaskFailureException(sample.GetProperty("failureType").GetString() == "infra"
+                    ? "Synthetic infrastructure storage failure: blob storage unavailable for DEMO validation; the JSON report still runs."
+                    : "Synthetic required validation failure: DEMO order rejected by the service validation rule; the JSON report still runs.",
+                    retryable: false, category: sample.GetProperty("failureType").GetString() == "infra"
+                        ? FailureCategory.PlatformError : FailureCategory.ValidationError);
         }))
     .Node("report", n => n.DependsOn("sample", DependencyCondition.Always)
         .DependsOn("fetch", DependencyCondition.Always)

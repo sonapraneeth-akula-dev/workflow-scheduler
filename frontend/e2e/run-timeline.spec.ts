@@ -31,18 +31,20 @@ test("actual retried run timeline separates queue/execution and retains accessib
     await hydrateBrowserSession(jwt)
   }, settings.token)
   await page.goto(`/runs/${settings.runId}`)
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible()
+  await expect(
+    page.getByRole("button", { name: /^Account menu for/ })
+  ).toBeVisible()
   const graphTab = page.getByRole("tab", { name: "Graph", exact: true })
   const timelineTab = page.getByRole("tab", { name: "Timeline", exact: true })
   await expect(graphTab).toHaveAttribute("aria-selected", "true")
-  expect(reads).toBe(0)
+  await expect.poll(() => reads).toBe(1)
   await graphTab.focus()
   await page.keyboard.press("ArrowRight")
   await expect(timelineTab).toBeFocused()
   await expect(timelineTab).toHaveAttribute("aria-selected", "true")
   const table = page.getByRole("table")
   await expect(table).toBeVisible()
-  expect(reads).toBe(1)
+  await expect.poll(() => reads).toBe(2)
   const actual = z
     .object({
       runId: z.uuid(),

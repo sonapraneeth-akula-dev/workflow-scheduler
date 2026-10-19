@@ -16,6 +16,8 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="..\..\db\migrations\*.sql" LogicalName="Wf.Migrations.%(Filename)%(Extension)" />
+    <Content Include="..\..\..\failure-categories\**\*.json" Link="failure-categories\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <!-- Syntax-only scaffold rewriting; ship the compiler libraries, never invoke a compiler on retained source. -->

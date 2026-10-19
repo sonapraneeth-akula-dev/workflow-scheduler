@@ -29,6 +29,7 @@ import {
   type ServiceWorkflow,
 } from "./api"
 import { RunHistoryStrip } from "./RunHistoryStrip"
+import { FailureSummary } from "@/features/runs/FailureSummary"
 
 function WorkflowActions({ workflow }: { workflow: CatalogWorkflow }) {
   const newTabDescription = useId()
@@ -148,6 +149,10 @@ function WorkflowGroup({
               >
                 {workflow.id}
               </p>
+              <FailureSummary
+                summary={workflow.latestRun?.failureSummary}
+                status={workflow.latestRun?.status}
+              />
               <p className="text-sm">
                 <span className="font-medium">Last run:</span>{" "}
                 <LastRun workflow={workflow} />
@@ -204,6 +209,10 @@ function WorkflowGroup({
                   <td className="p-3">
                     <StatusBadge
                       status={workflow.latestRun?.status ?? "NeverRun"}
+                    />
+                    <FailureSummary
+                      summary={workflow.latestRun?.failureSummary}
+                      status={workflow.latestRun?.status}
                     />
                   </td>
                   <td className="p-3">

@@ -2,6 +2,7 @@ import { z } from "zod"
 import { ApiError, publicApi } from "@/lib/api/client"
 import type { components } from "@/lib/api/schema"
 import { runStatuses } from "@/features/catalog/api"
+import { failureDetailSchema, failureSummarySchema } from "./failures"
 
 const timestamp = z.iso
   .datetime({ offset: true })
@@ -55,6 +56,8 @@ const responseSchema = z.object({
   lastSeq: z.int().nonnegative(),
   status: z.enum(runStatuses),
   attempts: z.array(attemptSchema),
+  failures: z.array(failureDetailSchema).optional(),
+  failureSummary: failureSummarySchema.nullish(),
 })
 export type TimelineAttempt = z.infer<typeof attemptSchema>
 export type RunTimeline = z.infer<typeof responseSchema>
@@ -88,6 +91,18 @@ export async function getTimeline(
   const attempts = new Map<string, number>()
   if (
     result.runId !== id ||
+    (result.failures ?? []).some(
+      (failure) =>
+        failure.taskKey !== null &&
+        !result.attempts.some(
+          (attempt) =>
+            attempt.taskKey === failure.taskKey &&
+            attempt.attempt === failure.attempt &&
+            ["Failed", "SoftFailed", "TimedOut"].includes(
+              attempt.terminalStatus ?? ""
+            )
+        )
+    ) ||
     result.attempts.some((row) => {
       const previous = attempts.get(row.taskKey) ?? 0
       attempts.set(row.taskKey, row.attempt)

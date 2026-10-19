@@ -588,6 +588,7 @@ public sealed partial class AuthorizationMatrixTests(AuthorizationDatabase datab
             builder.Configuration["AzureAd:ClientId"] = Audience;
             builder.Services.AddWorkflowAuthentication(builder.Configuration, builder.Environment);
             builder.Services.AddSingleton(source);
+            builder.Services.AddSingleton(FailureCatalog.Load(Path.Combine(AppContext.BaseDirectory, "failure-categories")));
             builder.Services.AddSingleton(TimeProvider.System);
             builder.Services.AddSingleton<Wf.ControlPlane.Engine.Agents.AgentRegistry>();
             builder.Services.AddSingleton<RunStore>();

@@ -2,6 +2,7 @@ import { z } from "zod"
 import { ApiError, publicApi } from "@/lib/api/client"
 import type { components } from "@/lib/api/schema"
 import { runStatuses } from "@/features/catalog/api"
+import { failureSummarySchema } from "./failures"
 import {
   instantMicros,
   instantSchema,
@@ -22,6 +23,7 @@ const rowSchema = z.object({
   createdAt: instantSchema,
   startedAt: instantSchema.nullable(),
   endedAt: instantSchema.nullable(),
+  failureSummary: failureSummarySchema.nullish(),
   metadata: z
     .object({
       type: z.string().min(1),

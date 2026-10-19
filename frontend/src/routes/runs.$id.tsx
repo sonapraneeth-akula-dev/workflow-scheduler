@@ -17,6 +17,7 @@ import { Timeline } from "@/features/runs/Timeline"
 import { SystemEvents } from "@/features/runs/SystemEvents"
 import { ResourceCharts } from "@/features/runs/ResourceCharts"
 import { TaskOutputs } from "@/features/runs/TaskOutputs"
+import { RunFailures } from "@/features/runs/RunFailures"
 import { TaskLogs } from "@/features/runs/TaskLogs"
 import { QueuedBanner } from "@/features/runs/QueuedBanner"
 import { ReportIndex } from "@/features/reports/ReportIndex"
@@ -147,6 +148,7 @@ function RunDetail() {
             active={run.status <= 1}
           />
           <RunLineage run={run} />
+          <RunFailures key={run.runId} run={run} />
           <Tabs.Root defaultValue="graph" className="min-w-0 space-y-3">
             <Tabs.List
               aria-label="Run views"

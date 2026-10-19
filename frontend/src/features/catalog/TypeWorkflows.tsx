@@ -13,6 +13,7 @@ import {
 } from "./usePresentation"
 import { PresentationFilters } from "./PresentationFilters"
 import { SubscribeMenu } from "@/features/subscriptions/SubscribeMenu"
+import { FailureSummary } from "@/features/runs/FailureSummary"
 
 export function TypeWorkflows({ team, type }: { team: string; type: string }) {
   const live = useCatalogLive(team, type)
@@ -163,6 +164,10 @@ export function TypeWorkflows({ team, type }: { team: string; type: string }) {
                     <td className="p-3">
                       <StatusBadge
                         status={workflow.latestRun?.status ?? "NeverRun"}
+                      />
+                      <FailureSummary
+                        summary={workflow.latestRun?.failureSummary}
+                        status={workflow.latestRun?.status}
                       />
                       {workflow.latestRun ? (
                         <p className="mt-2 font-mono text-xs">

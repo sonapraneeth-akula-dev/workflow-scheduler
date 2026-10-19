@@ -5,6 +5,7 @@ import { formatTimestamp } from "@/lib/timestamps"
 import { StatusBadge } from "@/components/StatusBadge"
 import { Button } from "@/components/ui/button"
 import { getTimeline, instantTicks, type TimelineAttempt } from "./timeline-api"
+import { FailureMessage } from "./FailureSummary"
 
 function orderedClock(row: TimelineAttempt) {
   return (
@@ -221,6 +222,7 @@ export const Timeline = memo(function Timeline({ runId }: { runId: string }) {
                           "Execution duration",
                           "Outcome",
                           "Failure category",
+                          "Failure type / category / message",
                         ].map((label) => (
                           <th key={label} scope="col" className="p-3">
                             {label}
@@ -276,6 +278,30 @@ export const Timeline = memo(function Timeline({ runId }: { runId: string }) {
                           </td>
                           <td className="p-3">
                             {row.failureCategory ?? "Not recorded"}
+                          </td>
+                          <td className="max-w-md min-w-64 p-3">
+                            {timeline.failures
+                              ?.filter(
+                                (failure) =>
+                                  failure.taskKey === row.taskKey &&
+                                  failure.attempt === row.attempt
+                              )
+                              .map((failure) => (
+                                <FailureMessage
+                                  key={`${failure.taskKey}/${failure.attempt}`}
+                                  failure={failure}
+                                />
+                              ))}
+                            {["Failed", "SoftFailed", "TimedOut"].includes(
+                              row.terminalStatus ?? ""
+                            ) &&
+                            !timeline.failures?.some(
+                              (failure) =>
+                                failure.taskKey === row.taskKey &&
+                                failure.attempt === row.attempt
+                            )
+                              ? "Failure message not recorded by this backend."
+                              : null}
                           </td>
                         </tr>
                       ))}

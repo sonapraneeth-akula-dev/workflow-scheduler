@@ -2,6 +2,7 @@ import { z } from "zod"
 import { ApiError, publicApi } from "@/lib/api/client"
 import type { components } from "@/lib/api/schema"
 import { runStatuses } from "@/features/catalog/api"
+import { failureSummarySchema } from "./failures"
 import {
   instantMicros,
   instantSchema,
@@ -41,6 +42,7 @@ const rowSchema = z.object({
   versionId: z.uuid().nullable(),
   version: z.string().min(1).max(256).nullable(),
   status: z.enum(runStatuses).nullable(),
+  failureSummary: failureSummarySchema.nullish(),
   startedAt: instantSchema.nullable(),
   endedAt: instantSchema.nullable(),
   durationMs: z.number().finite().nonnegative().nullable(),

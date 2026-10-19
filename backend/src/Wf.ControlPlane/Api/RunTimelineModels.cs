@@ -7,6 +7,9 @@ namespace Wf.ControlPlane.Api;
 public sealed record RunTimelineResponse(Guid RunId, long LastSeq, string Status,
     IReadOnlyList<RunTimelineAttempt> Attempts)
 {
+    public RunFailureSummary? FailureSummary { get; init; }
+    public IReadOnlyList<RunFailureDetail> Failures { get; init; } = [];
+
     public static RunTimelineResponse From(RunSnapshot snapshot,
         IReadOnlyDictionary<(string TaskKey, int Attempt), string?> agents, IReadOnlyList<string>? taskOrder = null,
         IReadOnlyDictionary<(string TaskKey, int Attempt), DateTimeOffset?>? resumedFrom = null)

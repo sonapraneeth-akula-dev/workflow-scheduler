@@ -10,6 +10,9 @@ import {
 } from "lucide-react"
 import { formatTimestamp } from "@/lib/timestamps"
 import type { ServiceWorkflow } from "./api"
+import { useState } from "react"
+import { failureLabels } from "@/features/runs/failures"
+import { FailureSummary } from "@/features/runs/FailureSummary"
 
 const outcomes = {
   Queued: { icon: Clock, color: "bg-info" },
@@ -25,6 +28,7 @@ export function RunHistoryStrip({
   runs,
   runLimit,
 }: Pick<ServiceWorkflow, "runs"> & { runLimit: number }) {
+  const [failuresOpen, setFailuresOpen] = useState(false)
   const completed = runs.filter((run) =>
     ["Succeeded", "Failed", "TimedOut", "Aborted"].includes(run.status)
   ).length
@@ -40,7 +44,10 @@ export function RunHistoryStrip({
         <div className="flex max-w-69 flex-wrap gap-1">
           {runs.map((run) => {
             const { icon: Icon, color } = outcomes[run.status]
-            const label = `${run.status} run ${run.id}, ${formatTimestamp(run.createdAt)} (${run.createdAt}). Opens in a new tab.`
+            const failure = run.failureSummary
+              ? ` ${failureLabels(run.failureSummary)}: ${run.failureSummary.primary.message}.`
+              : ""
+            const label = `${run.status} run ${run.id}, ${formatTimestamp(run.createdAt)} (${run.createdAt}).${failure} Opens in a new tab.`
             return (
               <Link
                 key={run.id}
@@ -81,6 +88,37 @@ export function RunHistoryStrip({
           )}
         </span>
       </div>
+      {runs.some((run) => run.failureSummary) ? (
+        <details
+          className="max-w-sm text-xs"
+          onToggle={(event) => setFailuresOpen(event.currentTarget.open)}
+        >
+          <summary className="cursor-pointer">
+            Failure details for run instances
+          </summary>
+          {failuresOpen ? (
+            <ul className="mt-2 space-y-2">
+              {runs
+                .filter((run) => run.failureSummary)
+                .map((run) => (
+                  <li key={run.id}>
+                    <Link
+                      to="/runs/$id"
+                      params={{ id: run.id }}
+                      className="block truncate font-mono"
+                    >
+                      {run.id}
+                    </Link>
+                    <FailureSummary
+                      summary={run.failureSummary}
+                      status={run.status}
+                    />
+                  </li>
+                ))}
+            </ul>
+          ) : null}
+        </details>
+      ) : null}
     </div>
   )
 }

@@ -783,9 +783,13 @@ Use `mode=random` (default), `success`, `retry` (two retries and an optional
 failure), or `failure` (one retry, optional failure and required failure).
 `seed=0` generates and records a random seed once; supply a nonzero seed to
 reproduce a random scenario. No failure is resampled during retries.
+`failureType=service` (default) produces dependency, optional diagnostic and
+validation messages. `failureType=infra` produces synthetic network retries and
+a synthetic storage failure; no real infrastructure is disrupted. For example:
 
 ```powershell
 dotnet run --file .\backend\samples\workflows\demo\teams\demo\release\json-failure-demo\workflow.cs -- --var mode=retry
+dotnet run --file .\backend\samples\workflows\demo\teams\demo\release\json-failure-demo\workflow.cs -- --var mode=failure --var failureType=infra
 ```
 
 Publish this directory with the same CLI command and SDK inputs shown above,
@@ -991,6 +995,37 @@ separate from category. Scripted typed signals exercise all eight categories
 through actual local and child SDK hosts; this does not implement every external
 fault producer. The committed metrics path described below preserves these known
 categories through gateway completion, durable attempts/events and replay.
+
+Display classifications are separate from these scheduler categories. The
+central, version-controlled `failure-categories` directory contains shared
+`system-infra\rules.json` and team-owned `teams\<team>\rules.json` files. Each
+file has a `rules` array of `{ "id", "contains", "category" }` objects. Matching is
+literal, case-insensitive substring matching against the recorded, redacted
+message: first shared infrastructure rule, then first owning-team rule, in
+file order. A match labels the failure **Infra** or **Service** without changing
+its original message, scheduler category or retry policy. Unmatched messages
+show **Unclassified**; typed AgentLost, PlatformError, Placement and
+ResourceLimit failures default to Infra, other failures to Service.
+
+The control plane validates and loads the catalogue at startup; malformed
+rules fail startup explicitly. The default catalogue is packaged with the
+application; `FailureClassification:Root` can point to a deployment-managed
+directory with the same layout. Rule IDs must be unique within a file; text
+must be nonblank and contain no control characters. Limits: 64 KiB/file,
+128 rules/file, 1,024 teams, 80-character IDs, 256-character matches and
+64-character categories. Changes require a control-plane deployment/restart.
+Labels are resolved at read time, so a new catalogue can relabel historical
+messages; original recorded diagnostics remain unchanged.
+
+Run cards, run tables, workflow latest-run summaries, workflow history and
+service history show type/category, impact and the primary message. Terminal
+failures take priority over retrying, optional and recovered failures.
+Successful retries remain **Recovered**, not run failures. Run details show
+every recorded failed attempt under **Failure diagnostics**; Timeline and
+the exact-attempt output inspector show its full message and scheduler category.
+Missing historical messages are explicitly identified, never reconstructed
+as original text. Completed runs load diagnostics once; active runs require
+**Refresh failures**, without adding graph polling.
 
 `RunSnapshot.Metrics` projects run, lifecycle-stage/node, task and attempt timing
 only when committed events are applied. Queue wait is separate from execution;

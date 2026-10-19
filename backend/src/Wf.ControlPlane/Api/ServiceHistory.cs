@@ -69,7 +69,7 @@ public static partial class CatalogEndpoints
         }
         try
         {
-            var page = await ReadWorkflowPage(context, source, authorization, filter);
+            var page = await ReadWorkflowPage(context, source, authorization, filter, includeFailures: false);
             var runs = new Dictionary<string, List<CatalogLatestRun>>(StringComparer.Ordinal);
             if (page.Items.Count > 0)
             {
@@ -98,8 +98,14 @@ public static partial class CatalogEndpoints
                         reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5)));
                 }
             }
-            var items = page.Items.Select(workflow =>
-                new ServiceWorkflow(workflow, runs.GetValueOrDefault(workflow.Id) ?? [])).ToArray();
+            var failures = await RunFailures.Summaries(context, source, runs.Values.SelectMany(instances => instances).Select(run => run.Id));
+            var items = page.Items.Select(workflow => new ServiceWorkflow(
+                workflow.LatestRun is not { } latest ? workflow : workflow with
+                {
+                    LatestRun = latest with { FailureSummary = failures.GetValueOrDefault(latest.Id) }
+                },
+                (runs.GetValueOrDefault(workflow.Id) ?? []).Select(run =>
+                    run with { FailureSummary = failures.GetValueOrDefault(run.Id) }).ToArray())).ToArray();
             return Results.Json(new(filter.Team, filter.Type, runLimit, items, page.NextCursor),
                 ServiceHistoryJson.Default.ServiceHistoryPage);
         }

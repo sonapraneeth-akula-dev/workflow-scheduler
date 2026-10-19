@@ -1,0 +1,7 @@
+{
+  "rules": [
+    { "id": "transient-fetch", "contains": "Synthetic transient fetch failure", "category": "Dependency" },
+    { "id": "optional-diagnostic", "contains": "Synthetic optional diagnostic failure", "category": "Diagnostics" },
+    { "id": "required-validation", "contains": "Synthetic required validation failure", "category": "Validation" }
+  ]
+}

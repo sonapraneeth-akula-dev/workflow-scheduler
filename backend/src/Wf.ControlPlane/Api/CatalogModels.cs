@@ -34,7 +34,10 @@ public sealed record CatalogType(string Team, string Name, string Description, C
     IReadOnlyDictionary<string, long> LatestStatusCounts);
 public sealed record CatalogVersion(Guid Id, string SemVer);
 public sealed record CatalogLatestRun(Guid Id, string Status, DateTimeOffset CreatedAt,
-    DateTimeOffset? StartedAt, DateTimeOffset? EndedAt);
+    DateTimeOffset? StartedAt, DateTimeOffset? EndedAt)
+{
+    public RunFailureSummary? FailureSummary { get; init; }
+}
 public sealed record CatalogWorkflow(string Id, string Team, string Type, string Name,
     CatalogVersion? ActiveVersion, CatalogVersion LatestVersion, WorkflowMetadata Metadata, CatalogLatestRun? LatestRun);
 public sealed record CatalogWorkflowPage(IReadOnlyList<CatalogWorkflow> Items, string? NextCursor);

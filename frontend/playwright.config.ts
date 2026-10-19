@@ -34,6 +34,7 @@ const fixtureOrigin =
 export default defineConfig({
   testDir: "./e2e",
   testIgnore: [
+    ...(!process.env.WF_FAILURE_RUNS ? ["**/run-failures.spec.ts"] : []),
     ...(!jsonDataflowOrigin ? ["**/json-dataflow.spec.ts"] : []),
     ...(!subscriptionOrigin ? ["**/subscriptions.spec.ts"] : []),
     ...(!dashboardOrigin ? ["**/dashboards.spec.ts"] : []),

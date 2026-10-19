@@ -148,7 +148,10 @@ public sealed partial class RunTimelineApiTests(RunTimelineDatabase database, IT
         await store.AppendAsync(run, EventEntity.Node, "node", (int)ExecutionStatus.Succeeded, clock.GetUtcNow(), Token);
         await store.AppendAsync(run, EventEntity.Run, null, (int)RunStatus.Succeeded, clock.GetUtcNow(), Token);
         await Execute("UPDATE agents SET name=$2 WHERE id=$1", first.AgentId, "private-machine-secret-" + first.AgentId.ToString("N"));
-        await Execute("UPDATE task_attempts SET error='private-error' WHERE run_id=$1", run.Snapshot.RunId);
+        await Execute("""
+            UPDATE task_attempts SET error='Synthetic infrastructure network failure: redacted diagnostic'
+            WHERE run_id=$1 AND attempt=1
+            """, run.Snapshot.RunId);
         await Execute("UPDATE node_runs SET outputs='{\"private-output\":\"never-project\"}' WHERE run_id=$1",
             run.Snapshot.RunId);
         var response = await Read(api, run.Snapshot.RunId, jwt);
@@ -166,6 +169,10 @@ public sealed partial class RunTimelineApiTests(RunTimelineDatabase database, IT
         Assert.Null(response.Attempts[1].FailureCategory);
         Assert.Null(response.Attempts[0].ResumedFrom);
         Assert.Equal(checkpoint.SavedAt.ToDateTimeOffset(), response.Attempts[1].ResumedFrom);
+        var failure = Assert.Single(response.Failures);
+        Assert.Equal(("Infra", "Network", "Recovered"), (failure.Type, failure.Category, failure.Impact));
+        Assert.True(failure.MessageRecorded);
+        Assert.Equal(1, response.FailureSummary!.RecoveredCount);
         var metrics = RunMetricsResponse.From((await store.LoadAsync(run.Snapshot.RunId, Token)).Snapshot).Tasks["node/task"];
         Assert.Equal(metrics.Attempts.Sum(a => a.DurationMs), response.Attempts.Sum(a => a.DurationMs));
         using var plan = await api.Get($"/api/v1/workflows/{definition.Name}/versions/{version:D}", jwt, Token);
@@ -179,7 +186,8 @@ public sealed partial class RunTimelineApiTests(RunTimelineDatabase database, IT
         Assert.Equal(response.Attempts[0] with { AgentId = null }, legacy.Attempts[0]);
     }
 
-    private async Task Browsers(MetricsApiServer api, Guid run, string jwt)
+    private async Task Browsers(MetricsApiServer api, Guid run, string jwt,
+        IReadOnlyDictionary<string, Guid>? failureRuns = null)
     {
         var frontend = Environment.GetEnvironmentVariable("WF_FRONTEND_ROOT");
         Assert.True(frontend is not null && File.Exists(System.IO.Path.Combine(frontend, "scripts", "timeline-browser.ts")),
@@ -191,6 +199,11 @@ public sealed partial class RunTimelineApiTests(RunTimelineDatabase database, IT
             WorkingDirectory = frontend, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
         };
         start.ArgumentList.Add(System.IO.Path.Combine("scripts", "timeline-browser.ts"));
+        if (failureRuns is not null)
+        {
+            start.ArgumentList.Add("--failures");
+            start.Environment["WF_FAILURE_RUNS"] = JsonSerializer.Serialize(failureRuns);
+        }
         start.Environment["WF_TIMELINE_API"] = api.Api;
         start.Environment["WF_TIMELINE_TOKEN"] = jwt;
         start.Environment["WF_TIMELINE_RUN"] = run.ToString("D");
@@ -205,6 +218,12 @@ public sealed partial class RunTimelineApiTests(RunTimelineDatabase database, IT
             await process.WaitForExitAsync(deadline.Token);
             Assert.True(process.ExitCode == 0, $"Actual Timeline browsers failed.\n{await stdout}\n{await stderr}");
             output.WriteLine(await stdout);
+        }
+        catch (OperationCanceledException) when (!Token.IsCancellationRequested)
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync(CancellationToken.None);
+            Assert.Fail($"Actual Timeline browsers timed out.\n{await stdout}\n{await stderr}");
         }
         finally
         {

@@ -40,6 +40,7 @@ public sealed class RunQueryServer(WebApplication app, HttpClient client, RSA rs
         builder.Configuration["AzureAd:ClientId"] = Audience;
         builder.Services.AddWorkflowAuthentication(builder.Configuration, builder.Environment);
         builder.Services.AddSingleton(source);
+        builder.Services.AddSingleton(FailureCatalog.Load(Path.Combine(AppContext.BaseDirectory, "failure-categories")));
         builder.Services.AddTeamAuthorization();
         builder.Services.AddWorkflowOpenApi();
         if (abort || live) builder.Services.AddSingleton(TimeProvider.System);

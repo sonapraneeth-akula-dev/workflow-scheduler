@@ -147,7 +147,7 @@ public sealed class TimelineApiTests
         var response = RunTimelineResponse.From(run.Snapshot, new Dictionary<(string, int), string?>());
         var text = JsonSerializer.Serialize(response, RunTimelineJsonContext.Default.RunTimelineResponse);
         using var json = JsonDocument.Parse(text);
-        Assert.Equal(new[] { "attempts", "lastSeq", "runId", "status" },
+        Assert.Equal(new[] { "attempts", "failures", "failureSummary", "lastSeq", "runId", "status" },
             json.RootElement.EnumerateObject().Select(p => p.Name).Order());
         Assert.Equal(new[] { "agentId", "attempt", "dispatchedAt", "durationMs", "endedAt", "failureCategory",
             "nodeKey", "queueWaitMs", "queuedAt", "resumedFrom", "startedAt", "taskKey", "terminalStatus" },

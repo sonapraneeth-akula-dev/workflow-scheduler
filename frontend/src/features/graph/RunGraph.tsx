@@ -14,7 +14,8 @@ import { StatusBadge } from "@/components/StatusBadge"
 import { Button } from "@/components/ui/button"
 import { getVersionPlan, type VersionPlan } from "@/features/taskplan/api"
 import { TaskOutputs } from "@/features/runs/TaskOutputs"
-import { getTimeline, type TimelineAttempt } from "@/features/runs/timeline-api"
+import type { TimelineAttempt } from "@/features/runs/timeline-api"
+import { completedTimelineQuery } from "@/features/runs/timeline-query"
 import { executionStatuses, type RunSnapshot } from "@/lib/live/runApi"
 import { GraphNode, NodePolicyIcons } from "./GraphNode"
 import { layoutGraph, type GraphLayout } from "./layout"
@@ -498,27 +499,7 @@ export function LiveRunGraph({ run }: { run: RunSnapshot }) {
     queryFn: ({ signal }) =>
       getVersionPlan(run.workflowId, run.versionId, signal),
   })
-  const history = useQuery({
-    queryKey: ["graph-attempts", run.runId],
-    enabled: run.status >= 3,
-    queryFn: async ({ signal }) => {
-      const timeline = await getTimeline(run.runId, signal)
-      if (
-        timeline.lastSeq < run.lastSeq ||
-        !["Succeeded", "Failed", "Aborted", "TimedOut"].includes(
-          timeline.status
-        )
-      )
-        throw new Error(
-          "The committed attempt history has not reached the terminal run state."
-        )
-      return timeline.attempts
-    },
-    staleTime: Infinity,
-    gcTime: 0,
-    retry: false,
-    refetchOnWindowFocus: false,
-  })
+  const history = useQuery(completedTimelineQuery(run))
   if (query.error)
     return (
       <div>
@@ -547,7 +528,9 @@ export function LiveRunGraph({ run }: { run: RunSnapshot }) {
         plan={query.data}
         run={run}
         attempts={
-          history.isSuccess && !history.isFetching ? history.data : undefined
+          run.status >= 3 && history.isSuccess && !history.isFetching
+            ? history.data.attempts
+            : undefined
         }
       />
     </>

@@ -24,7 +24,9 @@ public static class RunTimelineEndpoints
                 "dispatch attempt; missing legacy attribution is null. Never-started/skipped/reused work has no invented attempts. " +
                 "ResumedFrom is the verified seed's saved UTC time recorded before that attempt's dispatch delivery, " +
                 "not the task's latest checkpoint; missing historical or non-resumed attribution is null. " +
-                "Fresh Run Viewer authorization; no query parameters, variables, errors, outputs or machine capabilities.");
+                "Failure messages reuse redacted durable attempt errors, with team/shared-infra display categories; " +
+                "these labels never alter scheduler retry categories. Missing messages remain explicitly unrecorded. " +
+                "Fresh Run Viewer authorization; no query parameters, variables, outputs or machine capabilities.");
         return endpoints;
     }
 
@@ -55,7 +57,13 @@ public static class RunTimelineEndpoints
             var snapshot = await CommittedRunRead.Load(connection, store, runId, token);
             var (agents, resumedFrom) = await Attribution(connection, runId, token);
             var order = await TaskOrder(connection, runId, token);
-            var response = RunTimelineResponse.From(snapshot, agents, order, resumedFrom);
+            var failures = (await RunFailures.Read(connection, context.RequestServices.GetRequiredService<FailureCatalog>(),
+                [runId], token)).GetValueOrDefault(runId) ?? [];
+            var response = RunTimelineResponse.From(snapshot, agents, order, resumedFrom) with
+            {
+                Failures = failures,
+                FailureSummary = RunFailures.Summarize(failures)
+            };
             await transaction.CommitAsync(token);
             return Results.Json(response, RunTimelineJsonContext.Default.RunTimelineResponse);
         }

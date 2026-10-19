@@ -74,13 +74,13 @@ describe("filtered run list", () => {
     const scroll = screen.getByRole("region", {
       name: "Scrollable run results",
     })
-    fireEvent.scroll(scroll, { target: { scrollTop: 1000 * 128 } })
+    fireEvent.scroll(scroll, { target: { scrollTop: 1000 * 160 } })
     expect(container.querySelectorAll("[data-run-row]")).toHaveLength(10)
     expect(container.querySelectorAll("[data-run-row]")[0]).toHaveAttribute(
       "aria-posinset",
       "998"
     )
-    fireEvent.scroll(scroll, { target: { scrollTop: 9999 * 128 } })
+    fireEvent.scroll(scroll, { target: { scrollTop: 9999 * 160 } })
     expect(screen.getAllByRole("link")[0]).toHaveAttribute(
       "href",
       `/runs/${rows.at(-4)!.id}`

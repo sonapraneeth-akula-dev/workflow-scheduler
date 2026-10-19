@@ -616,6 +616,7 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
             builder.Configuration["Storage:Root"] = root;
             builder.Services.AddWorkflowAuthentication(builder.Configuration, builder.Environment);
             builder.Services.AddSingleton(source);
+            builder.Services.AddSingleton(Wf.ControlPlane.Api.FailureCatalog.Load(Path.Combine(AppContext.BaseDirectory, "failure-categories")));
             builder.Services.AddSingleton<TimeProvider>(clock);
             builder.Services.AddWorkflowRegistrations(builder.Configuration);
             if (runs)
