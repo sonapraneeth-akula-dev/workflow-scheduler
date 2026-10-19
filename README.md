@@ -641,6 +641,17 @@ Bad/duplicate queries return 400, missing pairs 404, denied scopes 403, corrupt
 data 500 and unavailable storage 503; errors never include partial source.
 Responses are never cached.
 
+The Versions UI offers **Download source** for any listed immutable release and
+**Download pinned source** for a historical release opened directly. These save
+the exact retained `workflow.cs`, preserving authored bytes, identity and SemVer;
+they do not download the compiled package or external registry/schedule files.
+The existing Viewer-authorized comparison read uses that exact UUID on both
+sides, with the same hash, size and scope checks; no clone or registration occurs.
+**Version download and comparison example** explains older-to-newer comparisons
+and includes a clearly illustrative timeout change. When two releases are loaded,
+**Compare latest two registrations** runs the example using their actual immutable
+IDs; a single-release history explains that another release is needed.
+
 `POST /api/v1/workflows/{team}/{type}/{workflow}/versions/{version}/clone`
 downloads an immutable-version scaffold without changing or registering either
 workflow. Send exactly `{"newName":"experiment","targetType":"team/type"}` with

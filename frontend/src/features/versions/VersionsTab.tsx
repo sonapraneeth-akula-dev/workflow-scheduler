@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { ApiError } from "@/lib/api/client"
 import { usePermissions } from "@/lib/auth/usePermissions"
-import { activateVersion, getVersions } from "./api"
+import { activateVersion, getVersionDiff, getVersions } from "./api"
 import { VersionComparison } from "./VersionComparison"
 import { CloneDialog } from "./CloneDialog"
 import { SubscribeMenu } from "@/features/subscriptions/SubscribeMenu"
@@ -46,6 +46,28 @@ export function VersionsTab({
   const client = useQueryClient()
   const permissions = usePermissions({ scope: "type", id: `${team}/${type}` })
   const canActivate = permissions.can("Admin")
+  const download = useMutation({
+    retry: false,
+    mutationFn: async (versionId: string) => {
+      if (!permissions.can("Viewer"))
+        throw new Error("Current Viewer permission is required.")
+      const source = await getVersionDiff(workflowId, versionId, versionId)
+      const link = document.createElement("a")
+      const url = URL.createObjectURL(
+        new Blob([source.source.after], { type: "text/plain;charset=utf-8" })
+      )
+      try {
+        link.href = url
+        link.download = "workflow.cs"
+        document.body.append(link)
+        link.click()
+      } finally {
+        link.remove()
+        setTimeout(() => URL.revokeObjectURL(url), 0)
+      }
+      return source.toVersion
+    },
+  })
   const activate = useMutation({
     retry: false,
     mutationFn: (versionId: string) => {
@@ -110,7 +132,23 @@ export function VersionsTab({
       <p className="break-words">{workflowId}</p>
       <SubscribeMenu scope="workflow" scopeId={workflowId} />
       {pinnedVersionId ? (
-        <CloneDialog workflowId={workflowId} versionId={pinnedVersionId} />
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={
+              !permissions.can("Viewer") ||
+              download.isPending ||
+              query.isFetching ||
+              query.isError
+            }
+            aria-label={`Download source for pinned version ${pinnedVersionId}`}
+            onClick={() => download.mutate(pinnedVersionId)}
+          >
+            Download pinned source
+          </Button>
+          <CloneDialog workflowId={workflowId} versionId={pinnedVersionId} />
+        </div>
       ) : null}
       <p>
         Newest registration first. Times shown in your local timezone; active
@@ -120,6 +158,15 @@ export function VersionsTab({
       {query.isPending ? <p role="status">Loading version history...</p> : null}
       {query.error ? <ErrorNotice error={query.error} /> : null}
       {permissions.error ? <ErrorNotice error={permissions.error} /> : null}
+      {download.error ? <ErrorNotice error={download.error} /> : null}
+      {download.isPending ? (
+        <p role="status">Preparing source download...</p>
+      ) : null}
+      {download.isSuccess ? (
+        <p role="status">
+          Source download started for version {download.data}.
+        </p>
+      ) : null}
       {duplicate ? (
         <ErrorNotice
           error={
@@ -141,6 +188,70 @@ export function VersionsTab({
             <p role="status">No registered versions.</p>
           ) : (
             <>
+              <details className="min-w-0 rounded border p-3">
+                <summary className="cursor-pointer font-medium">
+                  Version download and comparison example
+                </summary>
+                <div className="flex min-w-0 flex-col gap-3 pt-3">
+                  <p>
+                    Download source saves the exact retained workflow.cs for the
+                    selected release, including older and inactive versions. Its
+                    original identity and version stay unchanged. This is
+                    authored source, not the compiled deployment package or
+                    external registry/schedule files.
+                  </p>
+                  <p>
+                    Select an older release in Compare from, a newer one in
+                    Compare to, then Compare versions. Review added, removed or
+                    changed nodes, variables, policies and settings, followed by
+                    the source diff. Comparing is read-only; it does not
+                    activate or execute a release.
+                  </p>
+                  <p>
+                    Illustrative example: if 1.0.1 changes a node timeout from
+                    00:05:00 to 00:10:00, comparing 1.0.0 with 1.0.1 shows the
+                    node as Changed, with both timeouts and the corresponding
+                    source change. These example versions are not published
+                    data.
+                  </p>
+                  {versions.length >= 2 ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p>
+                        Try your registered versions: {versions[1]!.version}{" "}
+                        compared with {versions[0]!.version}.
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const pair = {
+                            from: versions[1]!.versionId,
+                            to: versions[0]!.versionId,
+                          }
+                          setFrom(pair.from)
+                          setTo(pair.to)
+                          setComparison(pair)
+                        }}
+                      >
+                        Compare latest two registrations
+                      </Button>
+                    </div>
+                  ) : (
+                    <p>
+                      Only one version is registered. Publish another manually
+                      versioned release to compare two different releases.
+                    </p>
+                  )}
+                  <p>
+                    Clone version instead downloads a new-workflow scaffold,
+                    resetting its identity and version to 1.0.0. Source
+                    downloads need Viewer access; cloning additionally needs
+                    Author access to the target type. Neither operation
+                    publishes or runs downloaded code.
+                  </p>
+                </div>
+              </details>
               <form
                 aria-label="Compare workflow versions"
                 onSubmit={compare}
@@ -207,6 +318,7 @@ export function VersionsTab({
                         "Git author / Registered by",
                         "Commit / SDK",
                         "Change note",
+                        "Source",
                         "Scaffold",
                         ...(canActivate ? ["Activation"] : []),
                       ].map((title) => (
@@ -259,6 +371,21 @@ export function VersionsTab({
                         </td>
                         <td className="max-w-96 p-3 break-words whitespace-pre-wrap">
                           {version.registration.changeNote ?? "No change note."}
+                        </td>
+                        <td className="p-3">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={
+                              !permissions.can("Viewer") ||
+                              download.isPending ||
+                              query.isFetching
+                            }
+                            aria-label={`Download source for version ${version.version} (${version.versionId})`}
+                            onClick={() => download.mutate(version.versionId)}
+                          >
+                            Download source
+                          </Button>
                         </td>
                         <td className="p-3">
                           {version.versionId !== pinnedVersionId ? (

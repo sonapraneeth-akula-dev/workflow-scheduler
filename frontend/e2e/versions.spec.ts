@@ -185,8 +185,33 @@ test("versions expose immutable provenance, lazy source and manifest diffs, corr
   ).toBe(false)
   await accessible(page)
 
+  const downloadReady = page.waitForEvent("download")
+  await table
+    .getByRole("button", {
+      name: `Download source for version 1.0.0 (${before.id})`,
+    })
+    .focus()
+  await page.keyboard.press("Enter")
+  const download = await downloadReady
+  expect(download.suggestedFilename()).toBe("workflow.cs")
+  const downloadedPath = await download.path()
+  if (!downloadedPath) throw new Error("Historical source was not downloaded.")
+  expect(await readFile(downloadedPath, "utf8")).toBe(before.source)
+  expect(diffRequests).toHaveLength(1)
+  expect(new URL(diffRequests[0]!).searchParams.get("from")).toBe(before.id)
+  expect(new URL(diffRequests[0]!).searchParams.get("to")).toBe(before.id)
+  expect(monacoRequests).toEqual([])
   await page
-    .getByRole("button", { name: "Compare versions", exact: true })
+    .getByText("Version download and comparison example", { exact: true })
+    .click()
+  await expect(
+    page.getByText(/These example versions are not published data/)
+  ).toBeVisible()
+  await page
+    .getByRole("button", {
+      name: "Compare latest two registrations",
+      exact: true,
+    })
     .click()
   const comparison = page.getByRole("region", {
     name: "Version comparison",
@@ -226,9 +251,9 @@ test("versions expose immutable provenance, lazy source and manifest diffs, corr
     .locator("pre")
   await expect(texts.nth(0)).toHaveText(before.source)
   await expect(texts.nth(1)).toHaveText(after.source)
-  expect(diffRequests).toHaveLength(1)
-  expect(new URL(diffRequests[0]!).searchParams.get("from")).toBe(before.id)
-  expect(new URL(diffRequests[0]!).searchParams.get("to")).toBe(after.id)
+  expect(diffRequests).toHaveLength(2)
+  expect(new URL(diffRequests[1]!).searchParams.get("from")).toBe(before.id)
+  expect(new URL(diffRequests[1]!).searchParams.get("to")).toBe(after.id)
   expect(
     await page.evaluate(() => Object.hasOwn(window, "__versionsXss"))
   ).toBe(false)
@@ -329,9 +354,13 @@ test("versions expose immutable provenance, lazy source and manifest diffs, corr
   await expect(compareTo).toBeFocused()
   await expect
     .poll(() =>
-      compareTo.evaluate((element) => getComputedStyle(element).outlineOffset)
+      compareTo.evaluate(
+        (element) =>
+          element.matches(":focus-visible") &&
+          getComputedStyle(element).boxShadow.includes("0px 0px 0px 3px")
+      )
     )
-    .toBe("-2px")
+    .toBe(true)
   await accessible(page)
 
   await table.getByRole("link", { name: "1.0.0", exact: true }).click()

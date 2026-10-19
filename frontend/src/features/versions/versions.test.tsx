@@ -116,11 +116,21 @@ const denied = () =>
   new ApiError(new Response(null, { status: 403 }), {
     title: "Viewer access revoked",
   })
+const createObjectURL = vi.fn<(content: Blob) => string>()
+const revokeObjectURL = vi.fn()
 
 describe("version history, comparison and read-only states", () => {
   beforeEach(() => {
     vi.resetAllMocks()
     vi.stubGlobal("Blob", NodeBlob)
+    vi.stubGlobal(
+      "URL",
+      class extends URL {
+        static createObjectURL = createObjectURL
+        static revokeObjectURL = revokeObjectURL
+      }
+    )
+    createObjectURL.mockReturnValue("blob:source")
     vi.mocked(getPermissions).mockImplementation(async ({ scope, id }) => ({
       scope,
       id,
@@ -132,7 +142,174 @@ describe("version history, comparison and read-only states", () => {
     vi.mocked(getVersions).mockResolvedValue(page)
     vi.mocked(getVersionDiff).mockResolvedValue(diff)
   })
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+  it("downloads exact historical authored source without cloning, activation, source rendering or line-ending changes", async () => {
+    vi.mocked(getVersionDiff).mockResolvedValue({
+      ...diff,
+      fromVersionId: from,
+      toVersionId: from,
+      fromVersion: "1.0.0",
+      toVersion: "1.0.0",
+      source: {
+        path: "workflow.cs",
+        before: "original\r\n// \u03bb <script>unsafe()</script>\n",
+        after: "original\r\n// \u03bb <script>unsafe()</script>\n",
+        changed: false,
+      },
+    })
+    let filename = ""
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        filename = this.download
+      })
+    show()
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: `Download source for version 1.0.0 (${from})`,
+      })
+    )
+    await screen.findByText("Source download started for version 1.0.0.")
+    expect(getVersionDiff).toHaveBeenCalledExactlyOnceWith(
+      workflowId,
+      from,
+      from
+    )
+    expect(await createObjectURL.mock.calls[0]![0].text()).toBe(
+      "original\r\n// \u03bb <script>unsafe()</script>\n"
+    )
+    expect(filename).toBe("workflow.cs")
+    expect(click).toHaveBeenCalledOnce()
+    expect(ReportRenderer).not.toHaveBeenCalled()
+    expect(document.querySelector("script, a[download]")).toBeNull()
+    await waitFor(() =>
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:source")
+    )
+  })
+  it("downloads an exact pinned version even when it is outside the loaded history page", async () => {
+    const pinned = "019ed132-2f44-7000-8000-000000000099"
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+    show(pinned)
+    const button = await screen.findByRole("button", {
+      name: `Download source for pinned version ${pinned}`,
+    })
+    await waitFor(() => expect(button).toBeEnabled())
+    fireEvent.click(button)
+    await waitFor(() =>
+      expect(getVersionDiff).toHaveBeenCalledExactlyOnceWith(
+        workflowId,
+        pinned,
+        pinned
+      )
+    )
+    await screen.findByText("Source download started for version 2.0.0.")
+    await waitFor(() =>
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:source")
+    )
+  })
+  it("keeps source downloads disabled without current Viewer authority", async () => {
+    vi.mocked(getPermissions).mockImplementation(async ({ scope, id }) => ({
+      scope,
+      id,
+      viewer: false,
+      author: false,
+      operator: false,
+      admin: false,
+    }))
+    show()
+    const button = await screen.findByRole("button", {
+      name: `Download source for version 1.0.0 (${from})`,
+    })
+    expect(button).toBeDisabled()
+    fireEvent.click(button)
+    expect(getVersionDiff).not.toHaveBeenCalled()
+    expect(createObjectURL).not.toHaveBeenCalled()
+  })
+  it("reports browser download failures instead of claiming a download started", async () => {
+    createObjectURL.mockImplementation(() => {
+      throw new Error("Browser download allocation failed.")
+    })
+    show()
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: `Download source for version 1.0.0 (${from})`,
+      })
+    )
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Browser download allocation failed."
+    )
+    expect(
+      screen.queryByText(/Source download started/)
+    ).not.toBeInTheDocument()
+  })
+  it.each([403, 404, 500, 503])(
+    "announces source HTTP %i without creating a partial download",
+    async (status) => {
+      vi.mocked(getVersionDiff).mockRejectedValue(
+        new ApiError(new Response(null, { status }), {
+          title: `Source HTTP ${status}`,
+        })
+      )
+      show()
+      fireEvent.click(
+        await screen.findByRole("button", {
+          name: `Download source for version 1.0.0 (${from})`,
+        })
+      )
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        `Source HTTP ${status}`
+      )
+      expect(createObjectURL).not.toHaveBeenCalled()
+      expect(
+        screen.queryByText(/Source download started/)
+      ).not.toBeInTheDocument()
+    }
+  )
+  it("shows a clearly illustrative example and can compare the actual latest two registrations on request", async () => {
+    show()
+    fireEvent.click(
+      await screen.findByText("Version download and comparison example")
+    )
+    expect(
+      screen.getByText(/These example versions are not published data/)
+    ).toBeVisible()
+    expect(
+      screen.getByText(
+        /Try your registered versions: 1.0.0 compared with 2.0.0/
+      )
+    ).toBeVisible()
+    expect(getVersionDiff).not.toHaveBeenCalled()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Compare latest two registrations" })
+    )
+    await waitFor(() =>
+      expect(getVersionDiff).toHaveBeenCalledWith(
+        workflowId,
+        from,
+        to,
+        expect.any(AbortSignal)
+      )
+    )
+    expect(screen.getByLabelText("Compare from")).toHaveValue(from)
+    expect(screen.getByLabelText("Compare to")).toHaveValue(to)
+  })
+  it("explains that a single registered release needs a second release for a distinct comparison", async () => {
+    vi.mocked(getVersions).mockResolvedValue({
+      ...page,
+      items: [page.items[0]!],
+    })
+    show()
+    fireEvent.click(
+      await screen.findByText("Version download and comparison example")
+    )
+    expect(screen.getByText(/Only one version is registered/)).toBeVisible()
+    expect(
+      screen.queryByRole("button", { name: "Compare latest two registrations" })
+    ).not.toBeInTheDocument()
+  })
   it("renders immutable provenance and exact UUID links, without loading Monaco or source before comparison", async () => {
     show()
     expect(screen.getByRole("status")).toHaveTextContent(
