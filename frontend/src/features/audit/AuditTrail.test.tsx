@@ -1,5 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ApiError } from "@/lib/api/client"
@@ -49,8 +55,25 @@ describe("audit trail", () => {
     expect(screen.getByText("machine.update")).toBeVisible()
     expect(screen.getByText("machine-one")).toBeVisible()
     expect(screen.getByText("#9223372036854775807")).toBeVisible()
-    expect(screen.getByText(/<script>old<\/script>/)).toBeVisible()
+    expect(screen.queryByText(/<script>old<\/script>/)).toBeNull()
+    expect(screen.queryByRole("dialog")).toBeNull()
+    const trigger = screen.getByRole("button", {
+      name: `View summary for audit record #${row.id}`,
+    })
+    await userEvent.click(trigger)
+    const dialog = screen.getByRole("dialog", {
+      name: `Audit record #${row.id}`,
+    })
+    expect(
+      within(dialog).getByRole("region", { name: "Audit summary JSON" })
+        .textContent
+    ).toBe(JSON.stringify(row.summary, null, 2))
     expect(document.querySelector("script")).toBeNull()
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Close summary" })
+    )
+    expect(screen.queryByRole("dialog")).toBeNull()
+    expect(trigger).toHaveFocus()
     expect(getAudit).toHaveBeenCalledTimes(1)
     await userEvent.click(
       screen.getByRole("button", { name: "Load more audit records" })
@@ -71,6 +94,12 @@ describe("audit trail", () => {
     })
     const client = show()
     await screen.findByText("admin-user")
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: `View summary for audit record #${row.id}`,
+      })
+    )
+    expect(screen.getByRole("dialog")).toBeVisible()
     vi.mocked(getAudit).mockRejectedValue(
       new ApiError(new Response(null, { status: 403 }), undefined)
     )
@@ -78,9 +107,65 @@ describe("audit trail", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("403")
     expect(screen.queryByText("admin-user")).toBeNull()
     expect(screen.queryByRole("table")).toBeNull()
+    expect(screen.queryByRole("dialog")).toBeNull()
+    expect(screen.queryByText(/<script>old<\/script>/)).toBeNull()
     expect(
       screen.queryByRole("button", { name: "Load more audit records" })
     ).toBeNull()
+  })
+  it("opens the selected row only, traps keyboard focus and restores it on Escape", async () => {
+    const second = {
+      ...row,
+      id: "9223372036854775806",
+      summary: { reason: "second-row-only" },
+    }
+    vi.mocked(getAudit).mockResolvedValueOnce({
+      items: [row, second],
+      nextCursor: null,
+    })
+    show()
+    const user = userEvent.setup()
+    const trigger = await screen.findByRole("button", {
+      name: `View summary for audit record #${second.id}`,
+    })
+    trigger.focus()
+    await user.keyboard("{Enter}")
+    const dialog = screen.getByRole("dialog", {
+      name: `Audit record #${second.id}`,
+    })
+    expect(
+      within(dialog).getByRole("region", { name: "Audit summary JSON" })
+        .textContent
+    ).toBe(JSON.stringify(second.summary, null, 2))
+    expect(screen.queryByText(/<script>old<\/script>/)).toBeNull()
+    const close = within(dialog).getByRole("button", { name: "Close summary" })
+    close.focus()
+    await user.tab()
+    expect(
+      within(dialog).getByRole("region", { name: "Audit summary JSON" })
+    ).toHaveFocus()
+    await user.keyboard("{Escape}")
+    expect(screen.queryByRole("dialog")).toBeNull()
+    expect(trigger).toHaveFocus()
+  })
+  it("closes an open summary on storage failure rather than leaking cached metadata", async () => {
+    vi.mocked(getAudit).mockResolvedValueOnce({
+      items: [row],
+      nextCursor: null,
+    })
+    const client = show()
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: `View summary for audit record #${row.id}`,
+      })
+    )
+    vi.mocked(getAudit).mockRejectedValueOnce(new Error("Audit unavailable"))
+    await client.invalidateQueries({ queryKey: ["audit"] })
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Audit unavailable"
+    )
+    expect(screen.queryByRole("dialog")).toBeNull()
+    expect(screen.queryByRole("table")).toBeNull()
   })
   it("distinguishes an empty result from loading and unavailable", async () => {
     vi.mocked(getAudit).mockResolvedValueOnce({ items: [], nextCursor: null })

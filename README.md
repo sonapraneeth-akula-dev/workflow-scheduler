@@ -1424,9 +1424,13 @@ Records sort newest first by timestamp and ID; `limit` is 1-100 (default 50),
 and `nextCursor` must retain the original filters and limit. Audit IDs are
 decimal strings to preserve Int64 precision in browsers. Responses are
 `no-store`; current authorization is checked on every read and failed refreshes
-hide previously cached records. The page shows committed actor, action, target,
-time and JSON summary, including existing before/after metadata, without
-joining workflow variables or storage capabilities. This read surface does
+hide previously cached records and close any open summary. Each compact row
+shows committed actor, action, target and browser-local time; **View summary**
+opens the exact recorded JSON in a scrollable, keyboard-accessible modal,
+including existing before/after metadata. Escape or **Close summary** returns
+focus to its row button. These are administrative/control audit records, not
+workflow execution results or task output; no workflow variables or storage
+capabilities are joined. This read surface does
 not imply the separate all-mutating-endpoint audit-coverage task is complete.
 
 Public schedule reads include `GET /api/v1/schedules?workflowId=team/type/name`

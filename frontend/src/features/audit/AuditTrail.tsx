@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react"
 import { useInfiniteQuery } from "@tanstack/react-query"
+import { Dialog } from "radix-ui"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { formatTimestamp } from "@/lib/timestamps"
 import { Button } from "@/components/ui/button"
@@ -100,8 +101,11 @@ export function AuditTrail({ search }: { search: AuditSearch }) {
     <section aria-label="Audit records" className="min-w-0 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p>
-          Global Admin only. Newest first; summaries contain committed audit
-          metadata.
+          Global Admin only. This audit trail records who performed an action,
+          when it was committed, and which target it affected, newest first.
+          View summary opens the recorded metadata, including before/after
+          values when available. These are administrative and control actions,
+          not workflow execution results or task output.
         </p>
         <Button
           variant="outline"
@@ -158,9 +162,50 @@ export function AuditTrail({ search }: { search: AuditSearch }) {
                     {row.teamId ? <p>Team: {row.teamId}</p> : null}
                   </td>
                   <td className="p-2">
-                    <pre className="max-w-80 break-words whitespace-pre-wrap">
-                      {JSON.stringify(row.summary, null, 2)}
-                    </pre>
+                    <Dialog.Root>
+                      <Dialog.Trigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="whitespace-nowrap"
+                          aria-label={`View summary for audit record #${row.id}`}
+                        >
+                          View summary
+                        </Button>
+                      </Dialog.Trigger>
+                      <Dialog.Portal>
+                        <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/30" />
+                        <Dialog.Content className="fixed top-1/2 left-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-3xl -translate-x-1/2 -translate-y-1/2 flex-col gap-4 overflow-y-auto rounded-lg border bg-background p-5 text-foreground shadow-lg">
+                          <Dialog.Title className="text-xl font-semibold">
+                            Audit record #{row.id}
+                          </Dialog.Title>
+                          <Dialog.Description className="text-sm break-words text-muted-foreground">
+                            Committed summary for {row.action} on{" "}
+                            {row.targetKind}: {row.targetId}. Recorded values
+                            only; missing fields are not inferred.
+                          </Dialog.Description>
+                          <p className="text-sm break-words">
+                            {row.actor} ({row.actorKind}){" "}
+                            <time dateTime={row.at} title={row.at}>
+                              {formatTimestamp(row.at)}
+                            </time>
+                          </p>
+                          <pre
+                            role="region"
+                            aria-label="Audit summary JSON"
+                            tabIndex={0}
+                            className="max-h-[50dvh] min-h-0 shrink overflow-auto rounded border bg-muted p-3 text-sm break-words whitespace-pre-wrap"
+                          >
+                            {JSON.stringify(row.summary, null, 2)}
+                          </pre>
+                          <Dialog.Close asChild>
+                            <Button variant="outline" className="self-end">
+                              Close summary
+                            </Button>
+                          </Dialog.Close>
+                        </Dialog.Content>
+                      </Dialog.Portal>
+                    </Dialog.Root>
                   </td>
                 </tr>
               ))}

@@ -55,9 +55,31 @@ test("Admin filters real audit by actor, target and UTC dates; pages, reloads, a
   await page.getByRole("button", { name: "Filter audit", exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`actor=${fixture.actor}`))
   await expect(page.locator("tbody tr")).toHaveCount(50)
-  await expect(page.locator("tbody tr").first()).toContainText(fixture.actor)
-  await expect(page.locator("tbody tr").first()).toContainText("old <script>")
-  await expect(page.locator("tbody tr").first()).toContainText("new & safe")
+  const first = page.locator("tbody tr").first()
+  await expect(first).toContainText(fixture.actor)
+  await expect(first).not.toContainText("old <script>")
+  await expect(first).not.toContainText("new & safe")
+  expect((await first.boundingBox())!.height).toBeLessThan(160)
+  const summary = first.getByRole("button", { name: /View summary/ })
+  await summary.focus()
+  await page.keyboard.press("Enter")
+  const dialog = page.getByRole("dialog")
+  await expect(dialog).toBeVisible()
+  expect(
+    JSON.parse(
+      await dialog
+        .getByRole("region", { name: "Audit summary JSON" })
+        .innerText()
+    )
+  ).toEqual({
+    before: { pool: "old <script>" },
+    after: { pool: "new & safe" },
+  })
+  await expect(dialog.locator("script")).toHaveCount(0)
+  await accessible(page)
+  await page.keyboard.press("Escape")
+  await expect(dialog).toHaveCount(0)
+  await expect(summary).toBeFocused()
   await accessible(page)
   await page.getByRole("button", { name: "Load more audit records" }).click()
   await expect(page.locator("tbody tr")).toHaveCount(51)
@@ -73,6 +95,16 @@ test("Admin filters real audit by actor, target and UTC dates; pages, reloads, a
   await page.getByRole("button", { name: "Dark theme" }).click()
   await expect(page.locator("html")).toHaveClass(/dark/)
   await accessible(page)
+  await first.getByRole("button", { name: /View summary/ }).click()
+  await expect(dialog).toBeVisible()
+  await accessible(page)
+  await dialog.getByRole("button", { name: "Close summary" }).click()
+  let release: () => void = () => {
+    throw new Error("Denied response was not paused.")
+  }
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
   await page.route("**/api/v1/audit?**", async (route) => {
     const response = await route.fetch({
       headers: {
@@ -81,10 +113,15 @@ test("Admin filters real audit by actor, target and UTC dates; pages, reloads, a
       },
     })
     expect(response.status()).toBe(403)
+    await gate
     await route.fulfill({ response })
   })
   await page.getByRole("button", { name: "Refresh audit", exact: true }).click()
+  await first.getByRole("button", { name: /View summary/ }).click()
+  await expect(dialog).toBeVisible()
+  release()
   await expect(page.getByRole("alert")).toContainText("403")
+  await expect(dialog).toHaveCount(0)
   await expect(page.getByRole("table")).toHaveCount(0)
   await expect(
     page.getByRole("button", { name: "Load more audit records" })
