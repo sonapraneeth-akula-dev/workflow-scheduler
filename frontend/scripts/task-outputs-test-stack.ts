@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
-import { createHash, randomBytes } from "node:crypto"
+import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { watchFile, unwatchFile } from "node:fs"
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
@@ -9,7 +9,7 @@ const root = resolve(import.meta.dirname, "..", "..")
 const artifacts = resolve(root, ".agent-artifacts", "task-outputs-3adec91f")
 const storage = resolve(artifacts, "browser")
 const stopFile = resolve(storage, "stop")
-const container = "wf-task-outputs-3adec91f"
+const container = `kardia-test-task-outputs-postgres-${randomUUID().slice(0, 12)}`
 const api = "http://127.0.0.1:4384"
 const origin = "http://127.0.0.1:4383"
 const host = resolve(
@@ -101,7 +101,7 @@ try {
     "POSTGRES_DB=workflow",
     "--publish",
     "127.0.0.1::5432",
-    "postgres:17-alpine",
+    "postgres:18.6-alpine",
   ])
   created = true
   const port = run("docker", ["port", container, "5432/tcp"]).split(":").at(-1)

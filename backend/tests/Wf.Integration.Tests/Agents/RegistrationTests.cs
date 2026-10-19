@@ -349,7 +349,8 @@ public class AgentDatabase : IAsyncLifetime
         var external = Environment.GetEnvironmentVariable("WF_TEST_POSTGRES");
         if (external is null)
         {
-            postgres = ConfigurePostgres(new PostgreSqlBuilder("postgres:17-alpine")
+            postgres = ConfigurePostgres(new PostgreSqlBuilder("postgres:18.6-alpine")
+                .WithName($"kardia-test-{GetType().Name.ToLowerInvariant()}-postgres-{Guid.NewGuid().ToString("N")[..12]}")
                 .WithCommand("-c", "fsync=on", "-c", "full_page_writes=on", "-c", "synchronous_commit=on")).Build();
             await postgres.StartAsync(token);
             connectionString = postgres.GetConnectionString();

@@ -78,10 +78,11 @@ public sealed class LocalStackStartupTests(ITestOutputHelper output)
             using var readiness = await client.GetAsync(app.GetEndpoint("wf-host", "api") + "healthz", token);
             Assert.Equal(HttpStatusCode.OK, readiness.StatusCode);
             Assert.True(File.Exists(caCertificate));
-            var image = Environment.GetEnvironmentVariable("WF_LAN_CURL_IMAGE") ?? "curlimages/curl:8.12.1";
+            var image = Environment.GetEnvironmentVariable("WF_LAN_CURL_IMAGE") ?? "curlimages/curl:8.23.0";
+            var clientName = "kardia-test-lan-curl-" + Guid.NewGuid().ToString("N")[..12];
             var common = new[]
             {
-                "run", "--rm", "--mount", $"type=bind,source={caCertificate},target=/ca.pem,readonly",
+                "run", "--rm", "--name", clientName, "--mount", $"type=bind,source={caCertificate},target=/ca.pem,readonly",
                 image, "--noproxy", "*", "--cacert", "/ca.pem", "--connect-timeout", "10", "--max-time", "20"
             };
             var health = await Command("docker", [.. common, "--http2", "-fsS", "-o", "/dev/null", "-w", "%{http_code} %{http_version}", endpoint + "/healthz"]);
@@ -115,7 +116,7 @@ public sealed class LocalStackStartupTests(ITestOutputHelper output)
                 await File.WriteAllTextAsync(wrongCA, certificate.ExportCertificatePem(), token);
             }
             var rejected = await Assert.ThrowsAsync<InvalidOperationException>(() => Command("docker",
-                ["run", "--rm", "--mount", $"type=bind,source={wrongCA},target=/ca.pem,readonly", image,
+                ["run", "--rm", "--name", clientName, "--mount", $"type=bind,source={wrongCA},target=/ca.pem,readonly", image,
                     "--noproxy", "*", "--cacert", "/ca.pem", "--connect-timeout", "5", "-fsS", endpoint + "/healthz"]));
             Assert.Contains("exited 60", rejected.Message);
             var listeners = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners();
@@ -297,6 +298,7 @@ public sealed class LocalStackStartupTests(ITestOutputHelper output)
                 var arguments = new List<string>
                 {
                     "--Local:DataRoot=" + root, "--Local:PostgresVolume=" + volume,
+                    "--Local:Monitoring=false",
                     "--Local:ApiPort=" + ports[0], "--Local:EnginePort=" + ports[1], "--Local:UiPort=" + ports[2],
                     "--Parameters:storage-key=" + key, "--Parameters:postgres-password=" + password
                 };
@@ -304,6 +306,9 @@ public sealed class LocalStackStartupTests(ITestOutputHelper output)
                 await using var builder = await DistributedApplicationTestingBuilder.CreateAsync(typeof(LocalStack),
                     new DistributedApplicationTestingBuilderOptions { EnableDashboard = true }, arguments.ToArray(), token);
                 if (externalDatabase) Assert.Empty(builder.Resources.OfType<ContainerResource>());
+                else Assert.Equal("kardia-postgres-" + volume, Assert.Single(
+                    Assert.Single(builder.Resources.OfType<PostgresServerResource>()).Annotations
+                        .OfType<ContainerNameAnnotation>()).Name);
                 await using var app = await builder.BuildAsync(token);
                 await app.StartAsync(token);
                 await app.ResourceNotifications.WaitForResourceHealthyAsync("wf-host", token);

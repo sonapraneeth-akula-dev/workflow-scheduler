@@ -136,7 +136,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:18.6-alpine
         env:
           POSTGRES_HOST_AUTH_METHOD: trust
         ports:
@@ -149,24 +149,24 @@ jobs:
       - name: Verify non-root CPU/RAM enforcement, independent host lifetimes and re-adoption
         run: |
           set -euo pipefail
-          docker run --rm --privileged --cgroupns=private \
+          docker run --rm --name "kardia-ci-resource-limits-${{ github.run_id }}-${{ github.run_attempt }}" --privileged --cgroupns=private \
             --env WF_RESOURCE_ISOLATED_CONTAINER=1 \
             --env 'WF_RESOURCE_TEST_FILTER=ResourceLimitTests|PhysicalHostLifetimeTests|HostReadoptionTests' \
             --env WF_RESOURCE_ARTIFACTS=/repo/.agent-artifacts/limits-linux \
             --mount "type=bind,source=$GITHUB_WORKSPACE,target=/repo" --workdir /repo \
-            mcr.microsoft.com/dotnet/sdk:10.0-noble-aot \
+            mcr.microsoft.com/dotnet/sdk:10.0.402-noble-aot \
             bash infra/agent/test-resource-sampling.sh --without-bpf
       - name: Verify actual agent loss, durable host replay, hard deadlines and RAM failures
         run: |
           set -euo pipefail
-          docker run --rm --privileged --cgroupns=private --network host \
+          docker run --rm --name "kardia-ci-agent-recovery-${{ github.run_id }}-${{ github.run_attempt }}" --privileged --cgroupns=private --network host \
             --env 'WF_TEST_POSTGRES=Host=127.0.0.1;Username=postgres;Database=postgres' \
             --env WF_RESOURCE_ISOLATED_CONTAINER=1 \
             --env 'WF_RESOURCE_TEST_FILTER=ResourceLimitExecutionTests|HostSurvivalTests|AgentRestartTests' \
             --env WF_RESOURCE_TEST_PROJECT=backend/tests/Wf.Integration.Tests \
             --env WF_RESOURCE_ARTIFACTS=/repo/.agent-artifacts/limits-linux \
             --mount "type=bind,source=$GITHUB_WORKSPACE,target=/repo" --workdir /repo \
-            mcr.microsoft.com/dotnet/sdk:10.0-noble-aot \
+            mcr.microsoft.com/dotnet/sdk:10.0.402-noble-aot \
             bash infra/agent/test-resource-sampling.sh --without-bpf
       - uses: actions/upload-artifact@v4
         if: always()
@@ -182,9 +182,9 @@ jobs:
       matrix:
         include:
           - distro: ubuntu
-            image: mcr.microsoft.com/dotnet/sdk:10.0-noble-aot
+            image: mcr.microsoft.com/dotnet/sdk:10.0.402-noble-aot
           - distro: azurelinux
-            image: mcr.microsoft.com/azurelinux/base/core:3.0
+            image: mcr.microsoft.com/azurelinux/base/core:3.0.20261015
     steps:
       - uses: actions/checkout@v4
       - name: Verify non-root systemd delegation and scope fallback
@@ -234,7 +234,7 @@ jobs:
           - os: windows-latest
             postgres-image: ""
           - os: ubuntu-latest
-            postgres-image: postgres:17-alpine
+            postgres-image: postgres:18.6-alpine
     runs-on: ${{ matrix.os }}
     services:
       postgres:

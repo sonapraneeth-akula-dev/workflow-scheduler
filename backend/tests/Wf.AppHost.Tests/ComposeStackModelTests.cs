@@ -61,8 +61,9 @@ public sealed class ComposeStackModelTests
         Assert.Equal(environment, agentValues["Agent__Labels__environment"]);
         Assert.Equal("/var/lib/wf-agent/results", agentValues["Agent__ResultJournalDirectory"]);
         var postgres = Assert.Single(builder.Resources.OfType<PostgresServerResource>());
-        Assert.Equal("17-alpine", Assert.Single(postgres.Annotations.OfType<ContainerImageAnnotation>()).Tag);
+        Assert.Equal("18.6-alpine", Assert.Single(postgres.Annotations.OfType<ContainerImageAnnotation>()).Tag);
         Assert.Equal("postgres-data", Assert.Single(postgres.Annotations.OfType<ContainerMountAnnotation>()).Source);
+        Assert.Equal("/var/lib/postgresql", Assert.Single(postgres.Annotations.OfType<ContainerMountAnnotation>()).Target);
         Assert.All(builder.Resources.OfType<ParameterResource>().Where(parameter => parameter.Name != "agent-id"),
             parameter => Assert.True(parameter.Secret));
     }

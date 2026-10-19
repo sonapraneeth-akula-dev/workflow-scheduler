@@ -1,6 +1,7 @@
 services:
   wf-prometheus:
     image: prom/prometheus:v3.15.0
+    container_name: kardia-monitoring-prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -19,6 +20,7 @@ services:
     restart: unless-stopped
   wf-grafana:
     image: grafana/grafana:13.2.4
+    container_name: kardia-monitoring-grafana
     ports:
       - "127.0.0.1:3000:3000"
     environment:

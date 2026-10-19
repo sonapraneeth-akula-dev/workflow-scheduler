@@ -19,7 +19,8 @@ public sealed class RunSchemaTests : IAsyncLifetime
         var external = Environment.GetEnvironmentVariable("WF_TEST_POSTGRES");
         if (external is null)
         {
-            postgres = new PostgreSqlBuilder("postgres:17-alpine").Build();
+            postgres = new PostgreSqlBuilder("postgres:18.6-alpine")
+                .WithName($"kardia-test-run-schema-postgres-{Guid.NewGuid().ToString("N")[..12]}").Build();
             await postgres.StartAsync();
             connectionString = postgres.GetConnectionString();
         }

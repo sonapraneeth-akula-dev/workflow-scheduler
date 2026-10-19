@@ -96,7 +96,8 @@ public static class LiveFanoutBench
         {
             if (external is null)
             {
-                postgres = new PostgreSqlBuilder("postgres:17-alpine")
+                postgres = new PostgreSqlBuilder("postgres:18.6-alpine")
+                    .WithName($"kardia-bench-live-fanout-postgres-{Guid.NewGuid().ToString("N")[..12]}")
                     .WithCommand("-c", "fsync=on", "-c", "full_page_writes=on", "-c", "synchronous_commit=on",
                         "-c", "shared_preload_libraries=pg_stat_statements").Build();
                 await postgres.StartAsync(token);

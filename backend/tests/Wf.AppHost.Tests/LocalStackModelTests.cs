@@ -54,10 +54,12 @@ public sealed class LocalStackModelTests : IDisposable
         LocalStack.Configure(builder);
         await using var app = builder.Build();
         var postgres = Assert.Single(builder.Resources.OfType<PostgresServerResource>());
-        Assert.Equal("17-alpine", Assert.Single(postgres.Annotations.OfType<ContainerImageAnnotation>()).Tag);
+        Assert.Equal("18.6-alpine", Assert.Single(postgres.Annotations.OfType<ContainerImageAnnotation>()).Tag);
+        Assert.Equal("kardia-postgres-wf-test-volume", Assert.Single(postgres.Annotations.OfType<ContainerNameAnnotation>()).Name);
         var volume = Assert.Single(postgres.Annotations.OfType<ContainerMountAnnotation>());
         Assert.Equal(ContainerMountType.Volume, volume.Type);
         Assert.Equal("wf-test-volume", volume.Source);
+        Assert.Equal("/var/lib/postgresql", volume.Target);
         Assert.False(volume.IsReadOnly);
         var wait = Assert.Single(Project(builder, "wf-migrations").Annotations.OfType<WaitAnnotation>());
         Assert.Same(postgres, wait.Resource);
@@ -80,6 +82,8 @@ public sealed class LocalStackModelTests : IDisposable
         var grafana = Assert.Single(builder.Resources.OfType<ContainerResource>(), resource => resource.Name == "wf-grafana");
         Assert.Equal("v3.15.0", Assert.Single(prometheus.Annotations.OfType<ContainerImageAnnotation>()).Tag);
         Assert.Equal("13.2.4", Assert.Single(grafana.Annotations.OfType<ContainerImageAnnotation>()).Tag);
+        Assert.Equal("kardia-local-prometheus-19090", Assert.Single(prometheus.Annotations.OfType<ContainerNameAnnotation>()).Name);
+        Assert.Equal("kardia-local-grafana-13000", Assert.Single(grafana.Annotations.OfType<ContainerNameAnnotation>()).Name);
         Assert.Contains(prometheus.Annotations.OfType<ContainerMountAnnotation>(), mount =>
             mount.Type == ContainerMountType.Volume && mount.Source == "wf-prometheus-data");
         Assert.Contains(grafana.Annotations.OfType<ContainerMountAnnotation>(), mount =>
@@ -302,6 +306,8 @@ public sealed class LocalStackModelTests : IDisposable
                     Assert.Equal("/var/lib/wf-agent/results", environment["Agent__ResultJournalDirectory"]);
                     Assert.Equal("/var/lib/wf-agent/secrets", environment["Secrets__LocalDirectory"]);
                     Assert.Equal("wf-local-agent-" + Guid.Parse(environment["Agent__Id"]).ToString("N"), mounts.Source);
+                    Assert.Equal("kardia-agent-linux-" + Guid.Parse(environment["Agent__Id"]).ToString("N"),
+                        Assert.Single(linux.Annotations.OfType<ContainerNameAnnotation>()).Name);
                 }
                 else
                 {

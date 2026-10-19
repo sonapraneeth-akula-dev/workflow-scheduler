@@ -207,7 +207,7 @@ try {
   await writeFile(
     resolve(root, "Dockerfile"),
     [
-      "FROM caddy:2.11.6-alpine",
+      "FROM caddy:2.11.7-alpine",
       "COPY Caddyfile /etc/caddy/Caddyfile",
       "COPY dist /srv",
       "USER 1000:1000",

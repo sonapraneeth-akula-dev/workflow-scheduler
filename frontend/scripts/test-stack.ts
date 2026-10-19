@@ -23,7 +23,7 @@ const host =
     "net10.0",
     "Wf.ControlPlane.dll"
   )
-const container = `wf-ui-${randomUUID()}`
+const container = `kardia-test-ui-postgres-${randomUUID().slice(0, 12)}`
 const password = randomBytes(24).toString("hex")
 const storage = await mkdtemp(resolve(tmpdir(), "wf-ui-"))
 const stopFile = resolve(storage, "stop")
@@ -144,7 +144,7 @@ try {
     "POSTGRES_DB=workflow",
     "--publish",
     "127.0.0.1::5432",
-    "postgres:17-alpine",
+    "postgres:18.6-alpine",
   ])
   containerCreated = true
   const port = run("docker", ["port", container, "5432/tcp"]).split(":").at(-1)

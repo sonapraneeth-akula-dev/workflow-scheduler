@@ -45,8 +45,10 @@ public static class LocalStack
         IResourceBuilder<PostgresServerResource>? postgres = null;
         if (external is null)
         {
-            postgres = builder.AddPostgres("postgres").WithImageTag("17-alpine")
-                .WithDataVolume(builder.Configuration["Local:PostgresVolume"] ?? "wf-postgres-data");
+            var volume = builder.Configuration["Local:PostgresVolume"] ?? "wf-postgres-data";
+            postgres = builder.AddPostgres("postgres").WithImageTag("18.6-alpine")
+                .WithContainerName("kardia-postgres-" + volume)
+                .WithDataVolume(volume);
             database = postgres.AddDatabase("wf", "workflow");
         }
         else database = builder.AddConnectionString("wf");

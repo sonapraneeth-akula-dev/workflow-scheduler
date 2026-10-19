@@ -43,7 +43,8 @@ public class GroupCommitBenchmarks
         var external = System.Environment.GetEnvironmentVariable("WF_TEST_POSTGRES");
         if (external is null)
         {
-            postgres = new PostgreSqlBuilder("postgres:17-alpine")
+            postgres = new PostgreSqlBuilder("postgres:18.6-alpine")
+                .WithName($"kardia-bench-group-commit-postgres-{Guid.NewGuid().ToString("N")[..12]}")
                 .WithCommand("-c", "fsync=on", "-c", "full_page_writes=on", "-c", "synchronous_commit=on").Build();
             await postgres.StartAsync();
             external = postgres.GetConnectionString();

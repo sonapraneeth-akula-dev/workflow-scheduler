@@ -66,13 +66,14 @@ public static class TriggerApiBench
         WebApplication? app = null;
         string? schema = null;
         var external = Environment.GetEnvironmentVariable("WF_TEST_POSTGRES");
-        var databaseMode = external is null ? "isolated postgres:17-alpine container" : "WF_TEST_POSTGRES unique schema";
+        var databaseMode = external is null ? "isolated postgres:18.6-alpine container" : "WF_TEST_POSTGRES unique schema";
         var blobRoot = Path.GetFullPath(Path.Combine(".agent-artifacts", "BenchmarkDotNet.Artifacts", $"trigger-api-{Guid.NewGuid():N}"));
         try
         {
             if (external is null)
             {
-                postgres = new PostgreSqlBuilder("postgres:17-alpine")
+                postgres = new PostgreSqlBuilder("postgres:18.6-alpine")
+                    .WithName($"kardia-bench-trigger-api-postgres-{Guid.NewGuid().ToString("N")[..12]}")
                     .WithCommand("-c", "fsync=on", "-c", "full_page_writes=on", "-c", "synchronous_commit=on").Build();
                 await postgres.StartAsync(token);
                 external = postgres.GetConnectionString();

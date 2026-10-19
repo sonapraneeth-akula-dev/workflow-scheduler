@@ -28,7 +28,7 @@ public static class ComposeStack
         MonitoringResources.Add(builder, native: false);
         var key = builder.AddParameter("storage-key", secret: true);
         var id = builder.AddParameter("agent-id");
-        var postgres = builder.AddPostgres("postgres", password: password).WithImageTag("17-alpine")
+        var postgres = builder.AddPostgres("postgres", password: password).WithImageTag("18.6-alpine")
             .WithEnvironment("POSTGRES_DB", "workflow").WithDataVolume("postgres-data");
         var database = postgres.AddDatabase("wf", "workflow");
         var migrations = builder.AddContainer("wf-migrations", "kardia-control-plane", environment)

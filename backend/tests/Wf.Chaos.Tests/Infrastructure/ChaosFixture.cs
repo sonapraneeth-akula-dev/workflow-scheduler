@@ -65,7 +65,8 @@ internal sealed class ChaosFixture : IAsyncDisposable
         database = await ChaosDatabase.StartAsync(token, requireCommitTimestamps: false, network);
         // Host routing is captured when the proxy container is built; engine ports attach later.
         await TestcontainersSettings.ExposeHostPortsAsync(Array.Empty<ushort>(), token);
-        proxy = new ContainerBuilder("ghcr.io/shopify/toxiproxy:2.12.0").WithNetwork(network)
+        proxy = new ContainerBuilder("ghcr.io/shopify/toxiproxy:2.13.0")
+            .WithName($"kardia-chaos-toxiproxy-{Guid.NewGuid().ToString("N")[..12]}").WithNetwork(network)
             .WithPortBinding(8474, true).WithPortBinding(15432, true)
             .WithPortBinding(19000, true).WithPortBinding(19001, true)
             .WithPortBinding(19002, true).WithPortBinding(19003, true)
@@ -105,7 +106,9 @@ internal sealed class ChaosFixture : IAsyncDisposable
         await LeaderAsync(token);
         await UntilAsync(async () => await ScalarAsync<long>("SELECT count(*) FROM agents WHERE last_heartbeat_at>now()-interval '10 seconds'", token) == 2,
             TimeSpan.FromSeconds(30), token);
-        disk = new ContainerBuilder("postgres:17-alpine").WithEntrypoint("sh", "-c").WithCommand("sleep 3600")
+        disk = new ContainerBuilder("postgres:18.6-alpine")
+            .WithName($"kardia-chaos-disk-fault-{Guid.NewGuid().ToString("N")[..12]}")
+            .WithEntrypoint("sh", "-c").WithCommand("sleep 3600")
             .WithCreateParameterModifier(parameters => (parameters.HostConfig ??= new()).Tmpfs =
                 new Dictionary<string, string> { ["/fault"] = "rw,noexec,nosuid,size=8388608" }).Build();
         await disk.StartAsync(token);
@@ -268,9 +271,11 @@ internal sealed class ChaosFixture : IAsyncDisposable
         if (hba.ExitCode != 0) throw new IOException($"Cannot enable owned standby replication: {hba.Stderr}");
         await ExecuteAsync("SELECT pg_reload_conf()", token);
         var settings = new NpgsqlConnectionStringBuilder(database.ConnectionString);
-        standby = new ContainerBuilder("postgres:17-alpine").WithNetwork(network).WithNetworkAliases("postgres-standby")
+        standby = new ContainerBuilder("postgres:18.6-alpine")
+            .WithName($"kardia-chaos-standby-postgres-{Guid.NewGuid().ToString("N")[..12]}")
+            .WithNetwork(network).WithNetworkAliases("postgres-standby")
             .WithPortBinding(5432, true).WithCreateParameterModifier(parameters => parameters.User = "postgres")
-            .WithEnvironment("PGDATA", "/var/lib/postgresql/data/standby")
+            .WithEnvironment("PGDATA", "/var/lib/postgresql/18/docker/standby")
             .WithEnvironment("PGUSER", settings.Username!)
             .WithEnvironment("PGPASSWORD", settings.Password!)
             .WithEntrypoint("sh", "-c").WithCommand(

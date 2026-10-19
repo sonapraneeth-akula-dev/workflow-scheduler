@@ -72,6 +72,7 @@ public static class AgentResources
                 var backend = Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", ".."));
                 agent = builder.AddDockerfile(descriptor.ResourceName, backend,
                         Path.Combine(backend, "src", "Wf.Agent", "Dockerfile"))
+                    .WithContainerName("kardia-agent-linux-" + descriptor.Id.ToString("N"))
                     .WithVolume(name: "wf-local-agent-" + descriptor.Id.ToString("N"), target: "/var/lib/wf-agent")
                     .WithEnvironment("Agent__AllowInsecureTransport", "true")
                     .WaitFor(host);

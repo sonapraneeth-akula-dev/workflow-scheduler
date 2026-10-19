@@ -2,7 +2,8 @@
 .github
 .wf
 .agent-artifacts
-backend
+backend/tests
+backend/samples
 docs
 node-compile-cache
 wf-h-*

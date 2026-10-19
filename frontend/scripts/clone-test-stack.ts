@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
-import { randomBytes } from "node:crypto"
+import { randomBytes, randomUUID } from "node:crypto"
 import { watchFile, unwatchFile } from "node:fs"
 import { mkdir, rm, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
@@ -13,7 +13,7 @@ const storage = resolve(
   "browser"
 )
 const stopFile = resolve(storage, "stop")
-const container = "wf-clone-clients-3adec91f"
+const container = `kardia-test-clone-postgres-${randomUUID().slice(0, 12)}`
 const api = "http://127.0.0.1:4284"
 const origin = "http://127.0.0.1:4283"
 const host = resolve(
@@ -107,7 +107,7 @@ try {
     "POSTGRES_DB=workflow",
     "--publish",
     "127.0.0.1::5432",
-    "postgres:17-alpine",
+    "postgres:18.6-alpine",
   ])
   created = true
   const port = run("docker", ["port", container, "5432/tcp"]).split(":").at(-1)

@@ -31,7 +31,7 @@ public sealed class ScheduleExactlyOnceTests(ITestOutputHelper output)
         var started = DateTimeOffset.UtcNow;
         await using var database = await ChaosDatabase.StartAsync(token);
         output.WriteLine($"Evidence: {report}");
-        output.WriteLine("Real UTC clock; PostgreSQL 17 durable commits; production control-plane child processes.");
+        output.WriteLine($"Real UTC clock; PostgreSQL {database.Settings["server_version_num"]} durable commits; production control-plane child processes.");
         try
         {
             var workflow = await SeedAsync(database.Source, token);
@@ -365,7 +365,8 @@ public sealed class ScheduleExactlyOnceTests(ITestOutputHelper output)
                 var external = network is null ? Environment.GetEnvironmentVariable("WF_TEST_POSTGRES") : null;
                 if (external is null)
                 {
-                    var builder = new PostgreSqlBuilder("postgres:17-alpine")
+                    var builder = new PostgreSqlBuilder("postgres:18.6-alpine")
+                        .WithName($"kardia-chaos-primary-postgres-{Guid.NewGuid().ToString("N")[..12]}")
                         .WithCommand("-c", "fsync=on", "-c", "full_page_writes=on", "-c", "synchronous_commit=on",
                             "-c", "track_commit_timestamp=on", "-c", "max_connections=200");
                     if (network is not null)
@@ -387,7 +388,8 @@ public sealed class ScheduleExactlyOnceTests(ITestOutputHelper output)
                 database.Source = NpgsqlDataSource.Create(database.ConnectionString);
                 foreach (var setting in new[] { "server_version_num", "fsync", "full_page_writes", "synchronous_commit", "track_commit_timestamp" })
                     database.Settings[setting] = await ScalarAsync<string>(database.Source, $"SHOW {setting}", token);
-                Assert.InRange(int.Parse(database.Settings["server_version_num"], CultureInfo.InvariantCulture), 170000, 179999);
+                Assert.InRange(int.Parse(database.Settings["server_version_num"], CultureInfo.InvariantCulture),
+                    database.container is null ? 170000 : 180000, 189999);
                 foreach (var setting in database.Settings.Where(pair => pair.Key != "server_version_num" &&
                     (requireCommitTimestamps || pair.Key != "track_commit_timestamp")))
                     Assert.Equal("on", setting.Value);

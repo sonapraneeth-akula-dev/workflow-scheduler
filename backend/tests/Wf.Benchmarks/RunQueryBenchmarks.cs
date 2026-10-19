@@ -58,14 +58,15 @@ public static class RunQueryBenchmarks
         PostgreSqlContainer? postgres = null;
         NpgsqlDataSource? source = null;
         var external = Environment.GetEnvironmentVariable("WF_TEST_POSTGRES");
-        var mode = external is null ? "isolated postgres:17-alpine container" : "WF_TEST_POSTGRES unique schema";
+        var mode = external is null ? "isolated postgres:18.6-alpine container" : "WF_TEST_POSTGRES unique schema";
         var schema = "run_query_benchmark_" + Guid.NewGuid().ToString("N");
         var schemaCreated = false;
         try
         {
             if (external is null)
             {
-                postgres = new PostgreSqlBuilder("postgres:17-alpine")
+                postgres = new PostgreSqlBuilder("postgres:18.6-alpine")
+                    .WithName($"kardia-bench-run-query-postgres-{Guid.NewGuid().ToString("N")[..12]}")
                     .WithCommand("-c", "fsync=on", "-c", "full_page_writes=on", "-c", "synchronous_commit=on").Build();
                 await postgres.StartAsync(token);
                 external = postgres.GetConnectionString();

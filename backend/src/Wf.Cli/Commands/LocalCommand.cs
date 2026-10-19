@@ -156,7 +156,7 @@ public static class LocalCommand
                 var absent = inspectionExit == 1 && imageId.Length == 0 &&
                     (diagnostic.Equals("Error response from daemon: No such image: " + gateway, StringComparison.Ordinal) ||
                      diagnostic.Equals("Error: No such image: " + gateway, StringComparison.Ordinal));
-                var previousGateway = "caddy:2.11.6-alpine";
+                var previousGateway = "caddy:2.11.7-alpine";
                 if (!absent)
                 {
                     await error.WriteAsync(inspectionError.ToString());

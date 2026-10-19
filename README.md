@@ -39,6 +39,41 @@ inside the consuming SDK task unless its author handles the missing key; it
 does not stop the control plane.
 
 By default PostgreSQL uses the persistent Docker volume `wf-postgres-data`.
+New Docker databases use `postgres:18.6-alpine`; the AppHost mounts the volume
+at `/var/lib/postgresql`, with PostgreSQL 18 data in `18/docker`.
+**Existing PostgreSQL 17 volumes require an explicit major-version migration.**
+Do not attach an existing 17 data volume to the 18 image or delete it to make
+startup succeed. Back up databases and globals using PostgreSQL 18 client tools,
+verify the backup, restore into a separate PostgreSQL 18 volume, then verify
+workflow history, reports and agent state before switching the launcher.
+Retain the original volume and matching filesystem blobs for rollback.
+Updating these image pins does not migrate or restart a running database.
+
+Native-profile container names describe their purpose and persistent identity:
+`kardia-postgres-<Local:PostgresVolume>` (default
+`kardia-postgres-wf-postgres-data`), `kardia-agent-linux-<agent-UUID>`,
+`kardia-local-prometheus-<port>` and `kardia-local-grafana-<port>`.
+Standalone monitoring uses `kardia-monitoring-prometheus` and
+`kardia-monitoring-grafana`. Compose retains project-scoped service names such
+as `kardia-dev-postgres-1`; test/chaos/benchmark containers include their purpose
+and a unique suffix so parallel runs cannot collide.
+
+Docker image pins verified October 19, 2026:
+
+| Component | Image tag |
+| --- | --- |
+| PostgreSQL | `18.6-alpine` |
+| .NET build SDK / runtime | `10.0.402` / `10.0.13` |
+| .NET Linux AOT build SDK | `10.0.402-noble-aot` |
+| Caddy / Bun frontend builder | `2.11.7-alpine` / `1.4.3` |
+| Azurite / Toxiproxy | `3.37.0` / `2.13.0` |
+| curl Linux test client | `8.23.0` |
+| Azure Linux 3 core CI image | `3.0.20261015` |
+| Prometheus / Grafana | `v3.15.0` / `13.2.4` (unchanged) |
+
+Pins retain their existing distribution families and stable channels; PostgreSQL
+19 prereleases are not used. JavaScript and NuGet dependencies are unchanged.
+
 To omit the database container entirely, set `ConnectionStrings__wf` to an
 existing database connection string before launching; the AppHost still runs
 its migrations. Supply a disposable database when evaluating migrations.
@@ -160,7 +195,7 @@ dotnet run --project .\backend\src\Wf.Cli -- local down --env dev
 
 `up` publishes Compose through Aspire, builds managed Release API/engine/agent
 images, runs migrations and waits for healthy services. Each project has
-PostgreSQL 17, an API-only host, two leader-elected engines, one nonroot Linux
+PostgreSQL 18.6, an API-only host, two leader-elected engines, one nonroot Linux
 agent, a Caddy gateway containing the built SPA and an anonymous Aspire
 dashboard. `kardia-dev` binds only `127.2.6.2`; `kardia-ppe` binds only
 `127.2.6.7`. Open `http://127.2.6.2` or `http://127.2.6.7` for the UI.
@@ -224,7 +259,15 @@ local environment, not a Git-derived workflow version. Workflow SemVer,
 immutable package hashes and run-version pinning retain their existing meaning.
 
 The control-plane build defaults to NuGet.org. `KARDIA_NUGET_SOURCE` can select
-an approved package mirror without disabling TLS verification. The real
+an approved package mirror without disabling TLS verification. Its Docker build
+context is the repository root, not `backend`, so published images include the
+shared/team failure catalogs:
+
+```powershell
+docker build -f .\backend\src\Wf.ControlPlane\Dockerfile -t kardia-control-plane:local .
+```
+
+The real
 lifecycle acceptance test requires a normal Debug CLI build and explicit
 `WF_COMPOSE_LIFECYCLE=true`:
 
@@ -2839,7 +2882,7 @@ remains a dependent task, not implied by basic exactly-once firing.
 
 `Wf.Chaos.Tests/Infrastructure/ChaosFixture.cs` supplies two real production
 engine processes, two real agents, a downloaded SDK task host and an owned
-PostgreSQL 17 database behind Toxiproxy 2.12.0. Per-agent gateway proxies isolate
+PostgreSQL 18.6 database behind Toxiproxy 2.13.0. Per-agent gateway proxies isolate
 one agent without partitioning its healthy peer. The fixture supports hard
 leader/agent/host kills, stable-identity agent restart and database partitions;
 PID creation identities guard task-host cleanup against reuse. Both engines
@@ -2888,9 +2931,9 @@ than stopping the engine. Each retry reacquires the normal database fence;
 the one-second transaction bound and leadership checks remain unchanged.
 
 The nightly/manual `schedule-chaos.yml` lane runs the actual one-hour
-`ScheduleExactlyOnce` gate against PostgreSQL 17 with durability enabled:
+`ScheduleExactlyOnce` gate against PostgreSQL 18.6 with durability enabled:
 1,000 minutely schedules, uniformly phased 60 ms apart across each minute,
-and two hard leader-process kills during firing. The measured local gate
+and two hard leader-process kills during firing. The historical PostgreSQL 17 local gate
 retained all 60,000 intended fire slots and runs, zero duplicate or invalid
 runs, zero extra slots and zero silent misses. Intended-fire-to-durable-commit
 p99 was 0.274046 s against the unchanged 2 s limit; maximum failover delay
@@ -3271,7 +3314,7 @@ SLAs. No forced query plans, cache purges or production query/index changes.
 The database contains summary rows rather than complete historical event graphs.
 Reports include dataset, environment, durability settings and per-scenario
 percentiles under ignored `.agent-artifacts\BenchmarkDotNet.Artifacts\run-query\<id>\report.json`.
-`WF_TEST_POSTGRES` uses a unique schema; otherwise an isolated PostgreSQL 17
+`WF_TEST_POSTGRES` uses a unique schema; otherwise an isolated PostgreSQL 18.6
 container is created. Both modes require `fsync`, `full_page_writes` and
 `synchronous_commit` ON and remove their own schema/container afterward.
 `benchmarks.yml` runs the gate and its actual performance fixture on Windows

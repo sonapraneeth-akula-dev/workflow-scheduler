@@ -429,7 +429,8 @@ public sealed class BlobStoreEnvironment : IAsyncLifetime
     public async ValueTask InitializeAsync()
     {
         var key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
-        azurite = new ContainerBuilder("mcr.microsoft.com/azure-storage/azurite:3.35.0")
+        azurite = new ContainerBuilder("mcr.microsoft.com/azure-storage/azurite:3.37.0")
+            .WithName($"kardia-test-blob-store-azurite-{Guid.NewGuid().ToString("N")[..12]}")
             .WithEnvironment("AZURITE_ACCOUNTS", $"wfstore:{key}")
             .WithPortBinding(10000, assignRandomHostPort: true)
             .WithCommand("azurite-blob", "--blobHost", "0.0.0.0", "--skipApiVersionCheck",

@@ -23,10 +23,12 @@ internal static class MonitoringResources
             .WaitFor(prometheus);
         if (native)
         {
-            prometheus.WithContainerNetworkAlias("wf-prometheus")
+            prometheus.WithContainerName("kardia-local-prometheus-" + prometheusPort)
+                .WithContainerNetworkAlias("wf-prometheus")
                 .WithContainerRuntimeArgs("--publish", $"127.0.0.1:{prometheusPort}:9090")
                 .WithUrl("http://127.0.0.1:" + prometheusPort, "Prometheus");
-            grafana.WithContainerRuntimeArgs("--publish", $"127.0.0.1:{grafanaPort}:3000")
+            grafana.WithContainerName("kardia-local-grafana-" + grafanaPort)
+                .WithContainerRuntimeArgs("--publish", $"127.0.0.1:{grafanaPort}:3000")
                 .WithUrl("http://127.0.0.1:" + grafanaPort + "/d/workflow-runs", "Workflow trends");
         }
     }

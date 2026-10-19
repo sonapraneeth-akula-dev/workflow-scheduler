@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-      - name: Run real one-hour durable PostgreSQL 17 gate
+      - name: Run real one-hour durable PostgreSQL 18 gate
         run: dotnet test backend/tests/Wf.Chaos.Tests --configuration Release --filter ScheduleExactlyOnce --logger "trx;LogFileName=schedule-chaos.trx" --results-directory TestResults
       - uses: actions/upload-artifact@v4
         if: always()

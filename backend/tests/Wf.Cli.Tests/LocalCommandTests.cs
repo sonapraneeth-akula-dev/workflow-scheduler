@@ -45,7 +45,7 @@ public sealed class LocalCommandTests : IDisposable
         AssertCompose(calls[1], env, ["config", "--quiet"]);
         Assert.Equal(["image", "inspect", "--format", "{{.Id}}", "kardia-gateway:" + env], calls[2].ArgumentList);
         AssertCompose(calls[3], env, ["up", "-d", "--build", "--wait", "--wait-timeout", "180"]);
-        Assert.Equal("caddy:2.11.6-alpine", calls[3].Environment["KARDIA_PREVIOUS_GATEWAY_IMAGE"]);
+        Assert.Equal("caddy:2.11.7-alpine", calls[3].Environment["KARDIA_PREVIOUS_GATEWAY_IMAGE"]);
         Assert.All(calls.Take(3), call => Assert.False(call.Environment.ContainsKey("KARDIA_PREVIOUS_GATEWAY_IMAGE")));
         var stable = ReadKeys(env);
         foreach (var call in calls)
@@ -158,7 +158,7 @@ public sealed class LocalCommandTests : IDisposable
         Assert.Equal(0, result.Exit);
         Assert.Empty(result.Error);
         Assert.Equal(4, calls.Count);
-        Assert.Equal("caddy:2.11.6-alpine", calls[^1].Environment["KARDIA_PREVIOUS_GATEWAY_IMAGE"]);
+        Assert.Equal("caddy:2.11.7-alpine", calls[^1].Environment["KARDIA_PREVIOUS_GATEWAY_IMAGE"]);
         Assert.DoesNotContain(calls, call => call.ArgumentList is ["image", "tag", ..]);
     }
 
@@ -195,7 +195,7 @@ public sealed class LocalCommandTests : IDisposable
             calls.Clear();
             gatewayImageId = null;
             Assert.Equal(0, (await Run(["up", "--env", "ppe"])).Exit);
-            Assert.Equal("caddy:2.11.6-alpine", calls[^1].Environment["KARDIA_PREVIOUS_GATEWAY_IMAGE"]);
+            Assert.Equal("caddy:2.11.7-alpine", calls[^1].Environment["KARDIA_PREVIOUS_GATEWAY_IMAGE"]);
             Assert.All(calls.Take(calls.Count - 1), call => Assert.False(call.Environment.ContainsKey("KARDIA_PREVIOUS_GATEWAY_IMAGE")));
             calls.Clear();
             Assert.Equal(0, (await Run(["down", "--env", "dev"])).Exit);

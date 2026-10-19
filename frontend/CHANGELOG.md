@@ -36,3 +36,7 @@ All notable frontend changes are documented here, using Keep a Changelog.
 - Delegated Entra authentication and an explicit loopback-development guard.
 - Real PostgreSQL/HTTP CRUD browser tests on Chromium, Firefox and WebKit, axe
   accessibility checks, draft/authentication units and a frontend CI lane.
+
+### Changed
+- PostgreSQL test-stack images pinned to 18.6-alpine, with purpose-based,
+  collision-safe container names; gateway acceptance uses Caddy 2.11.7-alpine.
