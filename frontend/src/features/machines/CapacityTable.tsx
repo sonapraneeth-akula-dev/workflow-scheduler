@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { formatTimestamp } from "@/lib/timestamps"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -191,7 +192,7 @@ export function CapacityTable({
               ].map(([name, label]) => (
                 <label key={name} className="flex min-w-0 flex-col gap-1">
                   {label}
-                  <input
+                  <Input
                     name={name}
                     defaultValue={
                       name === "transport"
@@ -203,7 +204,6 @@ export function CapacityTable({
                     required
                     maxLength={100}
                     readOnly={mutation.isPending}
-                    className="min-w-0 rounded border bg-background p-2"
                   />
                 </label>
               ))}
@@ -229,7 +229,7 @@ export function CapacityTable({
               </p>
               <label className="flex min-w-0 flex-col gap-1">
                 Capacity (requests/s)
-                <input
+                <Input
                   name="capacityRps"
                   type="number"
                   min={1}
@@ -238,7 +238,6 @@ export function CapacityTable({
                   defaultValue={draft.capacityRps}
                   required
                   readOnly={mutation.isPending}
-                  className="min-w-0 rounded border bg-background p-2"
                 />
               </label>
               {validation ? <ErrorNotice error={validation} /> : null}

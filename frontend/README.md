@@ -40,6 +40,10 @@ Single-value dropdowns share the native select component across filters,
 forms and report/table controls. Selected text has dedicated chevron clearance
 and trailing padding; controls keep native keyboard behavior, bounded widths,
 visible focus and disabled states in both themes.
+Default single-line inputs, dropdowns, buttons and toggles share a 32 px control
+height. Use the shared `Input` and `NativeSelect` rather than custom input
+sizing; compact variants remain 28 px. Multiline fields, navigation tabs and
+explicit large/icon variants retain their intended sizing.
 Enabled actions use pointer cursors consistently: tabs, profile/menu actions,
 buttons, links, dropdowns, expandable summaries and checkbox/radio controls
 and their labels. Native, ARIA and Radix disabled states remain non-actionable;

@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { formatTimestamp } from "@/lib/timestamps"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { NativeSelect } from "@/components/ui/native-select"
 import { usePermissions } from "@/lib/auth/usePermissions"
 import { useLive } from "@/lib/live/useLive"
@@ -49,18 +50,13 @@ export function MachineFilters({
     <form
       aria-label="Machine filters"
       onSubmit={submit}
-      className="flex min-w-0 flex-wrap items-start gap-3"
+      className="grid min-w-0 items-start gap-3 sm:grid-cols-2 xl:grid-cols-[repeat(3,max-content)_minmax(16rem,24rem)_max-content] xl:gap-y-1"
     >
-      <label className="flex min-w-0 flex-col gap-1">
+      <label className="flex min-w-0 flex-col gap-1 xl:row-span-2 xl:grid xl:grid-rows-subgrid">
         Pool (exact)
-        <input
-          name="pool"
-          defaultValue={search.pool ?? ""}
-          maxLength={200}
-          className="min-w-0 rounded border bg-background p-2"
-        />
+        <Input name="pool" defaultValue={search.pool ?? ""} maxLength={200} />
       </label>
-      <label className="flex min-w-0 flex-col gap-1">
+      <label className="flex min-w-0 flex-col gap-1 xl:row-span-2 xl:grid xl:grid-rows-subgrid">
         OS
         <NativeSelect aria-label="OS" name="os" defaultValue={search.os ?? ""}>
           <option value="">All operating systems</option>
@@ -68,7 +64,7 @@ export function MachineFilters({
           <option value="linux">Linux</option>
         </NativeSelect>
       </label>
-      <label className="flex min-w-0 flex-col gap-1">
+      <label className="flex min-w-0 flex-col gap-1 xl:row-span-2 xl:grid xl:grid-rows-subgrid">
         Health
         <NativeSelect
           aria-label="Health"
@@ -81,7 +77,7 @@ export function MachineFilters({
           ))}
         </NativeSelect>
       </label>
-      <label className="flex min-w-0 flex-col gap-1">
+      <label className="flex min-w-0 flex-col gap-1 xl:row-span-2 xl:grid xl:grid-rows-subgrid">
         Label filters (one key=value per line)
         <textarea
           name="label"
@@ -90,11 +86,19 @@ export function MachineFilters({
           className="min-w-0 rounded border bg-background p-2"
         />
       </label>
-      <Button type="submit">Filter machines</Button>
-      <Button type="button" variant="outline" onClick={() => onChange({})}>
-        Clear machine filters
-      </Button>
-      {error ? <ErrorNotice error={error} /> : null}
+      <div className="sm:col-span-2 xl:col-span-1 xl:row-span-2 xl:grid xl:grid-rows-subgrid">
+        <div className="flex flex-wrap items-center gap-2 xl:row-start-2 xl:self-start">
+          <Button type="submit">Filter machines</Button>
+          <Button type="button" variant="outline" onClick={() => onChange({})}>
+            Clear machine filters
+          </Button>
+        </div>
+      </div>
+      {error ? (
+        <div className="col-span-full">
+          <ErrorNotice error={error} />
+        </div>
+      ) : null}
     </form>
   )
 }

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { NativeSelect } from "@/components/ui/native-select"
 import type { TableData } from "./types"
 
@@ -40,10 +41,9 @@ export function VirtualTable({
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex min-w-0 flex-col gap-1">
           Filter table rows
-          <input
+          <Input
             type="search"
             value={filter}
-            className="h-9 w-full min-w-0 rounded-md border px-3"
             onChange={(event) => setFilter(event.target.value)}
           />
         </label>

@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -101,13 +102,12 @@ export function EditLabelsDialog({
           <p className="break-all">{machine.name}</p>
           <label className="flex min-w-0 flex-col gap-1">
             Pool
-            <input
+            <Input
               name="pool"
               defaultValue={original.pool}
               required
               maxLength={200}
               readOnly={mutation.isPending}
-              className="min-w-0 rounded border bg-background p-2"
             />
           </label>
           <label className="flex min-w-0 flex-col gap-1">

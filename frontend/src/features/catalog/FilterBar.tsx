@@ -148,11 +148,7 @@ export function FilterBar({
           ))}
         <label className="flex min-w-0 flex-col gap-1 text-sm">
           Run status
-          <NativeSelect
-            name="status"
-            defaultValue={filters.status ?? ""}
-            className="h-8"
-          >
+          <NativeSelect name="status" defaultValue={filters.status ?? ""}>
             <option value="">All statuses</option>
             {runStatuses.map((status) => (
               <option key={status}>{status}</option>

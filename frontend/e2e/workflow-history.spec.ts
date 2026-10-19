@@ -257,7 +257,7 @@ for (const width of [320, 768, 1440, 2000]) {
         }
       })
     )
-    expect(bounds.every(({ control }) => control.height === 36)).toBe(true)
+    expect(bounds.every(({ control }) => control.height === 32)).toBe(true)
     expect(bounds.every(({ control, label }) => label.bottom < control.y)).toBe(
       true
     )
@@ -268,7 +268,7 @@ for (const width of [320, 768, 1440, 2000]) {
         .getByRole("button", { name: "Filter history", exact: true })
         .boundingBox()
       expect(submit!.y).toBe(bounds[0]!.control.y)
-      expect(submit!.height).toBe(36)
+      expect(submit!.height).toBe(32)
     }
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth)

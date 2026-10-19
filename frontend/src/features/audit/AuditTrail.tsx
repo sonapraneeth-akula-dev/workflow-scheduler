@@ -4,6 +4,7 @@ import { Dialog } from "radix-ui"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { formatTimestamp } from "@/lib/timestamps"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   auditSearchSchema,
   getAudit,
@@ -50,11 +51,10 @@ export function AuditFilters({
               targetId: "Target ID (exact)",
             }[name]
           }
-          <input
+          <Input
             name={name}
             defaultValue={search[name] ?? ""}
             maxLength={1024}
-            className="min-w-0 rounded border bg-background p-2"
           />
         </label>
       ))}
@@ -63,7 +63,7 @@ export function AuditFilters({
           {name === "from"
             ? "From date (UTC, inclusive)"
             : "Until date (UTC, exclusive)"}
-          <input
+          <Input
             name={name}
             type="date"
             defaultValue={
@@ -71,7 +71,6 @@ export function AuditFilters({
                 ? new Date(search[name]).toISOString().slice(0, 10)
                 : ""
             }
-            className="min-w-0 rounded border bg-background p-2"
           />
         </label>
       ))}

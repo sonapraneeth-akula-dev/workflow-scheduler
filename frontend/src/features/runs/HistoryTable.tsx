@@ -76,7 +76,6 @@ export function HistoryFilters({
             defaultValue={search.abortedBy ?? ""}
             aria-invalid={error !== undefined}
             aria-describedby={error ? `${id}-error` : undefined}
-            className="h-9"
           />
         </Field>
         <Field className="min-w-0">
@@ -110,15 +109,8 @@ export function HistoryFilters({
           </NativeSelect>
         </Field>
         <div className="flex flex-wrap items-center gap-2 self-end sm:col-span-2 xl:col-span-1">
-          <Button type="submit" className="h-9">
-            Filter history
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            className="h-9"
-            onClick={() => onChange({})}
-          >
+          <Button type="submit">Filter history</Button>
+          <Button type="button" variant="outline" onClick={() => onChange({})}>
             Clear history filters
           </Button>
         </div>
