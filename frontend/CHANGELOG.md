@@ -38,8 +38,9 @@ All notable frontend changes are documented here, using Keep a Changelog.
   accessibility checks, draft/authentication units and a frontend CI lane.
 
 ### Changed
-- Run graph uses balanced desktop columns for the graph and node list/inspector,
-  stacking on smaller screens; the collapsible node list has bounded scrolling
-  and a sticky table header.
+- Run graph keeps the graph and node list together beside the selected-node
+  inspector in balanced desktop columns, stacking on smaller screens and using
+  the full width before selection; the collapsible node list has bounded
+  scrolling and a sticky table header.
 - PostgreSQL test-stack images pinned to 18.6-alpine, with purpose-based,
   collision-safe container names; gateway acceptance uses Caddy 2.11.7-alpine.

@@ -4,7 +4,7 @@ import { z } from "zod"
 
 const runId = z.uuid().parse(process.env.WF_GRAPH_LAYOUT_RUN)
 
-test("graph and node details share desktop space and stack on smaller screens", async ({
+test("graph and node list stay left of the inspector and stack on smaller screens", async ({
   page,
 }) => {
   test.setTimeout(120_000)
@@ -19,6 +19,16 @@ test("graph and node details share desktop space and stack on smaller screens", 
   await expect(table).toBeHidden()
   await list.locator("summary").click()
   await expect(table).toBeVisible()
+  const area = page.getByRole("region", { name: "Live run graph", exact: true })
+  const [unselectedGraph, wholeArea] = await Promise.all([
+    graph.boundingBox(),
+    area.boundingBox(),
+  ])
+  if (!unselectedGraph || !wholeArea)
+    throw new Error("Run graph panels are missing.")
+  expect(Math.abs(unselectedGraph.width - wholeArea.width)).toBeLessThanOrEqual(
+    1
+  )
   const nodes = graph.locator("[data-graph-node]")
   expect(await nodes.count()).toBeGreaterThan(0)
   const first = nodes.first()
@@ -43,16 +53,16 @@ test("graph and node details share desktop space and stack on smaller screens", 
     expect(inspectorBox).not.toBeNull()
     if (!graphBox || !listBox || !inspectorBox)
       throw new Error("Responsive graph panels are missing.")
+    expect(listBox.y).toBeGreaterThanOrEqual(graphBox.y + graphBox.height)
+    expect(Math.abs(graphBox.x - listBox.x)).toBeLessThanOrEqual(1)
+    expect(Math.abs(graphBox.width - listBox.width)).toBeLessThanOrEqual(1)
     if (width >= 1280) {
-      expect(graphBox.x + graphBox.width).toBeLessThan(listBox.x)
-      expect(Math.abs(graphBox.y - listBox.y)).toBeLessThanOrEqual(1)
-      expect(Math.abs(graphBox.width - listBox.width)).toBeLessThanOrEqual(1)
+      expect(graphBox.x + graphBox.width).toBeLessThan(inspectorBox.x)
+      expect(Math.abs(graphBox.y - inspectorBox.y)).toBeLessThanOrEqual(1)
     } else {
-      expect(listBox.y).toBeGreaterThanOrEqual(graphBox.y + graphBox.height)
-      expect(Math.abs(graphBox.x - listBox.x)).toBeLessThanOrEqual(1)
+      expect(inspectorBox.y).toBeGreaterThanOrEqual(listBox.y + listBox.height)
+      expect(Math.abs(inspectorBox.x - listBox.x)).toBeLessThanOrEqual(1)
     }
-    expect(inspectorBox.y).toBeGreaterThanOrEqual(listBox.y + listBox.height)
-    expect(Math.abs(inspectorBox.x - listBox.x)).toBeLessThanOrEqual(1)
     expect(Math.abs(inspectorBox.width - listBox.width)).toBeLessThanOrEqual(1)
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth)
