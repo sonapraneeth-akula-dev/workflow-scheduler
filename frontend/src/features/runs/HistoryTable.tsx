@@ -186,9 +186,9 @@ export function HistoryTable({
         </p>
       ) : null}
       <p className="text-sm text-muted-foreground">
-        Times shown in India Standard Time (IST, UTC+05:30) with milliseconds.
-        Duration requires recorded start and end times. Schedule triggered means
-        a run was created, not that it is still running. Status and cancelled-by
+        Times shown in your browser's local timezone with milliseconds. Duration
+        requires recorded start and end times. Schedule triggered means a run
+        was created, not that it is still running. Status and cancelled-by
         filters exclude schedule events without a run.
       </p>
       {query.isPending ? <p role="status">Loading run history...</p> : null}
@@ -237,7 +237,7 @@ export function HistoryTable({
             <thead className="border-b">
               <tr>
                 {[
-                  "Date / time (IST)",
+                  "Date / time (local)",
                   "Run ID",
                   "Status / Scheduling",
                   "Duration",
@@ -275,7 +275,7 @@ export function HistoryTable({
                   >
                     <td className="p-3 whitespace-nowrap">
                       <time dateTime={row.at} title={row.at}>
-                        {formatTimestamp(row.at, "Asia/Kolkata")}
+                        {formatTimestamp(row.at)}
                       </time>
                     </td>
                     <th
@@ -364,7 +364,7 @@ export function HistoryTable({
                                 dateTime={row.abort.at}
                                 title={row.abort.at}
                               >
-                                {formatTimestamp(row.abort.at, "Asia/Kolkata")}
+                                {formatTimestamp(row.abort.at)}
                               </time>
                             </dd>
                             <dt className="font-medium">Reason</dt>

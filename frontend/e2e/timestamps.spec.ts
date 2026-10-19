@@ -1,11 +1,11 @@
 import { expect, test, type Locator } from "@playwright/test"
 
-async function expectTimes(scope: Locator, locale: string, timeZone?: string) {
+async function expectTimes(scope: Locator, locale: string) {
   await expect(scope.locator("time[datetime]").first()).toBeVisible()
-  const times = await scope.locator("time[datetime]").evaluateAll(
-    (elements, { locale, timeZone }) => {
+  const times = await scope
+    .locator("time[datetime]")
+    .evaluateAll((elements, locale) => {
       const formatter = new Intl.DateTimeFormat(locale, {
-        timeZone,
         day: "2-digit",
         month: "short",
         year: "numeric",
@@ -30,9 +30,7 @@ async function expectTimes(scope: Locator, locale: string, timeZone?: string) {
           expected: `${parts.get("day")} ${parts.get("month")} ${parts.get("year")}, ${parts.get("hour")}:${parts.get("minute")}:${parts.get("second")}.${parts.get("fractionalSecond")} ${parts.get("timeZoneName")}`,
         }
       })
-    },
-    { locale, timeZone }
-  )
+    }, locale)
   for (const time of times) {
     expect(time.text).toBe(time.expected)
     expect(time.title).toBe(time.raw)
@@ -63,7 +61,7 @@ for (const [timezoneId, locale] of [
   test.describe(timezoneId, () => {
     test.use({ timezoneId })
 
-    test("recorded timestamps use local milliseconds while history stays in IST; absent attempts and events invent no times", async ({
+    test("recorded timestamps and history use browser-local milliseconds; absent attempts and events invent no times", async ({
       page,
     }) => {
       await page.goto("/t/report-tests/runs")
@@ -88,9 +86,9 @@ for (const [timezoneId, locale] of [
         .getByRole("link", { name: "Workflow history", exact: true })
         .click()
       await expect(
-        main.getByRole("columnheader", { name: "Date / time (IST)" })
+        main.getByRole("columnheader", { name: "Date / time (local)" })
       ).toBeVisible()
-      await expectTimes(main, "en-IN", "Asia/Kolkata")
+      await expectTimes(main, locale)
     })
   })
 }

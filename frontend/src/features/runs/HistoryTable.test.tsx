@@ -10,6 +10,7 @@ import {
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ApiError } from "@/lib/api/client"
+import { formatTimestamp } from "@/lib/timestamps"
 import {
   getHistory,
   type HistoryRow,
@@ -229,25 +230,26 @@ describe("historical table", () => {
       `/runs/${row.runId}`
     )
     expect(run.querySelector("time")).not.toBeInTheDocument()
-    expect(run).not.toHaveTextContent("IST")
+    expect(run).not.toHaveTextContent(formatTimestamp(row.at))
   })
   it.each([
-    ["2026-10-18T23:59:59.007999Z", "19 Oct 2026, 05:29:59.007 IST"],
-    ["2026-10-19T05:29:59.007999+05:30", "19 Oct 2026, 05:29:59.007 IST"],
-    ["2026-10-18T23:59:59Z", "19 Oct 2026, 05:29:59.000 IST"],
+    ["2026-10-18T23:59:59.007999Z", "007"],
+    ["2026-10-19T05:29:59.007999+05:30", "007"],
+    ["2026-10-18T23:59:59Z", "000"],
   ])(
-    "shows %s in a separate IST date column with milliseconds",
-    async (at, expected) => {
+    "shows %s in a separate local date column with milliseconds",
+    async (at, milliseconds) => {
       vi.mocked(getHistory).mockResolvedValue(page([{ ...row, at }]))
       show()
       const table = await screen.findByRole("table")
       expect(
-        within(table).getByRole("columnheader", { name: "Date / time (IST)" })
+        within(table).getByRole("columnheader", { name: "Date / time (local)" })
       ).toBeVisible()
       const date = within(within(table).getAllByRole("row")[1]!).getAllByRole(
         "cell"
       )[0]!
-      expect(date).toHaveTextContent(expected)
+      expect(date).toHaveTextContent(formatTimestamp(at))
+      expect(date.textContent).toContain(`.${milliseconds} `)
       expect(date.querySelector("time")).toHaveAttribute("datetime", at)
       expect(date.querySelector("time")).toHaveAttribute("title", at)
       expect(within(date).queryByRole("link")).not.toBeInTheDocument()
@@ -288,7 +290,7 @@ describe("historical table", () => {
     expect(table).toHaveTextContent("Manual")
     expect(table).toHaveTextContent("Operator Name")
     expect(table).toHaveTextContent(row.abort!.by)
-    expect(table).toHaveTextContent("16 Oct 2026, 12:30:00.123 IST")
+    expect(table).toHaveTextContent(formatTimestamp(row.abort!.at))
     expect(
       table.querySelector(`time[datetime="${row.abort!.at}"]`)
     ).toHaveAttribute("title", row.abort!.at)
