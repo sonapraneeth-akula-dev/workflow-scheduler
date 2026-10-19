@@ -43,23 +43,23 @@ test("confirmed Operator abort requires a reason and shows actual immutable attr
         snapshots++
     })
     await page.goto(`/runs/${runId}`)
-    await page.getByRole("button", { name: "Abort run", exact: true }).focus()
+    await page.getByRole("button", { name: "Cancel run", exact: true }).focus()
     await page.keyboard.press("Enter")
-    const dialog = page.getByRole("alertdialog", { name: "Abort this run?" })
+    const dialog = page.getByRole("alertdialog", { name: "Cancel this run?" })
     const confirm = dialog.getByRole("button", {
-      name: "Confirm abort",
+      name: "Confirm cancellation",
       exact: true,
     })
     await expect(confirm).toBeDisabled()
-    await dialog.getByLabel("Abort reason").fill(" \t\n ")
+    await dialog.getByLabel("Cancellation reason").fill(" \t\n ")
     await expect(confirm).toBeDisabled()
     await dialog
-      .getByRole("form", { name: "Confirm run abort" })
+      .getByRole("form", { name: "Confirm run cancellation" })
       .evaluate((form: HTMLFormElement) => form.requestSubmit())
     await expect(dialog.getByRole("alert")).toContainText("1-500")
     expect(posts).toBe(0)
     const reason = `Browser-confirmed ${randomUUID()}`
-    await dialog.getByLabel("Abort reason").fill(reason)
+    await dialog.getByLabel("Cancellation reason").fill(reason)
     const axeDialog = await new AxeBuilder({ page })
       .withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"])
       .analyze()
@@ -91,18 +91,19 @@ test("confirmed Operator abort requires a reason and shows actual immutable attr
     await expect(dialog).toBeHidden()
     const banner = page
       .getByRole("status")
-      .filter({ hasText: "Recorded abort" })
-    await expect(banner).toContainText("The run is Aborted.")
+      .filter({ hasText: "Recorded cancellation" })
+    await expect(banner).toContainText("The run is cancelled (Aborted).")
     await expect(banner).toContainText(receipt.by)
     await expect(banner).toContainText(receipt.byName)
-    await expect(banner).toContainText(receipt.at)
+    await expect(banner.locator("time")).toHaveAttribute("datetime", receipt.at)
+    await expect(banner.locator("time")).toHaveAttribute("title", receipt.at)
     await expect(banner).toContainText(reason)
     await expect(banner).toContainText("UI")
     await expect(
-      page.getByRole("button", { name: "Abort run", exact: true })
+      page.getByRole("button", { name: "Cancel run", exact: true })
     ).toHaveCount(0)
     await expect(
-      page.getByRole("region", { name: "Run controls" })
+      page.getByRole("region", { name: "Run controls", exact: true })
     ).toBeFocused()
     expect(snapshots).toBe(1)
     for (const dark of [false, true]) {
@@ -129,7 +130,7 @@ test("confirmed Operator abort requires a reason and shows actual immutable attr
     }
     await page.reload()
     await expect(banner).toContainText(reason)
-    await expect(banner).toContainText(receipt.at)
+    await expect(banner.locator("time")).toHaveAttribute("datetime", receipt.at)
     await page
       .getByRole("link", { name: "Series history", exact: true })
       .click()
@@ -140,7 +141,10 @@ test("confirmed Operator abort requires a reason and shows actual immutable attr
     await expect(row).toContainText("Aborted")
     await expect(row).toContainText(reason)
     await expect(row).toContainText(receipt.by)
-    await expect(row).toContainText(receipt.at)
+    await expect(row.locator(`time[datetime="${receipt.at}"]`)).toHaveAttribute(
+      "title",
+      receipt.at
+    )
     const after = await request.get(`/api/v1/schedules/${schedule.id}`)
     expect(after.headers().etag).toBe(etag)
     expect(scheduleSchema.parse(parseJson(await after.text())).paused).toBe(

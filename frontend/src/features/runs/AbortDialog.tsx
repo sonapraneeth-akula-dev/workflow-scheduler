@@ -4,6 +4,8 @@ import { ErrorNotice } from "@/components/ErrorNotice"
 import { formatTimestamp } from "@/lib/timestamps"
 import { StatusBadge } from "@/components/StatusBadge"
 import { Button } from "@/components/ui/button"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Textarea } from "@/components/ui/textarea"
 import { Can } from "@/components/ui/Can"
 import {
   AlertDialog,
@@ -38,9 +40,9 @@ export const AbortDialog = memo(function AbortDialog({
     retry: false,
     mutationFn: (reason: string) => {
       if (!permissions.can("Operator"))
-        throw new Error("Operator permission is required to abort this run.")
+        throw new Error("Operator permission is required to cancel this run.")
       if (!live || status > 1 || recordedAbort)
-        throw new Error("A live queued or running run is required to abort.")
+        throw new Error("A live queued or running run is required to cancel.")
       return abortRun(runId, reason)
     },
     onSuccess: () => {
@@ -78,7 +80,7 @@ export const AbortDialog = memo(function AbortDialog({
           <Can permissions={permissions} role="Operator">
             <AlertDialogTrigger asChild>
               <Button variant="destructive" disabled={mutation.isPending}>
-                Abort run
+                Cancel run
               </Button>
             </AlertDialogTrigger>
           </Can>
@@ -92,41 +94,41 @@ export const AbortDialog = memo(function AbortDialog({
           }}
         >
           <form
-            aria-label="Confirm run abort"
+            aria-label="Confirm run cancellation"
             onSubmit={submit}
             className="min-w-0 space-y-4"
           >
             <AlertDialogHeader>
-              <AlertDialogTitle>Abort this run?</AlertDialogTitle>
+              <AlertDialogTitle>Cancel this run?</AlertDialogTitle>
               <AlertDialogDescription>
                 Cancels queued work and signals running tasks to stop. Cleanup
                 and always-run stages may continue. The schedule is not paused.
                 An accepted request does not mean work has stopped.
               </AlertDialogDescription>
             </AlertDialogHeader>
-            <div className="space-y-2">
-              <label htmlFor={id} className="block font-medium">
-                Abort reason
-              </label>
-              <textarea
-                id={id}
-                value={reason}
-                onChange={(event) => {
-                  setReason(event.currentTarget.value)
-                  setValidation(undefined)
-                }}
-                required
-                maxLength={500}
-                readOnly={mutation.isPending}
-                aria-describedby={`${id}-help`}
-                aria-invalid={validation !== undefined}
-                className="min-h-24 w-full rounded border bg-background p-2"
-              />
-              <p id={`${id}-help`} className="text-sm text-muted-foreground">
-                Required, 1-500 characters. The original actor, time, reason and
-                source are retained for audit.
-              </p>
-            </div>
+            <FieldGroup>
+              <Field data-invalid={validation !== undefined}>
+                <FieldLabel htmlFor={id}>Cancellation reason</FieldLabel>
+                <Textarea
+                  id={id}
+                  value={reason}
+                  onChange={(event) => {
+                    setReason(event.currentTarget.value)
+                    setValidation(undefined)
+                  }}
+                  required
+                  maxLength={500}
+                  readOnly={mutation.isPending}
+                  aria-describedby={`${id}-help`}
+                  aria-invalid={validation !== undefined}
+                  className="min-h-24"
+                />
+                <p id={`${id}-help`} className="text-sm text-muted-foreground">
+                  Required, 1-500 characters. The original actor, time, reason
+                  and source are retained for audit.
+                </p>
+              </Field>
+            </FieldGroup>
             {validation ? <p role="alert">{validation}</p> : null}
             {!live || status > 1 || recordedAbort ? (
               <p role="status">
@@ -154,7 +156,9 @@ export const AbortDialog = memo(function AbortDialog({
                   !abortReasonSchema.safeParse(reason).success
                 }
               >
-                {mutation.isPending ? "Accepting abort..." : "Confirm abort"}
+                {mutation.isPending
+                  ? "Requesting cancellation..."
+                  : "Confirm cancellation"}
               </Button>
             </AlertDialogFooter>
           </form>
@@ -164,17 +168,17 @@ export const AbortDialog = memo(function AbortDialog({
       {!open && mutation.error ? <ErrorNotice error={mutation.error} /> : null}
       {abort ? (
         <section
-          aria-label="Run abort details"
+          aria-label="Run cancellation details"
           role="status"
           className="space-y-2 rounded-md border p-4"
         >
           <h2 className="text-lg font-semibold">
-            {recordedAbort ? "Recorded abort" : "Abort accepted"}
+            {recordedAbort ? "Recorded cancellation" : "Cancellation requested"}
           </h2>
           <p>
             {recordedAbort
               ? status === 5
-                ? "The run is Aborted. Work has stopped."
+                ? "The run is cancelled (Aborted). Work has stopped."
                 : "Cancellation is recorded. Cleanup may still be running; wait for Aborted."
               : "Waiting for committed run state. Acceptance does not mean tasks have stopped."}
           </p>
@@ -198,7 +202,8 @@ export const AbortDialog = memo(function AbortDialog({
         </section>
       ) : status === 5 ? (
         <p role="status">
-          Run Aborted; original abort details were not recorded.
+          Run cancelled (Aborted); original cancellation details were not
+          recorded.
         </p>
       ) : null}
     </section>

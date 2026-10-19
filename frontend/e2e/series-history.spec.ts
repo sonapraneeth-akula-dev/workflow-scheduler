@@ -276,7 +276,7 @@ test("workflow and series history show actual committed abort attribution and re
     await page.goto(`/series/${schedule.seriesId}`)
     const form = page.getByRole("form", { name: "History filters" })
     await form.getByLabel("Run status").selectOption("Aborted")
-    await form.getByLabel("Aborted by (principal UUID)").fill(receipt.by)
+    await form.getByLabel("Cancelled by (principal UUID)").fill(receipt.by)
     await form.getByLabel("History order").selectOption("createdAtAsc")
     await form
       .getByRole("button", { name: "Filter history", exact: true })
@@ -294,7 +294,10 @@ test("workflow and series history show actual committed abort attribution and re
     await expect(table).not.toContainText("9223372036854775807")
     const row = table.getByRole("row").filter({ hasText: runId })
     await expect(row).toContainText(receipt.by)
-    await expect(row).toContainText(receipt.at)
+    await expect(row.locator(`time[datetime="${receipt.at}"]`)).toHaveAttribute(
+      "title",
+      receipt.at
+    )
     await expect(
       row.getByRole("link", { name: versionId, exact: true })
     ).toHaveAttribute(
@@ -303,7 +306,7 @@ test("workflow and series history show actual committed abort attribution and re
     )
     await page.goto(copied)
     await expect(form.getByLabel("Run status")).toHaveValue("Aborted")
-    await expect(form.getByLabel("Aborted by (principal UUID)")).toHaveValue(
+    await expect(form.getByLabel("Cancelled by (principal UUID)")).toHaveValue(
       receipt.by
     )
     await expect(form.getByLabel("History order")).toHaveValue("createdAtAsc")

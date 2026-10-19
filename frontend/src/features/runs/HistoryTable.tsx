@@ -68,7 +68,7 @@ export function HistoryFilters({
         </Field>
         <Field className="min-w-0" data-invalid={error !== undefined}>
           <FieldLabel htmlFor={`${id}-abortedBy`} className="whitespace-nowrap">
-            Aborted by (principal UUID)
+            Cancelled by (principal UUID)
           </FieldLabel>
           <Input
             id={`${id}-abortedBy`}
@@ -152,6 +152,9 @@ export function HistoryTable({
   const rows = accessDenied(query.error)
     ? undefined
     : query.data?.pages.flatMap((page) => page.items)
+  const hasCancellation = rows?.some(
+    (row) => row.abort || row.status === "Aborting" || row.status === "Aborted"
+  )
   const scheduleId = query.error
     ? undefined
     : query.data?.pages.at(-1)?.currentScheduleId
@@ -182,7 +185,7 @@ export function HistoryTable({
       <p className="text-sm text-muted-foreground">
         Times shown in your local timezone. Duration requires recorded start and
         end times. Schedule triggered means a run was created, not that it is
-        still running. Status and aborted-by filters exclude schedule events
+        still running. Status and cancelled-by filters exclude schedule events
         without a run.
       </p>
       {query.isPending ? <p role="status">Loading run history...</p> : null}
@@ -197,8 +200,8 @@ export function HistoryTable({
         >
           <table className="w-full text-left text-sm">
             <caption className="sr-only">
-              Historical runs, versions, trigger, fire reasons and committed
-              abort attribution
+              Historical runs, versions, trigger, scheduling reasons and
+              cancellation audit
             </caption>
             <thead className="border-b">
               <tr>
@@ -208,7 +211,7 @@ export function HistoryTable({
                   "Duration",
                   "Trigger",
                   "Executed version",
-                  "Committed abort",
+                  ...(hasCancellation ? ["Cancellation"] : []),
                 ].map((label) => (
                   <th scope="col" key={label} className="p-3">
                     {label}
@@ -321,31 +324,41 @@ export function HistoryTable({
                         "Not applicable"
                       )}
                     </td>
-                    <td className="p-3">
-                      {row.abort ? (
-                        <dl className="max-w-xs space-y-1 break-words">
-                          <dt className="font-medium">By</dt>
-                          <dd>
-                            {row.abort.byName || row.abort.by}
-                            <code className="block">{row.abort.by}</code>
-                          </dd>
-                          <dt className="font-medium">At</dt>
-                          <dd>
-                            <time dateTime={row.abort.at} title={row.abort.at}>
-                              {formatTimestamp(row.abort.at)}
-                            </time>
-                          </dd>
-                          <dt className="font-medium">Reason</dt>
-                          <dd className="whitespace-pre-wrap">
-                            {row.abort.reason}
-                          </dd>
-                          <dt className="font-medium">Source</dt>
-                          <dd>{row.abort.source}</dd>
-                        </dl>
-                      ) : (
-                        "Not recorded"
-                      )}
-                    </td>
+                    {hasCancellation ? (
+                      <td className="p-3">
+                        {row.abort ? (
+                          <dl className="max-w-xs space-y-1 break-words">
+                            <dt className="font-medium">By</dt>
+                            <dd>
+                              {row.abort.byName || row.abort.by}
+                              <code className="block">{row.abort.by}</code>
+                            </dd>
+                            <dt className="font-medium">At</dt>
+                            <dd>
+                              <time
+                                dateTime={row.abort.at}
+                                title={row.abort.at}
+                              >
+                                {formatTimestamp(row.abort.at)}
+                              </time>
+                            </dd>
+                            <dt className="font-medium">Reason</dt>
+                            <dd className="whitespace-pre-wrap">
+                              {row.abort.reason}
+                            </dd>
+                            <dt className="font-medium">Source</dt>
+                            <dd>{row.abort.source}</dd>
+                          </dl>
+                        ) : row.status === "Aborted" ||
+                          row.status === "Aborting" ? (
+                          "Cancellation details not recorded"
+                        ) : row.kind === "Fire" ? (
+                          "Not applicable"
+                        ) : (
+                          "Not cancelled"
+                        )}
+                      </td>
+                    ) : null}
                   </tr>
                 )
               })}

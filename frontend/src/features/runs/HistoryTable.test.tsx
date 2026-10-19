@@ -231,8 +231,49 @@ describe("historical table", () => {
     vi.mocked(getHistory).mockResolvedValue(page([{ ...row, abort: null }]))
     show()
     expect(await screen.findByRole("table")).toHaveTextContent("Aborted")
-    expect(screen.getByRole("table")).toHaveTextContent("Not recorded")
+    expect(screen.getByRole("table")).toHaveTextContent(
+      "Cancellation details not recorded"
+    )
     expect(screen.queryByText("Operator Name")).not.toBeInTheDocument()
+  })
+  it("omits the cancellation column when no loaded run was cancelled", async () => {
+    vi.mocked(getHistory).mockResolvedValue(
+      page([{ ...row, status: "Succeeded", abort: null }])
+    )
+    show()
+    await screen.findByRole("table")
+    expect(
+      screen.queryByRole("columnheader", { name: "Cancellation" })
+    ).not.toBeInTheDocument()
+    expect(screen.getAllByRole("columnheader")).toHaveLength(5)
+    expect(screen.queryByText("Not cancelled")).not.toBeInTheDocument()
+  })
+  it("distinguishes unchanged successful runs from recorded and legacy cancellations", async () => {
+    vi.mocked(getHistory).mockResolvedValue(
+      page([
+        row,
+        {
+          ...row,
+          runId: "019ed132-2f44-7000-8000-000000000011",
+          status: "Succeeded",
+          abort: null,
+        },
+        {
+          ...row,
+          runId: "019ed132-2f44-7000-8000-000000000012",
+          status: "Aborted",
+          abort: null,
+        },
+      ])
+    )
+    show()
+    await screen.findByRole("table")
+    expect(
+      screen.getByRole("columnheader", { name: "Cancellation" })
+    ).toBeVisible()
+    expect(screen.getByText("Not cancelled")).toBeVisible()
+    expect(screen.getByText("Cancellation details not recorded")).toBeVisible()
+    expect(screen.getByText("Operator Name")).toBeVisible()
   })
   it("announces loading, empty and failed reads without false success", async () => {
     vi.mocked(getHistory).mockResolvedValue(page([]))
@@ -294,7 +335,7 @@ describe("historical table", () => {
       />
     )
     expect(screen.getByLabelText("Run status")).toHaveValue("Aborted")
-    expect(screen.getByLabelText("Aborted by (principal UUID)")).toHaveValue(
+    expect(screen.getByLabelText("Cancelled by (principal UUID)")).toHaveValue(
       row.abort!.by
     )
     screen.getByRole("button", { name: "Filter history" }).focus()
@@ -304,9 +345,9 @@ describe("historical table", () => {
       abortedBy: row.abort!.by,
       sort: "createdAtAsc",
     })
-    await user.clear(screen.getByLabelText("Aborted by (principal UUID)"))
+    await user.clear(screen.getByLabelText("Cancelled by (principal UUID)"))
     await user.type(
-      screen.getByLabelText("Aborted by (principal UUID)"),
+      screen.getByLabelText("Cancelled by (principal UUID)"),
       "not-a-principal"
     )
     await user.click(screen.getByRole("button", { name: "Filter history" }))

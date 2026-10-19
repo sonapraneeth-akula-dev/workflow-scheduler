@@ -56,8 +56,8 @@ function show(props = { ...run, live: true }) {
   return { ...view, client }
 }
 async function open() {
-  fireEvent.click(await screen.findByRole("button", { name: "Abort run" }))
-  return screen.findByRole("alertdialog", { name: "Abort this run?" })
+  fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }))
+  return screen.findByRole("alertdialog", { name: "Cancel this run?" })
 }
 describe("confirmed abort controls", () => {
   beforeEach(() => vi.resetAllMocks())
@@ -76,7 +76,7 @@ describe("confirmed abort controls", () => {
         ).toBe("success")
       )
       expect(
-        screen.queryByRole("button", { name: "Abort run" })
+        screen.queryByRole("button", { name: "Cancel run" })
       ).not.toBeInTheDocument()
       expect(abortRun).not.toHaveBeenCalled()
     }
@@ -90,7 +90,7 @@ describe("confirmed abort controls", () => {
       "Permissions unavailable."
     )
     expect(
-      screen.queryByRole("button", { name: "Abort run" })
+      screen.queryByRole("button", { name: "Cancel run" })
     ).not.toBeInTheDocument()
   })
   it.each([2, 3, 4, 5, 6])(
@@ -104,7 +104,7 @@ describe("confirmed abort controls", () => {
         ).toBe("success")
       )
       expect(
-        screen.queryByRole("button", { name: "Abort run" })
+        screen.queryByRole("button", { name: "Cancel run" })
       ).not.toBeInTheDocument()
     }
   )
@@ -113,7 +113,7 @@ describe("confirmed abort controls", () => {
     show({ ...run, live: false })
     expect(screen.getByText(/Last confirmed run status/)).toBeVisible()
     expect(
-      screen.queryByRole("button", { name: "Abort run" })
+      screen.queryByRole("button", { name: "Cancel run" })
     ).not.toBeInTheDocument()
   })
   it("blocks empty/whitespace/overlong reasons even through direct form submission", async () => {
@@ -121,15 +121,15 @@ describe("confirmed abort controls", () => {
     show()
     const dialog = await open()
     const confirm = within(dialog).getByRole("button", {
-      name: "Confirm abort",
+      name: "Confirm cancellation",
     })
     expect(confirm).toBeDisabled()
     for (const reason of ["", " \t\n", "x".repeat(501)]) {
-      fireEvent.change(within(dialog).getByLabelText("Abort reason"), {
+      fireEvent.change(within(dialog).getByLabelText("Cancellation reason"), {
         target: { value: reason },
       })
       fireEvent.submit(
-        within(dialog).getByRole("form", { name: "Confirm run abort" })
+        within(dialog).getByRole("form", { name: "Confirm run cancellation" })
       )
       expect(within(dialog).getByRole("alert")).toHaveTextContent("1-500")
     }
@@ -147,12 +147,15 @@ describe("confirmed abort controls", () => {
     const user = userEvent.setup()
     const dialog = await open()
     const reason = "  preserve reason  "
-    await user.type(within(dialog).getByLabelText("Abort reason"), reason)
+    await user.type(
+      within(dialog).getByLabelText("Cancellation reason"),
+      reason
+    )
     expect(abortRun).not.toHaveBeenCalled()
-    within(dialog).getByRole("button", { name: "Confirm abort" }).focus()
+    within(dialog).getByRole("button", { name: "Confirm cancellation" }).focus()
     await user.keyboard("{Enter}")
     const banner = await screen.findByRole("status")
-    expect(banner).toHaveTextContent("Abort accepted")
+    expect(banner).toHaveTextContent("Cancellation requested")
     expect(banner).toHaveTextContent("Waiting for committed run state")
     expect(banner).toHaveTextContent("Original operator")
     expect(banner).toHaveTextContent(formatTimestamp(receipt.at))
@@ -187,7 +190,9 @@ describe("confirmed abort controls", () => {
       </QueryClientProvider>
     )
     expect(screen.getByText("Aborted", { exact: true })).toBeVisible()
-    expect(screen.getByRole("status")).toHaveTextContent("The run is Aborted")
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "The run is cancelled (Aborted)"
+    )
     expect(screen.getByRole("status")).toHaveTextContent("Original reason")
   })
   it("keeps server errors and drafts visible without automatic retries", async () => {
@@ -197,14 +202,14 @@ describe("confirmed abort controls", () => {
     )
     show()
     const dialog = await open()
-    fireEvent.change(within(dialog).getByLabelText("Abort reason"), {
+    fireEvent.change(within(dialog).getByLabelText("Cancellation reason"), {
       target: { value: "Keep this draft" },
     })
     fireEvent.click(
-      within(dialog).getByRole("button", { name: "Confirm abort" })
+      within(dialog).getByRole("button", { name: "Confirm cancellation" })
     )
     expect(await screen.findByRole("alert")).toHaveTextContent("409")
-    expect(within(dialog).getByLabelText("Abort reason")).toHaveValue(
+    expect(within(dialog).getByLabelText("Cancellation reason")).toHaveValue(
       "Keep this draft"
     )
     expect(abortRun).toHaveBeenCalledTimes(1)
@@ -213,18 +218,18 @@ describe("confirmed abort controls", () => {
     vi.mocked(getPermissions).mockResolvedValue(grant)
     const { client } = show()
     const dialog = await open()
-    fireEvent.change(within(dialog).getByLabelText("Abort reason"), {
+    fireEvent.change(within(dialog).getByLabelText("Cancellation reason"), {
       target: { value: "Reason" },
     })
     vi.mocked(getPermissions).mockResolvedValue({ ...grant, operator: false })
     await client.invalidateQueries({ queryKey: ["permissions"] })
     await waitFor(() =>
       expect(
-        within(dialog).getByRole("button", { name: "Confirm abort" })
+        within(dialog).getByRole("button", { name: "Confirm cancellation" })
       ).toBeDisabled()
     )
     fireEvent.submit(
-      within(dialog).getByRole("form", { name: "Confirm run abort" })
+      within(dialog).getByRole("form", { name: "Confirm run cancellation" })
     )
     await waitFor(() => expect(abortRun).not.toHaveBeenCalled())
   })

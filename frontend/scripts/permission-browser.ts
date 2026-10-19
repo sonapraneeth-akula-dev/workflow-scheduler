@@ -131,10 +131,10 @@ try {
         .parse(await permission.json())
       assert.deepEqual(viewer, { viewer: true, operator: false })
       await expect(
-        page.getByRole("region", { name: "Run controls" })
+        page.getByRole("region", { name: "Run controls", exact: true })
       ).toContainText("Queued")
       await expect(
-        page.getByRole("button", { name: "Abort run", exact: true })
+        page.getByRole("button", { name: "Cancel run", exact: true })
       ).toHaveCount(0)
       assert.deepEqual(
         mutations,

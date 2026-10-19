@@ -824,6 +824,15 @@ recorded explanation, or explicitly report an unavailable scheduling reason.
 The history table omits variables; it focuses on outcomes, timing, versions
 and cancellation audit.
 
+Open a queued/running run and select **Cancel run** (Operator/Admin permission).
+A reason and confirmation are required. The authenticated actor's name/ID,
+timestamp, exact reason and UI/API/CLI source are retained for audit; retries
+preserve the first accepted request. Cancellation does not pause the schedule.
+Acceptance is not completion: cleanup may continue until the run is **Aborted**.
+History shows a **Cancellation** column only when a loaded row has cancellation
+facts or an Aborting/Aborted status. These records support operator handoffs and
+incident/audit investigation; missing legacy attribution is never invented.
+
 ### Service history
 
 Service history cards and tables show individual run instances inline.
