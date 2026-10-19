@@ -63,7 +63,9 @@ test("Outputs tab reads actual SDK attempt snapshots through real HTTP during/af
   test.setTimeout(90_000)
   const stack = z
     .object({
-      container: z.literal("wf-task-outputs-3adec91f"),
+      container: z
+        .string()
+        .regex(/^kardia-test-task-outputs-postgres-[0-9a-f-]{12}$/),
       workflowId: z.string(),
     })
     .parse(
