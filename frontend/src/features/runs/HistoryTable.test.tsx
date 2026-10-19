@@ -163,11 +163,69 @@ describe("historical table", () => {
       ])
     )
     show()
-    expect(await screen.findByRole("table")).toHaveTextContent("Skipped")
+    expect(await screen.findByRole("table")).toHaveTextContent(
+      "Schedule skipped"
+    )
     expect(screen.getByRole("table")).toHaveTextContent("overlap")
     expect(screen.getByRole("table")).toHaveTextContent("No run")
     expect(screen.getByRole("table")).toHaveTextContent("Not applicable")
     expect(screen.queryByText("0 ms")).not.toBeInTheDocument()
+  })
+  it("distinguishes schedule creation from the current run result without a missing-reason warning", async () => {
+    vi.mocked(getHistory).mockResolvedValue(
+      page([
+        {
+          ...row,
+          status: "Succeeded",
+          trigger: "Schedule",
+          abort: null,
+          fire: {
+            scheduleId: row.versionId!,
+            fireAt: row.at,
+            outcome: "Started",
+            reason: null,
+            scheduleConfigVersionId: null,
+          },
+        },
+      ])
+    )
+    show()
+    const table = await screen.findByRole("table")
+    expect(table).toHaveTextContent("Succeeded")
+    expect(table).toHaveTextContent("Schedule triggered")
+    expect(table).not.toHaveTextContent("Started")
+    expect(table).not.toHaveTextContent("Reason not recorded")
+    expect(table).not.toHaveTextContent("Scheduling reason not recorded")
+  })
+  it("keeps a missing reason explicit for a skipped schedule rather than inventing an explanation", async () => {
+    vi.mocked(getHistory).mockResolvedValue(
+      page([
+        {
+          ...row,
+          kind: "Fire",
+          runId: null,
+          versionId: null,
+          status: null,
+          startedAt: null,
+          endedAt: null,
+          durationMs: null,
+          trigger: null,
+          abort: null,
+          variables: [],
+          fire: {
+            scheduleId: row.versionId!,
+            fireAt: row.at,
+            outcome: "Skipped",
+            reason: null,
+            scheduleConfigVersionId: null,
+          },
+        },
+      ])
+    )
+    show()
+    expect(await screen.findByRole("table")).toHaveTextContent(
+      "Scheduling reason not recorded."
+    )
   })
   it("does not invent an actor for legacy Aborted rows", async () => {
     vi.mocked(getHistory).mockResolvedValue(page([{ ...row, abort: null }]))

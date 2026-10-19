@@ -60,7 +60,7 @@ export function HistoryFilters({
             className="w-full"
             defaultValue={search.status ?? ""}
           >
-            <option value="">All statuses and fire facts</option>
+            <option value="">All statuses and schedule events</option>
             {runStatuses.map((status) => (
               <option key={status}>{status}</option>
             ))}
@@ -89,7 +89,7 @@ export function HistoryFilters({
             className="w-full"
             defaultValue={search.outcome ?? ""}
           >
-            <option value="">Runs and retained fire facts</option>
+            <option value="">Runs and schedule events</option>
             <option value="Run">Runs only</option>
             <option>Skipped</option>
             <option>Missed</option>
@@ -158,7 +158,7 @@ export function HistoryTable({
   return (
     <section aria-label="Run history" className="min-w-0 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-xl font-semibold">Runs and fire history</h2>
+        <h2 className="text-xl font-semibold">Run history</h2>
         <Button
           variant="outline"
           disabled={query.isFetching}
@@ -181,7 +181,9 @@ export function HistoryTable({
       ) : null}
       <p className="text-sm text-muted-foreground">
         Times shown in your local timezone. Duration requires recorded start and
-        end times. Status and aborted-by filters exclude fire-only facts.
+        end times. Schedule triggered means a run was created, not that it is
+        still running. Status and aborted-by filters exclude schedule events
+        without a run.
       </p>
       {query.isPending ? <p role="status">Loading run history...</p> : null}
       {query.error ? <ErrorNotice error={query.error} /> : null}
@@ -202,7 +204,7 @@ export function HistoryTable({
               <tr>
                 {[
                   "Time (local) / Run",
-                  "Status / Fire outcome",
+                  "Status / Scheduling",
                   "Duration",
                   "Trigger",
                   "Executed version",
@@ -218,6 +220,19 @@ export function HistoryTable({
               {rows.map((row) => {
                 const [team = "", type = "", wf = ""] =
                   row.workflowId.split("/")
+                const reason = row.fire?.reason
+                const scheduleReason =
+                  reason === "overlap"
+                    ? "Another run was active (overlap policy)."
+                    : reason === "missed-grace"
+                      ? "Scheduled time exceeded the scheduler's grace period."
+                      : reason === "catch-up"
+                        ? "Recovery run created for the latest missed schedule (catch-up)."
+                        : reason ||
+                          (row.fire?.outcome === "Skipped" ||
+                          row.fire?.outcome === "Missed"
+                            ? "Scheduling reason not recorded."
+                            : null)
                 return (
                   <tr
                     key={`${row.kind}/${row.at}/${row.kind === "Run" ? row.runId : row.fire!.scheduleId}`}
@@ -253,14 +268,32 @@ export function HistoryTable({
                       ) : null}
                     </th>
                     <td className="space-y-2 p-3">
-                      {row.status ? <StatusBadge status={row.status} /> : null}
-                      {row.fire ? (
-                        <>
-                          <Badge variant="secondary">{row.fire.outcome}</Badge>
-                          <p className="max-w-xs break-words">
-                            {row.fire.reason ?? "Reason not recorded"}
-                          </p>
-                        </>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {row.status ? (
+                          <StatusBadge status={row.status} />
+                        ) : null}
+                        {row.fire ? (
+                          <Badge
+                            variant="secondary"
+                            title={
+                              row.fire.outcome === "Started"
+                                ? "The schedule created this run. Its current result is shown by the run status."
+                                : undefined
+                            }
+                          >
+                            {
+                              {
+                                Started: "Schedule triggered",
+                                Skipped: "Schedule skipped",
+                                Missed: "Schedule missed",
+                                CaughtUp: "Recovery triggered",
+                              }[row.fire.outcome]
+                            }
+                          </Badge>
+                        ) : null}
+                      </div>
+                      {scheduleReason ? (
+                        <p className="max-w-xs break-words">{scheduleReason}</p>
                       ) : null}
                     </td>
                     <td className="p-3 whitespace-nowrap">

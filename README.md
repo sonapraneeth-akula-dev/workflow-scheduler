@@ -812,6 +812,18 @@ until a deliberate republish. Use `-Environment ppe -Team operations` to select
 only the production tree against a matching backend; never publish demo
 registries into `prod`/`ppe`.
 
+### Workflow run history
+
+Workflow history groups its identity, **Workflow versions** (registered releases,
+comparisons and activation), **Metrics dashboard** (completed-run/task metrics),
+trigger and subscription actions in a compact header.
+Run status is the current result. **Schedule triggered** means the scheduler
+created that run; it does not mean a completed run is still running. Normal
+schedule starts need no reason. Skipped/missed schedule entries retain their
+recorded explanation, or explicitly report an unavailable scheduling reason.
+The history table omits variables; it focuses on outcomes, timing, versions
+and cancellation audit.
+
 ### Service history
 
 Service history cards and tables show individual run instances inline.

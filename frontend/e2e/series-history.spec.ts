@@ -44,7 +44,7 @@ test("actual catch-up run is badged while its retained source remains Missed", a
     "Recovery run for the latest missed scheduled fire"
   )
   await expect(page.getByRole("row").filter({ has: badge })).toContainText(
-    "Missed"
+    "Schedule missed"
   )
   await accessible(page)
   await page.getByRole("button", { name: "Dark theme" }).click()
@@ -84,7 +84,7 @@ test("retained skipped fires page through the real API and remain accessible on 
   await expect(page).toHaveURL(`/series/${fixture.historySeriesId}`)
   const table = page.getByRole("table")
   await expect(table.getByRole("row")).toHaveCount(51)
-  await expect(table.getByRole("row").nth(1)).toContainText("Skipped")
+  await expect(table.getByRole("row").nth(1)).toContainText("Schedule skipped")
   await expect(table.getByRole("row").nth(1)).toContainText("overlap")
   await expect(table.getByRole("row").nth(1)).toContainText("No run")
   await accessible(page)
@@ -165,11 +165,14 @@ test("actual scheduler overlap creates a visible skip without a run", async ({
       page
         .getByRole("table")
         .getByRole("row")
-        .filter({ hasText: "Skipped" })
+        .filter({ hasText: "Schedule skipped" })
         .first()
     ).toContainText("overlap")
     await expect(
-      page.getByRole("table").getByRole("row").filter({ hasText: "Started" })
+      page
+        .getByRole("table")
+        .getByRole("row")
+        .filter({ hasText: "Schedule triggered" })
     ).toHaveCount(1)
     await accessible(page)
   } finally {
