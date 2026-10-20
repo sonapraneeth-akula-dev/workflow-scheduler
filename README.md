@@ -835,6 +835,10 @@ ignores location and condition: its errors are measured honestly, not hidden
 behind a success threshold. Successful execution does not imply a useful
 property valuation model.
 
+The run's Graph/Timeline/Metrics/Logs/Outputs/Reports/System Events tab bar
+stays at the top of the viewport while scrolling its content. On narrow screens,
+the same bar scrolls horizontally; the global header and run summary scroll normally.
+
 Run directly without a backend:
 
 ```powershell

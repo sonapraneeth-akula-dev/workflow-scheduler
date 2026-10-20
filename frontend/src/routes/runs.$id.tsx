@@ -152,7 +152,7 @@ function RunDetail() {
           <Tabs.Root defaultValue="graph" className="min-w-0 space-y-3">
             <Tabs.List
               aria-label="Run views"
-              className="flex w-full min-w-0 flex-nowrap gap-1 overflow-x-auto border-b bg-card p-1"
+              className="sticky top-0 z-20 flex w-full min-w-0 flex-nowrap gap-1 overflow-x-auto border-b bg-card p-1 shadow-sm"
             >
               <Tabs.Trigger value="graph" className={runTabClassName}>
                 Graph

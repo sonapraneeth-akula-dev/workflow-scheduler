@@ -23,6 +23,42 @@ async function openListedRun(page: Page) {
 }
 
 for (const width of [320, 768, 2000]) {
+  test(`run navigation sticks to the viewport while content scrolls at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 700 })
+    await openListedRun(page)
+    const tabs = page.getByRole("tablist", { name: "Run views", exact: true })
+    await tabs.getByRole("tab", { name: "System Events", exact: true }).click()
+    await expect(
+      page.getByRole("region", { name: "Scrollable system event table" })
+    ).toBeVisible()
+    await page.evaluate(() => window.scrollTo(0, 0))
+    const original = await tabs.boundingBox()
+    expect(original!.y).toBeGreaterThan(0)
+    await page.evaluate((top) => window.scrollTo(0, top + 200), original!.y)
+    await expect
+      .poll(async () => (await tabs.boundingBox())!.y)
+      .toBeCloseTo(0, 0)
+    const after = await tabs.boundingBox()
+    expect(after!.height).toBe(original!.height)
+    expect(after!.height).toBeLessThanOrEqual(70)
+    expect(
+      (await page.getByRole("region", { name: "Run summary" }).boundingBox())!.y
+    ).toBeLessThan(0)
+    await expect(tabs).toHaveCSS("position", "sticky")
+    await expect(tabs).toHaveCSS("top", "0px")
+    const last = tabs.getByRole("tab", { name: "System Events", exact: true })
+    await last.focus()
+    await page.keyboard.press("Home")
+    await expect(
+      tabs.getByRole("tab", { name: "Graph", exact: true })
+    ).toBeFocused()
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth)
+    ).toBeLessThanOrEqual(width)
+  })
+
   test(`run summary keeps the graph near the top at ${width}px`, async ({
     page,
   }) => {
@@ -147,10 +183,9 @@ for (const colorScheme of ["light", "dark"] as const) {
         const tab = tabs.getByRole("tab", { name, exact: true })
         await tab.click()
         await expect(tabs.getByRole("tab", { selected: true })).toHaveText(name)
-        await expect(page.getByRole("tabpanel")).toHaveAttribute(
-          "aria-labelledby",
-          (await tab.getAttribute("id"))!
-        )
+        await expect(
+          page.getByRole("tabpanel", { name, exact: true })
+        ).toHaveAttribute("aria-labelledby", (await tab.getAttribute("id"))!)
         await expect(tab).toHaveCSS("border-bottom-width", "2px")
         await expect(tab).toHaveCSS("font-weight", "600")
         await expect(tab).toHaveCSS("border-top-left-radius", "0px")
