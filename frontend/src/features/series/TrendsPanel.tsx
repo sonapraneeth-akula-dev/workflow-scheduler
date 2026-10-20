@@ -57,6 +57,8 @@ export function TrendsPanel({
     const x = data.days.map((day) => day.day)
     const success: ChartData = {
       type: "bar",
+      xLabel: "UTC creation day",
+      yLabel: "Success rate (%)",
       x,
       series: [
         {
@@ -71,6 +73,8 @@ export function TrendsPanel({
     }
     const timing: ChartData = {
       type: "bar",
+      xLabel: "UTC creation day",
+      yLabel: "Duration (ms)",
       x,
       series: [
         {

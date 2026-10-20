@@ -7,10 +7,12 @@ import {
   waitFor,
   within,
 } from "@testing-library/react"
-import type uPlot from "uplot"
+import uPlot from "uplot"
+import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { parseChart } from "./chartData"
 import ChartReport, { Plot } from "./ChartReport"
+import { createChartPng } from "./chartExport"
 
 const { FakePlot } = vi.hoisted(() => {
   class FakePlot {
@@ -23,6 +25,14 @@ const { FakePlot } = vi.hoisted(() => {
     }
     readonly options: uPlot.Options
     readonly data: uPlot.AlignedData
+    readonly axes: uPlot.Axis[]
+    readonly cursor = { idx: null as number | null, left: -10, top: -10 }
+    readonly root: HTMLElement
+    readonly width = 640
+    readonly height = 360
+    readonly bbox = { left: 80, top: 0, width: 560, height: 300 }
+    valToPos = vi.fn((value: number) => value)
+    setCursor = vi.fn()
     destroy = vi.fn()
     redraw = vi.fn()
     setSize = vi.fn()
@@ -33,6 +43,8 @@ const { FakePlot } = vi.hoisted(() => {
     ) {
       this.options = options
       this.data = data
+      this.axes = options.axes ?? []
+      this.root = target
       target.appendChild(document.createElement("canvas"))
       FakePlot.instances.push(this)
     }
@@ -40,6 +52,7 @@ const { FakePlot } = vi.hoisted(() => {
   return { FakePlot }
 })
 vi.mock("uplot", () => ({ default: FakePlot }))
+vi.mock("./chartExport", () => ({ createChartPng: vi.fn() }))
 const line = {
   type: "line",
   x: [1, 2, 3],
@@ -58,6 +71,13 @@ describe("validated chart data", () => {
         })
       ).x
     ).toEqual(["first", "second", "third"])
+  })
+  it("accepts optional axis labels without changing legacy payloads", () => {
+    const labeled = { ...line, xLabel: "Epoch", yLabel: "RMSE (USD)" }
+    expect(parseChart(JSON.stringify(labeled))).toEqual(labeled)
+    expect(parseChart(JSON.stringify(line))).toEqual(line)
+    for (const xLabel of ["", " ", "x".repeat(257), 42, null])
+      expect(() => parseChart(JSON.stringify({ ...line, xLabel }))).toThrow()
   })
   it.each([
     { ...line, x: [2, 1, 3] },
@@ -85,6 +105,7 @@ describe("owned uPlot chart and tabular alternative", () => {
   beforeEach(() => {
     FakePlot.instances.length = 0
     FakePlot.paths.bars.mockClear()
+    vi.mocked(createChartPng).mockReset()
     vi.stubGlobal("Blob", NodeBlob)
     vi.stubGlobal(
       "ResizeObserver",
@@ -107,7 +128,7 @@ describe("owned uPlot chart and tabular alternative", () => {
     const plot = FakePlot.instances[0]!
     expect(plot.data).toEqual([line.x, line.series[0]!.values])
     expect(plot.options.legend).toEqual({ show: false })
-    expect(plot.options.axes![1]!.size).toBe(80)
+    expect(plot.options.axes![1]!.size).toBeGreaterThanOrEqual(60)
     fireEvent.click(screen.getByText("Chart data table"))
     expect(screen.getByRole("table")).toHaveAttribute("aria-rowcount", "4")
     expect(
@@ -119,6 +140,128 @@ describe("owned uPlot chart and tabular alternative", () => {
     await waitFor(() => expect(plot.redraw).toHaveBeenCalledWith(true))
     view.unmount()
     expect(plot.destroy).toHaveBeenCalledOnce()
+  })
+  it("shows the chart title and meaningful axes with thin subdued gridlines that toggle without rebuilding", async () => {
+    const user = userEvent.setup()
+    render(
+      <Plot
+        title="Learning curve"
+        data={parseChart(
+          JSON.stringify({
+            ...line,
+            xLabel: "Epoch",
+            yLabel: "RMSE (USD)",
+          })
+        )}
+      />
+    )
+    await waitFor(() => expect(FakePlot.instances).toHaveLength(1))
+    expect(screen.getByText("Learning curve", { exact: true })).toBeVisible()
+    expect(
+      screen.getByText("X axis: Epoch; Y axis: RMSE (USD).")
+    ).toBeInTheDocument()
+    const plot = FakePlot.instances[0]!
+    expect(plot.options.axes![0]!.label).toBe("Epoch")
+    expect(plot.options.axes![1]!.label).toBe("RMSE (USD)")
+    for (const axis of plot.axes) {
+      expect(axis.grid?.width).toBeLessThanOrEqual(0.5)
+      expect(axis.grid?.show).toBe(true)
+    }
+    const grid = screen.getByRole("button", { name: "Gridlines" })
+    expect(grid).toHaveAttribute("aria-pressed", "true")
+    await user.click(grid)
+    expect(grid).toHaveAttribute("aria-pressed", "false")
+    expect(plot.axes.every((axis) => axis.grid?.show === false)).toBe(true)
+    expect(FakePlot.instances).toHaveLength(1)
+    await user.click(grid)
+    expect(plot.axes.every((axis) => axis.grid?.show === true)).toBe(true)
+  })
+  it("shows exact hovered X/Y values, including zero and unavailable measurements, and clears the readout on leave", async () => {
+    render(
+      <Plot
+        title="Coordinates"
+        data={parseChart(
+          JSON.stringify({
+            ...line,
+            xLabel: "Epoch",
+            yLabel: "Price (USD)",
+            series: [
+              { label: "<script>value</script>", values: [0, null, 30] },
+            ],
+          })
+        )}
+      />
+    )
+    await waitFor(() => expect(FakePlot.instances).toHaveLength(1))
+    const plot = FakePlot.instances[0]!
+    const hooks = plot.options.hooks?.setCursor
+    if (!Array.isArray(hooks)) throw new Error("Cursor hook missing.")
+    if (!(plot instanceof uPlot))
+      throw new Error("Expected the owned uPlot instance.")
+    const hover = (index: number | null) =>
+      act(() => {
+        plot.cursor.idx = index
+        plot.cursor.left = index === null ? -10 : 20
+        plot.cursor.top = index === null ? -10 : 20
+        for (const hook of hooks) hook?.(plot)
+      })
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
+    hover(0)
+    const tooltip = screen.getByRole("tooltip")
+    expect(tooltip).toHaveTextContent("Epoch: 1")
+    expect(tooltip).toHaveTextContent("Price (USD)")
+    expect(tooltip).toHaveTextContent("<script>value</script> 0")
+    expect(document.querySelector("script")).toBeNull()
+    hover(1)
+    expect(tooltip).toHaveTextContent("Epoch: 2")
+    expect(tooltip).toHaveTextContent("Unavailable")
+    hover(null)
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
+  })
+  it("exports a PNG on demand, revokes its owned URL and surfaces export failures without losing the plot", async () => {
+    const user = userEvent.setup()
+    const create = vi.fn(() => "blob:chart")
+    const revoke = vi.fn()
+    vi.stubGlobal(
+      "URL",
+      class extends URL {
+        static createObjectURL = create
+        static revokeObjectURL = revoke
+      }
+    )
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {})
+    vi.mocked(createChartPng).mockResolvedValue(
+      new Blob(["png"], { type: "image/png" })
+    )
+    render(
+      <Plot title="Chart: sample" data={parseChart(JSON.stringify(line))} />
+    )
+    await waitFor(() => expect(FakePlot.instances).toHaveLength(1))
+    await user.click(
+      screen.getByRole("button", { name: "Export Chart: sample as PNG" })
+    )
+    await waitFor(() => expect(click).toHaveBeenCalledOnce())
+    expect(click.mock.instances[0]).toHaveAttribute(
+      "download",
+      "Chart_ sample.png"
+    )
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith("blob:chart"))
+    vi.mocked(createChartPng).mockRejectedValue(
+      new Error("PNG encoding failed.")
+    )
+    await user.click(
+      screen.getByRole("button", { name: "Export Chart: sample as PNG" })
+    )
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "PNG encoding failed."
+    )
+    expect(
+      screen.getByRole("img", { name: "Chart: sample: line chart" })
+    ).toBeVisible()
+    expect(click).toHaveBeenCalledOnce()
+    click.mockRestore()
   })
   it("uses grouped bar paths rather than hiding overlapping series, without interpreting labels", async () => {
     const label = "<img src=x onerror=alert()>"

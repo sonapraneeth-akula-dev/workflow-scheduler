@@ -79,6 +79,7 @@
     --chart-3: #b45309;
     --chart-4: #7c3aed;
     --chart-5: #be185d;
+    --chart-grid: #dce3ed;
     --radius: 0px;
     --sidebar: var(--card);
     --sidebar-foreground: var(--foreground);
@@ -114,6 +115,7 @@
     --chart-3: #fbbf24;
     --chart-4: #c4b5fd;
     --chart-5: #f9a8d4;
+    --chart-grid: #2c3b52;
 }
 
 /* Include third-party widgets that set fixed or inline corner radii. */

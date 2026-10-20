@@ -3,6 +3,8 @@ import { z } from "zod"
 const chartSchema = z
   .strictObject({
     type: z.enum(["line", "bar"]),
+    xLabel: z.string().trim().min(1).max(256).optional(),
+    yLabel: z.string().trim().min(1).max(256).optional(),
     x: z.array(z.union([z.number().finite(), z.string()])).min(1),
     series: z
       .array(

@@ -190,6 +190,14 @@ describe("resource charts", () => {
       },
     }
     const plots = resourcePlots(data, "task")
+    expect(plots.map((plot) => plot.data.xLabel)).toEqual(
+      Array(3).fill("Sample order (page)")
+    )
+    expect(plots.map((plot) => plot.data.yLabel)).toEqual([
+      "CPU (%)",
+      "RAM (MiB)",
+      "Network rate (B/s)",
+    ])
     expect(plots[0]!.data.x).toEqual([1, 2])
     expect(plots[0]!.data.series[0]!.values).toEqual([null, 0])
     expect(plots[2]!.data.series[0]!.values).toEqual([null, 0])

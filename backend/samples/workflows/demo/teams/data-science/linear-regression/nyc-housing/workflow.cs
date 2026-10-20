@@ -8,7 +8,7 @@ using Wf.Contracts.Definition;
 using Wf.Sdk;
 
 var hosted = args.Contains("--task-host", StringComparer.Ordinal);
-var workflow = Workflow.Define("data-science/linear-regression/nyc-housing", "1.2.1", w => w
+var workflow = Workflow.Define("data-science/linear-regression/nyc-housing", "1.2.2", w => w
     .Type("linear-regression")
     .Metadata("dataset", "nyc-housing")
     .Variables(v => v.Bool("runFinalTest", true).Bool("forceDownload", false)
@@ -70,6 +70,8 @@ var workflow = Workflow.Define("data-science/linear-regression/nyc-housing", "1.
             await Report(ctx, hosted, "chart", "Training and validation RMSE by epoch (USD)", new
             {
                 type = "line",
+                xLabel = "Epoch",
+                yLabel = "RMSE (USD)",
                 x = fit.Learning.Select(point => point.Epoch),
                 series = new[]
                 {
@@ -81,6 +83,8 @@ var workflow = Workflow.Define("data-science/linear-regression/nyc-housing", "1.
             await Report(ctx, hosted, "chart", "Training prices and fitted line by floor area", new
             {
                 type = "line",
+                xLabel = "Building area (sq ft)",
+                yLabel = "Sale price (USD)",
                 x = bins.Select(group => group.Average(row => row.SquareFeet)),
                 series = new[]
                 {
@@ -128,6 +132,8 @@ var workflow = Workflow.Define("data-science/linear-regression/nyc-housing", "1.
             await Report(ctx, hosted, "chart", "Final test: actual versus predicted prices (first 100 by actual price)", new
             {
                 type = "line",
+                xLabel = "Test property (price order)",
+                yLabel = "Sale price (USD)",
                 x = Enumerable.Range(1, chartRows.Length),
                 series = new[]
                 {

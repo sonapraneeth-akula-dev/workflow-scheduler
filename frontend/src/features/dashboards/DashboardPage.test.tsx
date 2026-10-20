@@ -308,6 +308,8 @@ describe("accessible metric dashboard", () => {
     ])
     const latency = chart.mock.calls[0]![0]
     expect(latency.xAxis).toBe("utc-date")
+    expect(latency.data.xLabel).toBe("UTC creation day")
+    expect(latency.data.yLabel).toBe("Execution latency (ms)")
     expect(latency.data.x).toEqual(
       Array.from({ length: 7 }, (_, i) => Date.UTC(2026, 9, 11 + i) / 1000)
     )
@@ -331,6 +333,8 @@ describe("accessible metric dashboard", () => {
     ])
     expect(chart.mock.calls[4]![0].data).toEqual({
       type: "bar",
+      xLabel: "Run status",
+      yLabel: "Runs",
       x: [
         "Queued",
         "Running",

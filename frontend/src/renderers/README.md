@@ -103,13 +103,32 @@ Cells are literal text, never HTML or spreadsheet formulas.
 `chart` accepts this JSON contract, with 1–16 aligned series:
 
 ```json
-{"type":"line","x":[1,2,3],"series":[{"label":"CPU","values":[10,null,30]}]}
+{"type":"line","xLabel":"Sample order","yLabel":"CPU (%)","x":[1,2,3],"series":[{"label":"CPU (%)","values":[10,null,30]}]}
 ```
 
 Line X values must be finite, strictly increasing numbers. `type: "bar"` also
 accepts string categories, renders grouped series and includes zero in its Y
-scale. Null values represent gaps. A responsive uPlot canvas has a named series
-legend and an expandable, sortable data-table alternative.
+scale. Null values represent gaps. Optional `xLabel` and `yLabel` are nonblank
+strings of at most 256 characters. Existing payloads remain valid: missing X
+labels use `X`, `Category`, or `UTC creation day` according to the axis; missing Y
+labels use the sole series label or `Value`. The title comes from committed
+report metadata, not an arbitrary extra payload field.
+
+The shared responsive uPlot view shows a visible title, labeled axes and a
+theme-aware series legend. **Gridlines** toggles thin, subdued 0.5px gridlines
+without resetting the current zoom. Hovering displays the nearest recorded X
+and each series' exact Y value; nulls show `Unavailable`, never an interpolated
+value or zero. Keyboard users can focus the chart and inspect points with
+Left/Right or Home/End; Escape dismisses the readout. The expandable sortable
+table remains available as a nonvisual alternative.
+
+**Export PNG** downloads the displayed chart, including title, labeled axes,
+legend and an opaque current-theme background, without exporting controls or the
+hover overlay. Native canvas export needs no screenshot dependency or network
+request. It targets 2x resolution, bounded to 8,192 pixels per side and 16 million
+pixels. Download filenames are sanitized; owned Blob URLs are revoked and
+encoding failures stay visible in the chart pane. The same controls apply to
+resource charts, series trends and dashboards.
 
 `diff` accepts only two plain-text strings:
 

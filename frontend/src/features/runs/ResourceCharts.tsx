@@ -276,6 +276,8 @@ export function resourcePlots(
       title: `${scope === "task" ? "Task" : "Machine"} CPU (%)`,
       data: {
         type: "line",
+        xLabel: "Sample order (page)",
+        yLabel: "CPU (%)",
         x,
         series: [
           {
@@ -289,6 +291,8 @@ export function resourcePlots(
       title: `${scope === "task" ? "Task" : "Machine"} RAM (MiB)`,
       data: {
         type: "line",
+        xLabel: "Sample order (page)",
+        yLabel: "RAM (MiB)",
         x,
         series: [
           {
@@ -306,6 +310,8 @@ export function resourcePlots(
       title: `${scope === "task" ? "Task" : "Machine"} network (B/s)`,
       data: {
         type: "line",
+        xLabel: "Sample order (page)",
+        yLabel: "Network rate (B/s)",
         x,
         series: [
           {

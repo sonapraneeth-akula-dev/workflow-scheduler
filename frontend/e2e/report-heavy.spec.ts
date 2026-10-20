@@ -183,6 +183,8 @@ test("retained table, grouped/line chart, read-only diff and multi-page PDF use 
       Buffer.from(
         JSON.stringify({
           type,
+          xLabel: "Sample",
+          yLabel: "Measurement",
           x: type === "line" ? [1, 2, 3] : ["first", "second", "third"],
           series: [
             { label: "CPU", values: [10, 20, 30] },
@@ -207,6 +209,65 @@ test("retained table, grouped/line chart, read-only diff and multi-page PDF use 
           .data.some((value, index) => index % 4 === 3 && value > 0)
       })
     ).toBe(true)
+    const chart = page.getByRole("region", {
+      name: `${type} results chart`,
+      exact: true,
+    })
+    await expect(
+      chart.getByText(`${type} results`, { exact: true })
+    ).toBeVisible()
+    await expect(
+      chart.getByText("X axis: Sample; Y axis: Measurement.")
+    ).toBeAttached()
+    const gridOn = await canvas.evaluate((node: HTMLCanvasElement) =>
+      node.toDataURL()
+    )
+    const grid = chart.getByRole("button", { name: "Gridlines", exact: true })
+    await grid.click()
+    await expect(grid).toHaveAttribute("aria-pressed", "false")
+    await expect
+      .poll(() =>
+        canvas.evaluate((node: HTMLCanvasElement) => node.toDataURL())
+      )
+      .not.toBe(gridOn)
+    await grid.click()
+    await expect(grid).toHaveAttribute("aria-pressed", "true")
+    const overlay = chart.locator(".u-over")
+    const bounds = await overlay.boundingBox()
+    await overlay.hover({
+      position: { x: bounds!.width / 2, y: bounds!.height / 2 },
+    })
+    await expect(chart.getByRole("tooltip")).toContainText(
+      type === "line" ? "Sample: 2" : "Sample: second"
+    )
+    await expect(chart.getByRole("tooltip")).toContainText("CPU 20")
+    await expect(chart.getByRole("tooltip")).toContainText("RAM Unavailable")
+    await page.keyboard.press("Escape")
+    await expect(chart.getByRole("tooltip")).toHaveCount(0)
+    const plot = chart.getByRole("img")
+    await plot.focus()
+    await page.keyboard.press("Home")
+    await expect(chart.getByRole("tooltip")).toContainText(
+      type === "line" ? "Sample: 1" : "Sample: first"
+    )
+    await page.keyboard.press("End")
+    await expect(chart.getByRole("tooltip")).toContainText(
+      type === "line" ? "Sample: 3" : "Sample: third"
+    )
+    const download = page.waitForEvent("download")
+    await chart
+      .getByRole("button", {
+        name: `Export ${type} results as PNG`,
+        exact: true,
+      })
+      .click()
+    const image = await download
+    expect(image.suggestedFilename()).toBe(`${type} results.png`)
+    const bytes = await readFile((await image.path())!)
+    expect(bytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a")
+    expect(bytes.readUInt32BE(16)).toBeGreaterThan(0)
+    expect(bytes.readUInt32BE(20)).toBeGreaterThan(360)
+    expect(bytes.length).toBeGreaterThan(1000)
     await page.getByText("Chart data table", { exact: true }).click()
     await expect(page.getByRole("table")).toHaveAttribute("aria-rowcount", "4")
     await expect(page.getByRole("columnheader", { name: "CPU" })).toBeVisible()

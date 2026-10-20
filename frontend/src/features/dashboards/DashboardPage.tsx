@@ -44,6 +44,7 @@ function WorkflowCharts({
   const lines = [
     {
       title: "Workflow execution latency (ms)",
+      yLabel: "Execution latency (ms)",
       series: [
         ["p50", "p50Ms"],
         ["p90", "p90Ms"],
@@ -53,14 +54,17 @@ function WorkflowCharts({
     },
     {
       title: "Workflow failure rate (%)",
+      yLabel: "Failure rate (%)",
       series: [["Failed, aborted or timed out (%)", "failureRate"]],
     },
     {
       title: "Daily maximum node CPU (%)",
+      yLabel: "CPU (%)",
       series: [["Maximum node CPU (%)", "cpuMaxPercent"]],
     },
     {
       title: "Daily maximum node RAM (MiB)",
+      yLabel: "RAM (MiB)",
       series: [["Peak node RAM (MiB)", "ramPeakMb"]],
     },
   ] as const
@@ -89,9 +93,11 @@ function WorkflowCharts({
         completed; {numbers.format(total.durationCount)} measured execution
         durations.
       </p>
-      {lines.map(({ title, series }) => {
+      {lines.map(({ title, yLabel, series }) => {
         const chart: ChartData = {
           type: "line",
+          xLabel: "UTC creation day",
+          yLabel,
           x,
           series: series.map(([label, key]) => ({
             label,
@@ -134,6 +140,8 @@ function WorkflowCharts({
             title="Workflow status counts"
             data={{
               type: "bar",
+              xLabel: "Run status",
+              yLabel: "Runs",
               x: statuses.map(([label]) => label),
               series: [
                 {
@@ -261,6 +269,8 @@ export function DashboardPage({
             const rows = data.rankings[key]
             const chart: ChartData = {
               type: "bar",
+              xLabel: "Rank",
+              yLabel: `${title} (${unit})`,
               x: rows.map((_, index) => String(index + 1)),
               series: [
                 {
