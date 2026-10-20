@@ -110,6 +110,127 @@ type TrackedWorkflow = ServiceWorkflow & {
   trackingError?: Error | null
 }
 
+function OutcomeSummary({
+  entries,
+  runLimit,
+  pending,
+  unavailable,
+  refreshing,
+}: {
+  entries: TrackedWorkflow[]
+  runLimit: number
+  pending: boolean
+  unavailable: boolean
+  refreshing: boolean
+}) {
+  const runs = new Map(
+    entries.flatMap((entry) =>
+      entry.runs.map((run) => [run.id.toLowerCase(), run] as const)
+    )
+  )
+  let failed = 0
+  let timedOut = 0
+  let infra = 0
+  let service = 0
+  let unknown = 0
+  const categories = new Map<string, number>()
+  for (const run of runs.values()) {
+    if (run.status !== "Failed" && run.status !== "TimedOut") continue
+    if (run.status === "Failed") failed++
+    else timedOut++
+    const cause = run.failureSummary?.primary
+    if (!cause || cause.impact !== "Failed") {
+      unknown++
+      continue
+    }
+    if (cause.type === "Infra") infra++
+    else service++
+    const label = `${cause.type} / ${cause.category}`
+    categories.set(label, (categories.get(label) ?? 0) + 1)
+  }
+  return (
+    <details open className="min-w-0 border bg-card p-3 sm:p-4">
+      <summary className="cursor-pointer text-base font-semibold focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+        Run outcome summary
+      </summary>
+      <div className="mt-4 space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Latest {runLimit} runs per configured card, across loaded workflows in
+          this team and type filter. Shared runs counted once; not all-time
+          totals.
+        </p>
+        {unavailable ? (
+          <p role="status">
+            Outcome summary unavailable. Resolve the service history or tracked
+            card errors to see complete counts.
+          </p>
+        ) : pending ? (
+          <p role="status">Loading outcome summary...</p>
+        ) : (
+          <>
+            <p className="text-sm">
+              {runs.size} unique {runs.size === 1 ? "run" : "runs"} across{" "}
+              {entries.length} loaded {entries.length === 1 ? "card" : "cards"}.
+            </p>
+            {refreshing ? (
+              <p role="status" className="text-sm text-muted-foreground">
+                Refreshing outcome summary...
+              </p>
+            ) : null}
+            <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              {[
+                ["Timed out runs", timedOut],
+                ["Failed runs", failed],
+                ["Infra failures", infra],
+                ["Service failures", service],
+                ["Unknown cause", unknown],
+              ].map(([label, count]) => (
+                <div key={label} className="min-w-0 border bg-background p-3">
+                  <dt className="text-sm text-muted-foreground">{label}</dt>
+                  <dd className="text-2xl font-semibold tabular-nums">
+                    {count}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <p className="text-xs text-muted-foreground">
+              Infra, Service and categories count only the primary cause of
+              failed or timed-out runs, not recovered or optional failures. Task
+              deadline failures count as Failed runs with category Timeout;
+              Timed out runs means the run deadline expired. Unknown cause means
+              no primary terminal failure was recorded.
+            </p>
+            <div role="group" aria-label="Failure categories">
+              <h2 className="text-sm font-semibold">Failure categories</h2>
+              {categories.size ? (
+                <ul className="mt-2 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-3">
+                  {[...categories]
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([label, count]) => (
+                      <li
+                        key={label}
+                        className="flex min-w-0 justify-between gap-3 border bg-background p-2"
+                      >
+                        <span className="break-words">{label}</span>
+                        <span className="font-semibold tabular-nums">
+                          {count}
+                        </span>
+                      </li>
+                    ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No classified terminal failures in these runs.
+                </p>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </details>
+  )
+}
+
 function WorkflowTracking({
   entry,
   runLimit,
@@ -586,6 +707,23 @@ export function ServiceHistory({
         schedules.json, not personal settings. Each History link uses the same
         schedules, including manual runs started from those schedules.
       </p>
+      <OutcomeSummary
+        entries={[...groups.values()].flat()}
+        runLimit={history.runLimit}
+        pending={
+          query.isPending ||
+          types.isPending ||
+          trackedQueries.some((tracked) => tracked.isPending)
+        }
+        unavailable={
+          Boolean(query.error || types.error) ||
+          trackedQueries.some((tracked) => Boolean(tracked.error))
+        }
+        refreshing={
+          query.isFetching ||
+          trackedQueries.some((tracked) => tracked.isFetching)
+        }
+      />
       <div
         className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"
         aria-label="Run status legend"

@@ -15,6 +15,7 @@ import { useLive } from "@/lib/live/useLive"
 import type { LiveSnapshot } from "@/lib/live/subscriptions"
 import { getServiceHistory, type ServiceSearch } from "./api"
 import { getHistory } from "@/features/runs/history"
+import type { FailureSummaryData } from "@/features/runs/failures"
 import { ServiceHistory } from "./ServiceHistory"
 import {
   ServiceHistoryPreferences,
@@ -425,6 +426,10 @@ it("preserves cached cards on transient failure, retries, and hides all cached h
     "Health unavailable"
   )
   expect(screen.getByText("Build", { exact: true })).toBeVisible()
+  expect(screen.getByText(/^Outcome summary unavailable/)).toBeVisible()
+  expect(
+    screen.queryByText("Failed runs", { exact: true })
+  ).not.toBeInTheDocument()
   vi.mocked(getServiceHistory).mockResolvedValue(response)
   fireEvent.click(
     screen.getByRole("button", { name: "Refresh service history" })
@@ -443,6 +448,9 @@ it("preserves cached cards on transient failure, retries, and hides all cached h
   expect(await screen.findByRole("alert")).toHaveTextContent("Viewer revoked")
   expect(screen.queryByText("Build", { exact: true })).not.toBeInTheDocument()
   expect(screen.queryByRole("img")).not.toBeInTheDocument()
+  expect(
+    screen.queryByText("Failed runs", { exact: true })
+  ).not.toBeInTheDocument()
 })
 
 it("manually refreshes run history, workflow types and display-name configuration", async () => {
@@ -482,6 +490,7 @@ it("automatically refreshes on run updates and reconnect resync, with a separate
   }
   shown.rerender(search)
   expect(await screen.findByText("100%", { exact: true })).toBeVisible()
+  expectOutcome("Failed runs", 0)
   await waitFor(() => expect(shown.client.isFetching()).toBe(0))
   const calls = vi.mocked(getServiceHistory).mock.calls.length
   snapshot = { ...snapshot, delta: null, resyncVersion: 1 }
@@ -851,6 +860,10 @@ it("does not replace failed selected-schedule queries with unfiltered runs", asy
   expect(
     within(card).getByRole("button", { name: "View last run" })
   ).toBeDisabled()
+  expect(screen.getByText(/^Outcome summary unavailable/)).toBeVisible()
+  expect(
+    screen.queryByText("Failed runs", { exact: true })
+  ).not.toBeInTheDocument()
 })
 
 it("refreshes customized cards when the owning type receives live updates", async () => {
@@ -982,4 +995,198 @@ it("renders separate configured cards in order and applies hidden cards and memb
     await screen.findByText("No visible service history cards are configured.")
   ).toBeVisible()
   expect(screen.queryByRole("heading", { level: 3 })).not.toBeInTheDocument()
+  expect(screen.getByText("0 unique runs across 0 loaded cards.")).toBeVisible()
+})
+
+function failure(
+  type: "Infra" | "Service",
+  category: string,
+  impact: "Failed" | "Recovered" | "Optional" = "Failed"
+): FailureSummaryData {
+  return {
+    count: 1,
+    recoveredCount: impact === "Recovered" ? 1 : 0,
+    primary: {
+      type,
+      category,
+      impact,
+      message: `${type} ${category} explanation`,
+      nodeKey: "train",
+      taskKey: "train/fit",
+      attempt: 1,
+      runtimeCategory: category,
+      ruleId: null,
+      messageRecorded: true,
+    },
+    groups: [{ type, category, impact, count: 1 }],
+  }
+}
+
+function expectOutcome(label: string, count: number) {
+  const tile = screen.getByText(label, { exact: true }).closest("div")!
+  expect(tile.querySelector("dd")).toHaveTextContent(new RegExp(`^${count}$`))
+}
+
+it("opens the collapsible summary by default and counts terminal primary causes, not recovered or optional failures", async () => {
+  const build = response.items[0]!
+  const scenarios = [
+    { status: "Failed", failureSummary: failure("Infra", "Network") },
+    { status: "Failed", failureSummary: failure("Service", "Validation") },
+    { status: "Failed", failureSummary: failure("Service", "Timeout") },
+    { status: "TimedOut", failureSummary: failure("Service", "Timeout") },
+    { status: "Failed", failureSummary: null },
+    {
+      status: "Failed",
+      failureSummary: failure("Infra", "Capacity", "Optional"),
+    },
+    {
+      status: "Succeeded",
+      failureSummary: failure("Infra", "Network", "Recovered"),
+    },
+    { status: "Running", failureSummary: failure("Infra", "Capacity") },
+    { status: "Aborted", failureSummary: failure("Service", "Cancelled") },
+  ] as const
+  vi.mocked(getServiceHistory).mockResolvedValue({
+    ...response,
+    items: [
+      {
+        ...build,
+        runs: scenarios.map((scenario, index) => ({
+          ...build.runs[0]!,
+          id: `019ed132-2f44-7000-8000-${String(index).padStart(12, "0")}`,
+          ...scenario,
+        })),
+      },
+    ],
+  })
+  const shown = show()
+  expect(
+    await screen.findByText("9 unique runs across 1 loaded card.")
+  ).toBeVisible()
+  expectOutcome("Failed runs", 5)
+  expectOutcome("Timed out runs", 1)
+  expectOutcome("Infra failures", 1)
+  expectOutcome("Service failures", 3)
+  expectOutcome("Unknown cause", 2)
+  const categories = screen.getByRole("group", { name: "Failure categories" })
+  expect(within(categories).getAllByRole("listitem")).toHaveLength(3)
+  expect(
+    within(categories).getByText("Service / Timeout").closest("li")
+  ).toHaveTextContent("Service / Timeout2")
+  expect(
+    within(categories).queryByText(/Capacity|Cancelled/)
+  ).not.toBeInTheDocument()
+  const disclosure = screen.getByText("Run outcome summary").closest("details")!
+  expect(disclosure).toHaveAttribute("open")
+  await userEvent.click(screen.getByText("Run outcome summary"))
+  expect(disclosure).not.toHaveAttribute("open")
+  await userEvent.click(screen.getByText("Run outcome summary"))
+  expect(disclosure).toHaveAttribute("open")
+  shown.rerender({ ...search, view: "table" })
+  expect(await screen.findByRole("table")).toBeVisible()
+  expectOutcome("Failed runs", 5)
+  expect(disclosure).toHaveAttribute("open")
+})
+
+it("deduplicates shared runs across configured cards and updates summary membership on refresh", async () => {
+  const build = response.items[0]!
+  vi.mocked(getServiceHistory).mockResolvedValue({
+    ...response,
+    items: [
+      {
+        ...build,
+        schedules: trackedSchedules,
+        historyCards: trackedSchedules.map((schedule, index) => ({
+          id: `card-${index}`,
+          name: `Configured card ${index}`,
+          seriesIds: [schedule.seriesId],
+        })),
+      },
+    ],
+  })
+  vi.mocked(getHistory).mockResolvedValue({
+    items: [
+      {
+        ...trackedRow,
+        status: "Failed",
+        failureSummary: failure("Infra", "Network"),
+        variables: [],
+      },
+    ],
+    nextCursor: null,
+    currentScheduleId: null,
+  })
+  const shown = show()
+  expect(
+    await screen.findByText("1 unique run across 2 loaded cards.")
+  ).toBeVisible()
+  expectOutcome("Failed runs", 1)
+  expectOutcome("Infra failures", 1)
+  vi.mocked(getHistory).mockResolvedValue({
+    items: [],
+    nextCursor: null,
+    currentScheduleId: null,
+  })
+  await shown.client.invalidateQueries({
+    queryKey: ["catalog", "team", "team", "service-history"],
+  })
+  expect(
+    await screen.findByText("0 unique runs across 2 loaded cards.")
+  ).toBeVisible()
+  expectOutcome("Failed runs", 0)
+  expectOutcome("Infra failures", 0)
+})
+
+it("does not show zero counts while configured-card history is still loading", async () => {
+  namedSchedules()
+  vi.mocked(getHistory).mockReturnValue(new Promise(() => {}))
+  show()
+  expect(await screen.findByText("Loading outcome summary...")).toBeVisible()
+  expect(
+    screen.queryByText("Failed runs", { exact: true })
+  ).not.toBeInTheDocument()
+})
+
+it("adds loaded pages once, preserves counts across metadata grouping and resets to the selected type", async () => {
+  const build = response.items[0]!
+  const extra = {
+    ...response.items[1]!,
+    runs: [
+      {
+        ...build.runs[0]!,
+        id: "019ed132-2f44-7000-8000-000000000099",
+        status: "TimedOut" as const,
+        failureSummary: failure("Service", "Timeout"),
+      },
+    ],
+  }
+  vi.mocked(getServiceHistory).mockImplementation(
+    async (_team, type, _limit, cursor) =>
+      type
+        ? { ...response, type, items: [] }
+        : cursor
+          ? { ...response, items: [extra] }
+          : { ...response, items: [build], nextCursor: "next" }
+  )
+  const shown = show()
+  expect(
+    await screen.findByText("3 unique runs across 1 loaded card.")
+  ).toBeVisible()
+  expectOutcome("Timed out runs", 0)
+  await userEvent.click(
+    screen.getByRole("button", { name: "Load more workflows" })
+  )
+  expect(
+    await screen.findByText("4 unique runs across 2 loaded cards.")
+  ).toBeVisible()
+  expectOutcome("Timed out runs", 1)
+  expectOutcome("Failed runs", 1)
+  shown.rerender({ ...search, groupBy: "metadata", groupKey: "component" })
+  expectOutcome("Timed out runs", 1)
+  shown.rerender({ ...search, type: "another" })
+  expect(
+    await screen.findByText("0 unique runs across 0 loaded cards.")
+  ).toBeVisible()
+  expectOutcome("Timed out runs", 0)
+  expectOutcome("Failed runs", 0)
 })

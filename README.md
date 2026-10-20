@@ -873,8 +873,8 @@ baseline comparison and a CSV of every test prediction. Each report opens in
 its own subtab inside **Reports**, without leaving the run. Arrow keys move
 between subtabs; Enter or Space opens the focused report. Kind/tag filters,
 live updates and source/attempt attribution remain available. Existing report
-detail URLs still work. Regression does not
-have a classification accuracy percentage. This deliberately simple model
+detail URLs still work. Linear regression predicts continuous prices, so its
+metrics do not include classification accuracy. This deliberately simple model
 ignores location and condition: its errors are measured honestly, not hidden
 behind a success threshold. Successful execution does not imply a useful
 property valuation model.
@@ -1221,6 +1221,19 @@ Each status-colored icon represents one run, with a distinct status symbol,
 run ID and timestamp; clicking it opens that exact run in a new tab.
 Failed runs use a red cross; timed-out runs use a purple alarm clock and a
 separate legend entry.
+The **Run outcome summary** accordion above the cards is open by default;
+Enter or Space toggles it. It shows timed-out runs, failed runs, Infra failures,
+Service failures, unknown causes and counts by failure type/category.
+Counts use unique run IDs across the currently loaded, visible configured cards
+in the selected team/type, with each card's personal recent-run limit applied
+before deduplication. Shared runs count once. These are not all-time totals:
+load more workflows, change type or run count, refresh or receive live updates
+to update the scope. Switching table/card format or metadata grouping does not
+change it. Loading or failed card queries show an explicit state, not zero counts.
+Infra/Service/category counts use only each failed or timed-out run's primary
+terminal cause, excluding optional and recovered failures; missing terminal
+causes appear under **Unknown cause**. A task deadline produces a **Failed**
+run with category **Timeout**; the **Timed out runs** tile counts run deadlines.
 **View last run** opens the exact latest run and is
 disabled for never-run workflows; **History** opens that workflow's run history.
 Cards are configured only in the workflow's applied `schedules.json`, not in the
