@@ -358,6 +358,12 @@ it("changes exact URL filters, clears the old type on team change and sends only
     type: undefined,
   })
   shown.rerender({ team: "alpha" })
+  expect(
+    await screen.findByRole("heading", {
+      name: "Alpha Science Recurring jobs",
+      level: 1,
+    })
+  ).toBeVisible()
   await waitFor(() =>
     expect(
       screen.getByRole("combobox", { name: "Workflow type" })
@@ -393,6 +399,10 @@ it("changes exact URL filters, clears the old type on team change and sends only
     team: undefined,
     type: undefined,
   })
+  shown.rerender({})
+  expect(
+    await screen.findByRole("heading", { name: "Recurring jobs", level: 1 })
+  ).toBeVisible()
 })
 
 it("shows loading and empty states without inventing recurring jobs", async () => {

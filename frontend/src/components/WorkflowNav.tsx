@@ -13,17 +13,21 @@ import {
 } from "@/features/catalog/api"
 import { presentationName } from "@/features/catalog/usePresentation"
 
+type WorkflowView = "service-history" | "recurring-jobs"
+
 const itemStyle =
   "flex min-h-9 cursor-pointer items-center justify-between gap-4 px-3 py-2 text-sm outline-none focus:bg-accent data-highlighted:bg-accent data-state-open:bg-accent data-disabled:cursor-not-allowed data-disabled:opacity-50"
 const contentStyle =
-  "z-50 max-h-[70vh] min-w-52 max-w-[calc(100vw-2rem)] overflow-auto border bg-popover p-1 text-popover-foreground shadow-md"
+  "z-50 max-h-[70vh] min-w-[min(13rem,var(--radix-dropdown-menu-content-available-width))] max-w-[var(--radix-dropdown-menu-content-available-width)] overflow-auto border bg-popover p-1 text-popover-foreground shadow-md"
 
-function TeamServiceLinks({
+function TeamWorkflowLinks({
   team,
   presentation,
+  view,
 }: {
   team: string
   presentation: Presentation | null
+  view: WorkflowView
 }) {
   const query = useQuery({
     queryKey: ["catalog", "team", team, "filter-types"],
@@ -32,9 +36,15 @@ function TeamServiceLinks({
   return (
     <>
       <DropdownMenu.Item asChild className={itemStyle}>
-        <Link to="/t/$team/services" params={{ team }}>
-          All workflow types
-        </Link>
+        {view === "recurring-jobs" ? (
+          <Link to="/recurring-jobs" search={{ team }}>
+            All workflow types
+          </Link>
+        ) : (
+          <Link to="/t/$team/services" params={{ team }}>
+            All workflow types
+          </Link>
+        )}
       </DropdownMenu.Item>
       <DropdownMenu.Separator className="my-1 h-px bg-border" />
       {query.isPending ? (
@@ -55,21 +65,30 @@ function TeamServiceLinks({
         </div>
       ) : null}
       {!accessDenied(query.error)
-        ? query.data?.map((type) => (
-            <DropdownMenu.Item key={type.name} asChild className={itemStyle}>
-              <Link
-                to="/t/$team/services"
-                params={{ team }}
-                search={{ type: type.name }}
-              >
-                {presentationName(
-                  presentation,
-                  type.name,
-                  `${team}/${type.name}`
+        ? query.data?.map((type) => {
+            const name = presentationName(
+              presentation,
+              type.name,
+              `${team}/${type.name}`
+            )
+            return (
+              <DropdownMenu.Item key={type.name} asChild className={itemStyle}>
+                {view === "recurring-jobs" ? (
+                  <Link to="/recurring-jobs" search={{ team, type: type.name }}>
+                    {name}
+                  </Link>
+                ) : (
+                  <Link
+                    to="/t/$team/services"
+                    params={{ team }}
+                    search={{ type: type.name }}
+                  >
+                    {name}
+                  </Link>
                 )}
-              </Link>
-            </DropdownMenu.Item>
-          ))
+              </DropdownMenu.Item>
+            )
+          })
         : null}
       {query.data?.length === 0 ? (
         <DropdownMenu.Item disabled className={itemStyle}>
@@ -80,33 +99,36 @@ function TeamServiceLinks({
   )
 }
 
-export function ServiceHistoryNav() {
+export function WorkflowNav({ view }: { view: WorkflowView }) {
   const [open, setOpen] = useState(false)
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   })
+  const label = view === "recurring-jobs" ? "Recurring jobs" : "Service history"
   const active =
-    pathname === "/service-history" || pathname.endsWith("/services")
+    view === "recurring-jobs"
+      ? pathname === "/recurring-jobs"
+      : pathname === "/service-history" || pathname.endsWith("/services")
   const query = useQuery({
     queryKey: ["catalog", "teams"],
     queryFn: ({ signal }) => getTeams(signal),
     enabled: open,
   })
   return (
-    <DropdownMenu.Root open={open} onOpenChange={setOpen}>
+    <DropdownMenu.Root open={open} onOpenChange={setOpen} modal={false}>
       <DropdownMenu.Trigger asChild>
         <Button
           variant="ghost"
-          aria-label="Service history menu"
+          aria-label={`${label} menu`}
           className={`min-h-10 px-2 ${active ? "bg-secondary text-secondary-foreground" : ""}`}
         >
-          Service history
+          {label}
           <ChevronDownIcon aria-hidden="true" />
         </Button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content
-          aria-label="Service history teams"
+          aria-label={`${label} teams`}
           aria-labelledby={undefined}
           sideOffset={8}
           align="start"
@@ -114,7 +136,11 @@ export function ServiceHistoryNav() {
           className={contentStyle}
         >
           <DropdownMenu.Item asChild className={itemStyle}>
-            <Link to="/service-history">All teams</Link>
+            {view === "recurring-jobs" ? (
+              <Link to="/recurring-jobs">All teams</Link>
+            ) : (
+              <Link to="/service-history">All teams</Link>
+            )}
           </DropdownMenu.Item>
           <DropdownMenu.Separator className="my-1 h-px bg-border" />
           {query.isPending ? (
@@ -152,9 +178,10 @@ export function ServiceHistoryNav() {
                       collisionPadding={12}
                       className={contentStyle}
                     >
-                      <TeamServiceLinks
+                      <TeamWorkflowLinks
                         team={team.team}
                         presentation={team.presentation}
+                        view={view}
                       />
                     </DropdownMenu.SubContent>
                   </DropdownMenu.Portal>

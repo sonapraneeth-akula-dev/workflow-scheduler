@@ -11,10 +11,11 @@ const [team, type] = workflow.split("/")
 if (!team || !type) throw new Error(`Invalid recurring workflow: ${workflow}.`)
 const filteredUrl = `/recurring-jobs?${new URLSearchParams({ team, type })}`
 
-test("navbar opens recurring job tables grouped by type and workflow and team/type filters survive reload", async ({
+test("navbar dropdown opens all teams, team and type job tables and filters survive reload", async ({
   page,
   request,
 }) => {
+  test.setTimeout(60_000)
   const response = await request.get(
     `/api/v1/schedules?${new URLSearchParams({ team, type, limit: "50" })}`
   )
@@ -24,9 +25,16 @@ test("navbar opens recurring job tables grouped by type and workflow and team/ty
     .parse(parseJson(await response.text())).items
   expect(jobs.length).toBeGreaterThan(0)
   await page.goto("/")
-  const link = page
+  const trigger = page
     .getByRole("navigation", { name: "Main navigation" })
-    .getByRole("link", { name: "Recurring jobs", exact: true })
+    .getByRole("button", { name: "Recurring jobs menu", exact: true })
+  await trigger.focus()
+  await page.keyboard.press("Enter")
+  const menu = page.getByRole("menu", {
+    name: "Recurring jobs teams",
+    exact: true,
+  })
+  const link = menu.getByRole("menuitem", { name: "All teams", exact: true })
   await expect(link).toHaveAttribute("href", "/recurring-jobs")
   await expect(link).not.toHaveAttribute("target", "_blank")
   await link.click()
@@ -37,16 +45,55 @@ test("navbar opens recurring job tables grouped by type and workflow and team/ty
   await expect(
     page.getByRole("combobox", { name: "Workflow type", exact: true })
   ).toBeDisabled()
-  await page
-    .getByRole("combobox", { name: "Team", exact: true })
-    .selectOption(team)
+  await trigger.click()
+  const teamItem = menu.locator(
+    `[role="menuitem"][aria-haspopup="menu"][data-team="${team}"]`
+  )
+  await expect(teamItem).toBeVisible()
+  const teamName = (await teamItem.textContent())!.trim()
+  await teamItem.focus()
+  await page.keyboard.press("ArrowRight")
+  const submenu = page.getByRole("menu", {
+    name: `${team} workflow types`,
+    exact: true,
+  })
+  const allTypes = submenu.getByRole("menuitem", {
+    name: "All workflow types",
+    exact: true,
+  })
+  await expect(allTypes).toHaveAttribute(
+    "href",
+    `/recurring-jobs?${new URLSearchParams({ team })}`
+  )
+  await allTypes.click()
+  await expect(
+    page.getByRole("heading", {
+      name: `${teamName} Recurring jobs`,
+      level: 1,
+      exact: true,
+    })
+  ).toBeVisible()
   const types = page.getByRole("combobox", {
     name: "Workflow type",
     exact: true,
   })
   await expect(types).toBeEnabled()
-  await types.selectOption(type)
+  await expect(types).toHaveValue("")
+  await trigger.click()
+  await teamItem.focus()
+  await page.keyboard.press("ArrowRight")
+  const typeLink = submenu.locator(
+    `[role="menuitem"][href*="type=${encodeURIComponent(type)}"]`
+  )
+  await expect(typeLink).toHaveAttribute("href", filteredUrl)
+  await expect(typeLink).not.toHaveAttribute("target", "_blank")
+  await typeLink.focus()
+  await page.keyboard.press("Enter")
   await expect(page).toHaveURL(filteredUrl)
+  await expect(trigger).toHaveClass(/bg-secondary/)
+  await expect(
+    page.getByRole("button", { name: "Service history menu", exact: true })
+  ).not.toHaveClass(/bg-secondary/)
   await page.reload()
   await expect(types).toHaveValue(type)
   await expect(
@@ -92,6 +139,54 @@ test("navbar opens recurring job tables grouped by type and workflow and team/ty
     new Set(jobs.map((job) => job.workflowId)).size
   )
   await expect(page.getByRole("alert")).toHaveCount(0)
+})
+
+test("shared navbar preserves Service history routes and submenu keyboard focus", async ({
+  page,
+}) => {
+  await page.goto(filteredUrl)
+  const trigger = page.getByRole("button", {
+    name: "Service history menu",
+    exact: true,
+  })
+  await trigger.focus()
+  await page.keyboard.press("Enter")
+  const menu = page.getByRole("menu", {
+    name: "Service history teams",
+    exact: true,
+  })
+  await expect(
+    menu.getByRole("menuitem", { name: "All teams", exact: true })
+  ).toHaveAttribute("href", "/service-history")
+  const teamItem = menu.locator(
+    `[role="menuitem"][aria-haspopup="menu"][data-team="${team}"]`
+  )
+  await expect(teamItem).toBeVisible()
+  await teamItem.focus()
+  await page.keyboard.press("ArrowRight")
+  const submenu = page.getByRole("menu", {
+    name: `${team} workflow types`,
+    exact: true,
+  })
+  await expect(
+    submenu.getByRole("menuitem", {
+      name: "All workflow types",
+      exact: true,
+    })
+  ).toHaveAttribute("href", `/t/${team}/services`)
+  const typeLink = submenu.locator(
+    `[role="menuitem"][href*="type=${encodeURIComponent(type)}"]`
+  )
+  await expect(typeLink).toBeVisible()
+  const destination = new URL(
+    (await typeLink.getAttribute("href"))!,
+    page.url()
+  )
+  expect(destination.pathname).toBe(`/t/${team}/services`)
+  expect(destination.searchParams.get("type")).toBe(type)
+  await page.keyboard.press("Escape")
+  await expect(trigger).toBeFocused()
+  await expect(menu).not.toBeVisible()
 })
 
 test("Run now from a paused grouped table row persists a Manual run without changing saved schedule settings", async ({
@@ -218,6 +313,41 @@ test("grouped recurring job tables and navbar remain accessible without page ove
       await page.setViewportSize({ width, height: 1000 })
       await page.goto(filteredUrl)
       await expect(page.locator("[data-schedule-id]").first()).toBeVisible()
+      const trigger = page.getByRole("button", {
+        name: "Recurring jobs menu",
+        exact: true,
+      })
+      await trigger.focus()
+      await page.keyboard.press("Enter")
+      const menu = page.getByRole("menu", {
+        name: "Recurring jobs teams",
+        exact: true,
+      })
+      const teamItem = menu.locator(
+        `[role="menuitem"][aria-haspopup="menu"][data-team="${team}"]`
+      )
+      await expect(teamItem).toBeVisible()
+      await teamItem.focus()
+      await page.keyboard.press("ArrowRight")
+      const submenu = page.getByRole("menu", {
+        name: `${team} workflow types`,
+        exact: true,
+      })
+      await expect(submenu).toBeVisible()
+      for (const popup of [menu, submenu]) {
+        const bounds = await popup.boundingBox()
+        expect(bounds).not.toBeNull()
+        expect(bounds!.x).toBeGreaterThanOrEqual(0)
+        expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width)
+      }
+      if (width === 390) {
+        const menuAudit = await new AxeBuilder({ page })
+          .withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"])
+          .analyze()
+        expect(menuAudit.violations).toEqual([])
+      }
+      await page.keyboard.press("Escape")
+      await expect(trigger).toBeFocused()
       const scrollRegion = page.getByRole("region", {
         name: /recurring jobs table$/,
       })

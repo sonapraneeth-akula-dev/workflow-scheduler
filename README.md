@@ -1291,7 +1291,10 @@ them. A card tracking multiple schedules uses one History table, with an additio
 **Schedule** column identifying each run's named source. A card with no matching
 runs shows an explicit empty state, never unrelated runs.
 
-**Recurring jobs** in the navbar opens `/recurring-jobs`: all nondeleted Code
+The **Recurring jobs** navbar dropdown mirrors **Service history**: choose
+**All teams**, or a team followed by **All workflow types** or a specific type.
+Links open `/recurring-jobs` with the exact team/type filters, and scoped page
+titles use the selected team's display name. The page shows all nondeleted Code
 and User schedules you can view, including paused schedules, in tables grouped
 by team, workflow type and workflow. Each workflow has a distinct header band
 with a strong divider, workflow name, exact ID and count of jobs shown;

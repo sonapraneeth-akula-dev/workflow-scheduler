@@ -68,7 +68,11 @@ export function RecurringJobs({
     <div className="min-w-0 space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Recurring jobs</h1>
+          <h1 className="text-2xl font-semibold break-words">
+            {search.team
+              ? `${presentationName(selectedConfig, search.team)} Recurring jobs`
+              : "Recurring jobs"}
+          </h1>
           <p className="text-sm text-muted-foreground">
             Scheduled jobs in tables grouped by team, workflow type and
             workflow. Includes active and paused Code and User schedules you can
