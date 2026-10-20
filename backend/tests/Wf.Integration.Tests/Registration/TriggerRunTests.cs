@@ -285,7 +285,10 @@ public sealed partial class TriggerRunTests(RegistrationDatabase database) : ICl
         var request = await Request(server);
         var group = Guid.NewGuid();
         var version = await Register(server, request, group);
-        var runId = await Accepted(server, new(request.WorkflowId!), Operator(server, group));
+        const string actorName = "Original triggering operator";
+        var runId = await Accepted(server, new(request.WorkflowId!),
+            server.Token("Operator", "user", "wf.read", groups: [group], name: actorName));
+        Assert.Equal(actorName, (await Payload(runId)).GetProperty("TriggeredByName").GetString());
         using var leader = new LeaseManager(database.DataSource, new(Guid.NewGuid().ToString("N"), new Uri("http://localhost:5200")),
             NullLogger<LeaseManager>.Instance);
         Assert.True(await leader.TryAcquireOrRenewAsync(Token));
@@ -300,6 +303,7 @@ public sealed partial class TriggerRunTests(RegistrationDatabase database) : ICl
         Assert.Equal(1L, await Scalar("SELECT count(*) FROM runs WHERE id=$1", runId));
         Assert.Equal(version, await Scalar("SELECT version_id FROM runs WHERE id=$1", runId));
         Assert.Equal(Server.Actor.ToString("D"), await Scalar("SELECT triggered_by FROM runs WHERE id=$1", runId));
+        Assert.Equal(actorName, await Scalar("SELECT triggered_by_name FROM runs WHERE id=$1", runId));
         Assert.Equal(1L, await Scalar("SELECT count(*) FROM commands WHERE run_id=$1 AND processed_at IS NOT NULL", runId));
         var expected = (await Payload(runId)).GetProperty("DeadlineAt").GetDateTimeOffset();
         var actual = Assert.IsType<DateTime>(await Scalar("SELECT deadline_at FROM runs WHERE id=$1", runId));

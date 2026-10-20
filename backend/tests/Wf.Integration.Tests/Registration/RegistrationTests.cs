@@ -627,13 +627,13 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
                     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.VariablesJsonContext.Default);
                 });
                 builder.Services.AddTeamAuthorization();
+                builder.Services.AddSingleton<Wf.ControlPlane.Engine.Dispatch.RunStore>();
                 builder.Services.AddSingleton<CommandInbox>();
                 builder.Services.AddSingleton<ActiveVersionCache>();
                 builder.Services.AddHostedService<ActiveVersionCache>(services => services.GetRequiredService<ActiveVersionCache>());
             }
             if (live)
             {
-                builder.Services.AddSingleton<Wf.ControlPlane.Engine.Dispatch.RunStore>();
                 builder.Services.AddWorkflowLive();
             }
             var metadata = new OpenIdConnectConfiguration { Issuer = Issuer };
@@ -692,7 +692,7 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
 
         public string Token(string role = "Registrar", string identity = "app", string? scope = null, bool includeActor = true,
             Guid[]? groups = null, Guid? actor = null, string? authorizedClient = "60d24b19-f65a-4ed4-96cc-9174bfcacabc",
-            bool includeIdentity = true)
+            bool includeIdentity = true, string? name = null)
         {
             var claims = new List<Claim>
             {
@@ -703,6 +703,7 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
             if (includeActor) claims.Add(new("oid", (actor ?? Actor).ToString()));
             if (scope is not null) claims.Add(new("scp", scope));
             if (groups is not null) claims.AddRange(groups.Select(group => new Claim("groups", group.ToString("D"))));
+            if (name is not null) claims.Add(new("name", name));
             return new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(Issuer, Audience, claims,
                 DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow.AddMinutes(20), new SigningCredentials(key, SecurityAlgorithms.RsaSha256)));
         }

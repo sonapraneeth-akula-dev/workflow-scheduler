@@ -120,7 +120,8 @@ public sealed class RunRecovery(NpgsqlDataSource dataSource, RunStore runs, Leas
                 {
                     var run = RunState.Restore(trigger.InitialState, [], message => logger.LogWarning("{RunStateError}", message));
                     await RunStore.CreateAsync(connection, run, trigger.WorkflowId, trigger.VersionId,
-                        trigger.DeadlineAt, createdAt, createdBy, cancellationToken, trigger.SeriesId);
+                        trigger.DeadlineAt, createdAt, createdBy, cancellationToken, trigger.SeriesId,
+                        triggeredByName: trigger.TriggeredByName);
                 }
             }
             else if (kind == 1)

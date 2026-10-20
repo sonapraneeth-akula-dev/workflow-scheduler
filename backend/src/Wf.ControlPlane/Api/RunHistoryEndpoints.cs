@@ -36,6 +36,7 @@ public static class RunHistoryEndpoints
                 "Run versionId is the executed workflow version, NOT code-schedule config. fire.scheduleConfigVersionId is the immutable config at claim, null for user/legacy fires. " +
                 "currentScheduleId is the authoritative non-deleted schedule linked by run_series for an explicit seriesId; null after schedule deletion, for run-only legacy series or without a series filter. " +
                 "Variables project only set schema-backed names/types; all values/defaults/secret references omitted, Secret entries marked redacted. Unknown legacy schemas produce []. " +
+                "triggeredByName is the authenticated display name recorded at manual acceptance, null for legacy/unnamed principals and nonmanual triggers; never inferred from the reader. " +
                 "Copied metadata is public author-declared metadata. Duration is endedAt-startedAt in milliseconds, null unless both exist. No storage capabilities.")
             .AddOpenApiOperationTransformer((operation, _, _) =>
             {
@@ -143,7 +144,7 @@ public static class RunHistoryEndpoints
                     FROM workflow_versions w CROSS JOIN LATERAL jsonb_array_elements(COALESCE(w.manifest->'variables','[]')) v
                     WHERE w.id=p.version_id AND w.workflow_id=p.workflow_id
                         AND r.variables ? (v->>'key')),'[]'::jsonb)::text AS variable_schema,
-                sf.schedule_id,sf.fire_at,sf.outcome,sf.reason,sf.config_version_id,executed.semver
+                sf.schedule_id,sf.fire_at,sf.outcome,sf.reason,sf.config_version_id,executed.semver,r.triggered_by_name
             FROM page p
             LEFT JOIN workflow_versions executed ON p.kind=0 AND executed.id=p.version_id AND executed.workflow_id=p.workflow_id
             LEFT JOIN runs r ON p.kind=0 AND r.run_day=p.run_day AND r.id=p.run_id
@@ -191,7 +192,10 @@ public static class RunHistoryEndpoints
                 status?.ToString(), started, ended, started is not null && ended is not null ? (ended.Value - started.Value).TotalMilliseconds : null,
                 trigger?.ToString(), reader.IsDBNull(11) ? null : RunMetadata.FromStored(reader.GetString(11)),
                 abort, RunHistoryQuery.Variables(reader.GetString(19)), fire)
-            { Version = reader.IsDBNull(25) ? null : reader.GetString(25) }, new(at, reader.GetGuid(1), kind)));
+            {
+                Version = reader.IsDBNull(25) ? null : reader.GetString(25),
+                TriggeredByName = trigger == RunTrigger.Manual && !reader.IsDBNull(26) ? reader.GetString(26) : null
+            }, new(at, reader.GetGuid(1), kind)));
         }
         var more = rows.Count > filter.Runs.Limit;
         if (more) rows.RemoveAt(rows.Count - 1);

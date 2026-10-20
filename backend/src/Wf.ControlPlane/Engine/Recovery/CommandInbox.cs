@@ -9,7 +9,10 @@ using Wf.Engine.Core.Rerun;
 namespace Wf.ControlPlane.Engine.Recovery;
 
 public sealed record TriggerRunCommand(RunSnapshot InitialState, string WorkflowId, Guid VersionId, DateTimeOffset DeadlineAt,
-    Guid? SeriesId = null, Guid? ParentRunId = null, ImmutableDictionary<string, ReusedNode>? ReusedNodes = null);
+    Guid? SeriesId = null, Guid? ParentRunId = null, ImmutableDictionary<string, ReusedNode>? ReusedNodes = null)
+{
+    public string? TriggeredByName { get; init; }
+}
 
 public sealed class CommandInbox(NpgsqlDataSource dataSource, TimeProvider time)
 {
@@ -63,6 +66,8 @@ public sealed class CommandInbox(NpgsqlDataSource dataSource, TimeProvider time)
         ArgumentNullException.ThrowIfNull(command);
         ArgumentNullException.ThrowIfNull(command.InitialState);
         ArgumentException.ThrowIfNullOrWhiteSpace(command.WorkflowId);
+        if (command.TriggeredByName is { } name && (string.IsNullOrWhiteSpace(name) || name.Contains('\0')))
+            throw new ArgumentException("A recorded triggering principal name must be nonblank and contain no NUL characters.", nameof(command));
         var snapshot = command.InitialState;
         _ = RunState.Restore(snapshot, [], _ => { });
         if (snapshot.Status != RunStatus.Queued || snapshot.LastSequence != 0 || snapshot.Abort is not null ||

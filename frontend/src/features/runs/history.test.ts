@@ -44,6 +44,25 @@ function respond(
 
 describe("history contracts", () => {
   beforeEach(() => vi.resetAllMocks())
+  it("retains recorded triggering names and accepts missing legacy attribution", async () => {
+    for (const triggeredByName of [
+      "Original triggering operator",
+      null,
+      undefined,
+    ]) {
+      respond([{ ...historyRow, triggeredByName }])
+      expect(
+        (await getHistory(scope, {}, null)).items[0]?.triggeredByName
+      ).toBe(triggeredByName)
+    }
+  })
+  it.each(["", " ", 1])(
+    "rejects invalid recorded triggering names: %s",
+    async (triggeredByName) => {
+      respond([{ ...historyRow, triggeredByName }])
+      await expect(getHistory(scope, {}, null)).rejects.toThrow()
+    }
+  )
   it("accepts canonical principal GUIDs without imposing run UUID version/variant bits", () => {
     expect(
       historySearchSchema.parse({

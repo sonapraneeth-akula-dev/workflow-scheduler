@@ -18,6 +18,7 @@ public sealed record RunHistoryRow(string Kind, DateTimeOffset At, string Workfl
 {
     [JsonRequired]
     public string? Version { get; init; }
+    public string? TriggeredByName { get; init; }
     public RunFailureSummary? FailureSummary { get; init; }
 }
 public sealed record RunHistoryPage(RunHistoryRow[] Items, string? NextCursor)

@@ -333,6 +333,13 @@ export function HistoryTable({
                       ) : (
                         "No run trigger"
                       )}
+                      {row.trigger === "Manual" ? (
+                        <p className="mt-1 max-w-xs break-words text-muted-foreground">
+                          {row.triggeredByName
+                            ? `By ${row.triggeredByName}`
+                            : "User name not recorded"}
+                        </p>
+                      ) : null}
                     </td>
                     <td className="p-3">
                       {row.versionId ? (

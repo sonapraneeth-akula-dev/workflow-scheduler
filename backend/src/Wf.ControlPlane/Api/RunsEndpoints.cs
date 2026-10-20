@@ -153,8 +153,14 @@ public static class RunsEndpoints
         var now = time.GetUtcNow();
         var runId = Guid.CreateVersion7(now);
         var run = new RunState(runId, manifest.Nodes, manifest.Metadata, _ => { }, variables.Values);
+        var actorName = context.User.FindFirstValue("name")?.Trim();
+        if (actorName?.Contains('\0') == true)
+            return Invalid("$.triggeredByName", "The authenticated principal name cannot contain NUL characters.");
         var command = new TriggerRunCommand(run.Snapshot with { Placement = request.Placement }, request.WorkflowId,
-            versionId, now.Add(manifest.RunTimeout), authorized.SeriesId);
+            versionId, now.Add(manifest.RunTimeout), authorized.SeriesId)
+        {
+            TriggeredByName = string.IsNullOrWhiteSpace(actorName) ? null : actorName
+        };
         try
         {
             var supplied = context.Features.Get<NpgsqlTransaction>();

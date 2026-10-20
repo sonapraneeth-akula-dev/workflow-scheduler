@@ -102,6 +102,55 @@ function page(items: HistoryRow[] = [row], nextCursor: string | null = null) {
 }
 describe("historical table", () => {
   beforeEach(() => vi.clearAllMocks())
+  it("shows the recorded triggering user's name with Manual in the trigger cell", async () => {
+    vi.mocked(getHistory).mockResolvedValue(
+      page([{ ...row, triggeredByName: "Original triggering operator" }])
+    )
+    show()
+    const table = await screen.findByRole("table")
+    const cell = within(table).getByRole("cell", { name: /Manual/ })
+    expect(cell).toHaveTextContent("By Original triggering operator")
+    expect(cell).not.toHaveTextContent(row.abort!.byName)
+  })
+  it.each([null, undefined])(
+    "keeps missing legacy actor names explicit instead of inventing a user: %s",
+    async (triggeredByName) => {
+      vi.mocked(getHistory).mockResolvedValue(
+        page([{ ...row, triggeredByName }])
+      )
+      show()
+      const table = await screen.findByRole("table")
+      expect(
+        within(table).getByRole("cell", { name: /Manual/ })
+      ).toHaveTextContent("User name not recorded")
+    }
+  )
+  it.each(["Schedule", "CatchUp", "Rerun"] as const)(
+    "does not attach manual-user text to %s triggers",
+    async (trigger) => {
+      vi.mocked(getHistory).mockResolvedValue(
+        page([{ ...row, trigger, triggeredByName: "Not a manual actor" }])
+      )
+      show()
+      await screen.findByRole("table")
+      expect(
+        screen.queryByText("By Not a manual actor")
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByText("User name not recorded")
+      ).not.toBeInTheDocument()
+    }
+  )
+  it("renders recorded names as literal text, not markup", async () => {
+    const name = "<img src=x onerror=alert()>"
+    vi.mocked(getHistory).mockResolvedValue(
+      page([{ ...row, triggeredByName: name }])
+    )
+    show()
+    const table = await screen.findByRole("table")
+    expect(within(table).getByText(`By ${name}`)).toBeVisible()
+    expect(table.querySelector("img")).toBeNull()
+  })
   it("links each loaded schedule series once above the table instead of repeating links beside run IDs", async () => {
     const otherSeriesId = "019ed132-2f44-7000-8000-000000000005"
     vi.mocked(getHistory).mockResolvedValue(

@@ -8,6 +8,7 @@ using Wf.Contracts;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
 using Wf.Contracts.Registry;
+using Wf.Contracts.Runs;
 using Wf.ControlPlane.Api;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Leadership;
@@ -229,6 +230,24 @@ public sealed class RunHistoryTests(AuthorizationDatabase database, ITestOutputH
         Assert.Equal(version, row.VersionId);
         Assert.Equal(run.Snapshot.RunId, row.RunId);
         Assert.Null(row.Version);
+    }
+
+    [Fact]
+    public async Task RunHistory_shows_recorded_manual_actor_names_not_the_reader_or_a_scheduled_principal()
+    {
+        var seed = await Seed();
+        var manual = await Create(seed.Workflow);
+        var legacy = await Create(seed.Workflow);
+        var scheduled = await Create(seed.Workflow);
+        await Execute("UPDATE runs SET triggered_by_name=$2 WHERE id=$1", manual.Snapshot.RunId, "Original triggering operator");
+        await Execute("UPDATE runs SET trigger=$2,triggered_by_name=$3 WHERE id=$1",
+            scheduled.Snapshot.RunId, (short)RunTrigger.Schedule, "Not a manual actor");
+        await using var server = await Server();
+        var rows = await All(server, "/api/v1/workflows/" + seed.Workflow + "/history",
+            server.Jwt(seed.Group, extra: [new("name", "Different history viewer")]));
+        Assert.Equal("Original triggering operator", rows.Single(row => row.RunId == manual.Snapshot.RunId).TriggeredByName);
+        Assert.Null(rows.Single(row => row.RunId == legacy.Snapshot.RunId).TriggeredByName);
+        Assert.Null(rows.Single(row => row.RunId == scheduled.Snapshot.RunId).TriggeredByName);
     }
 
     [Fact]

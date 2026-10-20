@@ -1105,6 +1105,12 @@ schedule starts need no reason. Skipped/missed schedule entries retain their
 recorded explanation, or explicitly report an unavailable scheduling reason.
 The history table omits variables; it focuses on outcomes, timing, versions
 and cancellation audit.
+The **Trigger** column shows the authenticated user's recorded display name
+under **Manual**, including manual **Run now** executions of a schedule.
+The name is captured when the trigger is accepted and retained with the run
+through command recovery; viewing history as a different user does not change it.
+Legacy runs and principals without a name show **User name not recorded**.
+Scheduled and catch-up triggers do not invent a human actor.
 Its separate **Date / time (local)** column uses the viewer's browser-local
 timezone with three-digit milliseconds, not a fixed timezone or the backend
 host's timezone. Cancellation audit times in this table use the same timezone;
