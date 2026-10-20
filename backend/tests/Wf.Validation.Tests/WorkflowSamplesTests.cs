@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Wf.Contracts.Registry;
 using Wf.Validation.Rules;
+using Wf.Validation.Schedules;
 
 namespace Wf.Validation.Tests;
 
@@ -61,4 +62,44 @@ public sealed class WorkflowSamplesTests
 
     private static string Samples(ValidatorFixture fixture) =>
         Path.GetFullPath(Path.Combine(fixture.AdditionalInputs[0], "..", "..", "samples", "workflows"));
+
+    [Fact]
+    public async Task Housing_profiles_validate_against_the_real_workflow_and_schedule_distinct_daily_experiments()
+    {
+        using var fixture = new ValidatorFixture();
+        var directory = Path.Combine(Samples(fixture), "demo", "teams", "data-science", "linear-regression", "nyc-housing");
+        var result = await Validator.ValidateAsync(directory, fixture.Cache, fixture.AdditionalInputs, ValidatorFixture.Token);
+        Assert.True(result.IsValid, string.Join("; ", result.Errors.Select(error => error.Message)) +
+            result.BuildFailure?.StandardOutput + result.BuildFailure?.StandardError);
+        Assert.NotNull(result.Build);
+        var schedules = ScheduleFileValidator.Validate(
+            await File.ReadAllBytesAsync(Path.Combine(directory, "schedules.json"), ValidatorFixture.Token),
+            result.Build.Manifest.Variables, cancellationToken: ValidatorFixture.Token);
+        Assert.True(schedules.IsValid);
+        Assert.Equal(2, schedules.Instances.Length);
+        var training = Assert.Single(schedules.Instances, item => item.Definition.Id == "daily-training-validation");
+        var full = Assert.Single(schedules.Instances, item => item.Definition.Id == "daily-full-test");
+        Assert.False(training.Variables["runFinalTest"].GetBoolean());
+        Assert.True(full.Variables["runFinalTest"].GetBoolean());
+        Assert.Equal(50, training.Variables["epochs"].GetInt32());
+        Assert.Equal(100, full.Variables["epochs"].GetInt32());
+        var now = new DateTimeOffset(2026, 10, 20, 9, 0, 0, TimeSpan.Zero);
+        Assert.Equal(new DateTimeOffset(2026, 10, 21, 0, 0, 0, TimeSpan.Zero), training.Expression.GetNextOccurrence(now));
+        Assert.Equal(new DateTimeOffset(2026, 10, 21, 0, 30, 0, TimeSpan.Zero), full.Expression.GetNextOccurrence(now));
+        foreach (var profile in schedules.Instances)
+        {
+            Assert.Equal("Etc/UTC", profile.Definition.Timezone);
+            Assert.Equal(Wf.Contracts.Schedules.ScheduleOverlapPolicy.Skip, profile.Definition.Overlap);
+            Assert.Equal(Wf.Contracts.Schedules.ScheduleCatchUpPolicy.Latest, profile.Definition.CatchUp);
+            Assert.Null(profile.Definition.VersionPin);
+            Assert.False(profile.Variables["forceDownload"].GetBoolean());
+            Assert.Equal(70, profile.Variables["trainingPercent"].GetInt32());
+            Assert.Equal(15, profile.Variables["validationPercent"].GetInt32());
+            Assert.Equal(15, profile.Variables["testPercent"].GetInt32());
+            Assert.Equal(0.1, profile.Variables["learningRate"].GetDouble());
+            Assert.Equal(7, profile.Variables.Count);
+            Assert.Equal(profile.Expression.GetNextOccurrence(now)!.Value.AddDays(1),
+                profile.Expression.GetNextOccurrence(profile.Expression.GetNextOccurrence(now)!.Value));
+        }
+    }
 }

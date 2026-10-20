@@ -1,0 +1,36 @@
+{
+  "$schema": "../../../../../../../src/Wf.Contracts/Schemas/schedules.schema.json",
+  "defaults": {
+    "experiment": {
+      "trainingPercent": 70,
+      "validationPercent": 15,
+      "testPercent": 15,
+      "learningRate": 0.1,
+      "forceDownload": false
+    }
+  },
+  "instances": [
+    {
+      "id": "daily-training-validation",
+      "cron": "0 0 * * *",
+      "timezone": "Etc/UTC",
+      "overlap": "Skip",
+      "catchUp": "Latest",
+      "variables": {
+        "runFinalTest": false,
+        "epochs": 50
+      }
+    },
+    {
+      "id": "daily-full-test",
+      "cron": "30 0 * * *",
+      "timezone": "Etc/UTC",
+      "overlap": "Skip",
+      "catchUp": "Latest",
+      "variables": {
+        "runFinalTest": true,
+        "epochs": 100
+      }
+    }
+  ]
+}

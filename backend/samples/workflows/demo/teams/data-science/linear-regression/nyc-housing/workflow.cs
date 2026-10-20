@@ -8,7 +8,7 @@ using Wf.Contracts.Definition;
 using Wf.Sdk;
 
 var hosted = args.Contains("--task-host", StringComparer.Ordinal);
-var workflow = Workflow.Define("data-science/linear-regression/nyc-housing", "1.2.0", w => w
+var workflow = Workflow.Define("data-science/linear-regression/nyc-housing", "1.2.1", w => w
     .Type("linear-regression")
     .Metadata("dataset", "nyc-housing")
     .Variables(v => v.Bool("runFinalTest", true).Bool("forceDownload", false)

@@ -818,9 +818,28 @@ Publish and trigger the new sample against the native development backend:
 ```powershell
 $env:WF_ACCESS_TOKEN = 'local-development' # explicit loopback Development only
 .\backend\samples\workflows\publish-samples.ps1 `
-  -Environment dev -Engine http://127.0.0.1:5000 -RunOnce
+  -Environment dev -Engine http://127.0.0.1:5000 -IncludeSchedules -RunOnce
 Remove-Item Env:\WF_ACCESS_TOKEN
 ```
+
+`-IncludeSchedules` deliberately registers the sample's two recurring code
+schedules from `nyc-housing\schedules.json`; without it the publication script
+skips scheduled workflows. `-RunOnce` additionally starts one manual run, not
+the recurring schedule.
+
+| Schedule profile | Daily time (`Etc/UTC`) | `runFinalTest` | `epochs` |
+| --- | --- | --- | --- |
+| `daily-training-validation` | 00:00 | `false` | 50 |
+| `daily-full-test` | 00:30 | `true` | 100 |
+
+Both profiles default to 70/15/15 splits, learning rate 0.1 and
+`forceDownload=false`. Change shared values under `defaults.experiment`, or
+override any parameter in a profile's `variables`, then republish with
+`-IncludeSchedules`. Each profile owns a separate series. Both follow the active
+workflow version, skip overlapping runs within their own series and use
+`catchUp=Latest` after downtime. They appear on the workflow's schedule list;
+code schedules are read-only in the UI. Their **Run now** action verifies a
+profile manually without moving its next automatic fire time.
 
 Open `/t/data-science/linear-regression/w/nyc-housing/history`. **Reports**
 includes training/validation RMSE by epoch, a fitted-price chart, model
