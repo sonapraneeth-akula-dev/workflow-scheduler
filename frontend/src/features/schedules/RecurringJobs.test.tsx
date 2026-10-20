@@ -87,6 +87,12 @@ const paused: RecurringJob = {
   paused: true,
   nextFireAt: null,
 }
+const fullTest: RecurringJob = {
+  ...job,
+  id: "019ed132-2f44-7000-8000-000000000009",
+  seriesId: "019ed132-2f44-7000-8000-000000000010",
+  name: "Full test",
+}
 const otherType: RecurringJob = {
   ...job,
   id: "019ed132-2f44-7000-8000-000000000005",
@@ -165,7 +171,11 @@ beforeEach(() => {
   })
 })
 
-it("groups scheduled jobs by authorized team and workflow type with recurrence, timezone, status and detail/history links", async () => {
+it("groups table rows by authorized team, workflow type and exact workflow with schedule details and actions", async () => {
+  vi.mocked(getRecurringJobs).mockResolvedValue({
+    ...response,
+    items: [...response.items, fullTest],
+  })
   show()
   const alpha = await screen.findByRole("region", {
     name: "Alpha Science recurring jobs",
@@ -173,55 +183,81 @@ it("groups scheduled jobs by authorized team and workflow type with recurrence, 
   const regression = within(alpha).getByRole("region", {
     name: "Alpha Science / Regression",
   })
-  expect(within(regression).getAllByRole("listitem")).toHaveLength(2)
+  const table = within(regression).getByRole("table", {
+    name: "Alpha Science / Regression recurring jobs grouped by workflow",
+  })
+  expect(within(table).getAllByRole("columnheader")).toHaveLength(8)
+  expect(table.querySelectorAll("tbody[data-workflow-id]")).toHaveLength(2)
+  const linear = within(table).getByRole("rowgroup", {
+    name: "Linear Regression - Housing",
+  })
+  expect(linear).toHaveAttribute("data-workflow-id", job.workflowId)
+  expect(within(linear).getAllByRole("row")).toHaveLength(3)
+  expect(
+    within(linear).getByRole("rowheader", { name: fullTest.name })
+  ).toBeVisible()
+  expect(linear.querySelector('th[scope="rowgroup"]')).toHaveAttribute(
+    "colspan",
+    "8"
+  )
   expect(
     within(alpha).getByRole("region", { name: "Alpha Science / Validation" })
   ).toBeVisible()
   expect(
     screen.getByRole("region", { name: "Bravo recurring jobs" })
   ).toBeVisible()
-  const card = within(regression)
-    .getByRole("heading", { name: job.name })
-    .closest("li")!
-  expect(within(card).getByText("Linear Regression - Housing")).toBeVisible()
-  expect(within(card).getByText("Code schedule")).toBeVisible()
-  expect(within(card).getByText("Every 300 seconds")).toBeVisible()
-  expect(within(card).getByText("Etc/UTC")).toBeVisible()
-  expect(within(card).getByText("Active", { exact: true })).toBeVisible()
-  expect(within(card).getByText("1.3.0")).toBeVisible()
-  expect(card.querySelector("time")).toHaveAttribute("datetime", job.nextFireAt)
+  const row = within(linear)
+    .getByRole("rowheader", { name: job.name })
+    .closest("tr")!
   expect(
-    within(card).getByRole("link", { name: "Schedule details" })
+    within(linear).getByRole("heading", {
+      name: "Linear Regression - Housing",
+      level: 4,
+    })
+  ).toBeVisible()
+  expect(within(row).getByText("Code schedule")).toBeVisible()
+  expect(within(row).getByText("Every 300 seconds")).toBeVisible()
+  expect(within(row).getByText("Etc/UTC")).toBeVisible()
+  expect(within(row).getByText("Active", { exact: true })).toBeVisible()
+  expect(within(row).getByText("1.3.0")).toBeVisible()
+  expect(row.querySelector("time")).toHaveAttribute("datetime", job.nextFireAt)
+  expect(
+    within(row).getByRole("link", { name: "Schedule details" })
   ).toHaveAttribute("href", `/schedules/${job.id}`)
   expect(
-    within(card).getByRole("link", { name: "Series history" })
+    within(row).getByRole("link", { name: "Series history" })
   ).toHaveAttribute("href", `/series/${job.seriesId}`)
-  const pausedCard = screen
-    .getByRole("heading", { name: paused.name })
-    .closest("li")!
-  expect(within(pausedCard).getByText("UI schedule")).toBeVisible()
-  expect(within(pausedCard).getByText("Cron: 0 9 * * 1-5")).toBeVisible()
+  const pausedRow = screen
+    .getByRole("rowheader", { name: paused.name })
+    .closest("tr")!
+  expect(pausedRow.parentElement).not.toBe(linear)
+  expect(pausedRow.parentElement).toHaveAttribute(
+    "data-workflow-id",
+    paused.workflowId
+  )
+  expect(within(pausedRow).getByText("UI schedule")).toBeVisible()
+  expect(within(pausedRow).getByText("Cron: 0 9 * * 1-5")).toBeVisible()
   expect(
-    within(pausedCard).getByText("Paused; no automatic fires")
+    within(pausedRow).getByText("Paused; no automatic fires")
   ).toBeVisible()
-  expect(within(pausedCard).getByText("Active version")).toBeVisible()
-  expect(screen.getByText("Showing 4 loaded recurring jobs.")).toBeVisible()
+  expect(within(pausedRow).getByText("Active version")).toBeVisible()
+  expect(screen.getByText("Showing 5 loaded recurring jobs.")).toBeVisible()
   expect(getTypes).not.toHaveBeenCalled()
   expect(screen.getByRole("combobox", { name: "Workflow type" })).toBeDisabled()
 })
 
 it("uses the existing scoped Run now action for the selected paused schedule without resume/edit writes", async () => {
   show()
-  const card = (
-    await screen.findByRole("heading", { name: paused.name })
-  ).closest("li")!
-  const button = await within(card).findByRole("button", { name: "Run now" })
+  const row = (
+    await screen.findByRole("rowheader", { name: paused.name })
+  ).closest("tr")!
+  const button = await within(row).findByRole("button", { name: "Run now" })
   button.focus()
   await userEvent.keyboard("{Enter}")
-  expect(await within(card).findByRole("status")).toHaveTextContent(
+  expect(await within(row).findByRole("status")).toHaveTextContent(
     "Run accepted in this series"
   )
-  expect(within(card).getByRole("status")).toHaveTextContent(
+  expect(within(row).getByRole("status")).toHaveTextContent(
     "next fire and saved variables are unchanged"
   )
   expect(runNow).toHaveBeenCalledExactlyOnceWith(paused.id, expect.any(String))
@@ -230,7 +266,7 @@ it("uses the existing scoped Run now action for the selected paused schedule wit
     expect.any(AbortSignal)
   )
   expect(
-    within(card).getByRole("link", {
+    within(row).getByRole("link", {
       name: "019ed132-2f44-7000-8000-000000000099",
     })
   ).toHaveAttribute("href", "/runs/019ed132-2f44-7000-8000-000000000099")
@@ -248,7 +284,7 @@ it("keeps jobs visible to a Viewer but hides Run now without Operator permission
     admin: false,
   }))
   const shown = show()
-  await screen.findByRole("heading", { name: job.name })
+  await screen.findByRole("rowheader", { name: job.name })
   await waitFor(() => expect(shown.client.isFetching()).toBe(0))
   expect(
     screen.queryByRole("button", { name: "Run now" })
@@ -256,21 +292,30 @@ it("keeps jobs visible to a Viewer but hides Run now without Operator permission
   expect(runNow).not.toHaveBeenCalled()
 })
 
-it("loads additional schedule pages into the existing team/type groups without dropping earlier jobs", async () => {
+it("merges additional pages into existing workflow row groups without dropping earlier jobs", async () => {
   vi.mocked(getRecurringJobs).mockImplementation(async (_search, cursor) =>
     cursor
-      ? { items: [otherTeam], nextCursor: null }
+      ? { items: [otherTeam, fullTest], nextCursor: null }
       : { items: [job], nextCursor: "next" }
   )
   show()
-  await screen.findByRole("heading", { name: job.name })
+  await screen.findByRole("rowheader", { name: job.name })
   await userEvent.click(
     screen.getByRole("button", { name: "Load more recurring jobs" })
   )
   expect(
-    await screen.findByRole("heading", { name: otherTeam.name })
+    await screen.findByRole("rowheader", { name: otherTeam.name })
   ).toBeVisible()
-  expect(screen.getByRole("heading", { name: job.name })).toBeVisible()
+  const linear = screen.getAllByRole("rowgroup", {
+    name: "Linear Regression - Housing",
+  })
+  expect(linear).toHaveLength(1)
+  expect(
+    within(linear[0]!).getByRole("rowheader", { name: job.name })
+  ).toBeVisible()
+  expect(
+    within(linear[0]!).getByRole("rowheader", { name: fullTest.name })
+  ).toBeVisible()
   expect(getRecurringJobs).toHaveBeenLastCalledWith(
     {},
     { cursor: "next", afterId: job.id },
@@ -293,7 +338,7 @@ it("changes exact URL filters, clears the old type on team change and sends only
     nextCursor: null,
   }))
   const shown = show()
-  await screen.findByRole("heading", { name: otherTeam.name })
+  await screen.findByRole("rowheader", { name: otherTeam.name })
   await userEvent.selectOptions(
     screen.getByRole("combobox", { name: "Team" }),
     "alpha"
@@ -319,11 +364,11 @@ it("changes exact URL filters, clears the old type on team change and sends only
   shown.rerender({ team: "alpha", type: "regression" })
   await waitFor(() =>
     expect(
-      screen.queryByRole("heading", { name: otherType.name })
+      screen.queryByRole("rowheader", { name: otherType.name })
     ).not.toBeInTheDocument()
   )
   expect(
-    screen.queryByRole("heading", { name: otherTeam.name })
+    screen.queryByRole("rowheader", { name: otherTeam.name })
   ).not.toBeInTheDocument()
   expect(getRecurringJobs).toHaveBeenLastCalledWith(
     { team: "alpha", type: "regression" },
@@ -344,7 +389,7 @@ it("shows loading and empty states without inventing recurring jobs", async () =
   vi.mocked(getRecurringJobs).mockReturnValue(new Promise(() => {}))
   const shown = show()
   expect(screen.getByText("Loading recurring jobs...")).toBeVisible()
-  expect(screen.queryByRole("listitem")).not.toBeInTheDocument()
+  expect(screen.queryByRole("table")).not.toBeInTheDocument()
   vi.mocked(getRecurringJobs).mockResolvedValue({ items: [], nextCursor: null })
   shown.rerender({ team: "bravo" })
   expect(
@@ -356,7 +401,7 @@ it("shows loading and empty states without inventing recurring jobs", async () =
 
 it("hides cached jobs after failed or revoked reads and reloads after an explicit retry", async () => {
   const shown = show()
-  await screen.findByRole("heading", { name: job.name })
+  await screen.findByRole("rowheader", { name: job.name })
   vi.mocked(getRecurringJobs).mockRejectedValue(
     new ApiError(new Response(null, { status: 403 }), {
       title: "Viewer access revoked",
@@ -367,7 +412,7 @@ it("hides cached jobs after failed or revoked reads and reloads after an explici
     "Viewer access revoked"
   )
   expect(
-    screen.queryByRole("heading", { name: job.name })
+    screen.queryByRole("rowheader", { name: job.name })
   ).not.toBeInTheDocument()
   expect(
     screen.queryByRole("button", { name: "Run now" })
@@ -376,7 +421,7 @@ it("hides cached jobs after failed or revoked reads and reloads after an explici
   await userEvent.click(
     screen.getByRole("button", { name: "Refresh recurring jobs" })
   )
-  expect(await screen.findByRole("heading", { name: job.name })).toBeVisible()
+  expect(await screen.findByRole("rowheader", { name: job.name })).toBeVisible()
   await waitFor(() =>
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   )

@@ -50,14 +50,16 @@ export function RecurringJobs({
   const jobs = unavailable
     ? undefined
     : query.data?.pages.flatMap((page) => page.items)
-  const groups = new Map<string, Map<string, RecurringJob[]>>()
+  const groups = new Map<string, Map<string, Map<string, RecurringJob[]>>>()
   for (const job of jobs ?? []) {
     const [team, type] = job.workflowId.split("/")
     if (!team || !type) throw new Error("A recurring job has no team or type.")
     if (!groups.has(team)) groups.set(team, new Map())
     const group = groups.get(team)!
-    if (!group.has(type)) group.set(type, [])
-    group.get(type)!.push(job)
+    if (!group.has(type)) group.set(type, new Map())
+    const workflows = group.get(type)!
+    if (!workflows.has(job.workflowId)) workflows.set(job.workflowId, [])
+    workflows.get(job.workflowId)!.push(job)
   }
   const teamConfig = teams.error ? undefined : teams.data
   const selectedConfig =
@@ -68,8 +70,9 @@ export function RecurringJobs({
         <div>
           <h1 className="text-2xl font-semibold">Recurring jobs</h1>
           <p className="text-sm text-muted-foreground">
-            Scheduled jobs grouped by team and workflow type. Includes active
-            and paused Code and User schedules you can view.
+            Scheduled jobs in tables grouped by team, workflow type and
+            workflow. Includes active and paused Code and User schedules you can
+            view.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -173,7 +176,7 @@ export function RecurringJobs({
               <h2 className="text-xl font-semibold break-words">{teamName}</h2>
               {[...types]
                 .sort(([left], [right]) => left.localeCompare(right))
-                .map(([type, entries]) => {
+                .map(([type, workflows]) => {
                   const typeName = presentationName(
                     config,
                     type,
@@ -188,105 +191,152 @@ export function RecurringJobs({
                       <h3 className="text-lg font-semibold break-words">
                         {typeName}
                       </h3>
-                      <ul className="grid min-w-0 items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3">
-                        {entries.map((job) => (
-                          <li
-                            key={job.id}
-                            data-schedule-id={job.id}
-                            className="flex min-w-0 flex-col gap-3 border bg-background p-3"
-                          >
-                            <div className="flex flex-wrap items-start justify-between gap-2">
-                              <h4 className="min-w-0 font-semibold break-words">
-                                {job.name}
-                              </h4>
-                              <Badge variant="secondary">
-                                {job.paused ? "Paused" : "Active"}
-                              </Badge>
-                            </div>
-                            <p className="break-words">
-                              {presentationName(
+                      <div
+                        role="region"
+                        aria-label={`${teamName} / ${typeName} recurring jobs table`}
+                        tabIndex={0}
+                        className="relative overflow-auto border"
+                      >
+                        <table className="w-full min-w-[64rem] text-left text-sm">
+                          <caption className="sr-only">
+                            {teamName} / {typeName} recurring jobs grouped by
+                            workflow
+                          </caption>
+                          <thead className="border-b bg-secondary text-secondary-foreground">
+                            <tr>
+                              {[
+                                "Job",
+                                "Status",
+                                "Source",
+                                "Recurrence",
+                                "Schedule timezone",
+                                "Next fire (local time)",
+                                "Version selection",
+                                "Actions",
+                              ].map((label) => (
+                                <th
+                                  key={label}
+                                  scope="col"
+                                  className="p-3 font-semibold"
+                                >
+                                  {label}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          {[...workflows]
+                            .sort(([left], [right]) =>
+                              left.localeCompare(right)
+                            )
+                            .map(([workflowId, entries]) => {
+                              const name = presentationName(
                                 config,
-                                job.workflowId.split("/")[2]!,
-                                job.workflowId
-                              )}
-                            </p>
-                            <p className="font-mono text-xs break-all text-muted-foreground">
-                              {job.workflowId}
-                            </p>
-                            <Badge variant="outline">
-                              {job.origin === "Code"
-                                ? "Code schedule"
-                                : "UI schedule"}
-                            </Badge>
-                            <dl className="space-y-2 text-sm">
-                              <div>
-                                <dt className="font-medium">Recurrence</dt>
-                                <dd className="break-all">
-                                  {job.interval
-                                    ? `Every ${durationSeconds(job.interval)} seconds`
-                                    : `Cron: ${job.cron}`}
-                                </dd>
-                              </div>
-                              <div>
-                                <dt className="font-medium">
-                                  Schedule timezone
-                                </dt>
-                                <dd className="break-all">{job.timezone}</dd>
-                              </div>
-                              <div>
-                                <dt className="font-medium">
-                                  Next fire (local time)
-                                </dt>
-                                <dd>
-                                  {job.paused ? (
-                                    "Paused; no automatic fires"
-                                  ) : job.nextFireAt ? (
-                                    <time
-                                      dateTime={job.nextFireAt}
-                                      title={job.nextFireAt}
+                                workflowId.split("/")[2]!,
+                                workflowId
+                              )
+                              return (
+                                <tbody
+                                  key={workflowId}
+                                  aria-label={name}
+                                  data-workflow-id={workflowId}
+                                >
+                                  <tr className="border-b bg-muted/50">
+                                    <th
+                                      scope="rowgroup"
+                                      colSpan={8}
+                                      className="p-3"
                                     >
-                                      {formatTimestamp(job.nextFireAt)}
-                                    </time>
-                                  ) : (
-                                    "Not scheduled"
-                                  )}
-                                </dd>
-                              </div>
-                              <div>
-                                <dt className="font-medium">
-                                  Version selection
-                                </dt>
-                                <dd className="break-words">
-                                  {job.versionPin ?? "Active version"}
-                                </dd>
-                              </div>
-                            </dl>
-                            <div className="mt-auto space-y-3">
-                              <div className="flex flex-wrap gap-3 text-sm">
-                                <Link
-                                  to="/schedules/$id"
-                                  params={{ id: job.id }}
-                                  className="underline"
-                                >
-                                  Schedule details
-                                </Link>
-                                <Link
-                                  to="/series/$id"
-                                  params={{ id: job.seriesId }}
-                                  className="underline"
-                                >
-                                  Series history
-                                </Link>
-                              </div>
-                              <RunNowButton
-                                scheduleId={job.id}
-                                seriesId={job.seriesId}
-                                disabled={query.isFetching || unavailable}
-                              />
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
+                                      <h4 className="font-semibold break-words">
+                                        {name}
+                                      </h4>
+                                      <p className="font-mono text-xs font-normal break-all text-muted-foreground">
+                                        {workflowId}
+                                      </p>
+                                    </th>
+                                  </tr>
+                                  {entries.map((job) => (
+                                    <tr
+                                      key={job.id}
+                                      data-schedule-id={job.id}
+                                      className="border-b bg-background align-top last:border-b-0"
+                                    >
+                                      <th
+                                        scope="row"
+                                        className="p-3 font-medium break-words"
+                                      >
+                                        {job.name}
+                                      </th>
+                                      <td className="p-3">
+                                        <Badge variant="secondary">
+                                          {job.paused ? "Paused" : "Active"}
+                                        </Badge>
+                                      </td>
+                                      <td className="p-3">
+                                        <Badge variant="outline">
+                                          {job.origin === "Code"
+                                            ? "Code schedule"
+                                            : "UI schedule"}
+                                        </Badge>
+                                      </td>
+                                      <td className="p-3 break-all">
+                                        {job.interval
+                                          ? `Every ${durationSeconds(job.interval)} seconds`
+                                          : `Cron: ${job.cron}`}
+                                      </td>
+                                      <td className="p-3 break-all">
+                                        {job.timezone}
+                                      </td>
+                                      <td className="p-3">
+                                        {job.paused ? (
+                                          "Paused; no automatic fires"
+                                        ) : job.nextFireAt ? (
+                                          <time
+                                            dateTime={job.nextFireAt}
+                                            title={job.nextFireAt}
+                                          >
+                                            {formatTimestamp(job.nextFireAt)}
+                                          </time>
+                                        ) : (
+                                          "Not scheduled"
+                                        )}
+                                      </td>
+                                      <td className="p-3 break-words">
+                                        {job.versionPin ?? "Active version"}
+                                      </td>
+                                      <td className="p-3">
+                                        <div className="space-y-3">
+                                          <div className="flex flex-wrap gap-3">
+                                            <Link
+                                              to="/schedules/$id"
+                                              params={{ id: job.id }}
+                                              className="underline"
+                                            >
+                                              Schedule details
+                                            </Link>
+                                            <Link
+                                              to="/series/$id"
+                                              params={{ id: job.seriesId }}
+                                              className="underline"
+                                            >
+                                              Series history
+                                            </Link>
+                                          </div>
+                                          <RunNowButton
+                                            scheduleId={job.id}
+                                            seriesId={job.seriesId}
+                                            disabled={
+                                              query.isFetching || unavailable
+                                            }
+                                          />
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              )
+                            })}
+                        </table>
+                      </div>
                     </section>
                   )
                 })}

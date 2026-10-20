@@ -1292,12 +1292,14 @@ them. A card tracking multiple schedules uses one History table, with an additio
 runs shows an explicit empty state, never unrelated runs.
 
 **Recurring jobs** in the navbar opens `/recurring-jobs`: all nondeleted Code
-and User schedules you can view, including paused schedules, grouped by team
-and workflow type. Team and workflow-type filters persist in the URL. Each card
-shows recurrence, schedule timezone, local next-fire time, version selection,
-and links to schedule details and series history. Results load 50 at a time;
-**Load more recurring jobs** adds the next page, and the list refreshes every
-30 seconds. **Run now** requires Operator permission for that series and starts
+and User schedules you can view, including paused schedules, in tables grouped
+by team, workflow type and workflow. Each workflow has a labeled row group;
+each scheduled job has its own row with status, source, recurrence, schedule
+timezone, local next-fire time, version selection, and links to schedule details
+and series history. Team and workflow-type filters persist in the URL. Tables
+scroll within a keyboard-focusable region on narrow screens. Results load 50
+at a time; **Load more recurring jobs** adds the next page. The list refreshes
+every 30 seconds. **Run now** requires Operator permission for that series and starts
 one Manual run using the saved variables and version selection. It never resumes
 a paused schedule or changes its next automatic fire. Resolved secret values
 are never included in the listing.

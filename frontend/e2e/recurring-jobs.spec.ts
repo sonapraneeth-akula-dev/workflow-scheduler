@@ -11,7 +11,7 @@ const [team, type] = workflow.split("/")
 if (!team || !type) throw new Error(`Invalid recurring workflow: ${workflow}.`)
 const filteredUrl = `/recurring-jobs?${new URLSearchParams({ team, type })}`
 
-test("navbar opens grouped recurring jobs and team/type filters survive reload", async ({
+test("navbar opens recurring job tables grouped by type and workflow and team/type filters survive reload", async ({
   page,
   request,
 }) => {
@@ -53,24 +53,33 @@ test("navbar opens grouped recurring jobs and team/type filters survive reload",
     page.getByRole("combobox", { name: "Team", exact: true })
   ).toHaveValue(team)
   for (const job of jobs) {
-    const card = page.locator(`[data-schedule-id="${job.id}"]`)
-    await expect(card).toBeVisible()
+    const row = page.locator(`tr[data-schedule-id="${job.id}"]`)
+    await expect(row).toBeVisible()
     await expect(
-      card.getByRole("heading", { name: job.name, exact: true })
+      row.getByRole("rowheader", { name: job.name, exact: true })
     ).toBeVisible()
     await expect(
-      card.getByRole("link", { name: "Schedule details" })
+      row.getByRole("link", { name: "Schedule details" })
     ).toHaveAttribute("href", `/schedules/${job.id}`)
     await expect(
-      card.getByRole("link", { name: "Series history" })
+      row.getByRole("link", { name: "Series history" })
     ).toHaveAttribute("href", `/series/${job.seriesId}`)
-    await expect(card).toContainText(job.workflowId)
-    expect(await card.locator("xpath=ancestor::section").count()).toBe(2)
+    const group = row.locator("..")
+    await expect(group).toHaveAttribute("data-workflow-id", job.workflowId)
+    await expect(group).toContainText(job.workflowId)
+    await expect(group.getByRole("heading", { level: 4 })).toBeVisible()
+    expect(await row.locator("xpath=ancestor::section").count()).toBe(2)
   }
+  await expect(page.getByRole("table")).toHaveCount(1)
+  await expect(page.getByRole("columnheader")).toHaveCount(8)
+  const workflowGroups = page.locator("tbody[data-workflow-id]")
+  await expect(workflowGroups).toHaveCount(
+    new Set(jobs.map((job) => job.workflowId)).size
+  )
   await expect(page.getByRole("alert")).toHaveCount(0)
 })
 
-test("Run now from a paused grouped card persists a Manual run without changing saved schedule settings", async ({
+test("Run now from a paused grouped table row persists a Manual run without changing saved schedule settings", async ({
   page,
   request,
 }) => {
@@ -113,15 +122,15 @@ test("Run now from a paused grouped card persists a Manual run without changing 
     const before = await beforeResponse.text()
     expect(scheduleSchema.parse(parseJson(before)).paused).toBe(true)
     await page.goto(filteredUrl)
-    const card = page.locator(`[data-schedule-id="${schedule.id}"]`)
-    await expect(card.getByText("Paused", { exact: true })).toBeVisible()
+    const row = page.locator(`tr[data-schedule-id="${schedule.id}"]`)
+    await expect(row.getByText("Paused", { exact: true })).toBeVisible()
     const accepted = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname ===
           `/api/v1/schedules/${schedule.id}/run-now` &&
         response.request().method() === "POST"
     )
-    await card.getByRole("button", { name: "Run now", exact: true }).focus()
+    await row.getByRole("button", { name: "Run now", exact: true }).focus()
     await page.keyboard.press("Enter")
     const response = await accepted
     expect(response.status()).toBe(202)
@@ -131,14 +140,14 @@ test("Run now from a paused grouped card persists a Manual run without changing 
         .success
     ).toBe(true)
     const { runId } = z.object({ runId: z.uuid() }).parse(await response.json())
-    await expect(card.getByRole("status")).toContainText(
+    await expect(row.getByRole("status")).toContainText(
       "Run accepted in this series"
     )
-    await expect(card.getByRole("status")).toContainText(
+    await expect(row.getByRole("status")).toContainText(
       "next fire and saved variables are unchanged"
     )
     await expect(
-      card.getByRole("link", { name: runId, exact: true })
+      row.getByRole("link", { name: runId, exact: true })
     ).toHaveAttribute("href", `/runs/${runId}`)
     await expect
       .poll(async () => {
@@ -167,9 +176,9 @@ test("Run now from a paused grouped card persists a Manual run without changing 
     expect(after.status()).toBe(200)
     expect(await after.text()).toBe(before)
     expect(after.headers().etag).toBe(etag)
-    await expect(card.getByText("Paused; no automatic fires")).toBeVisible()
+    await expect(row.getByText("Paused; no automatic fires")).toBeVisible()
     await expect(
-      card.getByRole("button", { name: /resume|pause|delete|save/i })
+      row.getByRole("button", { name: /resume|pause|delete|save/i })
     ).toHaveCount(0)
   } finally {
     const deleted = await request.delete(`/api/v1/schedules/${schedule.id}`, {
@@ -179,7 +188,7 @@ test("Run now from a paused grouped card persists a Manual run without changing 
   }
 })
 
-test("grouped recurring jobs and navbar remain accessible without overflow or overlap across themes and widths", async ({
+test("grouped recurring job tables and navbar remain accessible without page overflow or overlap across themes and widths", async ({
   page,
 }, info) => {
   test.setTimeout(120_000)
@@ -194,6 +203,18 @@ test("grouped recurring jobs and navbar remain accessible without overflow or ov
       await page.setViewportSize({ width, height: 1000 })
       await page.goto(filteredUrl)
       await expect(page.locator("[data-schedule-id]").first()).toBeVisible()
+      const scrollRegion = page.getByRole("region", {
+        name: /recurring jobs table$/,
+      })
+      await expect(scrollRegion).toHaveAttribute("tabindex", "0")
+      await scrollRegion.focus()
+      await expect(scrollRegion).toBeFocused()
+      if (width === 390) {
+        await page.keyboard.press("ArrowRight")
+        await expect
+          .poll(() => scrollRegion.evaluate((region) => region.scrollLeft))
+          .toBeGreaterThan(0)
+      }
       await expect(page.getByRole("alert")).toHaveCount(0)
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth)
