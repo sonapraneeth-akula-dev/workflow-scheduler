@@ -9,7 +9,7 @@ namespace Wf.Validation.Tests;
 public sealed class WorkflowSamplesTests
 {
     [Theory]
-    [InlineData("demo", "Demo", 3, 9)]
+    [InlineData("demo", "Demo", 4, 11)]
     [InlineData("production", "Production", 1, 2)]
     public void Source_tree_ownership_deployment_and_project_references_match_the_registry(
         string tree, string deployment, int teams, int workflows)
@@ -67,11 +67,13 @@ public sealed class WorkflowSamplesTests
     public async Task Housing_profiles_override_experiment_variables_and_alternate_every_two_hours()
     {
         using var fixture = new ValidatorFixture();
-        var directory = Path.Combine(Samples(fixture), "demo", "teams", "data-science", "linear-regression", "nyc-housing");
+        var directory = Path.Combine(Samples(fixture), "demo", "teams", "data-science", "regression", "linear-regression");
         var result = await Validator.ValidateAsync(directory, fixture.Cache, fixture.AdditionalInputs, ValidatorFixture.Token);
         Assert.True(result.IsValid, string.Join("; ", result.Errors.Select(error => error.Message)) +
             result.BuildFailure?.StandardOutput + result.BuildFailure?.StandardError);
         Assert.NotNull(result.Build);
+        Assert.Equal("data-science/regression/linear-regression", result.Build.Manifest.Name);
+        Assert.Equal("regression", result.Build.Manifest.Metadata.Type);
         var schedules = ScheduleFileValidator.Validate(
             await File.ReadAllBytesAsync(Path.Combine(directory, "schedules.json"), ValidatorFixture.Token),
             result.Build.Manifest.Variables, cancellationToken: ValidatorFixture.Token);

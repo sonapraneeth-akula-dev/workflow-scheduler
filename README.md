@@ -755,9 +755,18 @@ All policies and variables validate before tasks start.
 ### NYC housing linear regression
 
 The default local sample is
-`data-science/linear-regression/nyc-housing`: team **Data Science**, workflow
-type **Linear Regression**, workflow **NYC Housing Prices**. Its graph is a
+`data-science/regression/linear-regression`: team **Data Science**, workflow
+type **Regression**, workflow **Linear Regression - NYC Housing Prices**. Its graph is a
 single readable chain:
+
+Regression is the shared workflow type, not the particular model algorithm.
+The earlier housing workflow identity remains available only as historical
+data after upgrading a populated demo. Publish the corrected identity and apply
+`demo\retired.schedules.json` to the earlier identity using a schedule-only
+registration. This retires its code schedules without deleting their permanent
+schedule/series IDs or historical runs. Do not rewrite pinned manifests or source archives.
+Registry replacement retains referenced historical type rows for these foreign
+keys, while only the current team snapshot supplies catalogue types and groups.
 
 | Node | Task | Result |
 | --- | --- | --- |
@@ -823,7 +832,7 @@ Remove-Item Env:\WF_ACCESS_TOKEN
 ```
 
 `-IncludeSchedules` deliberately registers the sample's two recurring code
-schedules from `nyc-housing\schedules.json`; without it the publication script
+schedules from `regression\linear-regression\schedules.json`; without it the publication script
 skips scheduled workflows. `-RunOnce` additionally starts one manual run, not
 the recurring schedule.
 
@@ -857,7 +866,7 @@ workflow version, skip overlapping runs within their own series and use
 code schedules are read-only in the UI. Their **Run now** action verifies a
 profile manually without moving its next automatic fire time.
 
-Open `/t/data-science/linear-regression/w/nyc-housing/history`. **Reports**
+Open `/t/data-science/regression/w/linear-regression/history`. **Reports**
 includes training/validation RMSE by epoch, a fitted-price chart, model
 coefficients, validation metrics, final held-out R²/MAE/RMSE, a training-mean
 baseline comparison and a CSV of every test prediction. Each report opens in
@@ -877,7 +886,7 @@ the same bar scrolls horizontally; the global header and run summary scroll norm
 Run directly without a backend:
 
 ```powershell
-dotnet run --file .\backend\samples\workflows\demo\teams\data-science\linear-regression\nyc-housing\workflow.cs
+dotnet run --file .\backend\samples\workflows\demo\teams\data-science\regression\linear-regression\workflow.cs
 ```
 
 Direct execution prints reports; registered execution publishes them through
@@ -1066,7 +1075,7 @@ authorization and scheduler fires enforce the class server-side. Even a global
 Admin cannot browse or trigger the other class. Environment changes do not
 cancel already accepted runs or alter stored schedule definitions.
 
-The default demo loader selects only `data-science` (linear-regression).
+The default demo loader selects only `data-science` (Regression workflows).
 The demo tree also retains opt-in `platform` (release, maintenance) and `commerce`
 (validation, data), with two workflows per type. They use only local synthetic
 data. `commerce/validation/payment-guard` intentionally fails by default so the
@@ -1240,8 +1249,8 @@ Service names use capitalized display labels, not renamed identifiers.
 Team `presentation.labels` supplies metadata-key labels such as **Component**.
 The optional `presentation.names` dictionary supplies exact resource/grouping
 labels, for example `"data-science": "Data Science"`,
-`"data-science/linear-regression": "Linear Regression"` and
-`"data-science/linear-regression/nyc-housing": "NYC Housing Prices"`.
+`"data-science/regression": "Regression"` and
+`"data-science/regression/linear-regression": "Linear Regression - NYC Housing Prices"`.
 Unconfigured names turn hyphens/underscores
 into spaces and capitalize word initials without lowercasing existing acronyms.
 These names appear in service navigation, team headings, containers and workflow

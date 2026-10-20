@@ -1,0 +1,5 @@
+{
+  "$schema": "../../../src/Wf.Contracts/Schemas/schedules.schema.json",
+  "instances": [],
+  "historyCards": []
+}

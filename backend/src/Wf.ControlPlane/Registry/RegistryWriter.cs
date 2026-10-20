@@ -63,8 +63,11 @@ public sealed class RegistryWriter
         }
         if (changed)
         {
-            await using (var remove = new NpgsqlCommand(
-                "DELETE FROM workflow_types WHERE team_id=$1 AND NOT(name=ANY($2))", connection, transaction))
+            // Historical workflows retain their type identity; the registry snapshot defines the current catalogue.
+            await using (var remove = new NpgsqlCommand("""
+                DELETE FROM workflow_types t WHERE team_id=$1 AND NOT(name=ANY($2))
+                    AND NOT EXISTS (SELECT 1 FROM workflows w WHERE w.type_id=t.id)
+                """, connection, transaction))
             {
                 remove.Parameters.AddWithValue(registry.Team);
                 remove.Parameters.AddWithValue(registry.Types.Select(type => type.Name).ToArray());

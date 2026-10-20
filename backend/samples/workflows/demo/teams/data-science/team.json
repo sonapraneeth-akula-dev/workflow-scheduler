@@ -3,21 +3,21 @@
   "team": "data-science",
   "deployment": "Demo",
   "presentation": {
-    "typeOrder": ["linear-regression"],
+    "typeOrder": ["regression"],
     "listColumns": ["dataset"],
     "labels": { "dataset": "Dataset" },
     "names": {
       "data-science": "Data Science",
-      "data-science/linear-regression": "Linear Regression",
-      "data-science/linear-regression/nyc-housing": "NYC Housing Prices"
+      "data-science/regression": "Regression",
+      "data-science/regression/linear-regression": "Linear Regression - NYC Housing Prices"
     }
   },
   "roleBindings": [],
   "types": [
     {
       "team": "data-science",
-      "name": "linear-regression",
-      "description": "Learn a simple housing-price model, then measure held-out prediction error.",
+      "name": "regression",
+      "description": "Train regression-family models, validate them, and evaluate held-out predictions.",
       "roleBindings": [],
       "metadataSchema": {
         "allowFreeForm": false,

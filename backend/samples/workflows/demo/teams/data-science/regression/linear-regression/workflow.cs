@@ -8,8 +8,8 @@ using Wf.Contracts.Definition;
 using Wf.Sdk;
 
 var hosted = args.Contains("--task-host", StringComparer.Ordinal);
-var workflow = Workflow.Define("data-science/linear-regression/nyc-housing", "1.3.0", w => w
-    .Type("linear-regression")
+var workflow = Workflow.Define("data-science/regression/linear-regression", "1.3.0", w => w
+    .Type("regression")
     .Metadata("dataset", "nyc-housing")
     .Variables(v => v.Int("experimentNumber", 1).Bool("runFinalTest", true).Bool("forceDownload", false)
         .Int("trainingPercent", 70).Int("validationPercent", 15).Int("testPercent", 15)

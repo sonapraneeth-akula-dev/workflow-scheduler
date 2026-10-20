@@ -3,7 +3,7 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Grpc.Net.Client" />
     <ProjectReference Include="..\..\src\Wf.Sdk\Wf.Sdk.csproj" />
-    <ProjectReference Include="..\..\samples\workflows\demo\teams\data-science\linear-regression\nyc-housing\model\HousingModel.csproj" />
+    <ProjectReference Include="..\..\samples\workflows\demo\teams\data-science\regression\linear-regression\model\HousingModel.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Update="Snapshots\*.json" CopyToOutputDirectory="PreserveNewest" />

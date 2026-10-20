@@ -108,6 +108,30 @@ public sealed class RegistryPersistenceTests(RegistryDatabase database) : IClass
     }
 
     [Fact]
+    public async Task Replacement_preserves_referenced_historical_type_identity_without_exposing_it_in_the_current_registry()
+    {
+        var team = $"team-{Guid.NewGuid():N}";
+        await Save(Registry(team, "old"));
+        var workflow = team + "/old/sample";
+        await using (var seed = database.DataSource.CreateCommand("INSERT INTO workflows(id,type_id) VALUES($1,$2)"))
+        {
+            seed.Parameters.AddWithValue(workflow);
+            seed.Parameters.AddWithValue(team + "/old");
+            await seed.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+        Assert.True(await Save(Registry(team, "regression")));
+        Assert.Equal(["old", "regression"], await Names(team));
+        await using var query = database.DataSource.CreateCommand("SELECT type_id FROM workflows WHERE id=$1");
+        query.Parameters.AddWithValue(workflow);
+        Assert.Equal(team + "/old", await query.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+        await using var server = await StartServer();
+        var current = Assert.Single((await server.Client.GetFromJsonAsync<TeamRegistry[]>("/api/v1/teams",
+            TestContext.Current.CancellationToken))!, item => item.Team == team);
+        Assert.Equal("regression", Assert.Single(current.Types).Name);
+        Assert.False(await Save(Registry(team, "regression")));
+    }
+
+    [Fact]
     public async Task Same_type_names_are_allowed_in_distinct_teams()
     {
         var first = $"team-{Guid.NewGuid():N}";
@@ -321,7 +345,8 @@ public sealed class RegistryUpgradeTests(RegistryPreviousDatabase database) : IC
 
 public sealed class RegistryDatabase : AgentDatabase
 {
-    protected override IReadOnlyList<string> Migrations => ["0015_team_type_registry.sql", "0016_role_bindings.sql"];
+    protected override IReadOnlyList<string> Migrations =>
+        ["0015_team_type_registry.sql", "0016_role_bindings.sql", "0017_workflow_registrations.sql"];
 }
 
 public sealed class RegistryPreviousDatabase : AgentDatabase
