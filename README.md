@@ -1259,10 +1259,11 @@ each with a stable unique `id`, friendly `name`, optional `visible` (default
 ]
 ```
 
-In card format, workflow-type containers with configured cards contain a separate
-workflow container for each algorithm. **Regression** remains the workflow type;
-**Linear Regression** and **Logistic Regression** each contain their own
-**Training & validation** and **Full test** cards. The table retains one row per
+Selecting a workflow type shows a top-level panel per workflow, without a
+redundant type container. On the **Regression** page, **Linear Regression** and
+**Logistic Regression** are peer panels, each containing its own **Training &
+validation** and **Full test** instance cards. Across all workflow types, type
+containers retain the nested workflow panels. Table format retains one row per
 configured card, including its exact workflow identity. Metadata grouping remains
 available and does not change card membership or run counts.
 
@@ -1326,7 +1327,8 @@ count takes precedence. The service-history API uses `runLimit=1..30`
 (default `10`) independently of the workflow page `limit`. It no longer accepts
 the daily `window` filter or returns daily aggregates; each item contains
 bounded `runs` across all retained history.
-**Container grouping** defaults to workflow type. Select a metadata key such as
+**Container grouping** defaults to workflow type across all types, or workflow
+within a selected type. Select a metadata key such as
 `environment` or `component` to create a container per exact metadata value.
 Keys come from authorized type schemas and loaded workflow metadata; missing
 values have a **Not set** container and empty values stay distinct. Grouping is

@@ -57,7 +57,7 @@ test("outcome summary uses readable severity colors and separate Infra and Servi
   }
 })
 
-test("Regression contains distinct Linear and Logistic workflows with their own training and full-test cards", async ({
+test("a selected Regression type shows peer Linear and Logistic workflow panels with their own instance cards", async ({
   page,
 }) => {
   test.skip(
@@ -70,22 +70,29 @@ test("Regression contains distinct Linear and Logistic workflows with their own 
     for (const width of [390, 1999]) {
       await page.setViewportSize({ width, height: 1100 })
       await page.goto("/t/data-science/services?type=regression")
-      const regression = page.getByRole("region", {
-        name: "Regression",
-        exact: true,
-      })
-      await expect(regression).toBeVisible()
       await expect(
-        regression.getByText("4 loaded cards", { exact: true })
-      ).toBeVisible()
+        page.getByRole("region", { name: "Regression", exact: true })
+      ).toHaveCount(0)
+      const panels = page.locator("[data-workflow-container]")
+      await expect(panels).toHaveCount(2)
+      expect(
+        await panels.evaluateAll(
+          (elements) =>
+            elements[0]!.parentElement === elements[1]!.parentElement
+        )
+      ).toBe(true)
       for (const algorithm of ["linear", "logistic"]) {
-        const container = regression.locator(
+        const container = page.locator(
           `[data-workflow-container="data-science/regression/${algorithm}-regression"]`
         )
         await expect(container).toBeVisible()
+        await expect(container.getByRole("heading", { level: 2 })).toBeVisible()
+        await expect(
+          container.getByText("2 loaded cards", { exact: true })
+        ).toBeVisible()
         for (const name of ["Training & validation", "Full test"]) {
           const card = container
-            .getByRole("heading", { name, exact: true, level: 4 })
+            .getByRole("heading", { name, exact: true, level: 3 })
             .locator("..")
             .locator("..")
           await expect(card).toBeVisible()
@@ -99,6 +106,14 @@ test("Regression contains distinct Linear and Logistic workflows with their own 
         }
         await expect(container.locator(":scope > ul > li")).toHaveCount(2)
       }
+      if (width === 1999) {
+        const linear = await panels.nth(0).boundingBox()
+        const logistic = await panels.nth(1).boundingBox()
+        expect(linear).not.toBeNull()
+        expect(logistic).not.toBeNull()
+        expect(linear!.y).toBe(logistic!.y)
+        expect(logistic!.x).toBeGreaterThan(linear!.x)
+      }
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth)
       ).toBeLessThanOrEqual(width)
@@ -109,16 +124,20 @@ test("Regression contains distinct Linear and Logistic workflows with their own 
     }
   }
   await page.getByRole("radio", { name: "Table format" }).click()
-  const table = page
-    .getByRole("region", { name: "Regression", exact: true })
-    .getByRole("table")
-  await expect(table.getByRole("rowheader")).toHaveCount(4)
-  await expect(
-    table.getByRole("rowheader").filter({ hasText: "logistic-regression" })
-  ).toHaveCount(2)
-  await expect(
-    table.getByRole("rowheader").filter({ hasText: "linear-regression" })
-  ).toHaveCount(2)
+  await expect(page.getByRole("table")).toHaveCount(2)
+  for (const algorithm of ["linear", "logistic"]) {
+    const table = page
+      .locator(
+        `[data-workflow-container="data-science/regression/${algorithm}-regression"]`
+      )
+      .getByRole("table")
+    await expect(table.getByRole("rowheader")).toHaveCount(2)
+    await expect(
+      table
+        .getByRole("rowheader")
+        .filter({ hasText: `${algorithm}-regression` })
+    ).toHaveCount(2)
+  }
 })
 
 test("navbar discovers team/type service views and restores format with individual new-tab run actions", async ({

@@ -340,6 +340,7 @@ function WorkflowGroup({
   runLimit,
   presentation,
   groupWorkflows,
+  workflowId,
 }: {
   label: string
   entries: TrackedWorkflow[]
@@ -347,6 +348,7 @@ function WorkflowGroup({
   runLimit: number
   presentation: Presentation | null
   groupWorkflows: boolean
+  workflowId?: string
 }) {
   const id = useId()
   const workflows = new Map<string, TrackedWorkflow[]>()
@@ -359,7 +361,8 @@ function WorkflowGroup({
   return (
     <section
       aria-labelledby={id}
-      className="min-w-0 space-y-3 border bg-card p-3 sm:p-4"
+      data-workflow-container={workflowId}
+      className="flex min-w-0 flex-col gap-3 border bg-card p-3 sm:p-4"
     >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
         <h2 id={id} className="text-lg font-semibold break-words">
@@ -404,6 +407,7 @@ function WorkflowGroup({
             entries={entries}
             runLimit={runLimit}
             presentation={presentation}
+            workflowScoped={workflowId !== undefined}
           />
         )
       ) : (
@@ -491,16 +495,18 @@ function WorkflowCards({
   runLimit,
   presentation,
   nested = false,
+  workflowScoped = false,
 }: {
   entries: TrackedWorkflow[]
   runLimit: number
   presentation: Presentation | null
   nested?: boolean
+  workflowScoped?: boolean
 }) {
   const Heading = nested ? "h4" : "h3"
   return (
     <ul
-      className={`grid min-w-0 flex-1 items-stretch gap-3 md:grid-cols-2 ${nested ? "" : "xl:grid-cols-3 2xl:grid-cols-4"}`}
+      className={`grid min-w-0 flex-1 items-stretch gap-3 md:grid-cols-2 ${nested || workflowScoped ? "" : "xl:grid-cols-3 2xl:grid-cols-4"}`}
     >
       {entries.map((entry) => {
         const { workflow } = entry
@@ -666,13 +672,16 @@ export function ServiceHistory({
       for (const key of Object.keys(entry.workflow.metadata.values))
         metadataKeys.add(key)
   }
+  const groupByWorkflow = search.groupBy === "type" && Boolean(search.type)
   const groups = new Map<string | undefined, TrackedWorkflow[]>()
   for (const original of cardEntries) {
     const entry = trackedEntries.get(original.key) ?? original
     const key = search.groupKey
     const value =
       search.groupBy === "type"
-        ? entry.workflow.metadata.type
+        ? groupByWorkflow
+          ? entry.workflow.id
+          : entry.workflow.metadata.type
         : key && Object.hasOwn(entry.workflow.metadata.values, key)
           ? entry.workflow.metadata.values[key]
           : undefined
@@ -739,7 +748,9 @@ export function ServiceHistory({
                 )
               }}
             >
-              <option value="type">Workflow type</option>
+              <option value="type">
+                {groupByWorkflow ? "Workflow" : "Workflow type"}
+              </option>
               {search.groupBy === "metadata" &&
               search.groupKey &&
               !metadataKeys.has(search.groupKey) ? (
@@ -805,7 +816,9 @@ export function ServiceHistory({
         Real run outcomes from each card's configured schedules, grouped by{" "}
         {search.groupBy === "metadata"
           ? `metadata key "${presentationName(null, presentationLabel(config, search.groupKey!))}"`
-          : "workflow type"}
+          : groupByWorkflow
+            ? "workflow"
+            : "workflow type"}
         . Each colored icon is one run, newest first; select it to open that
         instance in a new tab. Up to {history.runLimit} recent runs per card are
         shown, regardless of age; change this in your account Settings. History
@@ -864,31 +877,42 @@ export function ServiceHistory({
         .map((type) => (
           <WorkflowTypeLive key={`${team}/${type}`} team={team} type={type} />
         ))}
-      {[...groups]
-        .sort(([a], [b]) =>
-          a === undefined ? 1 : b === undefined ? -1 : a.localeCompare(b)
-        )
-        .map(([value, entries]) => (
-          <WorkflowGroup
-            groupWorkflows={search.groupBy === "type"}
-            presentation={config}
-            runLimit={history.runLimit}
-            key={value === undefined ? "missing" : JSON.stringify(value)}
-            label={
-              value === undefined
-                ? "Not set"
-                : value.trim().length === 0
-                  ? `Empty value (${JSON.stringify(value)})`
-                  : presentationName(
-                      config,
-                      value,
-                      search.groupBy === "type" ? `${team}/${value}` : value
-                    )
-            }
-            entries={entries}
-            view={search.view}
-          />
-        ))}
+      <div
+        className={
+          groupByWorkflow
+            ? "grid min-w-0 items-stretch gap-4 2xl:grid-cols-2"
+            : "space-y-4"
+        }
+      >
+        {[...groups]
+          .sort(([a], [b]) =>
+            a === undefined ? 1 : b === undefined ? -1 : a.localeCompare(b)
+          )
+          .map(([value, entries]) => (
+            <WorkflowGroup
+              groupWorkflows={search.groupBy === "type" && !groupByWorkflow}
+              workflowId={groupByWorkflow ? value : undefined}
+              presentation={config}
+              runLimit={history.runLimit}
+              key={value === undefined ? "missing" : JSON.stringify(value)}
+              label={
+                groupByWorkflow
+                  ? presentationName(config, entries[0]!.workflow.name, value)
+                  : value === undefined
+                    ? "Not set"
+                    : value.trim().length === 0
+                      ? `Empty value (${JSON.stringify(value)})`
+                      : presentationName(
+                          config,
+                          value,
+                          search.groupBy === "type" ? `${team}/${value}` : value
+                        )
+              }
+              entries={entries}
+              view={search.view}
+            />
+          ))}
+      </div>
       {query.hasNextPage && entries ? (
         <Button
           variant="outline"

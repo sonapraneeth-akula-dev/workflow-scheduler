@@ -1029,7 +1029,7 @@ function expectOutcome(label: string, count: number) {
   expect(tile.querySelector("dd")).toHaveTextContent(new RegExp(`^${count}$`))
 }
 
-it("keeps Regression as the type and places each algorithm's configured cards in its own workflow container", async () => {
+it("uses peer workflow panels for a selected type and retains type containers across all types", async () => {
   vi.mocked(getHistory).mockResolvedValue({
     items: [],
     nextCursor: null,
@@ -1086,9 +1086,45 @@ it("keeps Regression as the type and places each algorithm's configured cards in
   shown.rerender({ ...search, view: "table" })
   expect(await within(regression).findByRole("table")).toBeVisible()
   expect(within(regression).getAllByRole("rowheader")).toHaveLength(4)
-  shown.rerender({ ...search, groupBy: "metadata", groupKey: "component" })
+  shown.rerender({ ...search, type: "regression" })
+  const linear = await screen.findByRole("region", {
+    name: "Linear Regression",
+  })
+  const logistic = screen.getByRole("region", {
+    name: "Logistic Regression",
+  })
+  expect(linear.parentElement).toBe(logistic.parentElement)
+  expect(linear.parentElement?.tagName).toBe("DIV")
   expect(
-    screen.queryByRole("region", { name: /Regression workflow$/ })
+    screen.queryByRole("region", { name: "Regression" })
+  ).not.toBeInTheDocument()
+  expect(
+    screen.getByLabelText("Container grouping").querySelector("option:checked")
+  ).toHaveTextContent(/^Workflow$/)
+  for (const panel of [linear, logistic]) {
+    expect(within(panel).getByRole("heading", { level: 2 })).toBeVisible()
+    expect(within(panel).getByText("2 loaded cards")).toBeVisible()
+    expect(panel.querySelector(":scope > ul")?.children).toHaveLength(2)
+    expect(panel.querySelector("[data-workflow-container]")).toBeNull()
+    for (const name of ["Training & validation", "Full test"])
+      expect(
+        within(panel).getByRole("heading", { name, level: 3 })
+      ).toBeVisible()
+  }
+  shown.rerender({ ...search, type: "regression", view: "table" })
+  for (const name of ["Linear Regression", "Logistic Regression"]) {
+    const panel = await screen.findByRole("region", { name })
+    expect(within(panel).getAllByRole("rowheader")).toHaveLength(2)
+  }
+  shown.rerender({
+    ...search,
+    type: "regression",
+    groupBy: "metadata",
+    groupKey: "component",
+  })
+  expect(await screen.findByRole("region", { name: "Not set" })).toBeVisible()
+  expect(
+    screen.queryByRole("heading", { name: /Regression$/, level: 2 })
   ).not.toBeInTheDocument()
 })
 
