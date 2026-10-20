@@ -825,7 +825,11 @@ Remove-Item Env:\WF_ACCESS_TOKEN
 Open `/t/data-science/linear-regression/w/nyc-housing/history`. **Reports**
 includes training/validation RMSE by epoch, a fitted-price chart, model
 coefficients, validation metrics, final held-out R²/MAE/RMSE, a training-mean
-baseline comparison and a CSV of every test prediction. Regression does not
+baseline comparison and a CSV of every test prediction. Each report opens in
+its own subtab inside **Reports**, without leaving the run. Arrow keys move
+between subtabs; Enter or Space opens the focused report. Kind/tag filters,
+live updates and source/attempt attribution remain available. Existing report
+detail URLs still work. Regression does not
 have a classification accuracy percentage. This deliberately simple model
 ignores location and condition: its errors are measured honestly, not hidden
 behind a success threshold. Successful execution does not imply a useful

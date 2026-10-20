@@ -42,13 +42,13 @@ const data: ReportViewData = {
   },
   content: new Blob(["payload"]),
 }
-function show() {
+function show(embedded = false) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <ReportView runId={runId} reportId={reportId} />
+      <ReportView runId={runId} reportId={reportId} embedded={embedded} />
     </QueryClientProvider>
   )
 }
@@ -92,6 +92,21 @@ describe("authenticated report viewer", () => {
       expect(screen.queryByRole("status")).not.toBeInTheDocument()
     }
   )
+  it("embeds the same authorized renderer without standalone navigation or a page heading", async () => {
+    vi.mocked(getReportView).mockResolvedValue(data)
+    show(true)
+    expect(
+      await screen.findByRole("heading", { level: 3, name: data.report.title })
+    ).toBeVisible()
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("link", { name: "Back to run" })
+    ).not.toBeInTheDocument()
+    expect(screen.getByText(/Tags: review/)).toHaveTextContent("Published")
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Renderer text: Committed title"
+    )
+  })
   it("shows loading without stale or fabricated report metadata", () => {
     vi.mocked(getReportView).mockImplementation(() => new Promise(() => {}))
     show()

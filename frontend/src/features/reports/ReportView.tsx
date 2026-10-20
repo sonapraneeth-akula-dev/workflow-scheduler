@@ -3,15 +3,19 @@ import { Link } from "@tanstack/react-router"
 import { ErrorNotice } from "@/components/ErrorNotice"
 import { Button } from "@/components/ui/button"
 import { ReportRenderer } from "@/renderers/ReportRenderer"
+import { formatTimestamp } from "@/lib/timestamps"
 import { getReportView } from "./api"
 
 export function ReportView({
   runId,
   reportId,
+  embedded = false,
 }: {
   runId: string
   reportId: string
+  embedded?: boolean
 }) {
+  const Heading = embedded ? "h3" : "h1"
   const result = useQuery({
     queryKey: ["report-view", runId, reportId],
     queryFn: ({ signal }) => getReportView(runId, reportId, signal),
@@ -19,13 +23,15 @@ export function ReportView({
   })
   return (
     <section className="min-w-0 space-y-4" aria-label="Report viewer">
-      <Link
-        to="/runs/$id"
-        params={{ id: runId }}
-        className="text-primary underline"
-      >
-        Back to run
-      </Link>
+      {!embedded ? (
+        <Link
+          to="/runs/$id"
+          params={{ id: runId }}
+          className="text-primary underline"
+        >
+          Back to run
+        </Link>
+      ) : null}
       <Button
         variant="outline"
         disabled={result.isFetching}
@@ -37,13 +43,26 @@ export function ReportView({
       {result.error ? <ErrorNotice error={result.error} /> : null}
       {result.data && !result.error ? (
         <>
-          <h1 className="text-2xl font-semibold break-words">
+          <Heading className="text-2xl font-semibold break-words">
             {result.data.report.title}
-          </h1>
+          </Heading>
           <p className="break-words">
             {result.data.report.kind} | {result.data.report.sourceKey} | Attempt{" "}
             {result.data.report.attempt} |{" "}
             {result.data.report.sizeBytes.toLocaleString("en-US")} bytes
+          </p>
+          <p className="break-words">
+            Tags:{" "}
+            {result.data.report.tags.length
+              ? result.data.report.tags.join(", ")
+              : "None"}
+            {" | Published "}
+            <time
+              dateTime={result.data.report.createdAt}
+              title={result.data.report.createdAt}
+            >
+              {formatTimestamp(result.data.report.createdAt)}
+            </time>
           </p>
           <ReportRenderer
             kind={result.data.report.kind}
