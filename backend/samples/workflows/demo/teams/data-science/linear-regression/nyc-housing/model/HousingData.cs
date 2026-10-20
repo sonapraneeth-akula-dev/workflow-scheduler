@@ -8,7 +8,8 @@ namespace HousingSample;
 
 public sealed record House(string PropertyId, double SquareFeet, double Price);
 public sealed record Dataset(string Directory, bool Reused, DateTimeOffset DownloadedAt,
-    string Source, int TrainingRows, int ValidationRows, int TestRows);
+    string Source, int TrainingRows, int ValidationRows, int TestRows,
+    int TrainingPercent = 70, int ValidationPercent = 15, int TestPercent = 15);
 public sealed record Model(double Intercept, double Slope, double AreaMean, double AreaScale, double TrainingMean)
 {
     public double Predict(double squareFeet) => Intercept + Slope * ((squareFeet - AreaMean) / AreaScale);
@@ -32,31 +33,40 @@ public static class HousingData
         "&$order=borough,block,lot,sale_date,sale_price&$limit=50000";
     private static readonly string[] DataFiles = ["source.json", "training.csv", "validation.csv", "test.csv"];
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
-    private sealed record Manifest(int Format, string Source, DateTimeOffset DownloadedAt, Dictionary<string, string> Sha256);
+    private sealed record Manifest(int Format, string Source, DateTimeOffset DownloadedAt, Dictionary<string, string> Sha256,
+        int TrainingPercent = 70, int ValidationPercent = 15, int TestPercent = 15);
 
-    public static string CacheDirectory()
+    public static string CacheDirectory(int trainingPercent = 70, int validationPercent = 15, int testPercent = 15)
     {
+        ValidateSplits(trainingPercent, validationPercent, testPercent);
         var root = Environment.GetEnvironmentVariable("WF_DATASET_ROOT") ??
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wf", "datasets");
         if (string.IsNullOrWhiteSpace(root) || !Path.IsPathFullyQualified(root))
             throw new InvalidDataException("WF_DATASET_ROOT must be an absolute dataset directory.");
-        return Path.Combine(root, "nyc-housing-v1");
+        var suffix = trainingPercent == 70 && validationPercent == 15 && testPercent == 15
+            ? "" : $"-{trainingPercent}-{validationPercent}-{testPercent}";
+        return Path.Combine(root, "nyc-housing-v1" + suffix);
     }
 
-    public static async Task<Dataset?> TryLoadAsync(string directory, Action<string> log, CancellationToken token)
+    public static async Task<Dataset?> TryLoadAsync(string directory, Action<string> log, CancellationToken token,
+        int trainingPercent = 70, int validationPercent = 15, int testPercent = 15)
     {
+        ValidateSplits(trainingPercent, validationPercent, testPercent);
         Directory.CreateDirectory(directory);
         await using var cacheLock = await LockAsync(Path.Combine(directory, "cache.lock"), token);
-        return await ReadCacheAsync(directory, log, token);
+        return await ReadCacheAsync(directory, log, token, trainingPercent, validationPercent, testPercent);
     }
 
-    private static async Task<Dataset?> ReadCacheAsync(string directory, Action<string> log, CancellationToken token)
+    private static async Task<Dataset?> ReadCacheAsync(string directory, Action<string> log, CancellationToken token,
+        int trainingPercent, int validationPercent, int testPercent)
     {
         var manifestPath = Path.Combine(directory, "manifest.json");
         if (!File.Exists(manifestPath)) return null;
         var manifest = JsonSerializer.Deserialize<Manifest>(await File.ReadAllBytesAsync(manifestPath, token), Json)
             ?? throw new InvalidDataException("Dataset cache manifest is empty.");
-        if (manifest.Format != 1 || manifest.Source != Source || manifest.Sha256.Count != DataFiles.Length)
+        if (manifest.Format != 1 || manifest.Source != Source || manifest.Sha256.Count != DataFiles.Length ||
+            manifest.TrainingPercent != trainingPercent || manifest.ValidationPercent != validationPercent ||
+            manifest.TestPercent != testPercent)
             throw new InvalidDataException("Dataset cache manifest does not match this workflow.");
         foreach (var name in DataFiles)
             if (!manifest.Sha256.TryGetValue(name, out var expected) ||
@@ -67,17 +77,20 @@ public static class HousingData
         return Describe(directory, true, manifest);
     }
 
-    public static async Task<Dataset> EnsureAsync(string directory, HttpClient http, Action<string> log, CancellationToken token)
+    public static async Task<Dataset> EnsureAsync(string directory, HttpClient http, Action<string> log, CancellationToken token,
+        int trainingPercent = 70, int validationPercent = 15, int testPercent = 15, bool forceDownload = false)
     {
+        ValidateSplits(trainingPercent, validationPercent, testPercent);
         Directory.CreateDirectory(directory);
         await using var cacheLock = await LockAsync(Path.Combine(directory, "cache.lock"), token);
-        if (await ReadCacheAsync(directory, log, token) is { } cached) return cached;
-        log("CACHE MISS: downloading official NYC residential sales and preparing fixed 70/15/15 splits.");
+        if (!forceDownload && await ReadCacheAsync(directory, log, token, trainingPercent, validationPercent, testPercent) is { } cached)
+            return cached;
+        log($"{(forceDownload ? "FORCED DOWNLOAD" : "CACHE MISS")}: downloading official NYC residential sales and preparing {trainingPercent}/{validationPercent}/{testPercent} splits.");
         using var response = await http.GetAsync(Source, HttpCompletionOption.ResponseHeadersRead, token);
         response.EnsureSuccessStatusCode();
         await response.Content.LoadIntoBufferAsync(16 * 1024 * 1024, token);
         var bytes = await response.Content.ReadAsByteArrayAsync(token);
-        var splits = Split(ParseSource(bytes));
+        var splits = Split(ParseSource(bytes), trainingPercent, validationPercent, testPercent);
         var contents = new Dictionary<string, byte[]>
         {
             ["source.json"] = bytes,
@@ -86,7 +99,7 @@ public static class HousingData
             ["test.csv"] = Encoding.UTF8.GetBytes(Csv(splits.Test))
         };
         var created = new Manifest(1, Source, DateTimeOffset.UtcNow,
-            contents.ToDictionary(item => item.Key, item => Hash(item.Value)));
+            contents.ToDictionary(item => item.Key, item => Hash(item.Value)), trainingPercent, validationPercent, testPercent);
         contents["manifest.json"] = JsonSerializer.SerializeToUtf8Bytes(created, Json);
         var suffix = "." + Guid.NewGuid().ToString("N") + ".partial";
         try
@@ -126,7 +139,8 @@ public static class HousingData
         if (training.Concat(validation).Concat(test).Select(row => row.PropertyId).Distinct().Count() !=
             training.Length + validation.Length + test.Length)
             throw new InvalidDataException("Dataset splits overlap or contain duplicate properties.");
-        return new(directory, reused, manifest.DownloadedAt, manifest.Source, training.Length, validation.Length, test.Length);
+        return new(directory, reused, manifest.DownloadedAt, manifest.Source, training.Length, validation.Length, test.Length,
+            manifest.TrainingPercent, manifest.ValidationPercent, manifest.TestPercent);
     }
 
     public static House[] ParseSource(byte[] bytes)
@@ -168,13 +182,28 @@ public static class HousingData
         double.TryParse(Text(row, key), NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && double.IsFinite(number)
             ? number : throw new InvalidDataException($"NYC row has an invalid {key}.");
 
-    public static (House[] Training, House[] Validation, House[] Test) Split(House[] rows)
+    public static void ValidateSplits(int trainingPercent, int validationPercent, int testPercent)
     {
+        if (trainingPercent is < 2 or > 96 || validationPercent is < 2 or > 96 ||
+            testPercent is < 2 or > 96 || trainingPercent + validationPercent + testPercent != 100)
+            throw new InvalidDataException("Training, validation and test percentages must each be 2-96 and sum to 100.");
+    }
+
+    public static void ValidateTrainingOptions(int epochs, double learningRate)
+    {
+        if (epochs is < 1 or > 10_000 || !double.IsFinite(learningRate) || learningRate is <= 0 or > 1)
+            throw new InvalidDataException("Epochs must be 1-10000 and learningRate must be finite, greater than 0 and at most 1.");
+    }
+
+    public static (House[] Training, House[] Validation, House[] Test) Split(House[] rows,
+        int trainingPercent = 70, int validationPercent = 15, int testPercent = 15)
+    {
+        ValidateSplits(trainingPercent, validationPercent, testPercent);
         if (rows.Length < 100 || rows.Select(row => row.PropertyId).Distinct().Count() != rows.Length)
             throw new InvalidDataException("Splitting requires at least 100 unique properties.");
         var ordered = rows.OrderBy(row => Hash(Encoding.UTF8.GetBytes(row.PropertyId)), StringComparer.Ordinal).ToArray();
-        var trainEnd = ordered.Length * 70 / 100;
-        var validationEnd = ordered.Length * 85 / 100;
+        var trainEnd = ordered.Length * trainingPercent / 100;
+        var validationEnd = ordered.Length * (trainingPercent + validationPercent) / 100;
         return (ordered[..trainEnd], ordered[trainEnd..validationEnd], ordered[validationEnd..]);
     }
 
@@ -200,8 +229,10 @@ public static class HousingData
         }).ToArray();
     }
 
-    public static Fit Train(House[] training, House[] validation, CancellationToken token = default)
+    public static Fit Train(House[] training, House[] validation, CancellationToken token = default,
+        int epochs = 100, double learningRate = 0.1)
     {
+        ValidateTrainingOptions(epochs, learningRate);
         if (training.Length < 2 || validation.Length < 2)
             throw new InvalidDataException("Training and validation each need at least two rows.");
         var mean = training.Average(row => row.SquareFeet);
@@ -211,15 +242,15 @@ public static class HousingData
         var intercept = training.Average(row => row.Price);
         var slope = 0d;
         var history = new List<LearningPoint>();
-        for (var epoch = 0; epoch <= 100; epoch++)
+        for (var epoch = 0; epoch <= epochs; epoch++)
         {
             token.ThrowIfCancellationRequested();
             var model = new Model(intercept, slope, mean, scale, training.Average(row => row.Price));
             history.Add(new(epoch, Evaluate(model, training).Rmse, Evaluate(model, validation).Rmse));
-            if (epoch == 100) return new(model, history.ToArray());
+            if (epoch == epochs) return new(model, history.ToArray());
             var errors = training.Select(row => (X: (row.SquareFeet - mean) / scale, Error: model.Predict(row.SquareFeet) - row.Price)).ToArray();
-            intercept -= 0.1 * errors.Average(row => row.Error);
-            slope -= 0.1 * errors.Average(row => row.Error * row.X);
+            intercept -= learningRate * errors.Average(row => row.Error);
+            slope -= learningRate * errors.Average(row => row.Error * row.X);
         }
         throw new InvalidOperationException("Training did not produce a model.");
     }

@@ -57,6 +57,43 @@ public sealed class HousingSampleTests : IDisposable
     }
 
     [Fact]
+    public void Configured_splits_and_training_options_are_used()
+    {
+        var split = HousingData.Split(Rows, 60, 20, 20);
+        Assert.Equal(120, split.Training.Length);
+        Assert.Equal(40, split.Validation.Length);
+        Assert.Equal(40, split.Test.Length);
+        Assert.Equal(200, split.Training.Concat(split.Validation).Concat(split.Test).Select(row => row.PropertyId).Distinct().Count());
+        var fit = HousingData.Train(split.Training, split.Validation, TestContext.Current.CancellationToken, 5, 0.2);
+        Assert.Equal(6, fit.Learning.Length);
+        Assert.Equal(5, fit.Learning[^1].Epoch);
+        Assert.NotEqual(fit.Model, HousingData.Train(split.Training, split.Validation, TestContext.Current.CancellationToken, 5, 0.1).Model);
+        Assert.EndsWith("nyc-housing-v1", HousingData.CacheDirectory());
+        Assert.EndsWith("nyc-housing-v1-60-20-20", HousingData.CacheDirectory(60, 20, 20));
+    }
+
+    [Theory]
+    [InlineData(70, 20, 15)]
+    [InlineData(98, 1, 1)]
+    [InlineData(-1, 50, 51)]
+    [InlineData(int.MaxValue, int.MaxValue, 2)]
+    public void Invalid_split_parameters_are_rejected(int training, int validation, int test)
+    {
+        Assert.Throws<InvalidDataException>(() => HousingData.Split(Rows, training, validation, test));
+        Assert.Throws<InvalidDataException>(() => HousingData.CacheDirectory(training, validation, test));
+    }
+
+    [Theory]
+    [InlineData(0, 0.1)]
+    [InlineData(10001, 0.1)]
+    [InlineData(10, 0)]
+    [InlineData(10, 1.1)]
+    [InlineData(10, double.NaN)]
+    [InlineData(10, double.PositiveInfinity)]
+    public void Invalid_training_parameters_are_rejected(int epochs, double rate) =>
+        Assert.Throws<InvalidDataException>(() => HousingData.Train(Rows, Rows, TestContext.Current.CancellationToken, epochs, rate));
+
+    [Fact]
     public void Regression_reports_undefined_r2_for_constant_targets_and_rejects_constant_features()
     {
         var model = new Model(200_000, 0, 1000, 1, 200_000);
@@ -106,6 +143,64 @@ public sealed class HousingSampleTests : IDisposable
         Assert.Equal(1, handler.Requests);
         Assert.Single(results, result => !result.Reused);
         Assert.Equal(2, results.Count(result => result.Reused));
+    }
+
+    [Fact]
+    public async Task Configured_cache_records_split_identity_and_rejects_mismatched_reuse()
+    {
+        using var http = new HttpClient(new SourceHandler());
+        var data = await HousingData.EnsureAsync(directory, http, _ => { }, TestContext.Current.CancellationToken, 60, 20, 20);
+        Assert.Equal((120, 40, 40), (data.TrainingRows, data.ValidationRows, data.TestRows));
+        Assert.Equal((60, 20, 20), (data.TrainingPercent, data.ValidationPercent, data.TestPercent));
+        Assert.True((await HousingData.TryLoadAsync(directory, _ => { }, TestContext.Current.CancellationToken, 60, 20, 20))!.Reused);
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            HousingData.TryLoadAsync(directory, _ => { }, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Forced_download_refreshes_valid_cache_and_repairs_corruption_without_deleting_unrelated_files()
+    {
+        var handler = new SourceHandler();
+        using var http = new HttpClient(handler);
+        await HousingData.EnsureAsync(directory, http, _ => { }, TestContext.Current.CancellationToken);
+        var refreshed = await HousingData.EnsureAsync(directory, http, _ => { }, TestContext.Current.CancellationToken, forceDownload: true);
+        Assert.False(refreshed.Reused);
+        Assert.Equal(2, handler.Requests);
+        await File.WriteAllTextAsync(Path.Combine(directory, "unrelated.txt"), "keep", TestContext.Current.CancellationToken);
+        await File.AppendAllTextAsync(Path.Combine(directory, "training.csv"), "corrupt", TestContext.Current.CancellationToken);
+        var repaired = await HousingData.EnsureAsync(directory, http, _ => { }, TestContext.Current.CancellationToken, forceDownload: true);
+        Assert.False(repaired.Reused);
+        Assert.Equal(3, handler.Requests);
+        Assert.Equal("keep", await File.ReadAllTextAsync(Path.Combine(directory, "unrelated.txt"), TestContext.Current.CancellationToken));
+        Assert.NotNull(await HousingData.TryLoadAsync(directory, _ => { }, TestContext.Current.CancellationToken));
+        Assert.Empty(Directory.GetFiles(directory, "*.partial"));
+    }
+
+    [Fact]
+    public async Task Failed_forced_download_preserves_existing_verified_cache()
+    {
+        using var online = new HttpClient(new SourceHandler());
+        var original = await HousingData.EnsureAsync(directory, online, _ => { }, TestContext.Current.CancellationToken);
+        using var offline = new HttpClient(new SourceHandler { Offline = true });
+        await Assert.ThrowsAsync<HttpRequestException>(() =>
+            HousingData.EnsureAsync(directory, offline, _ => { }, TestContext.Current.CancellationToken, forceDownload: true));
+        Assert.Equal(original with { Reused = true },
+            await HousingData.TryLoadAsync(directory, _ => { }, TestContext.Current.CancellationToken));
+        Assert.Empty(Directory.GetFiles(directory, "*.partial"));
+    }
+
+    [Fact]
+    public async Task Legacy_default_manifest_remains_reusable()
+    {
+        using var http = new HttpClient(new SourceHandler());
+        await HousingData.EnsureAsync(directory, http, _ => { }, TestContext.Current.CancellationToken);
+        var manifest = System.Text.Json.Nodes.JsonNode.Parse(
+            await File.ReadAllTextAsync(Path.Combine(directory, "manifest.json"), TestContext.Current.CancellationToken))!.AsObject();
+        manifest.Remove("trainingPercent");
+        manifest.Remove("validationPercent");
+        manifest.Remove("testPercent");
+        await File.WriteAllTextAsync(Path.Combine(directory, "manifest.json"), manifest.ToJsonString(), TestContext.Current.CancellationToken);
+        Assert.True((await HousingData.TryLoadAsync(directory, _ => { }, TestContext.Current.CancellationToken))!.Reused);
     }
 
     [Fact]

@@ -762,7 +762,7 @@ single readable chain:
 | Node | Task | Result |
 | --- | --- | --- |
 | Dataset | Check cache -> Download if missing -> Load and report | Verified source snapshot and fixed training/validation/test CSVs; download task **Skipped** on cache hit |
-| Train | Fit linear regression | Price predicted from building area, using 100 gradient-descent epochs |
+| Train | Fit linear regression | Price predicted from building area, using configurable gradient-descent epochs (default 100) |
 | Validate | Measure validation error | Validation R², MAE and RMSE, without fitting on validation rows |
 | Test | Evaluate held-out test | Final metrics, actual/predicted chart and every test prediction; node **Skipped** when `runFinalTest=false` |
 
@@ -770,8 +770,25 @@ Data comes from NYC Department of Finance's public NYC Open Data rolling sales
 dataset `usep-8jbt`, with no credentials required. The sample selects tax-class-1
 residential sales, 500–5000 gross square feet and $100,000–$3,000,000 sale prices.
 It retains one latest sale per property and orders property IDs by SHA-256 for
-reproducible 70% training, 15% validation and 15% final-test splits. The fixed
+reproducible splits (default 70% training, 15% validation and 15% final test). The fixed
 snapshot does not silently refresh when upstream data changes.
+
+The trigger form, API and direct `--var key=value` options accept:
+
+| Parameter | Default | Constraint |
+| --- | --- | --- |
+| `runFinalTest` | `true` | Boolean; `false` skips held-out evaluation |
+| `forceDownload` | `false` | Boolean; `true` downloads again and replaces this split's cache |
+| `trainingPercent`, `validationPercent`, `testPercent` | `70`, `15`, `15` | Integers, each 2-96, summing to 100 |
+| `epochs` | `100` | Integer, 1-10000 |
+| `learningRate` | `0.1` | Finite number, greater than 0 and at most 1 |
+
+The dataset report records the effective parameters. Invalid combinations fail
+before downloading. Changing split percentages selects a separate cache directory
+with a `-<training>-<validation>-<test>` suffix; epochs and learning rate reuse the
+same splits. Forced refresh bypasses even damaged cache validation and downloads
+under the dataset lock. Replacement files are staged before publication, so HTTP
+or parsing failure preserves the previous cache; unrelated files are never deleted.
 
 The cache-check task checks disk before making any HTTP request. A cache hit
 verifies SHA-256 hashes for the source and all three CSVs, reports **reuse** and

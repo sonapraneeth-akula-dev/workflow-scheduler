@@ -8,37 +8,52 @@ using Wf.Contracts.Definition;
 using Wf.Sdk;
 
 var hosted = args.Contains("--task-host", StringComparer.Ordinal);
-var workflow = Workflow.Define("data-science/linear-regression/nyc-housing", "1.1.0", w => w
+var workflow = Workflow.Define("data-science/linear-regression/nyc-housing", "1.2.0", w => w
     .Type("linear-regression")
     .Metadata("dataset", "nyc-housing")
-    .Variables(v => v.Bool("runFinalTest", true))
+    .Variables(v => v.Bool("runFinalTest", true).Bool("forceDownload", false)
+        .Int("trainingPercent", 70).Int("validationPercent", 15).Int("testPercent", 15)
+        .Int("epochs", 100).Double("learningRate", 0.1))
     .Affinity(new PlacementAffinity(AffinityKind.Run))
     .Node("dataset", n => n.Series()
         .Task("check-cache", async ctx =>
         {
-            var cached = await HousingData.TryLoadAsync(HousingData.CacheDirectory(), ctx.Log, ctx.CancellationToken);
+            var directory = DatasetDirectory(ctx);
+            var cached = ctx.Var<bool>("forceDownload") ? null :
+                await HousingData.TryLoadAsync(directory, ctx.Log, ctx.CancellationToken,
+                    ctx.Var<int>("trainingPercent"), ctx.Var<int>("validationPercent"), ctx.Var<int>("testPercent"));
+            if (ctx.Var<bool>("forceDownload")) ctx.Log("Forced refresh requested; the download task will replace this split's cached dataset.");
             ctx.Outputs["cacheMissing"] = cached is null;
             if (cached is not null) ctx.Outputs.Set("dataset", cached, HousingJsonContext.Default.Dataset);
         })
         .Task("download-if-missing", async ctx =>
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
-            var data = await HousingData.EnsureAsync(HousingData.CacheDirectory(), http, ctx.Log, ctx.CancellationToken);
+            var data = await HousingData.EnsureAsync(DatasetDirectory(ctx), http, ctx.Log, ctx.CancellationToken,
+                ctx.Var<int>("trainingPercent"), ctx.Var<int>("validationPercent"), ctx.Var<int>("testPercent"),
+                ctx.Var<bool>("forceDownload"));
             ctx.Outputs.Set("dataset", data, HousingJsonContext.Default.Dataset);
         }, p => p.Timeout(TimeSpan.FromMinutes(5)), when: Condition.Output("dataset", "cacheMissing"))
         .Task("load-and-report", async ctx =>
         {
-            var verified = await HousingData.TryLoadAsync(HousingData.CacheDirectory(), ctx.Log, ctx.CancellationToken)
+            var verified = await HousingData.TryLoadAsync(DatasetDirectory(ctx), ctx.Log, ctx.CancellationToken,
+                ctx.Var<int>("trainingPercent"), ctx.Var<int>("validationPercent"), ctx.Var<int>("testPercent"))
                 ?? throw new InvalidDataException("Dataset cache disappeared before loading.");
             var data = verified with { Reused = ctx.Outputs.Get("dataset", HousingJsonContext.Default.Dataset)!.Reused };
             ctx.Outputs.Set("dataset", data, HousingJsonContext.Default.Dataset);
             await Report(ctx, hosted, "json", "Dataset and cache", new
             {
                 data,
+                configuration = new
+                {
+                    trainingPercent = data.TrainingPercent, validationPercent = data.ValidationPercent, testPercent = data.TestPercent,
+                    epochs = ctx.Var<int>("epochs"), learningRate = ctx.Var<double>("learningRate"),
+                    forceDownload = ctx.Var<bool>("forceDownload"), runFinalTest = ctx.Var<bool>("runFinalTest")
+                },
                 feature = "Gross building area (square feet)",
                 target = "Sale price (USD)",
                 filters = "Tax class 1, 500-5000 square feet, $100,000-$3,000,000; latest sale per property.",
-                split = "Fixed SHA-256 ordering of property IDs: 70% training, 15% validation, 15% final test. No property overlaps.",
+                split = $"Fixed SHA-256 ordering of property IDs: {data.TrainingPercent}% training, {data.ValidationPercent}% validation, {data.TestPercent}% final test. No property overlaps.",
                 cache = data.Reused ? "Verified cache; download not executed." : "Downloaded, verified and stored on disk."
             });
         }))
@@ -47,7 +62,8 @@ var workflow = Workflow.Define("data-science/linear-regression/nyc-housing", "1.
         {
             var data = ctx.Input("dataset", "dataset", HousingJsonContext.Default.Dataset)!;
             var training = HousingData.Read(data.Directory, "training");
-            var fit = HousingData.Train(training, HousingData.Read(data.Directory, "validation"), ctx.CancellationToken);
+            var fit = HousingData.Train(training, HousingData.Read(data.Directory, "validation"), ctx.CancellationToken,
+                ctx.Var<int>("epochs"), ctx.Var<double>("learningRate"));
             ctx.Outputs.Set("dataset", data, HousingJsonContext.Default.Dataset);
             ctx.Outputs.Set("model", fit.Model, HousingJsonContext.Default.Model);
             ctx.Log($"Trained price = {fit.Model.Intercept:F2} + {fit.Model.Slope:F2} * standardized square feet.");
@@ -127,7 +143,7 @@ var workflow = Workflow.Define("data-science/linear-regression/nyc-housing", "1.
                 "# NYC housing: a deliberately simple baseline\n\n" +
                 "Dataset -> Train -> Validate -> Test. A verified cache hit marks the download task Skipped; no HTTP request or attempt. " +
                 "Set runFinalTest=false to mark the final test node and its task Skipped while retaining training and validation reports.\n\n" +
-                "One input: building area. One target: sale price in USD. Gradient descent runs 100 epochs; area normalization uses training rows only. " +
+                $"One input: building area. One target: sale price in USD. Gradient descent runs {ctx.Var<int>("epochs")} epochs at learning rate {ctx.Var<double>("learningRate").ToString(System.Globalization.CultureInfo.InvariantCulture)}; area normalization uses training rows only. " +
                 "Validation is monitored, not used to fit coefficients. The test split is read only after validation completes.\n\n" +
                 "R squared, MAE and RMSE measure regression quality; there is no classification accuracy percentage. " +
                 "Compare final RMSE with the training-mean baseline. This small model ignores location, condition and many other price drivers, so expect substantial error. " +
@@ -137,6 +153,13 @@ var workflow = Workflow.Define("data-science/linear-regression/nyc-housing", "1.
         })));
 
 return await workflow.RunAsync(args);
+
+static string DatasetDirectory(TaskContext context)
+{
+    HousingData.ValidateTrainingOptions(context.Var<int>("epochs"), context.Var<double>("learningRate"));
+    return HousingData.CacheDirectory(context.Var<int>("trainingPercent"), context.Var<int>("validationPercent"),
+        context.Var<int>("testPercent"));
+}
 
 static Task Report(TaskContext context, bool hosted, string kind, string title, object value) =>
     Publish(context, hosted, kind, title, JsonSerializer.SerializeToUtf8Bytes(value, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
