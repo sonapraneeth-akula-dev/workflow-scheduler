@@ -7,6 +7,10 @@ import {
 } from "react"
 import { z } from "zod"
 import type { Session } from "@/lib/auth/session"
+import {
+  trackingSchema,
+  type ScheduleTrackingSelection,
+} from "@/features/schedules/tracking"
 
 export const maximumServiceRunLimit = 30
 export const serviceRunLimitSchema = z.int().min(1).max(maximumServiceRunLimit)
@@ -16,7 +20,16 @@ interface PreferenceState {
   error: Error | null
 }
 const Preferences = createContext<
-  (PreferenceState & { setRunLimit: (value: number) => boolean }) | null
+  | (PreferenceState & {
+      setRunLimit: (value: number) => boolean
+      tracking: Record<string, ScheduleTrackingSelection>
+      trackingError: Error | null
+      setTracking: (
+        workflowId: string,
+        value: ScheduleTrackingSelection
+      ) => boolean
+    })
+  | null
 >(null)
 
 export function profilePreferenceKey(session: Session | null) {
@@ -28,6 +41,41 @@ export function profilePreferenceKey(session: Session | null) {
       "A signed-in account and tenant are required to save personal settings."
     )
   return `kardia.profile.v1.${encodeURIComponent(session.tenantId)}.${encodeURIComponent(session.accountId)}.serviceRunLimit`
+}
+
+export function trackingPreferenceKey(session: Session | null) {
+  return (
+    profilePreferenceKey(session)?.replace(
+      /serviceRunLimit$/,
+      "scheduleTracking"
+    ) ?? null
+  )
+}
+
+const workflowIdentity = z
+  .string()
+  .regex(/^[^/\\\p{Cc}]+\/[^/\\\p{Cc}]+\/[^/\\\p{Cc}]+$/u)
+const trackingPreferencesSchema = z.record(workflowIdentity, trackingSchema)
+function readTracking(session: Session | null) {
+  try {
+    const key = trackingPreferenceKey(session)
+    const stored = key === null ? null : localStorage.getItem(key)
+    return {
+      tracking:
+        stored === null
+          ? {}
+          : trackingPreferencesSchema.parse(JSON.parse(stored)),
+      trackingError: null,
+    }
+  } catch (cause) {
+    return {
+      tracking: {},
+      trackingError: new Error(
+        "Your saved schedule tracking could not be read. Showing all schedules and manual runs until you save a new selection.",
+        { cause }
+      ),
+    }
+  }
 }
 
 function readPreference(session: Session | null): PreferenceState {
@@ -60,13 +108,22 @@ export function ServiceHistoryPreferences({
   children: ReactNode
 }) {
   const [state, setState] = useState(() => readPreference(session))
+  const [trackingState, setTrackingState] = useState(() =>
+    readTracking(session)
+  )
   useEffect(() => {
     function changed(event: StorageEvent) {
       if (
         event.storageArea === localStorage &&
         (event.key === null || event.key === profilePreferenceKey(session))
-      )
+      ) {
         setState(readPreference(session))
+      }
+      if (
+        event.storageArea === localStorage &&
+        (event.key === null || event.key === trackingPreferenceKey(session))
+      )
+        setTrackingState(readTracking(session))
     }
     window.addEventListener("storage", changed)
     return () => window.removeEventListener("storage", changed)
@@ -101,8 +158,44 @@ export function ServiceHistoryPreferences({
       return false
     }
   }
+  function setTracking(workflowId: string, value: ScheduleTrackingSelection) {
+    const validId = workflowIdentity.safeParse(workflowId)
+    const selection = trackingSchema.safeParse(value)
+    if (!validId.success || !selection.success) {
+      setTrackingState((previous) => ({
+        ...previous,
+        trackingError: new Error(
+          "Choose a valid workflow and at most 32 distinct schedules."
+        ),
+      }))
+      return false
+    }
+    try {
+      const key = trackingPreferenceKey(session)
+      if (key === null)
+        throw new Error("Sign in before saving personal settings.")
+      const tracking = {
+        ...trackingState.tracking,
+        [workflowId]: selection.data,
+      }
+      localStorage.setItem(key, JSON.stringify(tracking))
+      setTrackingState({ tracking, trackingError: null })
+      return true
+    } catch (cause) {
+      setTrackingState((previous) => ({
+        ...previous,
+        trackingError: new Error(
+          "Your schedule tracking could not be saved. The previous selection is unchanged.",
+          { cause }
+        ),
+      }))
+      return false
+    }
+  }
   return (
-    <Preferences.Provider value={{ ...state, setRunLimit }}>
+    <Preferences.Provider
+      value={{ ...state, ...trackingState, setRunLimit, setTracking }}
+    >
       {children}
     </Preferences.Provider>
   )

@@ -4,6 +4,10 @@ import type { components } from "@/lib/api/schema"
 import { runStatuses } from "@/features/catalog/api"
 import { failureSummarySchema } from "./failures"
 import {
+  seriesSelectionSchema,
+  trackedScheduleSchema,
+} from "@/features/schedules/tracking"
+import {
   instantMicros,
   instantSchema,
   metadataValuesSchema,
@@ -27,6 +31,15 @@ export const historySearchSchema = z.object({
   abortedBy: principal.optional(),
   sort: z.enum(["createdAtDesc", "createdAtAsc"]).optional(),
   outcome: z.enum(["Run", "Skipped", "Missed"]).optional(),
+  seriesIds: seriesSelectionSchema.optional(),
+  includeManual: z
+    .enum(["true", "false"])
+    .or(
+      z
+        .boolean()
+        .transform((value) => (value ? ("true" as const) : ("false" as const)))
+    )
+    .optional(),
 })
 export type HistorySearch = z.infer<typeof historySearchSchema>
 export type HistoryScope =
@@ -100,6 +113,7 @@ const pageSchema = z.object({
   items: z.array(rowSchema).max(50),
   nextCursor: z.string().min(1).max(256).nullable(),
   currentScheduleId: z.uuid().nullable(),
+  schedules: z.array(trackedScheduleSchema).optional(),
 })
 export type HistoryPage = z.infer<typeof pageSchema>
 export type HistoryCursor = { cursor: string; after: HistoryRow } | null
@@ -124,8 +138,10 @@ export async function getHistory(
   scope: HistoryScope,
   search: HistorySearch,
   cursor: HistoryCursor,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  limit = 50
 ): Promise<HistoryPage> {
+  z.int().min(1).max(50).parse(limit)
   const filters = historySearchSchema.parse(search)
   const resource: HistoryScope = z
     .union([
@@ -135,14 +151,21 @@ export async function getHistory(
     .parse(scope)
   const result = await publicApi.GET("/api/v1/runs/history", {
     params: {
-      query: { ...resource, ...filters, limit: 50, cursor: cursor?.cursor },
+      query: { ...resource, ...filters, limit, cursor: cursor?.cursor },
     },
     signal,
   })
   if (!result.response.ok) throw new ApiError(result.response, result.error)
   const page = pageSchema.parse(result.data)
   const ascending = filters.sort === "createdAtAsc"
+  const selected =
+    filters.seriesIds === undefined
+      ? null
+      : filters.seriesIds === "none"
+        ? []
+        : filters.seriesIds.split(",")
   if (
+    page.items.length > limit ||
     page.nextCursor === cursor?.cursor ||
     (page.nextCursor !== null && page.items.length === 0) ||
     (!("seriesId" in resource) && page.currentScheduleId !== null) ||
@@ -159,6 +182,9 @@ export async function getHistory(
           row.workflowId !== resource.workflowId) ||
         (resource.seriesId !== undefined &&
           row.seriesId !== resource.seriesId) ||
+        (row.seriesId === null
+          ? filters.includeManual === "false"
+          : selected !== null && !selected.includes(row.seriesId)) ||
         (isRun
           ? !row.runId || !row.versionId || !row.status || !row.trigger
           : !row.fire ||

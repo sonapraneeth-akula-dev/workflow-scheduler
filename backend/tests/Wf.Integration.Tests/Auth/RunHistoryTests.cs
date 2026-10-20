@@ -486,6 +486,84 @@ public sealed class RunHistoryTests(AuthorizationDatabase database, ITestOutputH
         return new(team, group);
     }
 
+    [Fact]
+    public async Task RunHistory_tracks_named_schedules_before_paging_including_run_now_and_retained_fires()
+    {
+        var seed = await Seed();
+        var version = Guid.CreateVersion7();
+        await Version(seed, version);
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+        var schedules = new[] { Guid.NewGuid(), Guid.NewGuid() };
+        for (var index = 0; index < schedules.Length; index++)
+        {
+            await Execute("""
+                INSERT INTO schedules(id,workflow_id,origin,name,timezone,interval_s,created_by,updated_by,paused,deleted_at)
+                VALUES($1,$2,1,$3,'UTC',60,'test','test',$4,CASE WHEN $4 THEN now() END)
+                """, schedules[index], seed.Workflow, index == 0 ? "Training & validation" : "Full test", index == 1);
+            await Execute("INSERT INTO run_series(id,workflow_id,schedule_id) VALUES($1,$2,$3)",
+                index == 0 ? first : second, seed.Workflow, schedules[index]);
+        }
+        var scheduled = await Create(seed.Workflow, version);
+        var runNow = await Create(seed.Workflow, version);
+        var other = await Create(seed.Workflow, version);
+        var manual = await Create(seed.Workflow, version);
+        await Execute("UPDATE runs SET series_id=$2,trigger=$3 WHERE id=$1", scheduled.Snapshot.RunId, first, (short)RunTrigger.Schedule);
+        await Execute("UPDATE runs SET series_id=$2 WHERE id=$1", runNow.Snapshot.RunId, first);
+        await Execute("UPDATE runs SET series_id=$2,trigger=$3 WHERE id=$1", other.Snapshot.RunId, second, (short)RunTrigger.Schedule);
+        await Execute("""
+            INSERT INTO schedule_fires(schedule_id,fire_at,outcome,reason)
+            VALUES($1,now()-interval '1 hour',1,'overlap'),($2,now()-interval '2 hours',2,'missed-grace')
+            """, schedules[0], schedules[1]);
+        await using var server = await Server();
+        var jwt = server.Jwt(seed.Group);
+        var path = "/api/v1/runs/history?workflowId=" + seed.Workflow;
+        var tracked = path + "&seriesIds=" + first + "&includeManual=false&limit=1";
+        var rows = await All(server, tracked, jwt);
+        Assert.Equal(3, rows.Count);
+        Assert.All(rows, row => Assert.Equal(first, row.SeriesId));
+        Assert.Contains(rows, row => row.RunId == runNow.Snapshot.RunId && row.Trigger == "Manual");
+        Assert.Contains(rows, row => row.Kind == "Fire" && row.Fire!.Outcome == "Skipped");
+        using var latestResponse = await server.Get(tracked + "&outcome=Run", jwt);
+        var latestRun = Assert.Single((await Page(latestResponse)).Items);
+        Assert.Equal(runNow.Snapshot.RunId, latestRun.RunId);
+        var combined = await All(server, path + "&seriesIds=" + first + "," + second + "&includeManual=false&limit=2", jwt);
+        Assert.Equal(5, combined.Count);
+        Assert.DoesNotContain(combined, row => row.RunId == manual.Snapshot.RunId);
+        var withManual = await All(server, path + "&seriesIds=" + first, jwt);
+        Assert.Equal(4, withManual.Count);
+        Assert.Contains(withManual, row => row.RunId == manual.Snapshot.RunId);
+        Assert.Equal(manual.Snapshot.RunId, Assert.Single(await All(server, path + "&seriesIds=none", jwt)).RunId);
+        Assert.Empty(await All(server, path + "&seriesIds=none&includeManual=false", jwt));
+        using var response = await server.Get(tracked, jwt);
+        var page = await Page(response);
+        Assert.Equal(["Full test", "Training & validation"], page.Schedules.Select(item => item.Name));
+        Assert.True(page.Schedules[0].Deleted);
+        Assert.True(page.Schedules[0].Paused);
+        Assert.NotNull(page.NextCursor);
+        using var changed = await server.Get(path + "&seriesIds=" + second + "&includeManual=false&limit=1&cursor=" + page.NextCursor, jwt);
+        await Error(changed, HttpStatusCode.BadRequest, "invalid_run_history_cursor");
+        using var wrongScope = await server.Get("/api/v1/runs/history?workflowId=" + seed.Team +
+            "-foreign/release/workflow&seriesIds=" + first, jwt);
+        await Error(wrongScope, HttpStatusCode.Forbidden, "insufficient_scope_role");
+        await using var pooledSource = NpgsqlDataSource.Create(new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            MaxPoolSize = 4
+        }.ConnectionString);
+        await using var concurrent = await RunQueryServer.Start(pooledSource, Token);
+        var concurrentJwt = concurrent.Jwt(seed.Group);
+        await Task.WhenAll(Enumerable.Range(0, 8).Select(async _ =>
+        {
+            for (var attempt = 0; attempt < 4; attempt++)
+            {
+                using var result = await concurrent.Get(tracked, concurrentJwt);
+                var batch = await Page(result);
+                Assert.Single(batch.Items);
+                Assert.Equal(2, batch.Schedules.Length);
+            }
+        }));
+    }
+
     private async Task<RunState> Create(string workflow, Guid? version = null, IReadOnlyDictionary<string, JsonElement>? variables = null)
     {
         var run = new RunState(Guid.CreateVersion7(), [],

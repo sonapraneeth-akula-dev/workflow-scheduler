@@ -1,5 +1,5 @@
 import { useId } from "react"
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
+import { useInfiniteQuery, useQueries, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ExternalLinkIcon, LayoutGridIcon, ListIcon } from "lucide-react"
 import { ErrorNotice } from "@/components/ErrorNotice"
@@ -30,9 +30,14 @@ import {
 } from "./api"
 import { RunHistoryStrip } from "./RunHistoryStrip"
 import { FailureSummary } from "@/features/runs/FailureSummary"
+import { getHistory } from "@/features/runs/history"
+import { ScheduleTracking } from "@/features/schedules/ScheduleTracking"
+import { defaultTracking, trackingSearch } from "@/features/schedules/tracking"
 
 function WorkflowActions({ workflow }: { workflow: CatalogWorkflow }) {
   const newTabDescription = useId()
+  const history = useServiceHistoryPreferences()
+  const tracking = history.tracking[workflow.id] ?? defaultTracking
   return (
     <div className="flex flex-wrap gap-2">
       <span id={newTabDescription} hidden>
@@ -65,6 +70,7 @@ function WorkflowActions({ workflow }: { workflow: CatalogWorkflow }) {
             type: workflow.type,
             wf: workflow.name,
           }}
+          search={trackingSearch(tracking)}
           target="_blank"
           rel="noopener noreferrer"
           aria-label={`History for ${workflow.id}`}
@@ -80,13 +86,69 @@ function WorkflowActions({ workflow }: { workflow: CatalogWorkflow }) {
 
 function LastRun({ workflow }: { workflow: CatalogWorkflow }) {
   const run = workflow.latestRun
+  const history = useServiceHistoryPreferences()
+  const selection = history.tracking[workflow.id] ?? defaultTracking
+  const filtered = selection.seriesIds !== null || !selection.includeManual
   return run ? (
     <time dateTime={run.createdAt} title={run.createdAt}>
       {formatTimestamp(run.createdAt)}
     </time>
   ) : (
-    <span className="text-muted-foreground">Never run</span>
+    <span className="text-muted-foreground">
+      {filtered ? "No tracked runs" : "Never run"}
+    </span>
   )
+}
+
+type TrackedWorkflow = ServiceWorkflow & {
+  trackingPending?: boolean
+  trackingError?: Error | null
+}
+
+function WorkflowTracking({
+  entry,
+  runLimit,
+}: {
+  entry: TrackedWorkflow
+  runLimit: number
+}) {
+  const history = useServiceHistoryPreferences()
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      <ScheduleTracking
+        workflowId={entry.workflow.id}
+        schedules={entry.schedules ?? []}
+        selection={history.tracking[entry.workflow.id] ?? defaultTracking}
+        onChange={(next) => {
+          history.setTracking(entry.workflow.id, next)
+        }}
+      />
+      {entry.trackingError ? (
+        <ErrorNotice error={entry.trackingError} />
+      ) : entry.trackingPending ? (
+        <p role="status">Loading tracked runs...</p>
+      ) : (
+        <RunHistoryStrip runs={entry.runs} runLimit={runLimit} />
+      )}
+    </div>
+  )
+}
+
+function WorkflowStatus({ entry }: { entry: TrackedWorkflow }) {
+  const history = useServiceHistoryPreferences()
+  const selection = history.tracking[entry.workflow.id] ?? defaultTracking
+  if (entry.trackingPending)
+    return <span className="text-sm text-muted-foreground">Loading...</span>
+  if (entry.trackingError)
+    return <span className="text-sm text-muted-foreground">Unavailable</span>
+  if (
+    !entry.workflow.latestRun &&
+    (selection.seriesIds !== null || !selection.includeManual)
+  )
+    return (
+      <span className="text-sm text-muted-foreground">No tracked runs</span>
+    )
+  return <StatusBadge status={entry.workflow.latestRun?.status ?? "NeverRun"} />
 }
 
 function WorkflowTypeLive({ team, type }: { team: string; type: string }) {
@@ -109,7 +171,7 @@ function WorkflowGroup({
   presentation,
 }: {
   label: string
-  entries: ServiceWorkflow[]
+  entries: TrackedWorkflow[]
   view: ServiceSearch["view"]
   runLimit: number
   presentation: Presentation | null
@@ -130,44 +192,51 @@ function WorkflowGroup({
       </div>
       {view === "cards" ? (
         <ul className="grid min-w-0 items-start gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {entries.map(({ workflow, runs }) => (
-            <li
-              key={workflow.id}
-              className="min-w-0 space-y-4 border bg-background p-3"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <h3 className="min-w-0 text-base font-semibold break-words">
-                  {presentationName(presentation, workflow.name, workflow.id)}
-                </h3>
-                <StatusBadge
-                  status={workflow.latestRun?.status ?? "NeverRun"}
-                />
-              </div>
-              <p
-                className="truncate font-mono text-xs text-muted-foreground"
-                title={workflow.id}
+          {entries.map((entry) => {
+            const { workflow } = entry
+            return (
+              <li
+                key={workflow.id}
+                className="min-w-0 space-y-4 border bg-background p-3"
               >
-                {workflow.id}
-              </p>
-              <FailureSummary
-                summary={workflow.latestRun?.failureSummary}
-                status={workflow.latestRun?.status}
-              />
-              <p className="text-sm">
-                <span className="font-medium">Last run:</span>{" "}
-                <LastRun workflow={workflow} />
-              </p>
-              <RunHistoryStrip runs={runs} runLimit={runLimit} />
-              <WorkflowActions workflow={workflow} />
-            </li>
-          ))}
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <h3 className="min-w-0 text-base font-semibold break-words">
+                    {presentationName(presentation, workflow.name, workflow.id)}
+                  </h3>
+                  <WorkflowStatus entry={entry} />
+                </div>
+                <p
+                  className="truncate font-mono text-xs text-muted-foreground"
+                  title={workflow.id}
+                >
+                  {workflow.id}
+                </p>
+                <FailureSummary
+                  summary={workflow.latestRun?.failureSummary}
+                  status={workflow.latestRun?.status}
+                />
+                <p className="text-sm">
+                  <span className="font-medium">Last run:</span>{" "}
+                  {entry.trackingPending ? (
+                    "Loading..."
+                  ) : entry.trackingError ? (
+                    "Unavailable"
+                  ) : (
+                    <LastRun workflow={workflow} />
+                  )}
+                </p>
+                <WorkflowTracking entry={entry} runLimit={runLimit} />
+                <WorkflowActions workflow={workflow} />
+              </li>
+            )
+          })}
         </ul>
       ) : (
         <div
           role="region"
           aria-label={`${label} service table`}
           tabIndex={0}
-          className="overflow-auto border"
+          className="relative overflow-auto border"
         >
           <table className="w-full text-left text-sm">
             <caption className="sr-only">
@@ -189,43 +258,50 @@ function WorkflowGroup({
               </tr>
             </thead>
             <tbody>
-              {entries.map(({ workflow, runs }) => (
-                <tr
-                  key={workflow.id}
-                  className="border-b last:border-0 odd:bg-card even:bg-muted/50"
-                >
-                  <th scope="row" className="p-3 font-medium">
-                    <span className="block">
-                      {presentationName(
-                        presentation,
-                        workflow.name,
-                        workflow.id
+              {entries.map((entry) => {
+                const { workflow } = entry
+                return (
+                  <tr
+                    key={workflow.id}
+                    className="border-b last:border-0 odd:bg-card even:bg-muted/50"
+                  >
+                    <th scope="row" className="p-3 font-medium">
+                      <span className="block">
+                        {presentationName(
+                          presentation,
+                          workflow.name,
+                          workflow.id
+                        )}
+                      </span>
+                      <span className="font-mono text-xs font-normal text-muted-foreground">
+                        {workflow.id}
+                      </span>
+                    </th>
+                    <td className="p-3">
+                      <WorkflowStatus entry={entry} />
+                      <FailureSummary
+                        summary={workflow.latestRun?.failureSummary}
+                        status={workflow.latestRun?.status}
+                      />
+                    </td>
+                    <td className="p-3">
+                      {entry.trackingPending ? (
+                        "Loading..."
+                      ) : entry.trackingError ? (
+                        "Unavailable"
+                      ) : (
+                        <LastRun workflow={workflow} />
                       )}
-                    </span>
-                    <span className="font-mono text-xs font-normal text-muted-foreground">
-                      {workflow.id}
-                    </span>
-                  </th>
-                  <td className="p-3">
-                    <StatusBadge
-                      status={workflow.latestRun?.status ?? "NeverRun"}
-                    />
-                    <FailureSummary
-                      summary={workflow.latestRun?.failureSummary}
-                      status={workflow.latestRun?.status}
-                    />
-                  </td>
-                  <td className="p-3">
-                    <LastRun workflow={workflow} />
-                  </td>
-                  <td className="w-px p-3">
-                    <RunHistoryStrip runs={runs} runLimit={runLimit} />
-                  </td>
-                  <td className="p-3">
-                    <WorkflowActions workflow={workflow} />
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="w-px p-3">
+                      <WorkflowTracking entry={entry} runLimit={runLimit} />
+                    </td>
+                    <td className="p-3">
+                      <WorkflowActions workflow={workflow} />
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -270,6 +346,70 @@ export function ServiceHistory({
     accessDenied(query.error) || accessDenied(types.error)
       ? undefined
       : query.data?.pages.flatMap((page) => page.items)
+  const filteredEntries = (entries ?? []).filter((entry) => {
+    const selection = history.tracking[entry.workflow.id] ?? defaultTracking
+    return selection.seriesIds !== null || !selection.includeManual
+  })
+  const trackedQueries = useQueries({
+    queries: filteredEntries.map((entry) => {
+      const filters = {
+        ...trackingSearch(
+          history.tracking[entry.workflow.id] ?? defaultTracking
+        ),
+        outcome: "Run" as const,
+      }
+      return {
+        queryKey: [
+          "catalog",
+          "team",
+          team,
+          "service-history",
+          entry.workflow.type,
+          "tracking",
+          entry.workflow.id,
+          filters,
+          history.runLimit,
+        ],
+        queryFn: ({ signal }: { signal: AbortSignal }) =>
+          getHistory(
+            { workflowId: entry.workflow.id },
+            filters,
+            null,
+            signal,
+            history.runLimit
+          ),
+      }
+    }),
+  })
+  const trackedEntries = new Map(
+    filteredEntries.map((entry, index) => {
+      const tracked = trackedQueries[index]!
+      const runs = (tracked.error ? [] : (tracked.data?.items ?? [])).map(
+        (row) => {
+          if (!row.runId || !row.status)
+            throw new Error("Tracked run history returned a non-run row.")
+          return {
+            id: row.runId,
+            status: row.status,
+            createdAt: row.at,
+            startedAt: row.startedAt,
+            endedAt: row.endedAt,
+            failureSummary: row.failureSummary,
+          }
+        }
+      )
+      return [
+        entry.workflow.id,
+        {
+          ...entry,
+          workflow: { ...entry.workflow, latestRun: runs[0] ?? null },
+          runs,
+          trackingPending: tracked.isPending,
+          trackingError: tracked.error,
+        },
+      ]
+    })
+  )
   const config =
     accessDenied(query.error) || accessDenied(types.error)
       ? null
@@ -284,8 +424,9 @@ export function ServiceHistory({
       for (const key of Object.keys(entry.workflow.metadata.values))
         metadataKeys.add(key)
   }
-  const groups = new Map<string | undefined, ServiceWorkflow[]>()
-  for (const entry of entries ?? []) {
+  const groups = new Map<string | undefined, TrackedWorkflow[]>()
+  for (const original of entries ?? []) {
+    const entry = trackedEntries.get(original.workflow.id) ?? original
     const key = search.groupKey
     const value =
       search.groupBy === "type"
@@ -400,12 +541,17 @@ export function ServiceHistory({
           <Button
             variant="outline"
             className="transition-none"
-            disabled={query.isFetching || types.isFetching}
+            disabled={
+              query.isFetching ||
+              types.isFetching ||
+              trackedQueries.some((tracked) => tracked.isFetching)
+            }
             onClick={() =>
               void Promise.all([
                 query.refetch(),
                 types.refetch(),
                 presentation.refetch(),
+                ...trackedQueries.map((tracked) => tracked.refetch()),
               ])
             }
           >
@@ -414,15 +560,16 @@ export function ServiceHistory({
         </div>
       </div>
       <p className="text-sm text-muted-foreground">
-        Real run outcomes across all series and manual runs, grouped by{" "}
+        Real run outcomes from each workflow's selected sources, grouped by{" "}
         {search.groupBy === "metadata"
           ? `metadata key "${presentationName(null, presentationLabel(config, search.groupKey!))}"`
           : "workflow type"}
         . Each colored icon is one run, newest first; select it to open that
         instance in a new tab. Up to {history.runLimit} recent runs per workflow
         are shown, regardless of age; change this in your account Settings.
-        History contains the full list. Success rates use the completed runs
-        shown.
+        History contains the full matching list. Success rates use the completed
+        runs shown. Choose one or multiple named schedules for each workflow;
+        its History link uses the same selection.
       </p>
       <div
         className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"
@@ -441,6 +588,9 @@ export function ServiceHistory({
         ))}
       </div>
       {history.error ? <ErrorNotice error={history.error} /> : null}
+      {history.trackingError ? (
+        <ErrorNotice error={history.trackingError} />
+      ) : null}
       {query.isPending ? <p role="status">Loading service history...</p> : null}
       {query.error ? <ErrorNotice error={query.error} /> : null}
       {types.error ? <ErrorNotice error={types.error} /> : null}

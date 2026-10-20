@@ -23,7 +23,7 @@ public sealed class RunHistoryTests
         Assert.Equal(50, filter.Runs.Limit);
         Assert.Null(filter.After);
         Assert.NotNull(JsonSchemaExporter.GetJsonSchemaAsNode(RunHistoryJsonContext.Default.RunHistoryPage));
-        Assert.Equal("{\"items\":[],\"nextCursor\":null,\"currentScheduleId\":null}",
+        Assert.Equal("{\"items\":[],\"nextCursor\":null,\"currentScheduleId\":null,\"schedules\":[]}",
             JsonSerializer.Serialize(new RunHistoryPage([], null), RunHistoryJsonContext.Default.RunHistoryPage));
     }
 
@@ -40,6 +40,11 @@ public sealed class RunHistoryTests
     [InlineData("cursor", "not-a-cursor")]
     [InlineData("unknown", "ignored")]
     [InlineData("workflowId", "team/type/override")]
+    [InlineData("seriesIds", "")]
+    [InlineData("seriesIds", "not-a-uuid")]
+    [InlineData("seriesIds", "00000000-0000-0000-0000-000000000000")]
+    [InlineData("includeManual", "1")]
+    [InlineData("includeManual", "False")]
     public void RunHistory_rejects_invalid_or_overridden_filters(string key, string value) =>
         Assert.Throws<ArgumentException>(() => Parse((key, value)));
 
@@ -81,6 +86,27 @@ public sealed class RunHistoryTests
         })
             Assert.NotEqual(parsed.CursorBinding, other.Binding(["team/type"]));
         Assert.NotEqual(parsed.CursorBinding, filter.Binding([]));
+    }
+
+    [Fact]
+    public void RunHistory_tracking_is_bounded_canonical_and_cursor_bound()
+    {
+        var first = Guid.NewGuid().ToString();
+        var second = Guid.NewGuid().ToString();
+        var all = Parse();
+        var selected = Parse(("seriesIds", first + "," + second), ("includeManual", "false"));
+        Assert.Equal(2, selected.SeriesIds!.Length);
+        Assert.False(selected.IncludeManual);
+        Assert.NotEqual(all.Binding(["team/type"]), selected.Binding(["team/type"]));
+        Assert.Equal(selected.Binding(["team/type"]),
+            Parse(("seriesIds", second + "," + first), ("includeManual", "false")).Binding(["team/type"]));
+        Assert.NotEqual(selected.Binding(["team/type"]),
+            Parse(("seriesIds", first + "," + second)).Binding(["team/type"]));
+        Assert.Empty(Parse(("seriesIds", "none")).SeriesIds!);
+        Assert.Throws<ArgumentException>(() => Parse(("seriesIds", first + "," + first)));
+        Assert.Throws<ArgumentException>(() => Parse(("seriesIds", string.Join(',', Enumerable.Range(0, 33).Select(_ => Guid.NewGuid())))));
+        Assert.Throws<ArgumentException>(() => RunHistoryQuery.Parse(new QueryCollection(
+            new Dictionary<string, StringValues> { ["seriesIds"] = first }), series: second));
     }
 
     [Fact]

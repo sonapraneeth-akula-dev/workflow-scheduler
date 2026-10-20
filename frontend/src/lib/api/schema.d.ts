@@ -41,7 +41,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Authorized, team-scoped workflows with their latest run instances across all series and manual runs, without a date cutoff. runLimit=1..30 (default 10) applies separately to each workflow; fewer runs means fewer instances, never fabricated outcomes. Run instances are ordered by createdAt then id descending. Uses the same exact team/type, keyset cursor and metadata filters as the workflow catalogue. No payloads or capabilities. */
+        /** @description Authorized, team-scoped workflows with their latest run instances across all series and manual runs, without a date cutoff. runLimit=1..30 (default 10) applies separately to each workflow; fewer runs means fewer instances, never fabricated outcomes. Run instances are ordered by createdAt then id descending. Each item also contains authorized schedule names and permanent series identities, including paused/deleted schedules for retained history tracking. Uses the same exact team/type, keyset cursor and metadata filters as the workflow catalogue. No payloads or capabilities. */
         get: {
             parameters: {
                 query: {
@@ -2798,7 +2798,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Durable workflow/series history: runs plus retained skipped/missed fire facts, including deleted resources. Run filters share /runs semantics; from/to bound the row timestamp. status, abortedBy or meta.* exclude fire-only rows. sort=createdAtDesc (default) or createdAtAsc; stable timestamp/UUID/kind keyset, bound to all filters, limit and fresh Viewer scopes. outcome=Run|Skipped|Missed; abortedBy is an exact principal UUID from the first committed abort event, not inferred from status. Run versionId is the executed workflow version, NOT code-schedule config. fire.scheduleConfigVersionId is the immutable config at claim, null for user/legacy fires. currentScheduleId is the authoritative non-deleted schedule linked by run_series for an explicit seriesId; null after schedule deletion, for run-only legacy series or without a series filter. Variables project only set schema-backed names/types; all values/defaults/secret references omitted, Secret entries marked redacted. Unknown legacy schemas produce []. triggeredByName is the authenticated display name recorded at manual acceptance, null for legacy/unnamed principals and nonmanual triggers; never inferred from the reader. Copied metadata is public author-declared metadata. Duration is endedAt-startedAt in milliseconds, null unless both exist. No storage capabilities. */
+        /** @description Durable workflow/series history: runs plus retained skipped/missed fire facts, including deleted resources. Run filters share /runs semantics; from/to bound the row timestamp. status, abortedBy or meta.* exclude fire-only rows. sort=createdAtDesc (default) or createdAtAsc; stable timestamp/UUID/kind keyset, bound to all filters, limit and fresh Viewer scopes. outcome=Run|Skipped|Missed; abortedBy is an exact principal UUID from the first committed abort event, not inferred from status. Run versionId is the executed workflow version, NOT code-schedule config. fire.scheduleConfigVersionId is the immutable config at claim, null for user/legacy fires. currentScheduleId is the authoritative non-deleted schedule linked by run_series for an explicit seriesId; null after schedule deletion, for run-only legacy series or without a series filter. Variables project only set schema-backed names/types; all values/defaults/secret references omitted, Secret entries marked redacted. Unknown legacy schemas produce []. triggeredByName is the authenticated display name recorded at manual acceptance, null for legacy/unnamed principals and nonmanual triggers; never inferred from the reader. seriesIds selects up to 32 comma-separated schedule series UUIDs (none selects no schedules); includeManual=true (default) includes runs without a series. Filters apply before paging. schedules contains authorized schedule names and retained deleted schedule identities for this resource; manual Run now remains associated with its schedule series. Copied metadata is public author-declared metadata. Duration is endedAt-startedAt in milliseconds, null unless both exist. No storage capabilities. */
         get: {
             parameters: {
                 query?: {
@@ -2815,6 +2815,8 @@ export interface paths {
                     sort?: "createdAtDesc" | "createdAtAsc";
                     abortedBy?: string;
                     outcome?: "Run" | "Skipped" | "Missed";
+                    seriesIds?: string;
+                    includeManual?: "true" | "false";
                 };
                 header?: never;
                 path?: never;
@@ -2893,7 +2895,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Durable workflow/series history: runs plus retained skipped/missed fire facts, including deleted resources. Run filters share /runs semantics; from/to bound the row timestamp. status, abortedBy or meta.* exclude fire-only rows. sort=createdAtDesc (default) or createdAtAsc; stable timestamp/UUID/kind keyset, bound to all filters, limit and fresh Viewer scopes. outcome=Run|Skipped|Missed; abortedBy is an exact principal UUID from the first committed abort event, not inferred from status. Run versionId is the executed workflow version, NOT code-schedule config. fire.scheduleConfigVersionId is the immutable config at claim, null for user/legacy fires. currentScheduleId is the authoritative non-deleted schedule linked by run_series for an explicit seriesId; null after schedule deletion, for run-only legacy series or without a series filter. Variables project only set schema-backed names/types; all values/defaults/secret references omitted, Secret entries marked redacted. Unknown legacy schemas produce []. triggeredByName is the authenticated display name recorded at manual acceptance, null for legacy/unnamed principals and nonmanual triggers; never inferred from the reader. Copied metadata is public author-declared metadata. Duration is endedAt-startedAt in milliseconds, null unless both exist. No storage capabilities. */
+        /** @description Durable workflow/series history: runs plus retained skipped/missed fire facts, including deleted resources. Run filters share /runs semantics; from/to bound the row timestamp. status, abortedBy or meta.* exclude fire-only rows. sort=createdAtDesc (default) or createdAtAsc; stable timestamp/UUID/kind keyset, bound to all filters, limit and fresh Viewer scopes. outcome=Run|Skipped|Missed; abortedBy is an exact principal UUID from the first committed abort event, not inferred from status. Run versionId is the executed workflow version, NOT code-schedule config. fire.scheduleConfigVersionId is the immutable config at claim, null for user/legacy fires. currentScheduleId is the authoritative non-deleted schedule linked by run_series for an explicit seriesId; null after schedule deletion, for run-only legacy series or without a series filter. Variables project only set schema-backed names/types; all values/defaults/secret references omitted, Secret entries marked redacted. Unknown legacy schemas produce []. triggeredByName is the authenticated display name recorded at manual acceptance, null for legacy/unnamed principals and nonmanual triggers; never inferred from the reader. seriesIds selects up to 32 comma-separated schedule series UUIDs (none selects no schedules); includeManual=true (default) includes runs without a series. Filters apply before paging. schedules contains authorized schedule names and retained deleted schedule identities for this resource; manual Run now remains associated with its schedule series. Copied metadata is public author-declared metadata. Duration is endedAt-startedAt in milliseconds, null unless both exist. No storage capabilities. */
         get: {
             parameters: {
                 query?: {
@@ -2910,6 +2912,8 @@ export interface paths {
                     sort?: "createdAtDesc" | "createdAtAsc";
                     abortedBy?: string;
                     outcome?: "Run" | "Skipped" | "Missed";
+                    seriesIds?: string;
+                    includeManual?: "true" | "false";
                 };
                 header?: never;
                 path: {
@@ -2992,7 +2996,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Durable workflow/series history: runs plus retained skipped/missed fire facts, including deleted resources. Run filters share /runs semantics; from/to bound the row timestamp. status, abortedBy or meta.* exclude fire-only rows. sort=createdAtDesc (default) or createdAtAsc; stable timestamp/UUID/kind keyset, bound to all filters, limit and fresh Viewer scopes. outcome=Run|Skipped|Missed; abortedBy is an exact principal UUID from the first committed abort event, not inferred from status. Run versionId is the executed workflow version, NOT code-schedule config. fire.scheduleConfigVersionId is the immutable config at claim, null for user/legacy fires. currentScheduleId is the authoritative non-deleted schedule linked by run_series for an explicit seriesId; null after schedule deletion, for run-only legacy series or without a series filter. Variables project only set schema-backed names/types; all values/defaults/secret references omitted, Secret entries marked redacted. Unknown legacy schemas produce []. triggeredByName is the authenticated display name recorded at manual acceptance, null for legacy/unnamed principals and nonmanual triggers; never inferred from the reader. Copied metadata is public author-declared metadata. Duration is endedAt-startedAt in milliseconds, null unless both exist. No storage capabilities. */
+        /** @description Durable workflow/series history: runs plus retained skipped/missed fire facts, including deleted resources. Run filters share /runs semantics; from/to bound the row timestamp. status, abortedBy or meta.* exclude fire-only rows. sort=createdAtDesc (default) or createdAtAsc; stable timestamp/UUID/kind keyset, bound to all filters, limit and fresh Viewer scopes. outcome=Run|Skipped|Missed; abortedBy is an exact principal UUID from the first committed abort event, not inferred from status. Run versionId is the executed workflow version, NOT code-schedule config. fire.scheduleConfigVersionId is the immutable config at claim, null for user/legacy fires. currentScheduleId is the authoritative non-deleted schedule linked by run_series for an explicit seriesId; null after schedule deletion, for run-only legacy series or without a series filter. Variables project only set schema-backed names/types; all values/defaults/secret references omitted, Secret entries marked redacted. Unknown legacy schemas produce []. triggeredByName is the authenticated display name recorded at manual acceptance, null for legacy/unnamed principals and nonmanual triggers; never inferred from the reader. seriesIds selects up to 32 comma-separated schedule series UUIDs (none selects no schedules); includeManual=true (default) includes runs without a series. Filters apply before paging. schedules contains authorized schedule names and retained deleted schedule identities for this resource; manual Run now remains associated with its schedule series. Copied metadata is public author-declared metadata. Duration is endedAt-startedAt in milliseconds, null unless both exist. No storage capabilities. */
         get: {
             parameters: {
                 query?: {
@@ -3009,6 +3013,8 @@ export interface paths {
                     sort?: "createdAtDesc" | "createdAtAsc";
                     abortedBy?: string;
                     outcome?: "Run" | "Skipped" | "Missed";
+                    seriesIds?: string;
+                    includeManual?: "true" | "false";
                 };
                 header?: never;
                 path: {
@@ -6150,6 +6156,7 @@ export interface components {
             nextCursor: null | string;
             /** Format: uuid */
             currentScheduleId: null | string;
+            schedules?: components["schemas"]["RunHistorySchedule"][];
         };
         RunHistoryRow: {
             kind: string;
@@ -6177,6 +6184,15 @@ export interface components {
             version: null | string;
             triggeredByName?: null | string;
             failureSummary?: null | components["schemas"]["RunFailureSummary"];
+        };
+        RunHistorySchedule: {
+            /** Format: uuid */
+            seriesId: string;
+            /** Format: uuid */
+            scheduleId: string;
+            name: string;
+            paused: boolean;
+            deleted: boolean;
         };
         RunHistoryVariable: {
             key: string;
@@ -6365,6 +6381,7 @@ export interface components {
         ServiceWorkflow: {
             workflow: components["schemas"]["CatalogWorkflow"];
             runs: components["schemas"]["CatalogLatestRun"][];
+            schedules?: components["schemas"]["RunHistorySchedule"][];
         };
         SubscriptionPage: {
             items: components["schemas"]["SubscriptionRow"][];

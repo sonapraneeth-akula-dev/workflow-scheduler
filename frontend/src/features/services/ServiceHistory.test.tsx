@@ -14,15 +14,21 @@ import { getTeams, getTypes } from "@/features/catalog/api"
 import { useLive } from "@/lib/live/useLive"
 import type { LiveSnapshot } from "@/lib/live/subscriptions"
 import { getServiceHistory, type ServiceSearch } from "./api"
+import { getHistory } from "@/features/runs/history"
 import { ServiceHistory } from "./ServiceHistory"
 import {
   ServiceHistoryPreferences,
   profilePreferenceKey,
+  trackingPreferenceKey,
 } from "@/lib/ServiceHistoryPreferences"
 
 vi.mock("./api", async (original) => ({
   ...(await original<typeof import("./api")>()),
   getServiceHistory: vi.fn(),
+}))
+vi.mock("@/features/runs/history", async (original) => ({
+  ...(await original<typeof import("@/features/runs/history")>()),
+  getHistory: vi.fn(),
 }))
 vi.mock("@/features/catalog/api", async (original) => ({
   ...(await original<typeof import("@/features/catalog/api")>()),
@@ -36,20 +42,27 @@ vi.mock("@tanstack/react-router", () => ({
   Link: ({
     to,
     params,
+    search,
     children,
     ...props
   }: {
     to: string
     params?: Record<string, string>
+    search?: Record<string, string | undefined>
     children: ReactNode
   }) => (
     <a
       {...props}
-      href={Object.entries(params ?? {}).reduce(
-        (path, [key, value]) =>
-          path.replace(`$${key}`, encodeURIComponent(value)),
-        to
-      )}
+      href={
+        Object.entries(params ?? {}).reduce(
+          (path, [key, value]) =>
+            path.replace(`$${key}`, encodeURIComponent(value)),
+          to
+        ) +
+        (search && Object.values(search).some((value) => value !== undefined)
+          ? `?${new URLSearchParams(Object.entries(search).filter((pair): pair is [string, string] => pair[1] !== undefined))}`
+          : "")
+      }
     >
       {children}
     </a>
@@ -178,9 +191,11 @@ it("renders individual run outcomes with exact new-tab links, last run and full 
   expect(lastRunLabel.parentElement?.tagName).toBe("P")
   expect(card.querySelectorAll('[data-run-status="Succeeded"]')).toHaveLength(2)
   expect(card.querySelectorAll('[data-run-status="Failed"]')).toHaveLength(1)
-  expect(within(card).getByRole("group")).toHaveAccessibleName(
-    "Run history: 3 recent runs, newest first"
-  )
+  expect(
+    within(card).getByRole("group", {
+      name: "Run history: 3 recent runs, newest first",
+    })
+  ).toHaveAccessibleName("Run history: 3 recent runs, newest first")
   const runLinks = within(card).getAllByRole("link", {
     name: /Opens in a new tab/,
   })
@@ -200,7 +215,7 @@ it("renders individual run outcomes with exact new-tab links, last run and full 
     "66.7% completed successfully"
   )
   expect(screen.queryByText("Daily health details")).not.toBeInTheDocument()
-  expect(card.querySelector("details")).toBeNull()
+  expect(within(card).getByText("Choose tracked schedules")).toBeVisible()
   const never = screen.getByRole("heading", { name: "Never" }).closest("li")!
   expect(
     within(never).getByText("Last run:", { exact: true }).parentElement
@@ -248,7 +263,8 @@ it("switches to the striped semantic table without changing the cached health qu
   expect(
     within(table).getByRole("button", { name: "View last run" })
   ).toBeDisabled()
-  expect(table.querySelector("details")).toBeNull()
+  expect(within(table).getAllByText("Choose tracked schedules")).toHaveLength(2)
+  expect(table.parentElement).toHaveClass("relative", "overflow-auto")
   expect(
     table.querySelector("tbody tr")!.querySelectorAll("[data-run-id]")
   ).toHaveLength(3)
@@ -629,4 +645,280 @@ it("hides cached metadata grouping keys and containers after access is revoked",
   expect(
     screen.queryByRole("heading", { name: "Build" })
   ).not.toBeInTheDocument()
+})
+
+const trackedSchedules = [
+  {
+    seriesId: "019ed132-2f44-7000-8000-000000000020",
+    scheduleId: "019ed132-2f44-7000-8000-000000000030",
+    name: "daily-training-validation",
+    paused: false,
+    deleted: false,
+  },
+  {
+    seriesId: "019ed132-2f44-7000-8000-000000000021",
+    scheduleId: "019ed132-2f44-7000-8000-000000000031",
+    name: "daily-full-test",
+    paused: false,
+    deleted: false,
+  },
+]
+const trackedRow = {
+  kind: "Run",
+  at: "2026-10-17T00:00:00Z",
+  workflowId: "team/release/build",
+  seriesId: trackedSchedules[0]!.seriesId,
+  runId: "019ed132-2f44-7000-8000-000000000040",
+  versionId: "019ed132-2f44-7000-8000-000000000001",
+  version: "1.0.0",
+  status: "Succeeded",
+  startedAt: null,
+  endedAt: null,
+  durationMs: null,
+  trigger: "Schedule",
+  metadata: null,
+  abort: null,
+  variables: [],
+  fire: null,
+} as const
+function namedSchedules() {
+  vi.mocked(getServiceHistory).mockResolvedValue({
+    ...response,
+    items: response.items.map((entry) => ({
+      ...entry,
+      schedules: trackedSchedules,
+    })),
+  })
+}
+
+it("selects named schedules independently per card and carries the selection to its one history link", async () => {
+  namedSchedules()
+  vi.mocked(getHistory).mockResolvedValue({
+    items: [{ ...trackedRow, variables: [] }],
+    nextCursor: null,
+    currentScheduleId: null,
+    schedules: trackedSchedules,
+  })
+  const user = userEvent.setup()
+  show()
+  const card = (await screen.findByRole("heading", { name: "Build" })).closest(
+    "li"
+  )!
+  expect(
+    within(card).getByLabelText("Tracking for team/release/build")
+  ).toHaveTextContent(
+    "Daily Training Validation, Daily Full Test, Unscheduled runs"
+  )
+  await user.click(within(card).getByText("Choose tracked schedules"))
+  await user.click(
+    within(card).getByRole("checkbox", { name: "Daily Full Test" })
+  )
+  await user.click(
+    within(card).getByRole("checkbox", {
+      name: "Include unscheduled runs",
+    })
+  )
+  await waitFor(() =>
+    expect(getHistory).toHaveBeenLastCalledWith(
+      { workflowId: "team/release/build" },
+      {
+        seriesIds: trackedSchedules[0]!.seriesId,
+        includeManual: "false",
+        outcome: "Run",
+      },
+      null,
+      expect.any(AbortSignal),
+      10
+    )
+  )
+  expect(
+    within(card).getByLabelText("Tracking for team/release/build")
+  ).toHaveTextContent(/^Tracking: Daily Training Validation$/)
+  expect(
+    within(card).getByRole("link", { name: "History for team/release/build" })
+  ).toHaveAttribute(
+    "href",
+    `/t/team/release/w/build/history?seriesIds=${trackedSchedules[0]!.seriesId}&includeManual=false`
+  )
+  expect(
+    within(card).getByRole("link", {
+      name: "View last run for team/release/build",
+    })
+  ).toHaveAttribute("href", `/runs/${trackedRow.runId}`)
+  expect(
+    within(card).queryByText("Failed", { exact: true })
+  ).not.toBeInTheDocument()
+  expect(card.querySelectorAll("[data-run-id]")).toHaveLength(1)
+  expect(
+    JSON.parse(localStorage.getItem(trackingPreferenceKey(session)!)!)
+  ).toEqual({
+    "team/release/build": {
+      seriesIds: [trackedSchedules[0]!.seriesId],
+      includeManual: false,
+    },
+  })
+  const other = screen.getByRole("heading", { name: "Never" }).closest("li")!
+  expect(
+    within(other).getByLabelText("Tracking for team/release/never")
+  ).toHaveTextContent("Daily Full Test")
+})
+
+it("restores multiple selected schedules in table format and shows an explicit empty tracked state", async () => {
+  namedSchedules()
+  localStorage.setItem(
+    trackingPreferenceKey(session)!,
+    JSON.stringify({
+      "team/release/build": {
+        seriesIds: trackedSchedules.map((item) => item.seriesId),
+        includeManual: false,
+      },
+    })
+  )
+  vi.mocked(getHistory).mockResolvedValue({
+    items: [],
+    nextCursor: null,
+    currentScheduleId: null,
+  })
+  const shown = show()
+  shown.rerender({ ...search, view: "table" })
+  const table = await screen.findByRole("table")
+  await waitFor(() =>
+    expect(
+      within(table).queryByText("Loading tracked runs...")
+    ).not.toBeInTheDocument()
+  )
+  expect(
+    within(table).getByLabelText("Tracking for team/release/build")
+  ).toHaveTextContent("Daily Training Validation, Daily Full Test")
+  expect(within(table).getAllByText("No tracked runs")).not.toHaveLength(0)
+  expect(
+    within(table).queryByText("Failed", { exact: true })
+  ).not.toBeInTheDocument()
+  expect(
+    within(table).getByRole("link", { name: "History for team/release/build" })
+  ).toHaveAttribute(
+    "href",
+    `/t/team/release/w/build/history?seriesIds=${encodeURIComponent(trackedSchedules.map((item) => item.seriesId).join(","))}&includeManual=false`
+  )
+})
+
+it("does not replace failed selected-schedule queries with unfiltered runs", async () => {
+  namedSchedules()
+  localStorage.setItem(
+    trackingPreferenceKey(session)!,
+    JSON.stringify({
+      "team/release/build": {
+        seriesIds: [trackedSchedules[0]!.seriesId],
+        includeManual: false,
+      },
+    })
+  )
+  vi.mocked(getHistory).mockRejectedValue(
+    new Error("Tracked history unavailable")
+  )
+  show()
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Tracked history unavailable"
+  )
+  const card = screen.getByRole("heading", { name: "Build" }).closest("li")!
+  expect(
+    within(card).queryByText("Failed", { exact: true })
+  ).not.toBeInTheDocument()
+  expect(card.querySelector("[data-run-id]")).toBeNull()
+  expect(
+    within(card).getByRole("button", { name: "View last run" })
+  ).toBeDisabled()
+})
+
+it("refreshes customized cards when the owning type receives live updates", async () => {
+  namedSchedules()
+  localStorage.setItem(
+    trackingPreferenceKey(session)!,
+    JSON.stringify({
+      "team/release/build": {
+        seriesIds: [trackedSchedules[0]!.seriesId],
+        includeManual: false,
+      },
+    })
+  )
+  vi.mocked(getHistory).mockResolvedValue({
+    items: [{ ...trackedRow, variables: [] }],
+    nextCursor: null,
+    currentScheduleId: null,
+  })
+  let snapshot: LiveSnapshot = {
+    resource: { scope: "type", id: "team/release" },
+    status: "live",
+    error: null,
+    delta: null,
+    resyncVersion: 0,
+    reportVersion: 0,
+  }
+  vi.mocked(useLive).mockImplementation(() => ({ snapshot, retry: vi.fn() }))
+  const shown = show()
+  await screen.findByRole("link", {
+    name: "View last run for team/release/build",
+  })
+  await waitFor(() => expect(shown.client.isFetching()).toBe(0))
+  const calls = vi.mocked(getHistory).mock.calls.length
+  vi.mocked(getHistory).mockResolvedValue({
+    items: [],
+    nextCursor: null,
+    currentScheduleId: null,
+  })
+  snapshot = {
+    ...snapshot,
+    delta: { scope: "type", id: "team/release", items: [] },
+  }
+  shown.rerender(search)
+  await waitFor(() => expect(getHistory).toHaveBeenCalledTimes(calls + 1))
+  expect(await screen.findAllByText("No tracked runs")).not.toHaveLength(0)
+})
+
+it("supports unscheduled-only and no-source tracking without falling back to all runs", async () => {
+  namedSchedules()
+  vi.mocked(getHistory).mockResolvedValue({
+    items: [],
+    nextCursor: null,
+    currentScheduleId: null,
+  })
+  const user = userEvent.setup()
+  show()
+  const card = (await screen.findByRole("heading", { name: "Build" })).closest(
+    "li"
+  )!
+  await user.click(within(card).getByText("Choose tracked schedules"))
+  await user.click(
+    within(card).getByRole("checkbox", {
+      name: "All schedules, including future schedules",
+    })
+  )
+  await waitFor(() =>
+    expect(getHistory).toHaveBeenLastCalledWith(
+      { workflowId: "team/release/build" },
+      { seriesIds: "none", includeManual: undefined, outcome: "Run" },
+      null,
+      expect.any(AbortSignal),
+      10
+    )
+  )
+  expect(
+    within(card).getByLabelText("Tracking for team/release/build")
+  ).toHaveTextContent(/^Tracking: Unscheduled runs$/)
+  await user.click(
+    within(card).getByRole("checkbox", { name: "Include unscheduled runs" })
+  )
+  await waitFor(() =>
+    expect(getHistory).toHaveBeenLastCalledWith(
+      { workflowId: "team/release/build" },
+      { seriesIds: "none", includeManual: "false", outcome: "Run" },
+      null,
+      expect.any(AbortSignal),
+      10
+    )
+  )
+  expect(
+    within(card).getByLabelText("Tracking for team/release/build")
+  ).toHaveTextContent("Nothing selected")
+  expect(card.querySelector("[data-run-id]")).toBeNull()
 })

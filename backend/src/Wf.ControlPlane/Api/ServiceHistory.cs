@@ -8,7 +8,10 @@ using Npgsql;
 
 namespace Wf.ControlPlane.Api;
 
-public sealed record ServiceWorkflow(CatalogWorkflow Workflow, IReadOnlyList<CatalogLatestRun> Runs);
+public sealed record ServiceWorkflow(CatalogWorkflow Workflow, IReadOnlyList<CatalogLatestRun> Runs)
+{
+    public RunHistorySchedule[] Schedules { get; init; } = [];
+}
 public sealed record ServiceHistoryPage(string Team, string? Type, int RunLimit,
     IReadOnlyList<ServiceWorkflow> Items, string? NextCursor);
 
@@ -26,6 +29,7 @@ public static partial class CatalogEndpoints
             .WithDescription("Authorized, team-scoped workflows with their latest run instances across all series and manual runs, without a date cutoff. " +
                 "runLimit=1..30 (default 10) applies separately to each workflow; fewer runs means fewer instances, never fabricated outcomes. " +
                 "Run instances are ordered by createdAt then id descending. " +
+                "Each item also contains authorized schedule names and permanent series identities, including paused/deleted schedules for retained history tracking. " +
                 "Uses the same exact team/type, keyset cursor and metadata filters as the workflow catalogue. No payloads or capabilities.")
             .AddOpenApiOperationTransformer((operation, _, _) =>
             {
@@ -99,13 +103,15 @@ public static partial class CatalogEndpoints
                 }
             }
             var failures = await RunFailures.Summaries(context, source, runs.Values.SelectMany(instances => instances).Select(run => run.Id));
+            var schedules = await RunHistoryEndpoints.ReadSchedules(source, page.Items.Select(item => item.Id).ToArray(), context.RequestAborted);
             var items = page.Items.Select(workflow => new ServiceWorkflow(
                 workflow.LatestRun is not { } latest ? workflow : workflow with
                 {
                     LatestRun = latest with { FailureSummary = failures.GetValueOrDefault(latest.Id) }
                 },
                 (runs.GetValueOrDefault(workflow.Id) ?? []).Select(run =>
-                    run with { FailureSummary = failures.GetValueOrDefault(run.Id) }).ToArray())).ToArray();
+                    run with { FailureSummary = failures.GetValueOrDefault(run.Id) }).ToArray())
+                { Schedules = schedules.GetValueOrDefault(workflow.Id)?.ToArray() ?? [] }).ToArray();
             return Results.Json(new(filter.Team, filter.Type, runLimit, items, page.NextCursor),
                 ServiceHistoryJson.Default.ServiceHistoryPage);
         }

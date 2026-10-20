@@ -2,6 +2,7 @@ import { z } from "zod"
 import { ApiError, publicApi } from "@/lib/api/client"
 import { catalogWorkflowSchema } from "@/features/catalog/api"
 import { instantMicros, instantSchema } from "@/features/runs/search"
+import { trackedScheduleSchema } from "@/features/schedules/tracking"
 import {
   maximumServiceRunLimit,
   serviceRunLimitSchema,
@@ -44,6 +45,7 @@ const servicePageSchema = z.object({
             })
           )
           .max(maximumServiceRunLimit),
+        schedules: z.array(trackedScheduleSchema).optional(),
       })
     )
     .max(50),

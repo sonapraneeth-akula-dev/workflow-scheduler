@@ -1122,9 +1122,11 @@ show **No run** instead of a fabricated identifier.
 **Service history** summarizes workflows and their recent executions.
 **Run history** lists a workflow's executions and schedule events.
 **Series history** narrows those records to one schedule series, including its
-skipped/missed schedule events. Workflow history links each distinct series in
-the loaded rows once above the table, not beside every run ID; loading more rows
-adds any newly encountered series. A series page never links back to itself.
+skipped/missed schedule events. Workflow history keeps tracked schedules in the
+same table instead of sending readers to separate series links. A **Tracking**
+summary names the selected sources, even for an empty result; a **Schedule**
+column identifies each row when multiple schedules are tracked. Unknown legacy
+series retain their UUID rather than borrowing another schedule's name.
 **Executed version** shows the semantic version from that run's immutable
 registration (for example `1.2.3`), not today's active release. The internal UUID
 stays in the version-details URL and tooltip; legacy missing registrations
@@ -1155,6 +1157,23 @@ Each status-colored icon represents one run, with a distinct status symbol,
 run ID and timestamp; clicking it opens that exact run in a new tab.
 **View last run** opens the exact latest run and is
 disabled for never-run workflows; **History** opens that workflow's run history.
+Each workflow card/table row includes **Choose tracked schedules**. Select one
+or multiple named recurring schedules (up to 32 specific series), or **All
+schedules, including future schedules**, and independently choose **Include
+unscheduled runs**. The visible
+**Tracking** summary lists those sources; paused/deleted schedules are marked.
+Selections persist per account/tenant/workflow in this browser and synchronize
+between its tabs, not between devices or users. Changing tracking only changes
+this personal view: it never pauses, edits or renames a schedule.
+Latest status, last-run links, run icons and success rates all use the selected
+sources; filtering happens on the server **before** the recent-run limit.
+**History** carries that same selection into the existing workflow history page,
+and its ordinary status/outcome filters preserve the tracking selection.
+Runs started through **Run now** remain associated with their selected schedule;
+the unscheduled toggle applies only to runs without a schedule series (including
+standalone manual runs and reruns). Selecting no sources shows an explicit empty
+state, never unrelated runs. Missing saved schedule identities stay visible as
+unavailable until explicitly removed.
 These page-content navigation buttons, along with workflow history's
 **Workflow versions** and **Metrics dashboard** buttons, open new tabs.
 Each shows an outgoing-link icon and announces its new-tab behavior to screen
@@ -1168,7 +1187,7 @@ personal settings and the API; larger saved values show an error and use the
 default 10 until a valid preference is saved. This personal preference is
 saved separately for each signed-in account and tenant in this browser; the
 explicit local-development identity has its own preference. It is not synced
-between devices. **History** retains the full list.
+between devices. **History** retains the full matching list.
 Success rates use the completed instances currently shown. The percentage sits
 beside the recent-run count; its accessible label explains completed success.
 Run icons wrap after at most ten per row, growing card height rather than

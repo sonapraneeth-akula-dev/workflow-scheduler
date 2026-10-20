@@ -37,11 +37,13 @@ public static class RunHistoryEndpoints
                 "currentScheduleId is the authoritative non-deleted schedule linked by run_series for an explicit seriesId; null after schedule deletion, for run-only legacy series or without a series filter. " +
                 "Variables project only set schema-backed names/types; all values/defaults/secret references omitted, Secret entries marked redacted. Unknown legacy schemas produce []. " +
                 "triggeredByName is the authenticated display name recorded at manual acceptance, null for legacy/unnamed principals and nonmanual triggers; never inferred from the reader. " +
+                "seriesIds selects up to 32 comma-separated schedule series UUIDs (none selects no schedules); includeManual=true (default) includes runs without a series. Filters apply before paging. " +
+                "schedules contains authorized schedule names and retained deleted schedule identities for this resource; manual Run now remains associated with its schedule series. " +
                 "Copied metadata is public author-declared metadata. Duration is endedAt-startedAt in milliseconds, null unless both exist. No storage capabilities.")
             .AddOpenApiOperationTransformer((operation, _, _) =>
             {
                 operation.Parameters ??= [];
-                foreach (var name in new[] { "workflowId", "seriesId", "team", "type", "status", "from", "to", "meta.*", "limit", "cursor", "sort", "abortedBy", "outcome" })
+                foreach (var name in new[] { "workflowId", "seriesId", "team", "type", "status", "from", "to", "meta.*", "limit", "cursor", "sort", "abortedBy", "outcome", "seriesIds", "includeManual" })
                 {
                     var schema = new OpenApiSchema { Type = name == "limit" ? JsonSchemaType.Integer : JsonSchemaType.String };
                     if (name == "limit") { schema.Minimum = "1"; schema.Maximum = "100"; schema.Default = JsonValue.Create(50); }
@@ -50,7 +52,7 @@ public static class RunHistoryEndpoints
                     var choices = name switch
                     {
                         "status" => Enum.GetNames<RunStatus>(), "sort" => ["createdAtDesc", "createdAtAsc"],
-                        "outcome" => ["Run", "Skipped", "Missed"], _ => []
+                        "outcome" => ["Run", "Skipped", "Missed"], "includeManual" => ["true", "false"], _ => []
                     };
                     if (choices.Length > 0) schema.Enum = choices.Select(value => (JsonNode)JsonValue.Create(value)!).ToList();
                     operation.Parameters.Add(new OpenApiParameter { Name = name, In = ParameterLocation.Query, Schema = schema });
@@ -85,7 +87,12 @@ public static class RunHistoryEndpoints
             }
             return await Page(context, source, filter, types, scheduleId);
         }
-        catch (NpgsqlException) { return Problem(503, "Run history is unavailable", "run_history_unavailable"); }
+        catch (NpgsqlException error)
+        {
+            context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(RunHistoryEndpoints).FullName!)
+                .LogError(error, "Run history storage is unavailable.");
+            return Problem(503, "Run history is unavailable", "run_history_unavailable");
+        }
         catch (Exception error) when (error is InvalidDataException or JsonException or ArgumentException or
             InvalidOperationException or OverflowException or InvalidCastException or KeyNotFoundException)
         { return Problem(500, "Committed history data is inconsistent", "run_history_data_inconsistent"); }
@@ -96,6 +103,10 @@ public static class RunHistoryEndpoints
     {
         await using var query = source.CreateCommand();
         var where = RunQueryEndpoints.Predicates(query, filter.Runs, types);
+        if (filter.SeriesIds is { } selected)
+            where.Add("(r.series_id=ANY(" + P(selected, NpgsqlDbType.Array | NpgsqlDbType.Uuid) + ")" +
+                (filter.IncludeManual ? " OR r.series_id IS NULL)" : ")"));
+        else if (!filter.IncludeManual) where.Add("r.series_id IS NOT NULL");
         if (filter.Outcome is "Skipped" or "Missed") where.Add("false");
         if (filter.AbortedBy is { } actor)
             where.Add("""
@@ -113,6 +124,8 @@ public static class RunHistoryEndpoints
         };
         if (filter.Runs.WorkflowId is { } workflow) fires.Add("s.workflow_id=" + P(workflow, NpgsqlDbType.Text));
         if (filter.Runs.SeriesId is { } series) fires.Add("s.id=" + P(series, NpgsqlDbType.Uuid));
+        if (filter.SeriesIds is { } fireSeries)
+            fires.Add("s.id=ANY(" + P(fireSeries, NpgsqlDbType.Array | NpgsqlDbType.Uuid) + ")");
         if (filter.Runs.From is { } from) fires.Add("f.fire_at>=" + P(from, NpgsqlDbType.TimestampTz));
         if (filter.Runs.To is { } to) fires.Add("f.fire_at<" + P(to, NpgsqlDbType.TimestampTz));
         if (filter.Runs.Status is not null || filter.AbortedBy is not null || filter.Runs.Metadata.Count > 0 || filter.Outcome == "Run")
@@ -163,43 +176,47 @@ public static class RunHistoryEndpoints
             ORDER BY p.at
             """ + direction + ",p.key_id" + direction + ",p.kind" + direction;
         var rows = new List<(RunHistoryRow Row, RunHistoryPosition Position)>();
-        await using var reader = await query.ExecuteReaderAsync(context.RequestAborted);
-        while (await reader.ReadAsync(context.RequestAborted))
+        await using (var reader = await query.ExecuteReaderAsync(context.RequestAborted))
         {
-            var kind = reader.GetInt32(2);
-            var at = reader.GetFieldValue<DateTimeOffset>(0);
-            var started = Time(8);
-            var ended = Time(9);
-            LiveAbort? abort = null;
-            if (!reader.IsDBNull(18))
+            while (await reader.ReadAsync(context.RequestAborted))
             {
-                var record = JsonSerializer.Deserialize(reader.GetString(18), RunStoreJson.Default.AbortRecord)
-                    ?? throw new InvalidDataException();
-                abort = new(record.By, record.ByName, record.At.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
-                    record.Reason, record.Source.ToString());
+                var kind = reader.GetInt32(2);
+                var at = reader.GetFieldValue<DateTimeOffset>(0);
+                var started = Time(8);
+                var ended = Time(9);
+                LiveAbort? abort = null;
+                if (!reader.IsDBNull(18))
+                {
+                    var record = JsonSerializer.Deserialize(reader.GetString(18), RunStoreJson.Default.AbortRecord)
+                        ?? throw new InvalidDataException();
+                    abort = new(record.By, record.ByName, record.At.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                        record.Reason, record.Source.ToString());
+                }
+                RunHistoryFire? fire = null;
+                var offset = kind == 1 ? 12 : 20;
+                if (!reader.IsDBNull(offset))
+                    fire = new(reader.GetGuid(offset), reader.GetFieldValue<DateTimeOffset>(offset + 1),
+                        reader.GetInt16(offset + 2) switch { 0 => "Started", 1 => "Skipped", 2 => "Missed", 3 => "CaughtUp", _ => throw new InvalidDataException() },
+                        reader.IsDBNull(offset + 3) ? null : reader.GetString(offset + 3), Uuid(offset + 4));
+                var status = reader.IsDBNull(7) ? (RunStatus?)null : (RunStatus)reader.GetInt16(7);
+                var trigger = reader.IsDBNull(10) ? (RunTrigger?)null : (RunTrigger)reader.GetInt16(10);
+                if (status is { } st && !Enum.IsDefined(st) || trigger is { } tr && !Enum.IsDefined(tr) ||
+                    started is not null && ended < started) throw new InvalidDataException();
+                rows.Add((new(kind == 0 ? "Run" : "Fire", at, reader.GetString(3), Uuid(4), Uuid(5), Uuid(6),
+                    status?.ToString(), started, ended, started is not null && ended is not null ? (ended.Value - started.Value).TotalMilliseconds : null,
+                    trigger?.ToString(), reader.IsDBNull(11) ? null : RunMetadata.FromStored(reader.GetString(11)),
+                    abort, RunHistoryQuery.Variables(reader.GetString(19)), fire)
+                {
+                    Version = reader.IsDBNull(25) ? null : reader.GetString(25),
+                    TriggeredByName = trigger == RunTrigger.Manual && !reader.IsDBNull(26) ? reader.GetString(26) : null
+                }, new(at, reader.GetGuid(1), kind)));
             }
-            RunHistoryFire? fire = null;
-            var offset = kind == 1 ? 12 : 20;
-            if (!reader.IsDBNull(offset))
-                fire = new(reader.GetGuid(offset), reader.GetFieldValue<DateTimeOffset>(offset + 1),
-                    reader.GetInt16(offset + 2) switch { 0 => "Started", 1 => "Skipped", 2 => "Missed", 3 => "CaughtUp", _ => throw new InvalidDataException() },
-                    reader.IsDBNull(offset + 3) ? null : reader.GetString(offset + 3), Uuid(offset + 4));
-            var status = reader.IsDBNull(7) ? (RunStatus?)null : (RunStatus)reader.GetInt16(7);
-            var trigger = reader.IsDBNull(10) ? (RunTrigger?)null : (RunTrigger)reader.GetInt16(10);
-            if (status is { } st && !Enum.IsDefined(st) || trigger is { } tr && !Enum.IsDefined(tr) ||
-                started is not null && ended < started) throw new InvalidDataException();
-            rows.Add((new(kind == 0 ? "Run" : "Fire", at, reader.GetString(3), Uuid(4), Uuid(5), Uuid(6),
-                status?.ToString(), started, ended, started is not null && ended is not null ? (ended.Value - started.Value).TotalMilliseconds : null,
-                trigger?.ToString(), reader.IsDBNull(11) ? null : RunMetadata.FromStored(reader.GetString(11)),
-                abort, RunHistoryQuery.Variables(reader.GetString(19)), fire)
-            {
-                Version = reader.IsDBNull(25) ? null : reader.GetString(25),
-                TriggeredByName = trigger == RunTrigger.Manual && !reader.IsDBNull(26) ? reader.GetString(26) : null
-            }, new(at, reader.GetGuid(1), kind)));
+
+            Guid? Uuid(int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetGuid(ordinal);
+            DateTimeOffset? Time(int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetFieldValue<DateTimeOffset>(ordinal);
         }
         var more = rows.Count > filter.Runs.Limit;
         if (more) rows.RemoveAt(rows.Count - 1);
-        await reader.DisposeAsync();
         var failures = await RunFailures.Summaries(context, source,
             rows.Where(row => row.Row.Kind == "Run" && row.Row.RunId.HasValue).Select(row => row.Row.RunId!.Value));
         for (var index = 0; index < rows.Count; index++)
@@ -210,12 +227,46 @@ public static class RunHistoryEndpoints
                 FailureSummary = row.Row.Kind == "Run" && row.Row.RunId is { } id ? failures.GetValueOrDefault(id) : null
             }, row.Position);
         }
+        var workflows = filter.Runs.WorkflowId is { } workflowId ? new[] { workflowId } :
+            await SeriesWorkflows(source, filter.Runs.SeriesId!.Value, context.RequestAborted);
+        var schedules = await ReadSchedules(source, workflows, context.RequestAborted);
         return Results.Ok(new RunHistoryPage(rows.Select(row => row.Row).ToArray(),
-            more ? filter.Cursor(rows[^1].Position, types) : null) { CurrentScheduleId = scheduleId });
+            more ? filter.Cursor(rows[^1].Position, types) : null)
+        {
+            CurrentScheduleId = scheduleId,
+            Schedules = schedules.Values.SelectMany(values => values)
+                .Where(item => filter.Runs.SeriesId is null || item.SeriesId == filter.Runs.SeriesId).ToArray()
+        });
 
         string P(object value, NpgsqlDbType type) => RunQueryEndpoints.Parameter(query, value, type);
-        Guid? Uuid(int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetGuid(ordinal);
-        DateTimeOffset? Time(int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetFieldValue<DateTimeOffset>(ordinal);
+    }
+
+    private static async Task<string[]> SeriesWorkflows(NpgsqlDataSource source, Guid seriesId, CancellationToken token)
+    {
+        await using var query = source.CreateCommand("SELECT workflow_id FROM run_series WHERE id=$1");
+        query.Parameters.AddWithValue(seriesId);
+        return await query.ExecuteScalarAsync(token) is string workflow ? [workflow] : [];
+    }
+
+    internal static async Task<Dictionary<string, List<RunHistorySchedule>>> ReadSchedules(
+        NpgsqlDataSource source, string[] workflows, CancellationToken token)
+    {
+        var result = new Dictionary<string, List<RunHistorySchedule>>(StringComparer.Ordinal);
+        if (workflows.Length == 0) return result;
+        await using var query = source.CreateCommand("""
+            SELECT s.workflow_id,r.id,s.id,s.name,s.paused,s.deleted_at IS NOT NULL
+            FROM schedules s JOIN run_series r ON r.schedule_id=s.id AND r.workflow_id=s.workflow_id
+            WHERE s.workflow_id=ANY($1) ORDER BY s.workflow_id,s.name,s.id
+            """);
+        query.Parameters.AddWithValue(workflows);
+        await using var reader = await query.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token))
+        {
+            var workflow = reader.GetString(0);
+            if (!result.TryGetValue(workflow, out var values)) result.Add(workflow, values = []);
+            values.Add(new(reader.GetGuid(1), reader.GetGuid(2), reader.GetString(3), reader.GetBoolean(4), reader.GetBoolean(5)));
+        }
+        return result;
     }
 
     private static IResult Problem(int status, string title, string reason, string? detail = null) =>

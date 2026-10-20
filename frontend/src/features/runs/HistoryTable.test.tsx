@@ -97,8 +97,29 @@ function show(search: HistorySearch = {}, historyScope: HistoryScope = scope) {
     client,
   }
 }
+const schedules = [
+  {
+    seriesId: row.seriesId!,
+    scheduleId: "019ed132-2f44-7000-8000-000000000020",
+    name: "Training & validation",
+    paused: false,
+    deleted: false,
+  },
+  {
+    seriesId: "019ed132-2f44-7000-8000-000000000005",
+    scheduleId: "019ed132-2f44-7000-8000-000000000021",
+    name: "Full test",
+    paused: true,
+    deleted: false,
+  },
+]
 function page(items: HistoryRow[] = [row], nextCursor: string | null = null) {
-  return { items, nextCursor, currentScheduleId: null }
+  return {
+    items,
+    nextCursor,
+    currentScheduleId: null,
+    schedules: [] as typeof schedules,
+  }
 }
 describe("historical table", () => {
   beforeEach(() => vi.clearAllMocks())
@@ -151,10 +172,10 @@ describe("historical table", () => {
     expect(within(table).getByText(`By ${name}`)).toBeVisible()
     expect(table.querySelector("img")).toBeNull()
   })
-  it("links each loaded schedule series once above the table instead of repeating links beside run IDs", async () => {
+  it("names multiple tracked schedules in the same history table without separate series links", async () => {
     const otherSeriesId = "019ed132-2f44-7000-8000-000000000005"
-    vi.mocked(getHistory).mockResolvedValue(
-      page([
+    vi.mocked(getHistory).mockResolvedValue({
+      ...page([
         row,
         { ...row, runId: "019ed132-2f44-7000-8000-000000000011" },
         {
@@ -167,28 +188,30 @@ describe("historical table", () => {
           runId: "019ed132-2f44-7000-8000-000000000013",
           seriesId: null,
         },
-      ])
-    )
-    show({}, { workflowId: row.workflowId })
-    const navigation = await screen.findByRole("navigation", {
-      name: "Schedule series histories",
+      ]),
+      schedules,
     })
-    expect(within(navigation).getAllByRole("link")).toHaveLength(2)
-    for (const id of [row.seriesId!, otherSeriesId]) {
-      expect(
-        within(navigation).getByRole("link", {
-          name: `Schedule series history: ${id}`,
-        })
-      ).toHaveAttribute("href", `/series/${id}`)
-    }
-    expect(navigation).toHaveTextContent("Service history summarizes workflows")
-    expect(navigation).toHaveTextContent(
-      "run history lists executions and schedule events"
+    show({}, { workflowId: row.workflowId })
+    const table = await screen.findByRole("table")
+    expect(
+      within(table).getByRole("columnheader", { name: "Schedule" })
+    ).toBeVisible()
+    expect(screen.getByLabelText("Tracked history sources")).toHaveTextContent(
+      "Training & Validation, Full Test (paused)"
     )
-    expect(navigation).toHaveTextContent(
-      "Series history narrows those records to one schedule series"
-    )
-    const table = screen.getByRole("table")
+    const dataRows = within(table).getAllByRole("row").slice(1)
+    expect(
+      dataRows.map((item) =>
+        within(item)
+          .getAllByRole("cell")
+          .some((cell) => cell.textContent === "Training & Validation")
+      )
+    ).toEqual([true, true, false, false])
+    expect(within(dataRows[2]!).getByText("Full Test (paused)")).toBeVisible()
+    expect(within(dataRows[3]!).getByText("Unscheduled run")).toBeVisible()
+    expect(
+      screen.queryByRole("navigation", { name: "Schedule series histories" })
+    ).not.toBeInTheDocument()
     expect(
       within(table).queryByRole("link", { name: /series history/i })
     ).not.toBeInTheDocument()
@@ -203,17 +226,22 @@ describe("historical table", () => {
       "019ed132-2f44-7000-8000-000000000013",
     ])
   })
-  it("uses a concise link for a single series and keeps its immutable identity in the URL and tooltip", async () => {
-    vi.mocked(getHistory).mockResolvedValue(page())
-    show({}, { workflowId: row.workflowId })
-    const link = await screen.findByRole("link", {
-      name: "Schedule series history",
+  it("shows one tracked schedule by name without an unnecessary schedule column", async () => {
+    vi.mocked(getHistory).mockResolvedValue({
+      ...page(),
+      schedules: [schedules[0]!],
     })
-    expect(link).toHaveAttribute("href", `/series/${row.seriesId}`)
-    expect(link).toHaveAttribute(
-      "title",
-      `Runs and schedule events for series ${row.seriesId}`
+    show({}, { workflowId: row.workflowId })
+    await screen.findByRole("table")
+    expect(screen.getByLabelText("Tracked history sources")).toHaveTextContent(
+      "Training & Validation"
     )
+    expect(
+      screen.queryByRole("columnheader", { name: "Schedule" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("link", { name: /series history/i })
+    ).not.toBeInTheDocument()
   })
   it("does not link a series page to itself", async () => {
     vi.mocked(getHistory).mockResolvedValue(page())
@@ -241,30 +269,50 @@ describe("historical table", () => {
       ).not.toBeInTheDocument()
     }
   )
-  it("deduplicates series navigation across loaded pages and includes newly loaded series", async () => {
+  it("keeps selected sources and schedule names across history pages", async () => {
     const otherSeriesId = "019ed132-2f44-7000-8000-000000000005"
     vi.mocked(getHistory)
-      .mockResolvedValueOnce(page([row], "next"))
-      .mockResolvedValueOnce(
-        page([
+      .mockResolvedValueOnce({ ...page([row], "next"), schedules })
+      .mockResolvedValueOnce({
+        ...page([
           { ...row, runId: "019ed132-2f44-7000-8000-000000000011" },
           {
             ...row,
             runId: "019ed132-2f44-7000-8000-000000000012",
             seriesId: otherSeriesId,
           },
-        ])
-      )
-    show({}, { workflowId: row.workflowId })
-    const navigation = await screen.findByRole("navigation", {
-      name: "Schedule series histories",
-    })
-    expect(within(navigation).getAllByRole("link")).toHaveLength(1)
+        ]),
+        schedules,
+      })
+    const search = {
+      seriesIds: `${row.seriesId},${otherSeriesId}`,
+      includeManual: "false",
+    } as const
+    show(search, { workflowId: row.workflowId })
+    await screen.findByRole("table")
     fireEvent.click(screen.getByRole("button", { name: "Load more history" }))
     await waitFor(() =>
-      expect(within(navigation).getAllByRole("link")).toHaveLength(2)
+      expect(screen.getAllByRole("rowheader")).toHaveLength(3)
     )
     expect(screen.getAllByRole("rowheader")).toHaveLength(3)
+    expect(
+      screen.getByRole("cell", { name: "Full Test (paused)" })
+    ).toBeVisible()
+    expect(vi.mocked(getHistory).mock.calls.at(-1)?.[1]).toEqual(search)
+  })
+  it("retains named tracking context even when selected schedules have no matching history", async () => {
+    vi.mocked(getHistory).mockResolvedValue({ ...page([]), schedules })
+    show(
+      { seriesIds: schedules[1]!.seriesId, includeManual: "false" },
+      { workflowId: row.workflowId }
+    )
+    expect(await screen.findByText("No matching history.")).toBeVisible()
+    expect(screen.getByLabelText("Tracked history sources")).toHaveTextContent(
+      "Full Test (paused)"
+    )
+    expect(
+      screen.getByLabelText("Tracked history sources")
+    ).not.toHaveTextContent("Training")
   })
   it("labels execution UUIDs as Run ID in a separate column with their original run links", async () => {
     vi.mocked(getHistory).mockResolvedValue(page())
@@ -540,9 +588,7 @@ describe("historical table", () => {
       vi.mocked(getHistory).mockResolvedValue(page())
       show({}, { workflowId: row.workflowId })
       await screen.findByRole("table")
-      expect(
-        screen.getByRole("navigation", { name: "Schedule series histories" })
-      ).toBeVisible()
+      expect(screen.getByLabelText("Tracked history sources")).toBeVisible()
       vi.mocked(getHistory).mockRejectedValue(
         new ApiError(new Response(null, { status }), {
           title: "Permission revoked.",
@@ -554,7 +600,7 @@ describe("historical table", () => {
       await screen.findByRole("alert")
       expect(screen.queryByRole("table")).not.toBeInTheDocument()
       expect(
-        screen.queryByRole("navigation", { name: "Schedule series histories" })
+        screen.queryByLabelText("Tracked history sources")
       ).not.toBeInTheDocument()
     }
   )
@@ -596,5 +642,25 @@ describe("historical table", () => {
       screen.getByRole("button", { name: "Clear history filters" })
     )
     expect(onChange).toHaveBeenLastCalledWith({})
+  })
+  it("preserves selected schedule sources when applying or clearing ordinary history filters", async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    const sources = {
+      seriesIds: schedules[0]!.seriesId,
+      includeManual: "false",
+    } as const
+    render(<HistoryFilters search={sources} onChange={onChange} />)
+    await user.selectOptions(screen.getByLabelText("Run status"), "Succeeded")
+    await user.click(screen.getByRole("button", { name: "Filter history" }))
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...sources,
+      status: "Succeeded",
+      sort: "createdAtDesc",
+    })
+    await user.click(
+      screen.getByRole("button", { name: "Clear history filters" })
+    )
+    expect(onChange).toHaveBeenLastCalledWith(sources)
   })
 })

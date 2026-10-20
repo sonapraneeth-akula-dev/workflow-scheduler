@@ -21,6 +21,21 @@ public sealed partial class AuthorizationMatrixTests
         await CatalogWorkflow(seed.Type + "/b-never");
         await CatalogWorkflow(seed.Team + "/sibling/hidden");
         await CatalogWorkflow(seed.OtherType + "/hidden");
+        var scheduleId = Guid.NewGuid();
+        var seriesId = Guid.NewGuid();
+        await using (var schedule = database.DataSource.CreateCommand("""
+            WITH created AS (
+                INSERT INTO schedules(id,workflow_id,origin,name,timezone,interval_s,created_by,updated_by)
+                VALUES($1,$2,1,'Training & validation','UTC',60,'test','test') RETURNING id,workflow_id
+            )
+            INSERT INTO run_series(id,workflow_id,schedule_id) SELECT $3,workflow_id,id FROM created
+            """))
+        {
+            schedule.Parameters.AddWithValue(scheduleId);
+            schedule.Parameters.AddWithValue(workflow);
+            schedule.Parameters.AddWithValue(seriesId);
+            await schedule.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
         var clock = new ManualTimeProvider();
         var now = clock.GetUtcNow();
         var first = now.Date.AddDays(-45);
@@ -45,6 +60,10 @@ public sealed partial class AuthorizationMatrixTests
         Assert.Equal(10, page.RunLimit);
         Assert.Equal(2, page.Items.Count);
         var item = Assert.Single(page.Items, entry => entry.Workflow.Id == workflow);
+        var trackedSchedule = Assert.Single(item.Schedules);
+        Assert.Equal(scheduleId, trackedSchedule.ScheduleId);
+        Assert.Equal(seriesId, trackedSchedule.SeriesId);
+        Assert.Equal("Training & validation", trackedSchedule.Name);
         Assert.Equal(8, item.Runs.Count);
         Assert.Equal(ids.Order(), item.Runs.Select(run => run.Id).Order());
         Assert.Equal(latest, item.Runs[0].Id);
@@ -54,6 +73,7 @@ public sealed partial class AuthorizationMatrixTests
         var never = Assert.Single(page.Items, entry => entry.Workflow.Name == "b-never");
         Assert.Null(never.Workflow.LatestRun);
         Assert.Empty(never.Runs);
+        Assert.Empty(never.Schedules);
         var json = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         foreach (var secret in new[] { seed.Other, "hidden", "private-payload", "variables", "roleBindings", "packageUri" })
             Assert.DoesNotContain(secret, json);

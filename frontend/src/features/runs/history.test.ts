@@ -89,6 +89,47 @@ describe("history contracts", () => {
       signal,
     })
   })
+  it("passes selected schedule sources and applies the requested card run limit", async () => {
+    respond()
+    const filters = {
+      seriesIds: historyRow.seriesId!,
+      includeManual: "false",
+      outcome: "Run",
+    } as const
+    expect(
+      (await getHistory(scope, filters, null, undefined, 1)).items
+    ).toHaveLength(1)
+    expect(get).toHaveBeenLastCalledWith("/api/v1/runs/history", {
+      params: { query: { ...scope, ...filters, limit: 1, cursor: undefined } },
+      signal: undefined,
+    })
+    respond([{ ...historyRow, seriesId: null }])
+    await expect(getHistory(scope, filters, null)).rejects.toThrow(
+      /inconsistent history/
+    )
+    respond()
+    await expect(
+      getHistory(scope, { seriesIds: "none" }, null)
+    ).rejects.toThrow(/inconsistent history/)
+  })
+  it("accepts URL-parsed booleans without weakening API filter validation", () => {
+    expect(historySearchSchema.parse({ includeManual: false })).toEqual({
+      includeManual: "false",
+    })
+    expect(historySearchSchema.parse({ includeManual: true })).toEqual({
+      includeManual: "true",
+    })
+    expect(historySearchSchema.safeParse({ includeManual: 0 }).success).toBe(
+      false
+    )
+  })
+  it.each(["", "not-a-uuid", `${historyRow.seriesId},${historyRow.seriesId}`])(
+    "rejects invalid schedule selections before requesting data: %s",
+    async (seriesIds) => {
+      await expect(getHistory(scope, { seriesIds }, null)).rejects.toThrow()
+      expect(get).not.toHaveBeenCalled()
+    }
+  )
   it("retains authoritative schedule context on an empty filtered series page", async () => {
     respond([], null, historyRow.versionId)
     expect(

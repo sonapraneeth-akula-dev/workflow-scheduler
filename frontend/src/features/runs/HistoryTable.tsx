@@ -14,6 +14,10 @@ import { TriggerBadge } from "./TriggerBadge"
 import { RunNowButton } from "@/features/series/RunNowButton"
 import { FailureSummary } from "./FailureSummary"
 import {
+  scheduleName,
+  trackingDescription,
+} from "@/features/schedules/tracking"
+import {
   getHistory,
   historySearchSchema,
   type HistoryCursor,
@@ -36,7 +40,11 @@ export function HistoryFilters({
     new FormData(event.currentTarget).forEach((value, key) => {
       if (typeof value === "string" && value !== "") values[key] = value
     })
-    const parsed = historySearchSchema.safeParse(values)
+    const parsed = historySearchSchema.safeParse({
+      ...values,
+      seriesIds: search.seriesIds,
+      includeManual: search.includeManual,
+    })
     if (!parsed.success) {
       setError(parsed.error.issues.map((issue) => issue.message).join(" "))
       return
@@ -111,7 +119,20 @@ export function HistoryFilters({
         </Field>
         <div className="flex flex-wrap items-center gap-2 self-end sm:col-span-2 xl:col-span-1">
           <Button type="submit">Filter history</Button>
-          <Button type="button" variant="outline" onClick={() => onChange({})}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() =>
+              onChange({
+                ...(search.seriesIds === undefined
+                  ? {}
+                  : { seriesIds: search.seriesIds }),
+                ...(search.includeManual === undefined
+                  ? {}
+                  : { includeManual: search.includeManual }),
+              })
+            }
+          >
             Clear history filters
           </Button>
         </div>
@@ -148,9 +169,25 @@ export function HistoryTable({
   const hasCancellation = rows?.some(
     (row) => row.abort || row.status === "Aborting" || row.status === "Aborted"
   )
-  const seriesIds = scope.seriesId
+  const schedules = query.error
     ? []
-    : [...new Set(rows?.flatMap((row) => (row.seriesId ? [row.seriesId] : [])))]
+    : (query.data?.pages.at(-1)?.schedules ?? [])
+  const selection = {
+    seriesIds:
+      search.seriesIds === undefined
+        ? null
+        : search.seriesIds === "none"
+          ? []
+          : search.seriesIds.split(","),
+    includeManual: search.includeManual !== "false",
+  }
+  const trackedSeries = selection.seriesIds ?? [
+    ...new Set([
+      ...schedules.map((item) => item.seriesId),
+      ...(rows?.flatMap((row) => (row.seriesId ? [row.seriesId] : [])) ?? []),
+    ]),
+  ]
+  const hasSchedules = scope.workflowId && trackedSeries.length > 1
   const scheduleId = query.error
     ? undefined
     : query.data?.pages.at(-1)?.currentScheduleId
@@ -187,33 +224,19 @@ export function HistoryTable({
       {query.isPending ? <p role="status">Loading run history...</p> : null}
       {query.error ? <ErrorNotice error={query.error} /> : null}
       {rows?.length === 0 ? <p role="status">No matching history.</p> : null}
-      {seriesIds.length > 0 ? (
-        <nav
-          aria-label="Schedule series histories"
-          className="flex min-w-0 flex-col gap-2"
-        >
-          <p className="text-sm text-muted-foreground">
-            Service history summarizes workflows; run history lists executions
-            and schedule events. Series history narrows those records to one
-            schedule series. Each series in the loaded rows is linked once
-            below.
-          </p>
-          <div className="flex min-w-0 flex-wrap gap-x-4 gap-y-2">
-            {seriesIds.map((id) => (
-              <Link
-                key={id}
-                to="/series/$id"
-                params={{ id }}
-                title={`Runs and schedule events for series ${id}`}
-                className="min-w-0 break-all text-primary underline"
-              >
-                {seriesIds.length === 1
-                  ? "Schedule series history"
-                  : `Schedule series history: ${id}`}
-              </Link>
-            ))}
-          </div>
-        </nav>
+      {!query.error && !query.isPending ? (
+        <p className="text-sm break-words" aria-label="Tracked history sources">
+          <span className="font-medium">Tracking:</span>{" "}
+          {trackingDescription(
+            schedules,
+            scope.seriesId
+              ? {
+                  seriesIds: [scope.seriesId],
+                  includeManual: false,
+                }
+              : selection
+          )}
+        </p>
       ) : null}
       {rows && rows.length > 0 ? (
         <div
@@ -235,6 +258,7 @@ export function HistoryTable({
                   "Status / Scheduling",
                   "Duration",
                   "Trigger",
+                  ...(hasSchedules ? ["Schedule"] : []),
                   "Executed version",
                   ...(hasCancellation ? ["Cancellation"] : []),
                 ].map((label) => (
@@ -341,6 +365,20 @@ export function HistoryTable({
                         </p>
                       ) : null}
                     </td>
+                    {hasSchedules ? (
+                      <td className="max-w-xs p-3 break-words">
+                        {row.seriesId
+                          ? (() => {
+                              const schedule = schedules.find(
+                                (item) => item.seriesId === row.seriesId
+                              )
+                              return schedule
+                                ? scheduleName(schedule)
+                                : `Unknown schedule (${row.seriesId})`
+                            })()
+                          : "Unscheduled run"}
+                      </td>
+                    ) : null}
                     <td className="p-3">
                       {row.versionId ? (
                         <Link
