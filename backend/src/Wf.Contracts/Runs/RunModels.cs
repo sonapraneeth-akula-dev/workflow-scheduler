@@ -24,6 +24,11 @@ public sealed record RerunRunRequest(ImmutableArray<string>? FromNodes = null,
 public sealed record RerunFingerprint(Guid ParentRunId, ImmutableArray<string>? FromNodes,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RunPlacement? Placement = null);
 
+public sealed record CloneRunRequest(ImmutableDictionary<string, JsonElement> Variables, RunPlacement? Placement = null);
+public sealed record CloneRunSourceResponse(Guid RunId, string WorkflowId, Guid VersionId,
+    ImmutableDictionary<string, JsonElement> Variables, RunPlacement? Placement = null);
+public sealed record CloneRunFingerprint(Guid ParentRunId, CloneRunRequest Request);
+
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, AllowDuplicateProperties = false,
     RespectNullableAnnotations = true, RespectRequiredConstructorParameters = true)]
@@ -31,6 +36,9 @@ public sealed record RerunFingerprint(Guid ParentRunId, ImmutableArray<string>? 
 [JsonSerializable(typeof(TriggerRunResponse))]
 [JsonSerializable(typeof(RerunRunRequest))]
 [JsonSerializable(typeof(RerunFingerprint))]
+[JsonSerializable(typeof(CloneRunRequest))]
+[JsonSerializable(typeof(CloneRunSourceResponse))]
+[JsonSerializable(typeof(CloneRunFingerprint))]
 [JsonSerializable(typeof(RunPlacement))]
 [JsonSerializable(typeof(PlacementOptionsResponse))]
 public partial class RunJsonContext : JsonSerializerContext;

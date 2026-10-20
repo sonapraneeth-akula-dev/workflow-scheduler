@@ -353,7 +353,7 @@ public sealed partial class RegistrationTests
     }
 
     private async Task<RerunSeed> SeedRerun(Server server, bool terminal = true, Guid? viewerGroup = null,
-        RunPlacement? placement = null)
+        RunPlacement? placement = null, bool omitVariables = false)
     {
         var request = await Request(server);
         var workflow = Workflow.Define(request.WorkflowId!, "1.0.0", w => w.Type("release").Metadata("area", "rerun-original")
@@ -386,7 +386,8 @@ public sealed partial class RegistrationTests
         using var registered = await server.Post(request);
         Assert.Equal(HttpStatusCode.Created, registered.StatusCode);
         var version = (await Json(registered)).GetProperty("workflowVersion").GetGuid();
-        var variables = ImmutableDictionary<string, JsonElement>.Empty.Add("environment", JsonSerializer.SerializeToElement("ppe"));
+        var variables = omitVariables ? ImmutableDictionary<string, JsonElement>.Empty
+            : ImmutableDictionary<string, JsonElement>.Empty.Add("environment", JsonSerializer.SerializeToElement("ppe"));
         LocalRunResult? result = terminal
             ? await new LocalEngine(workflow, variables, TextWriter.Null).RunAsync(TestContext.Current.CancellationToken)
                 .WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken) : null;

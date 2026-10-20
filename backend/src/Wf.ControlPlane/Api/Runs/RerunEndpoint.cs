@@ -13,20 +13,52 @@ using Wf.ControlPlane.Engine.Agents;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Recovery;
 using Wf.ControlPlane.Engine.Registry;
+using Wf.Engine.Core;
 using Wf.Engine.Core.Rerun;
 using Wf.Engine.Core.StateMachine;
 using Wf.Validation;
 
 namespace Wf.ControlPlane.Api;
 
-internal sealed record AuthorizedRerun(Guid ParentRunId, RerunRunRequest Request, Guid Actor);
+internal sealed record AuthorizedRerun(Guid ParentRunId, RerunRunRequest Request, Guid Actor,
+    CloneRunRequest? CloneRequest = null);
 
 public static class RerunEndpoint
 {
     private const long MaximumRequestBytes = 64 * 1024;
+    private const long MaximumCloneBytes = 1024 * 1024;
 
     internal static void MapRerunEndpoint(this IEndpointRouteBuilder endpoints)
     {
+        endpoints.MapGet("/api/v1/runs/{id}/clone", CloneSource).RequireAuthorization()
+            .Produces<CloneRunSourceResponse>()
+            .ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404)
+            .ProducesProblem(409).ProducesProblem(500).ProducesProblem(503)
+            .WithDescription("Current Run Operator read of a terminal run's exact pinned version, effective variable JSON " +
+                "and placement. Secret references remain references; no resolved secrets or task outputs are returned.")
+            .AddEndpointFilter(Authorize);
+        endpoints.MapPost("/api/v1/runs/{id}/clone", Accept).RequireAuthorization()
+            .Accepts<CloneRunRequest>("application/json").Produces<TriggerRunResponse>(202)
+            .ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404)
+            .ProducesProblem(409).ProducesProblem(413).ProducesProblem(415).ProducesProblem(500).ProducesProblem(503)
+            .WithDescription("Current Run Operator creates a fresh full rerun of a terminal run's exact pinned workflow " +
+                "version with a complete edited variable object. All nodes execute fresh; no outputs are reused. " +
+                "Source metadata, parent lineage and series are preserved. Placement defaults to the source. " +
+                "Variables are validated against the pinned definition; the source, active version and schedules stay unchanged. " +
+                "Idempotency-Key replays acceptance for 24 hours, scoped to actor, source and canonical request. Maximum body: 1 MiB.")
+            .AddOpenApiOperationTransformer((operation, _, _) =>
+            {
+                operation.Parameters ??= [];
+                operation.Parameters.Add(new OpenApiParameter
+                {
+                    Name = "Idempotency-Key", In = ParameterLocation.Header,
+                    Description = "Optional retry key: one value of 1 to 200 visible ASCII characters without whitespace.",
+                    Schema = new OpenApiSchema { Type = JsonSchemaType.String, MinLength = 1, MaxLength = 200 }
+                });
+                return Task.CompletedTask;
+            })
+            .AddEndpointFilter(Authorize)
+            .AddEndpointFilter<IdempotencyFilter>();
         endpoints.MapPost("/api/v1/runs/{id}/placement-options", PlacementOptions).RequireAuthorization()
             .Accepts<RerunRunRequest>("application/json").Produces<PlacementOptionsResponse>()
             .ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404)
@@ -64,7 +96,8 @@ public static class RerunEndpoint
             !Guid.TryParseExact(id, "D", out var parent) || parent.Version != 7 || parent.ToString("D") != id ||
             context.Request.QueryString.HasValue ||
             context.Features.Get<IHttpRequestFeature>()?.RawTarget?.Split('?')[0] is not { } path ||
-            path != $"/api/v1/runs/{id}/rerun" && path != $"/api/v1/runs/{id}/placement-options")
+            path != $"/api/v1/runs/{id}/rerun" && path != $"/api/v1/runs/{id}/placement-options" &&
+            path != $"/api/v1/runs/{id}/clone")
             return Invalid("$.id", "Use one exact canonical UUIDv7 run identity with no query parameters.");
         if (!(await context.RequestServices.GetRequiredService<IAuthorizationService>().AuthorizeAsync(context.User,
             new TeamResource(TeamResourceKind.Run, id, context.RequestAborted),
@@ -72,17 +105,36 @@ public static class RerunEndpoint
             return Results.Problem(TeamAuthorizationExtensions.Forbidden());
         if (!Guid.TryParse(context.User.FindFirstValue("oid"), out var actor) || actor == Guid.Empty)
             return Results.Problem(statusCode: 403, title: "A rerunning principal object ID is required");
+        var cloning = path == $"/api/v1/runs/{id}/clone";
+        if (cloning && HttpMethods.IsGet(context.Request.Method))
+        {
+            context.Features.Set(new AuthorizedRerun(parent, new(), actor));
+            return await next(invocation);
+        }
         if (!context.Request.HasJsonContentType())
             return Results.Problem(statusCode: 415, title: "A JSON request content type is required");
-        if (context.Request.ContentLength > MaximumRequestBytes) return TooLarge();
+        var maximum = cloning ? MaximumCloneBytes : MaximumRequestBytes;
+        if (context.Request.ContentLength > maximum) return TooLarge();
         if (context.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
-            limit.MaxRequestBodySize = MaximumRequestBytes;
+            limit.MaxRequestBodySize = maximum;
         RerunRunRequest? request;
+        CloneRunRequest? clone = null;
         try
         {
-            request = await context.Request.ReadFromJsonAsync(RunJsonContext.Default.RerunRunRequest, context.RequestAborted);
+            if (cloning)
+            {
+                clone = await context.Request.ReadFromJsonAsync(RunJsonContext.Default.CloneRunRequest, context.RequestAborted);
+                if (clone?.Variables is null) return Invalid("$.variables", "Supply a JSON object of complete variable values.");
+                request = new(Placement: clone.Placement);
+            }
+            else
+                request = await context.Request.ReadFromJsonAsync(RunJsonContext.Default.RerunRunRequest, context.RequestAborted);
         }
-        catch (JsonException) { return Invalid("$", "Supply an object with only optional fromNodes and placement."); }
+        catch (JsonException)
+        {
+            return Invalid("$", cloning ? "Supply an object with variables and optional placement."
+                : "Supply an object with only optional fromNodes and placement.");
+        }
         catch (BadHttpRequestException error) when (error.StatusCode == 413) { return TooLarge(); }
         if (request is null) return Invalid("$", "Supply a rerun request object.");
         if (PlacementOverrideValidator.Invalid(request.Placement) is { } invalidPlacement)
@@ -95,9 +147,11 @@ public static class RerunEndpoint
                 return Invalid("$.fromNodes", "Specify nonempty unique declared node keys, or omit fromNodes.");
             request = request with { FromNodes = nodes.Order(StringComparer.Ordinal).ToImmutableArray() };
         }
-        context.Features.Set(new AuthorizedRerun(parent, request, actor));
-        context.Features.Set(new IdempotentRunRequest(actor, JsonSerializer.SerializeToElement(
-            new RerunFingerprint(parent, request.FromNodes, request.Placement), RunJsonContext.Default.RerunFingerprint)));
+        context.Features.Set(new AuthorizedRerun(parent, request, actor, clone));
+        context.Features.Set(new IdempotentRunRequest(actor, clone is not null
+            ? JsonSerializer.SerializeToElement(new CloneRunFingerprint(parent, clone), RunJsonContext.Default.CloneRunFingerprint)
+            : JsonSerializer.SerializeToElement(new RerunFingerprint(parent, request.FromNodes, request.Placement),
+                RunJsonContext.Default.RerunFingerprint)));
         return await next(invocation);
     }
 
@@ -107,8 +161,11 @@ public static class RerunEndpoint
     private static Task<IResult> PlacementOptions(HttpContext context, string id, NpgsqlDataSource source, CommandInbox inbox,
         TimeProvider time, ILoggerFactory logs) => Handle(context, id, source, inbox, time, logs, true);
 
+    private static Task<IResult> CloneSource(HttpContext context, string id, NpgsqlDataSource source, CommandInbox inbox,
+        TimeProvider time, ILoggerFactory logs) => Handle(context, id, source, inbox, time, logs, false, true);
+
     private static async Task<IResult> Handle(HttpContext context, string id, NpgsqlDataSource source, CommandInbox inbox,
-        TimeProvider time, ILoggerFactory logs, bool optionsOnly)
+        TimeProvider time, ILoggerFactory logs, bool optionsOnly, bool cloneSourceOnly = false)
     {
         var authorized = context.Features.Get<AuthorizedRerun>()
             ?? throw new InvalidOperationException("Rerun acceptance requires authorization.");
@@ -148,12 +205,27 @@ public static class RerunEndpoint
                 return Invalid("$.fromNodes", "Use only node keys from this run's pinned workflow definition.");
             var store = new RunStore(source, logs.CreateLogger<RunStore>());
             var snapshot = await CommittedRunRead.Load(connection, store, authorized.ParentRunId, token);
-            var outputs = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-            await using (var read = new NpgsqlCommand("""
-                SELECT node_key,COALESCE(outputs,'{}'::jsonb)::text FROM node_runs
-                WHERE run_day=uuid_v7_run_day($1) AND run_id=$1
-                """, connection, transaction))
+            if (cloneSourceOnly)
             {
+                var originalVariables = VariableBinder.Resolve(selected.Manifest.Variables, snapshot.Variables, cancellationToken: token);
+                if (!originalVariables.IsValid)
+                    throw new InvalidDataException("Source variables do not match the pinned workflow.");
+                return Results.Json(new CloneRunSourceResponse(authorized.ParentRunId, workflow, version,
+                    originalVariables.Values, snapshot.Placement), RunJsonContext.Default.CloneRunSourceResponse);
+            }
+            var edited = authorized.CloneRequest is { } clone
+                ? VariableBinder.Resolve(selected.Manifest.Variables, clone.Variables, cancellationToken: token)
+                : null;
+            if (edited is { IsValid: false })
+                return Results.Problem(statusCode: 400, title: "Clone variable validation failed",
+                    extensions: new Dictionary<string, object?> { ["errors"] = edited.Errors });
+            var outputs = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            if (edited is null)
+            {
+                await using var read = new NpgsqlCommand("""
+                    SELECT node_key,COALESCE(outputs,'{}'::jsonb)::text FROM node_runs
+                    WHERE run_day=uuid_v7_run_day($1) AND run_id=$1
+                    """, connection, transaction);
                 read.Parameters.AddWithValue(authorized.ParentRunId);
                 await using var rows = await read.ExecuteReaderAsync(token);
                 while (await rows.ReadAsync(token))
@@ -164,9 +236,13 @@ public static class RerunEndpoint
             }
             var now = time.GetUtcNow();
             var runId = Guid.CreateVersion7(now);
-            var plan = RerunPlanner.Plan(runId, new(version, snapshot, outputs), selected.Manifest.Nodes,
-                authorized.Request.FromNodes is { } fromNodes ? fromNodes : null);
-            var variables = VariableBinder.Bind(selected.Manifest.Variables, snapshot.Variables);
+            var plan = edited is not null
+                ? new RerunPlan(authorized.ParentRunId, version,
+                    new RunState(runId, selected.Manifest.Nodes, snapshot.Metadata, _ => { }, edited.Values).Snapshot,
+                    ImmutableDictionary<string, ReusedNode>.Empty)
+                : RerunPlanner.Plan(runId, new(version, snapshot, outputs), selected.Manifest.Nodes,
+                    authorized.Request.FromNodes is { } fromNodes ? fromNodes : null);
+            var variables = VariableBinder.Bind(selected.Manifest.Variables, plan.Snapshot.Variables);
             if (optionsOnly)
                 return await PlacementOverrideValidator.OptionsAsync(connection, transaction, selected.Manifest,
                     variables, now, token);
@@ -188,7 +264,7 @@ public static class RerunEndpoint
             await inbox.RerunAsync(command, authorized.Actor.ToString("D"), transaction, token);
             await using (var audit = new NpgsqlCommand("""
                 INSERT INTO audit_log(ts,actor,actor_kind,action,target_kind,target_id,team_id,summary)
-                VALUES($1,$2,$3,'run.rerun','Run',$4,$5,
+                VALUES($1,$2,$3,$9,'Run',$4,$5,
                     jsonb_build_object('parentRunId',$6::uuid,'versionId',$7::uuid,'fromNodes',($8::jsonb)->'fromNodes'))
                 """, connection, transaction))
             {
@@ -200,6 +276,7 @@ public static class RerunEndpoint
                 audit.Parameters.AddWithValue(plan.ParentRunId);
                 audit.Parameters.AddWithValue(version);
                 audit.Parameters.AddWithValue(JsonSerializer.Serialize(authorized.Request, RunJsonContext.Default.RerunRunRequest));
+                audit.Parameters.AddWithValue(authorized.CloneRequest is null ? "run.rerun" : "run.clone");
                 await audit.ExecuteNonQueryAsync(token);
             }
             if (ownedTransaction is not null) await ownedTransaction.CommitAsync(token);

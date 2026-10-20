@@ -52,6 +52,7 @@ public sealed class PublicApiContractTests
             ("GET", "/api/v1/runs/{id}/tasks/{task}/{attempt}/logs"),
             ("GET", "/api/v1/series/{id}/trends"),
             ("GET", "/api/v1/runs/{id}/reports"), ("POST", "/api/v1/runs/{id}/rerun"),
+            ("GET", "/api/v1/runs/{id}/clone"), ("POST", "/api/v1/runs/{id}/clone"),
             ("POST", "/api/v1/runs/placement-options"), ("POST", "/api/v1/runs/{id}/placement-options"),
             ("POST", "/api/v1/workflows/{team}/{type}/{workflow}/versions/{version}/activate") })
             Assert.Contains(operation, observedPublic);

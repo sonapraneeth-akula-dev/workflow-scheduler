@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { LiveRunGraph } from "@/features/graph/RunGraph"
 import { AbortDialog } from "@/features/runs/AbortDialog"
 import { RerunDialog } from "@/features/runs/RerunDialog"
+import { CloneRunDialog } from "@/features/runs/CloneRunDialog"
 import { RunLineage } from "@/features/runs/RunLineage"
 import { Timeline } from "@/features/runs/Timeline"
 import { SystemEvents } from "@/features/runs/SystemEvents"
@@ -96,6 +97,14 @@ function RunDetail() {
                 versionId={run.versionId}
                 status={run.status}
                 placement={run.placement}
+                live={live.status === "live"}
+              />
+              <CloneRunDialog
+                key={`clone-${run.runId}`}
+                runId={run.runId}
+                workflowId={run.workflowId}
+                versionId={run.versionId}
+                status={run.status}
                 live={live.status === "live"}
               />
             </div>

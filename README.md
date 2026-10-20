@@ -946,7 +946,9 @@ dotnet run --file .\backend\samples\workflows\demo\teams\data-science\regression
 ```
 
 Publish with the same `publish-samples.ps1 -IncludeSchedules` command above.
-Its default history card includes both scheduled and manual diagnostic runs.
+Its configured training/full-test cards include their own scheduled runs and
+manual runs started from those same schedule series. Standalone diagnostics
+remain available in the workflow's full run history.
 
 ### Node and task conditions
 
@@ -2086,10 +2088,31 @@ New runs execute lifecycle stages again; invalidating a setup stage invalidates
 its implicit body dependents. A successful source with no selection means a
 full rerun; explicit selection must be nonempty, unique and declared. Source
 runs must be terminal and match the pinned acyclic node/task definition.
-Old abort, completion timestamps and attempt states do not carry over. Tests
-plan from actual failed SDK execution and replay the planned shared core;
-the HTTP rerun command, persistence of lineage/outputs and UI remain separate
-tasks, not an available hosted rerun endpoint.
+Old abort, completion timestamps and attempt states do not carry over.
+The hosted **Re-run from failed** action uses
+`POST /api/v1/runs/{id}/rerun`, with current Run Operator authorization,
+durable parent/output lineage and idempotent acceptance.
+
+**Clone run** on a confirmed terminal run opens its captured inputs as
+pretty-printed **Variables (JSON)**. Edit values and use **Format JSON** to retain
+nested objects, arrays, Boolean values and exact large-number tokens; it does not
+flatten objects or turn numbers into strings. Only secret reference names appear,
+never resolved secret values. Unknown keys, wrong types and invalid values are
+rejected against the source's immutable pinned definition.
+**Confirm clone** creates a new full run: every node starts fresh, with no reused
+outputs or copied attempt/abort state. It retains the source version, metadata,
+placement, parent lineage and schedule series, without editing the source,
+active version or any saved schedule. History records it as a full **Rerun**.
+
+`GET /api/v1/runs/{id}/clone` reads the same pinned effective inputs;
+`POST /api/v1/runs/{id}/clone` accepts a complete `{"variables": {...}}` object
+and optional placement override, up to 1 MiB. Both require current Run Operator
+permission and return `Cache-Control: no-store`. Accepted requests return 202 and
+the new run ID. `Idempotency-Key` preserves one acceptance for 24 hours, scoped to
+actor, source and canonical request. Uncertain browser acceptance freezes the
+exact edited inputs and key for **Retry clone**, including across closing and
+reopening the dialog. Validation errors preserve editable JSON. The `run.clone`
+audit entry records lineage and version, not variable values.
 
 Dry-run executes the same core using explicit task mocks, without invoking any
 original task delegate or external service:
