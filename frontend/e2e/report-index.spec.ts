@@ -10,7 +10,7 @@ import {
   seedRendererReports,
 } from "../scripts/seed-renderer-reports"
 
-test("Reports tab groups retained sources, filters exact kind/tag and receives a committed addition within one second without reload", async ({
+test("Report subtabs retain sources, filter exact kind/tag and receive a committed addition within one second without navigation", async ({
   page,
   request,
 }, testInfo) => {
@@ -78,21 +78,17 @@ test("Reports tab groups retained sources, filters exact kind/tag and receives a
   await expect(
     page.getByText(`${initial.length} of ${initial.length} reports`)
   ).toBeVisible()
-  await expect(
-    page.getByRole("heading", {
-      name: "Stage Post-process ($post)",
-      exact: true,
-    })
-  ).toBeVisible()
-  await expect(
-    page.getByRole("heading", { name: "Task report-renderer", exact: true })
-  ).toBeVisible()
+  const reportTabs = page.getByRole("tablist", { name: "Run report tabs" })
+  await expect(reportTabs.getByRole("tab")).toHaveCount(initial.length)
+  await expect(reportTabs).toContainText("$post/report-renderer")
   await page.getByRole("combobox", { name: "Report kind" }).selectOption("json")
   await expect(page.getByText(`2 of ${initial.length} reports`)).toBeVisible()
-  await expect(page.getByRole("link", { name: "Metrics tree" })).toBeVisible()
-  await expect(page.getByRole("link", { name: "Release summary" })).toHaveCount(
-    0
-  )
+  await expect(
+    reportTabs.getByRole("tab", { name: /^Metrics tree / })
+  ).toBeVisible()
+  await expect(
+    reportTabs.getByRole("tab", { name: /^Release summary / })
+  ).toHaveCount(0)
   await page.getByRole("button", { name: "Clear report filters" }).click()
   await expect(
     page.getByText(`${initial.length} of ${initial.length} reports`)
@@ -111,8 +107,11 @@ test("Reports tab groups retained sources, filters exact kind/tag and receives a
     sourceKey: "build/live",
     tags: ["live", "review"],
   })
-  const link = page.getByRole("link", { name: added.title, exact: true })
-  await expect(link).toBeVisible()
+  const tab = reportTabs.getByRole("tab", {
+    name: `${added.title} build/live | Attempt 1`,
+    exact: true,
+  })
+  await expect(tab).toBeVisible()
   const elapsedMs = performance.now() - started
   expect(elapsedMs).toBeLessThanOrEqual(1000)
   await testInfo.attach("report-index-commit-to-visible.json", {
@@ -125,12 +124,7 @@ test("Reports tab groups retained sources, filters exact kind/tag and receives a
   await expect(
     page.getByText(`${initial.length + 1} of ${initial.length + 1} reports`)
   ).toBeVisible()
-  await expect(
-    page.getByRole("heading", { name: "Node build", exact: true })
-  ).toBeVisible()
-  await expect(
-    page.getByRole("heading", { name: "Task live", exact: true })
-  ).toBeVisible()
+  await expect(tab).toContainText("build/live")
   await page.getByRole("combobox", { name: "Report tag" }).selectOption("live")
   await expect(
     page.getByText(`1 of ${initial.length + 1} reports`)
@@ -163,8 +157,9 @@ test("Reports tab groups retained sources, filters exact kind/tag and receives a
       )
     ).toBe(true)
   }
-  await link.click()
+  await tab.click()
   await expect(page.getByRole("region", { name: added.title })).toHaveText(
     "actual committed report index content"
   )
+  await expect(page).toHaveURL(new RegExp(`/runs/${runId}$`))
 })
