@@ -2,7 +2,10 @@ import { z } from "zod"
 import { ApiError, publicApi } from "@/lib/api/client"
 import { catalogWorkflowSchema } from "@/features/catalog/api"
 import { instantMicros, instantSchema } from "@/features/runs/search"
-import { trackedScheduleSchema } from "@/features/schedules/tracking"
+import {
+  trackedScheduleSchema,
+  trackingSchema,
+} from "@/features/schedules/tracking"
 import {
   maximumServiceRunLimit,
   serviceRunLimitSchema,
@@ -46,6 +49,20 @@ const servicePageSchema = z.object({
           )
           .max(maximumServiceRunLimit),
         schedules: z.array(trackedScheduleSchema).optional(),
+        historyCards: z
+          .array(
+            z.object({
+              id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/),
+              name: z
+                .string()
+                .min(1)
+                .max(200)
+                .regex(/^(?![\s\S]*\p{Cc})\S(?:[\s\S]*\S)?$/u),
+              seriesIds: trackingSchema.shape.seriesIds.unwrap().min(1),
+            })
+          )
+          .max(32)
+          .nullable(),
       })
     )
     .max(50),
@@ -126,7 +143,16 @@ export async function getServiceHistory(
         (index > 0
           ? compareIds(workflow.id, page.items[index - 1]!.workflow.id) <= 0
           : cursor !== null && compareIds(workflow.id, cursor.afterId) <= 0) ||
-        !consistentRuns(entry, runLimit)
+        !consistentRuns(entry, runLimit) ||
+        (entry.historyCards !== null &&
+          (new Set(entry.historyCards.map((card) => card.id)).size !==
+            entry.historyCards.length ||
+            entry.historyCards.some((card) =>
+              card.seriesIds.some(
+                (id) =>
+                  !entry.schedules?.some((schedule) => schedule.seriesId === id)
+              )
+            )))
       )
     })
   )

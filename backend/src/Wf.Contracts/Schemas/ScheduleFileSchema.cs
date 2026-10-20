@@ -20,6 +20,7 @@ public static class ScheduleFileSchema
         properties["versionPin"]!["maxLength"] = 256;
         properties["versionPin"]!["description"] =
             "Exact SemVer or version UUID, comparison ranges joined by spaces (AND) or || (OR), or *, major.* and major.minor.* wildcards.";
+        properties["name"] = NameSchema();
         properties["interval"]!["type"] = "string";
         properties["interval"]!["pattern"] = "^(\\d+\\.)?\\d{2}:\\d{2}:\\d{2}(\\.0{1,7})?$";
         properties["overlap"]!["default"] = nameof(ScheduleOverlapPolicy.Skip);
@@ -29,6 +30,28 @@ public static class ScheduleFileSchema
                 { ["required"] = new JsonArray("interval") } },
             new JsonObject { ["required"] = new JsonArray("interval"), ["not"] = new JsonObject
                 { ["required"] = new JsonArray("cron") } });
+        var cards = schema["properties"]!["historyCards"]!;
+        cards["type"] = "array";
+        cards["maxItems"] = 32;
+        cards["description"] = "Ordered Service History cards. Omit for one all-runs workflow card; [] hides all cards. References use instance IDs; schedule-based manual runs remain in their schedule's card.";
+        var card = cards["items"]!;
+        card["properties"]!["id"] = new JsonObject
+        {
+            ["type"] = "string", ["minLength"] = 1, ["maxLength"] = 128,
+            ["pattern"] = "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+        };
+        card["properties"]!["name"] = NameSchema();
+        var references = card["properties"]!["scheduleIds"]!;
+        references["minItems"] = 1;
+        references["maxItems"] = 32;
+        references["uniqueItems"] = true;
+        references["items"]!["minLength"] = 1;
         return schema;
     }
+
+    private static JsonObject NameSchema() => new()
+    {
+        ["type"] = "string", ["minLength"] = 1, ["maxLength"] = 200,
+        ["pattern"] = "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f-\\u009f])\\S(?:[\\s\\S]*\\S)?$"
+    };
 }

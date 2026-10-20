@@ -13,6 +13,7 @@
   "instances": [
     {
       "id": "daily-training-validation",
+      "name": "Training & validation",
       "cron": "0 */4 * * *",
       "timezone": "Etc/UTC",
       "overlap": "Skip",
@@ -24,6 +25,7 @@
     },
     {
       "id": "daily-full-test",
+      "name": "Full test",
       "cron": "0 2-23/4 * * *",
       "timezone": "Etc/UTC",
       "overlap": "Skip",
@@ -33,6 +35,20 @@
         "runFinalTest": true,
         "epochs": 100
       }
+    }
+  ],
+  "historyCards": [
+    {
+      "id": "training-validation",
+      "name": "Training & validation",
+      "visible": true,
+      "scheduleIds": ["daily-training-validation"]
+    },
+    {
+      "id": "full-test",
+      "name": "Full test",
+      "visible": true,
+      "scheduleIds": ["daily-full-test"]
     }
   ]
 }

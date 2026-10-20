@@ -111,9 +111,9 @@ public static class ScheduleFileApplier
             await using var upsert = new NpgsqlCommand("""
                 INSERT INTO schedules(id,workflow_id,origin,code_key,name,timezone,cron,interval_s,variables,version_pin,
                     overlap_policy,catchup_policy,next_fire_at,created_by,updated_by,config_version_id,created_at,updated_at)
-                VALUES($1,$2,0,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12,$13,$14,$14)
+                VALUES($1,$2,0,$3,$15,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12,$13,$14,$14)
                 ON CONFLICT(workflow_id,code_key) WHERE origin=0 DO UPDATE SET
-                    timezone=excluded.timezone,cron=excluded.cron,interval_s=excluded.interval_s,variables=excluded.variables,
+                    name=excluded.name,timezone=excluded.timezone,cron=excluded.cron,interval_s=excluded.interval_s,variables=excluded.variables,
                     version_pin=excluded.version_pin,overlap_policy=excluded.overlap_policy,catchup_policy=excluded.catchup_policy,
                     config_version_id=excluded.config_version_id,updated_by=excluded.updated_by,updated_at=excluded.updated_at,
                     deleted_at=NULL,paused=CASE WHEN schedules.deleted_at IS NULL THEN schedules.paused ELSE false END,
@@ -123,10 +123,10 @@ public static class ScheduleFileApplier
                         THEN schedules.next_fire_at ELSE excluded.next_fire_at END,
                     row_version=schedules.row_version+1
                 WHERE schedules.deleted_at IS NOT NULL OR
-                    (schedules.timezone,schedules.cron,schedules.interval_s,schedules.variables,schedules.version_pin,
+                    (schedules.name,schedules.timezone,schedules.cron,schedules.interval_s,schedules.variables,schedules.version_pin,
                         schedules.overlap_policy,schedules.catchup_policy,schedules.config_version_id)
                     IS DISTINCT FROM
-                    (excluded.timezone,excluded.cron,excluded.interval_s,excluded.variables,excluded.version_pin,
+                    (excluded.name,excluded.timezone,excluded.cron,excluded.interval_s,excluded.variables,excluded.version_pin,
                         excluded.overlap_policy,excluded.catchup_policy,excluded.config_version_id)
                 """, connection, transaction);
             upsert.Parameters.AddWithValue(Guid.CreateVersion7());
@@ -144,6 +144,7 @@ public static class ScheduleFileApplier
             upsert.Parameters.AddWithValue(actor);
             upsert.Parameters.AddWithValue(config);
             upsert.Parameters.AddWithValue(now);
+            upsert.Parameters.AddWithValue(definition.Name ?? definition.Id);
             await upsert.ExecuteNonQueryAsync(cancellationToken);
         }
         await using (var remove = new NpgsqlCommand("""

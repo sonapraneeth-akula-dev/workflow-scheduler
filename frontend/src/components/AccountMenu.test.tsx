@@ -151,7 +151,7 @@ it("saves a configurable run count for the personal profile without changing oth
   fireEvent.click(within(menu).getByRole("menuitem", { name: "Settings" }))
   const dialog = await screen.findByRole("dialog", { name: "Settings" })
   const input = within(dialog).getByRole("spinbutton", {
-    name: "Recent runs per workflow",
+    name: "Recent runs per card",
   })
   expect(input).toHaveValue(10)
   expect(input).toHaveAttribute("max", "30")
@@ -171,7 +171,7 @@ it("saves a configurable run count for the personal profile without changing oth
     )
   ).toBeNull()
   const updatedInput = within(dialog).getByRole("spinbutton", {
-    name: "Recent runs per workflow",
+    name: "Recent runs per card",
   })
   fireEvent.change(updatedInput, { target: { value: "31" } })
   expect(updatedInput).toBeInvalid()

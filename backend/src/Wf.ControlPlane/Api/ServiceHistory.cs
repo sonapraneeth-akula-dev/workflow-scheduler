@@ -5,13 +5,16 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.OpenApi;
 using Npgsql;
+using Wf.Contracts.Schedules;
 
 namespace Wf.ControlPlane.Api;
 
 public sealed record ServiceWorkflow(CatalogWorkflow Workflow, IReadOnlyList<CatalogLatestRun> Runs)
 {
     public RunHistorySchedule[] Schedules { get; init; } = [];
+    public ServiceHistoryCard[]? HistoryCards { get; init; }
 }
+public sealed record ServiceHistoryCard(string Id, string Name, Guid[] SeriesIds);
 public sealed record ServiceHistoryPage(string Team, string? Type, int RunLimit,
     IReadOnlyList<ServiceWorkflow> Items, string? NextCursor);
 
@@ -30,6 +33,7 @@ public static partial class CatalogEndpoints
                 "runLimit=1..30 (default 10) applies separately to each workflow; fewer runs means fewer instances, never fabricated outcomes. " +
                 "Run instances are ordered by createdAt then id descending. " +
                 "Each item also contains authorized schedule names and permanent series identities, including paused/deleted schedules for retained history tracking. " +
+                "historyCards comes from the active applied schedules.json snapshot: null preserves one all-runs card; [] hides the workflow; otherwise ordered visible cards select permanent series identities, including schedule-based manual runs. " +
                 "Uses the same exact team/type, keyset cursor and metadata filters as the workflow catalogue. No payloads or capabilities.")
             .AddOpenApiOperationTransformer((operation, _, _) =>
             {
@@ -104,6 +108,7 @@ public static partial class CatalogEndpoints
             }
             var failures = await RunFailures.Summaries(context, source, runs.Values.SelectMany(instances => instances).Select(run => run.Id));
             var schedules = await RunHistoryEndpoints.ReadSchedules(source, page.Items.Select(item => item.Id).ToArray(), context.RequestAborted);
+            var cards = await ReadHistoryCards(source, page.Items.Select(item => item.Id).ToArray(), context.RequestAborted);
             var items = page.Items.Select(workflow => new ServiceWorkflow(
                 workflow.LatestRun is not { } latest ? workflow : workflow with
                 {
@@ -111,7 +116,10 @@ public static partial class CatalogEndpoints
                 },
                 (runs.GetValueOrDefault(workflow.Id) ?? []).Select(run =>
                     run with { FailureSummary = failures.GetValueOrDefault(run.Id) }).ToArray())
-                { Schedules = schedules.GetValueOrDefault(workflow.Id)?.ToArray() ?? [] }).ToArray();
+                {
+                    Schedules = schedules.GetValueOrDefault(workflow.Id)?.ToArray() ?? [],
+                    HistoryCards = cards.GetValueOrDefault(workflow.Id)
+                }).ToArray();
             return Results.Json(new(filter.Team, filter.Type, runLimit, items, page.NextCursor),
                 ServiceHistoryJson.Default.ServiceHistoryPage);
         }
@@ -119,9 +127,54 @@ public static partial class CatalogEndpoints
         {
             return Results.Problem(statusCode: 503, title: "Service history is unavailable");
         }
-        catch (Exception error) when (error is InvalidDataException or InvalidCastException or OverflowException)
+        catch (Exception error) when (error is InvalidDataException or InvalidCastException or OverflowException or JsonException)
         {
             return Results.Problem(statusCode: 500, title: "Committed service history data is inconsistent");
         }
+    }
+
+    private static async Task<Dictionary<string, ServiceHistoryCard[]>> ReadHistoryCards(
+        NpgsqlDataSource source, string[] workflows, CancellationToken token)
+    {
+        var result = new Dictionary<string, ServiceHistoryCard[]>(StringComparer.Ordinal);
+        if (workflows.Length == 0) return result;
+        var files = new List<(string Workflow, ScheduleFile File)>();
+        await using (var query = source.CreateCommand("""
+            SELECT w.id,c.content FROM workflows w
+            JOIN schedule_config_versions c ON c.id=w.active_schedule_config_id AND c.workflow_id=w.id
+            WHERE w.id=ANY($1)
+            """))
+        {
+            query.Parameters.AddWithValue(workflows);
+            await using var reader = await query.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token))
+            {
+                if (reader.IsDBNull(1))
+                    throw new InvalidDataException("The active schedule configuration has no retained content.");
+                var file = JsonSerializer.Deserialize(reader.GetString(1), ScheduleFileJsonContext.Default.ScheduleFile)
+                    ?? throw new InvalidDataException("The active schedule configuration is null.");
+                if (file.HistoryCards is not null) files.Add((reader.GetString(0), file));
+            }
+        }
+        if (files.Count == 0) return result;
+        var identities = new Dictionary<(string Workflow, string Key), Guid>();
+        await using (var query = source.CreateCommand("""
+            SELECT s.workflow_id,s.code_key,r.id FROM schedules s
+            JOIN run_series r ON r.schedule_id=s.id AND r.workflow_id=s.workflow_id
+            WHERE s.workflow_id=ANY($1) AND s.origin=0
+            """))
+        {
+            query.Parameters.AddWithValue(files.Select(file => file.Workflow).ToArray());
+            await using var reader = await query.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token))
+                identities.Add((reader.GetString(0), reader.GetString(1)), reader.GetGuid(2));
+        }
+        foreach (var (workflow, file) in files)
+            result.Add(workflow, file.HistoryCards!.Value.Where(card => card.Visible).Select(card =>
+                new ServiceHistoryCard(card.Id, card.Name, card.ScheduleIds.Select(key =>
+                    identities.TryGetValue((workflow, key), out var series) ? series :
+                        throw new InvalidDataException("A configured history card has no permanent schedule series."))
+                    .ToArray())).ToArray());
+        return result;
     }
 }

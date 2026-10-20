@@ -14,7 +14,8 @@ public sealed class ScheduleEnumConverter<T>() : JsonStringEnumConverter<T>(allo
 
 public sealed record ScheduleFile(ImmutableArray<ScheduleInstance> Instances,
     ImmutableDictionary<string, ImmutableDictionary<string, JsonElement>> Defaults = null!,
-    [property: JsonPropertyName("$schema")] string? Schema = null)
+    [property: JsonPropertyName("$schema")] string? Schema = null,
+    ImmutableArray<ScheduleHistoryCard>? HistoryCards = null)
 {
     public ImmutableDictionary<string, ImmutableDictionary<string, JsonElement>> Defaults { get; init; } =
         Defaults ?? ImmutableDictionary<string, ImmutableDictionary<string, JsonElement>>.Empty;
@@ -23,11 +24,14 @@ public sealed record ScheduleFile(ImmutableArray<ScheduleInstance> Instances,
 public sealed record ScheduleInstance(string Id, string Timezone, string? Cron = null, TimeSpan? Interval = null,
     string? VersionPin = null, ScheduleOverlapPolicy Overlap = ScheduleOverlapPolicy.Skip,
     ScheduleCatchUpPolicy CatchUp = ScheduleCatchUpPolicy.Latest,
-    ImmutableDictionary<string, JsonElement> Variables = null!)
+    ImmutableDictionary<string, JsonElement> Variables = null!, string? Name = null)
 {
     public ImmutableDictionary<string, JsonElement> Variables { get; init; } =
         Variables ?? ImmutableDictionary<string, JsonElement>.Empty;
 }
+
+public sealed record ScheduleHistoryCard(string Id, string Name, ImmutableArray<string> ScheduleIds,
+    bool Visible = true);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     UseStringEnumConverter = true, WriteIndented = true,

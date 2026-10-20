@@ -85,9 +85,11 @@ public static class ScheduleFileValidator
             if (string.IsNullOrWhiteSpace(instance.Id) || instance.Id.Any(char.IsControl) || !ids.Add(instance.Id))
                 errors.Add(RuleCatalog.ScheduleIdentity.CreateError(file, path + ".id"));
             var raw = document.RootElement.GetProperty("instances")[index];
-            foreach (var optional in new[] { "cron", "interval", "versionPin" })
+            foreach (var optional in new[] { "cron", "interval", "versionPin", "name" })
                 if (raw.TryGetProperty(optional, out var property) && property.ValueKind == JsonValueKind.Null)
                     errors.Add(RuleCatalog.ScheduleShape.CreateError(file, path + "." + optional));
+            if (instance.Name is { } name && !ValidName(name))
+                errors.Add(RuleCatalog.ScheduleShape.CreateError(file, path + ".name"));
             if (instance.VersionPin is { } pin && !ValidVersionPin(pin))
                 errors.Add(RuleCatalog.ScheduleVersionPin.CreateError(file, path + ".versionPin"));
             ScheduleExpression? expression = null;
@@ -113,10 +115,46 @@ public static class ScheduleFileValidator
             if (expression is not null)
                 resolved.Add(new(instance, expression, effective.ToImmutable()));
         }
+        if (document.RootElement.TryGetProperty("historyCards", out var cardsProperty) &&
+            cardsProperty.ValueKind == JsonValueKind.Null)
+            errors.Add(RuleCatalog.ScheduleShape.CreateError(file, "$.historyCards"));
+        if (definition.HistoryCards is { } cards)
+        {
+            if (cards.Length > 32)
+                errors.Add(RuleCatalog.ScheduleShape.CreateError(file, "$.historyCards"));
+            var cardIds = new HashSet<string>(StringComparer.Ordinal);
+            for (var index = 0; index < cards.Length; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var card = cards[index];
+                var path = $"$.historyCards[{index}]";
+                if (card is null)
+                {
+                    errors.Add(RuleCatalog.ScheduleShape.CreateError(file, path));
+                    continue;
+                }
+                if (string.IsNullOrEmpty(card.Id) || card.Id.Length > 128 ||
+                    !char.IsAsciiLetterOrDigit(card.Id[0]) ||
+                    card.Id.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('-' or '_')) ||
+                    !cardIds.Add(card.Id))
+                    errors.Add(RuleCatalog.ScheduleIdentity.CreateError(file, path + ".id"));
+                if (!ValidName(card.Name))
+                    errors.Add(RuleCatalog.ScheduleShape.CreateError(file, path + ".name"));
+                if (card.ScheduleIds.Length is < 1 or > 32)
+                    errors.Add(RuleCatalog.ScheduleShape.CreateError(file, path + ".scheduleIds"));
+                var references = new HashSet<string>(StringComparer.Ordinal);
+                for (var reference = 0; reference < card.ScheduleIds.Length; reference++)
+                    if (card.ScheduleIds[reference] is not { } id || !ids.Contains(id) || !references.Add(id))
+                        errors.Add(RuleCatalog.ScheduleIdentity.CreateError(file, $"{path}.scheduleIds[{reference}]"));
+            }
+        }
         cancellationToken.ThrowIfCancellationRequested();
         return new(errors.OrderBy(error => error.Path, StringComparer.Ordinal)
             .ThenBy(error => error.RuleId, StringComparer.Ordinal).ToImmutableArray(), resolved.ToImmutable());
     }
+
+    private static bool ValidName(string? name) => !string.IsNullOrWhiteSpace(name) &&
+        name.Length <= 200 && !name.Any(char.IsControl) && name == name.Trim();
 
     private static JsonDocument? Parse(ReadOnlyMemory<byte> utf8, string file, List<ValidationError> errors)
     {

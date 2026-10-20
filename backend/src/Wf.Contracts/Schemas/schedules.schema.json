@@ -49,6 +49,12 @@
             ],
             "default": "Latest"
           },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f-\\u009f])\\S(?:[\\s\\S]*\\S)?$"
+          },
           "variables": {
             "type": "object",
             "default": null
@@ -89,6 +95,49 @@
         "null"
       ],
       "default": null
+    },
+    "historyCards": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f-\\u009f])\\S(?:[\\s\\S]*\\S)?$"
+          },
+          "scheduleIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "maxItems": 32,
+            "uniqueItems": true
+          },
+          "visible": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "scheduleIds"
+        ],
+        "additionalProperties": false
+      },
+      "default": null,
+      "maxItems": 32,
+      "description": "Ordered Service History cards. Omit for one all-runs workflow card; [] hides all cards. References use instance IDs; schedule-based manual runs remain in their schedule\u0027s card."
     },
     "defaults": {
       "type": "object",

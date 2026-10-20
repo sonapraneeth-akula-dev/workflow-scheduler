@@ -206,9 +206,7 @@ function AccountSettings({
       >
         <FieldGroup>
           <Field data-invalid={history.error !== null}>
-            <FieldLabel htmlFor={runLimitId}>
-              Recent runs per workflow
-            </FieldLabel>
+            <FieldLabel htmlFor={runLimitId}>Recent runs per card</FieldLabel>
             <Input
               id={runLimitId}
               name="runLimit"

@@ -836,6 +836,11 @@ One automatic run fires every two hours, alternating the profiles; each profile
 runs every four hours. Existing profile IDs retain their series and history
 despite the original `daily-` names.
 
+The same file defines two visible Service History cards, **Training & validation**
+and **Full test**, each tracking its matching recurring instance. **Run now**
+from either schedule remains in that schedule's card. Change `historyCards`
+membership or `visible` in JSON and republish; no UI configuration is involved.
+
 Both profiles default to experiment number 1, 70/15/15 splits, learning rate 0.1 and
 `forceDownload=false`. Change shared values under `defaults.experiment`, or
 override any parameter in a profile's `variables`, then republish with
@@ -1157,32 +1162,49 @@ Each status-colored icon represents one run, with a distinct status symbol,
 run ID and timestamp; clicking it opens that exact run in a new tab.
 **View last run** opens the exact latest run and is
 disabled for never-run workflows; **History** opens that workflow's run history.
-Each workflow card/table row includes **Choose tracked schedules**. Select one
-or multiple named recurring schedules (up to 32 specific series), or **All
-schedules, including future schedules**, and independently choose **Include
-unscheduled runs**. The visible
-**Tracking** summary lists those sources; paused/deleted schedules are marked.
-Selections persist per account/tenant/workflow in this browser and synchronize
-between its tabs, not between devices or users. Changing tracking only changes
-this personal view: it never pauses, edits or renames a schedule.
+Cards are configured only in the workflow's applied `schedules.json`, not in the
+UI or browser preferences. Optional `historyCards` defines up to 32 ordered cards,
+each with a stable unique `id`, friendly `name`, optional `visible` (default
+`true`) and 1-32 distinct `scheduleIds` referencing the file's instance IDs:
+
+```json
+"historyCards": [
+  {"id":"training","name":"Training & validation","visible":true,"scheduleIds":["daily-training-validation"]},
+  {"id":"combined","name":"All experiments","visible":false,"scheduleIds":["daily-training-validation","daily-full-test"]}
+]
+```
+
+One schedule can appear in multiple cards. Add/remove references, change names,
+reorder cards or set `visible:false`, then publish the schedule file; refresh/live
+updates reflect the active committed configuration for every viewer. Hidden
+cards never pause schedules or delete runs. `historyCards:[]` hides all cards for
+that workflow. Omitting `historyCards` preserves one backward-compatible card
+tracking all schedules (including future ones) and unscheduled runs.
+Each instance can supply an optional friendly `name`, independent of its stable
+`id`; renaming preserves schedule and series history. Card IDs use 1-128 ASCII
+letters/digits, `_` or `-`, starting with a letter/digit; names use 1-200 characters,
+without control characters or leading/trailing whitespace. Duplicate card IDs,
+duplicate references, missing instances and invalid fields reject registration
+atomically. The read-only **Tracking** summary marks paused/deleted schedules.
 Latest status, last-run links, run icons and success rates all use the selected
 sources; filtering happens on the server **before** the recent-run limit.
 **History** carries that same selection into the existing workflow history page,
 and its ordinary status/outcome filters preserve the tracking selection.
 Runs started through **Run now** remain associated with their selected schedule;
-the unscheduled toggle applies only to runs without a schedule series (including
-standalone manual runs and reruns). Selecting no sources shows an explicit empty
-state, never unrelated runs. Missing saved schedule identities stay visible as
-unavailable until explicitly removed.
+configured cards exclude runs without a schedule series (including standalone
+manual runs and reruns), while the backward-compatible all-runs card includes
+them. A card tracking multiple schedules uses one History table, with an additional
+**Schedule** column identifying each run's named source. A card with no matching
+runs shows an explicit empty state, never unrelated runs.
 These page-content navigation buttons, along with workflow history's
 **Workflow versions** and **Metrics dashboard** buttons, open new tabs.
 Each shows an outgoing-link icon and announces its new-tab behavior to screen
 readers. Navbar links stay in the current tab; action buttons are unchanged.
 Timestamps keep their full source precision in the time element while displaying
 local time with millisecond precision.
-Both formats show the latest **10 runs per workflow** by default, newest first,
+Both formats show the latest **10 runs per card** by default, newest first,
 with **no date cutoff**. Open your account menu -> **Settings** -> **Recent runs
-per workflow** to save a count from **1 to 30**. The hard maximum is 30 in
+per card** to save a count from **1 to 30**. The hard maximum is 30 in
 personal settings and the API; larger saved values show an error and use the
 default 10 until a valid preference is saved. This personal preference is
 saved separately for each signed-in account and tenant in this browser; the

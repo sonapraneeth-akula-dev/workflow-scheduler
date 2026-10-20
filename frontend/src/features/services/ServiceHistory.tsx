@@ -10,7 +10,6 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   accessDenied,
   getTypes,
-  type CatalogWorkflow,
   type Presentation,
 } from "@/features/catalog/api"
 import {
@@ -31,13 +30,17 @@ import {
 import { RunHistoryStrip } from "./RunHistoryStrip"
 import { FailureSummary } from "@/features/runs/FailureSummary"
 import { getHistory } from "@/features/runs/history"
-import { ScheduleTracking } from "@/features/schedules/ScheduleTracking"
-import { defaultTracking, trackingSearch } from "@/features/schedules/tracking"
+import {
+  defaultTracking,
+  trackingDescription,
+  trackingSearch,
+  type ScheduleTrackingSelection,
+} from "@/features/schedules/tracking"
 
-function WorkflowActions({ workflow }: { workflow: CatalogWorkflow }) {
+function WorkflowActions({ entry }: { entry: TrackedWorkflow }) {
+  const { workflow, selection, cardName } = entry
   const newTabDescription = useId()
-  const history = useServiceHistoryPreferences()
-  const tracking = history.tracking[workflow.id] ?? defaultTracking
+  const label = cardName ? `${workflow.id} (${cardName})` : workflow.id
   return (
     <div className="flex flex-wrap gap-2">
       <span id={newTabDescription} hidden>
@@ -50,7 +53,7 @@ function WorkflowActions({ workflow }: { workflow: CatalogWorkflow }) {
             params={{ id: workflow.latestRun.id }}
             target="_blank"
             rel="noopener noreferrer"
-            aria-label={`View last run for ${workflow.id}`}
+            aria-label={`View last run for ${label}`}
             aria-describedby={newTabDescription}
           >
             View last run
@@ -70,10 +73,10 @@ function WorkflowActions({ workflow }: { workflow: CatalogWorkflow }) {
             type: workflow.type,
             wf: workflow.name,
           }}
-          search={trackingSearch(tracking)}
+          search={trackingSearch(selection)}
           target="_blank"
           rel="noopener noreferrer"
-          aria-label={`History for ${workflow.id}`}
+          aria-label={`History for ${label}`}
           aria-describedby={newTabDescription}
         >
           History
@@ -84,10 +87,9 @@ function WorkflowActions({ workflow }: { workflow: CatalogWorkflow }) {
   )
 }
 
-function LastRun({ workflow }: { workflow: CatalogWorkflow }) {
+function LastRun({ entry }: { entry: TrackedWorkflow }) {
+  const { workflow, selection } = entry
   const run = workflow.latestRun
-  const history = useServiceHistoryPreferences()
-  const selection = history.tracking[workflow.id] ?? defaultTracking
   const filtered = selection.seriesIds !== null || !selection.includeManual
   return run ? (
     <time dateTime={run.createdAt} title={run.createdAt}>
@@ -101,6 +103,9 @@ function LastRun({ workflow }: { workflow: CatalogWorkflow }) {
 }
 
 type TrackedWorkflow = ServiceWorkflow & {
+  key: string
+  cardName?: string
+  selection: ScheduleTrackingSelection
   trackingPending?: boolean
   trackingError?: Error | null
 }
@@ -112,17 +117,14 @@ function WorkflowTracking({
   entry: TrackedWorkflow
   runLimit: number
 }) {
-  const history = useServiceHistoryPreferences()
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <ScheduleTracking
-        workflowId={entry.workflow.id}
-        schedules={entry.schedules ?? []}
-        selection={history.tracking[entry.workflow.id] ?? defaultTracking}
-        onChange={(next) => {
-          history.setTracking(entry.workflow.id, next)
-        }}
-      />
+      <p
+        aria-label={`Tracking for ${entry.key}`}
+        className="text-sm break-words text-muted-foreground"
+      >
+        Tracking: {trackingDescription(entry.schedules ?? [], entry.selection)}
+      </p>
       {entry.trackingError ? (
         <ErrorNotice error={entry.trackingError} />
       ) : entry.trackingPending ? (
@@ -135,8 +137,7 @@ function WorkflowTracking({
 }
 
 function WorkflowStatus({ entry }: { entry: TrackedWorkflow }) {
-  const history = useServiceHistoryPreferences()
-  const selection = history.tracking[entry.workflow.id] ?? defaultTracking
+  const { selection } = entry
   if (entry.trackingPending)
     return <span className="text-sm text-muted-foreground">Loading...</span>
   if (entry.trackingError)
@@ -187,7 +188,7 @@ function WorkflowGroup({
           {label}
         </h2>
         <span className="text-sm text-muted-foreground">
-          {entries.length} loaded workflows
+          {entries.length} loaded cards
         </span>
       </div>
       {view === "cards" ? (
@@ -196,12 +197,17 @@ function WorkflowGroup({
             const { workflow } = entry
             return (
               <li
-                key={workflow.id}
+                key={entry.key}
                 className="min-w-0 space-y-4 border bg-background p-3"
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <h3 className="min-w-0 text-base font-semibold break-words">
-                    {presentationName(presentation, workflow.name, workflow.id)}
+                    {entry.cardName ??
+                      presentationName(
+                        presentation,
+                        workflow.name,
+                        workflow.id
+                      )}
                   </h3>
                   <WorkflowStatus entry={entry} />
                 </div>
@@ -222,11 +228,11 @@ function WorkflowGroup({
                   ) : entry.trackingError ? (
                     "Unavailable"
                   ) : (
-                    <LastRun workflow={workflow} />
+                    <LastRun entry={entry} />
                   )}
                 </p>
                 <WorkflowTracking entry={entry} runLimit={runLimit} />
-                <WorkflowActions workflow={workflow} />
+                <WorkflowActions entry={entry} />
               </li>
             )
           })}
@@ -262,16 +268,17 @@ function WorkflowGroup({
                 const { workflow } = entry
                 return (
                   <tr
-                    key={workflow.id}
+                    key={entry.key}
                     className="border-b last:border-0 odd:bg-card even:bg-muted/50"
                   >
                     <th scope="row" className="p-3 font-medium">
                       <span className="block">
-                        {presentationName(
-                          presentation,
-                          workflow.name,
-                          workflow.id
-                        )}
+                        {entry.cardName ??
+                          presentationName(
+                            presentation,
+                            workflow.name,
+                            workflow.id
+                          )}
                       </span>
                       <span className="font-mono text-xs font-normal text-muted-foreground">
                         {workflow.id}
@@ -290,14 +297,14 @@ function WorkflowGroup({
                       ) : entry.trackingError ? (
                         "Unavailable"
                       ) : (
-                        <LastRun workflow={workflow} />
+                        <LastRun entry={entry} />
                       )}
                     </td>
                     <td className="w-px p-3">
                       <WorkflowTracking entry={entry} runLimit={runLimit} />
                     </td>
                     <td className="p-3">
-                      <WorkflowActions workflow={workflow} />
+                      <WorkflowActions entry={entry} />
                     </td>
                   </tr>
                 )
@@ -346,16 +353,23 @@ export function ServiceHistory({
     accessDenied(query.error) || accessDenied(types.error)
       ? undefined
       : query.data?.pages.flatMap((page) => page.items)
-  const filteredEntries = (entries ?? []).filter((entry) => {
-    const selection = history.tracking[entry.workflow.id] ?? defaultTracking
-    return selection.seriesIds !== null || !selection.includeManual
-  })
+  const cardEntries: TrackedWorkflow[] = (entries ?? []).flatMap((entry) =>
+    entry.historyCards === null
+      ? [{ ...entry, key: entry.workflow.id, selection: defaultTracking }]
+      : entry.historyCards.map((card) => ({
+          ...entry,
+          key: `${entry.workflow.id}/${card.id}`,
+          cardName: card.name,
+          selection: { seriesIds: card.seriesIds, includeManual: false },
+        }))
+  )
+  const filteredEntries = cardEntries.filter(
+    (entry) => entry.selection.seriesIds !== null
+  )
   const trackedQueries = useQueries({
     queries: filteredEntries.map((entry) => {
       const filters = {
-        ...trackingSearch(
-          history.tracking[entry.workflow.id] ?? defaultTracking
-        ),
+        ...trackingSearch(entry.selection),
         outcome: "Run" as const,
       }
       return {
@@ -366,7 +380,7 @@ export function ServiceHistory({
           "service-history",
           entry.workflow.type,
           "tracking",
-          entry.workflow.id,
+          entry.key,
           filters,
           history.runLimit,
         ],
@@ -399,7 +413,7 @@ export function ServiceHistory({
         }
       )
       return [
-        entry.workflow.id,
+        entry.key,
         {
           ...entry,
           workflow: { ...entry.workflow, latestRun: runs[0] ?? null },
@@ -425,8 +439,8 @@ export function ServiceHistory({
         metadataKeys.add(key)
   }
   const groups = new Map<string | undefined, TrackedWorkflow[]>()
-  for (const original of entries ?? []) {
-    const entry = trackedEntries.get(original.workflow.id) ?? original
+  for (const original of cardEntries) {
+    const entry = trackedEntries.get(original.key) ?? original
     const key = search.groupKey
     const value =
       search.groupBy === "type"
@@ -445,7 +459,7 @@ export function ServiceHistory({
             {presentationName(config, team)} Service History
           </h1>
           <p className="text-sm text-muted-foreground">
-            Run instances: latest {history.runLimit} runs per workflow
+            Run instances: latest {history.runLimit} runs per card
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -560,16 +574,17 @@ export function ServiceHistory({
         </div>
       </div>
       <p className="text-sm text-muted-foreground">
-        Real run outcomes from each workflow's selected sources, grouped by{" "}
+        Real run outcomes from each card's configured schedules, grouped by{" "}
         {search.groupBy === "metadata"
           ? `metadata key "${presentationName(null, presentationLabel(config, search.groupKey!))}"`
           : "workflow type"}
         . Each colored icon is one run, newest first; select it to open that
-        instance in a new tab. Up to {history.runLimit} recent runs per workflow
-        are shown, regardless of age; change this in your account Settings.
-        History contains the full matching list. Success rates use the completed
-        runs shown. Choose one or multiple named schedules for each workflow;
-        its History link uses the same selection.
+        instance in a new tab. Up to {history.runLimit} recent runs per card are
+        shown, regardless of age; change this in your account Settings. History
+        contains the full matching list. Success rates use the completed runs
+        shown. Card names, visibility and tracked schedules come from
+        schedules.json, not personal settings. Each History link uses the same
+        schedules, including manual runs started from those schedules.
       </p>
       <div
         className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"
@@ -588,15 +603,15 @@ export function ServiceHistory({
         ))}
       </div>
       {history.error ? <ErrorNotice error={history.error} /> : null}
-      {history.trackingError ? (
-        <ErrorNotice error={history.trackingError} />
-      ) : null}
       {query.isPending ? <p role="status">Loading service history...</p> : null}
       {query.error ? <ErrorNotice error={query.error} /> : null}
       {types.error ? <ErrorNotice error={types.error} /> : null}
       {presentation.error ? <ErrorNotice error={presentation.error} /> : null}
       {entries?.length === 0 ? (
         <p role="status">No workflows are available in this team and type.</p>
+      ) : null}
+      {entries && entries.length > 0 && cardEntries.length === 0 ? (
+        <p role="status">No visible service history cards are configured.</p>
       ) : null}
       {[...new Set(entries?.map(({ workflow }) => workflow.type))]
         .sort()

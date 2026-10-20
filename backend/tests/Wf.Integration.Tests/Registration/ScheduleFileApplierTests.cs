@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -6,11 +7,94 @@ using Npgsql;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Manifest;
 using Wf.Contracts.Registration;
+using Wf.ControlPlane.Api;
 
 namespace Wf.Integration.Tests.Registration;
 
 public sealed partial class RegistrationTests
 {
+    [Fact]
+    public async Task ServiceHistory_projects_only_active_applied_cards_in_file_order_and_preserves_named_series()
+    {
+        await using var server = await Server.Start(database.DataSource, runs: true);
+        var request = await Request(server);
+        using var registered = await server.Post(request);
+        var version = (await Json(registered)).GetProperty("workflowVersion").GetGuid();
+        var workflow = request.WorkflowId!;
+        Assert.Null((await Read()).HistoryCards);
+        var content = """
+            {"instances":[
+              {"id":"training","name":"Training & validation","interval":"00:01:00","timezone":"Etc/UTC"},
+              {"id":"test","name":"Full test","interval":"00:02:00","timezone":"Etc/UTC"}],
+             "historyCards":[
+              {"id":"test-only","name":"Full test","scheduleIds":["test"]},
+              {"id":"training-only","name":"Training & validation","scheduleIds":["training"]},
+              {"id":"hidden","name":"Hidden","visible":false,"scheduleIds":["training","test"]}]}
+            """;
+        using var applied = await server.Post(ScheduleRequest(request, content));
+        Assert.Equal(HttpStatusCode.Created, applied.StatusCode);
+        var config = (await Json(applied)).GetProperty("scheduleConfigVersion").GetGuid();
+        var first = await Read();
+        var cards = Assert.IsType<ServiceHistoryCard[]>(first.HistoryCards);
+        Assert.Equal(["test-only", "training-only"], cards.Select(card => card.Id));
+        Assert.Equal(["Full test", "Training & validation"], cards.Select(card => card.Name));
+        Assert.Equal(2, first.Schedules.Length);
+        var training = Assert.Single(first.Schedules, schedule => schedule.Name == "Training & validation");
+        var test = Assert.Single(first.Schedules, schedule => schedule.Name == "Full test");
+        Assert.Equal([test.SeriesId], cards[0].SeriesIds);
+        Assert.Equal([training.SeriesId], cards[1].SeriesIds);
+        await Execute("UPDATE schedules SET paused=true WHERE id=$1", training.ScheduleId);
+        var due = await Value("SELECT next_fire_at FROM schedules WHERE id=$1", training.ScheduleId);
+        var renamed = content.Replace("Training & validation", "Training renamed", StringComparison.Ordinal);
+        using var rename = await server.Post(ScheduleRequest(request, renamed));
+        Assert.Equal(HttpStatusCode.Created, rename.StatusCode);
+        var afterRename = await Read();
+        var retained = Assert.Single(afterRename.Schedules, schedule => schedule.SeriesId == training.SeriesId);
+        Assert.Equal("Training renamed", retained.Name);
+        Assert.True(retained.Paused);
+        Assert.Equal(training.ScheduleId, retained.ScheduleId);
+        Assert.Equal(due, await Value("SELECT next_fire_at FROM schedules WHERE id=$1", training.ScheduleId));
+        var combined = renamed[..renamed.IndexOf("\"historyCards\"", StringComparison.Ordinal)] +
+            """
+            "historyCards":[{"id":"combined","name":"Combined","scheduleIds":["training","test"]}]}
+            """;
+        using var grouped = await server.Post(ScheduleRequest(request, combined));
+        Assert.Equal(HttpStatusCode.Created, grouped.StatusCode);
+        Assert.Equal([training.SeriesId, test.SeriesId], Assert.Single((await Read()).HistoryCards!).SeriesIds);
+        using var invalid = await server.Post(ScheduleRequest(request, combined.Replace("[\"training\",\"test\"]",
+            "[\"missing\"]", StringComparison.Ordinal)));
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        Assert.Equal([training.SeriesId, test.SeriesId], Assert.Single((await Read()).HistoryCards!).SeriesIds);
+        var empty = combined[..combined.IndexOf("\"historyCards\"", StringComparison.Ordinal)] + "\"historyCards\":[]}";
+        using var hidden = await server.Post(ScheduleRequest(request, empty));
+        Assert.Equal(HttpStatusCode.Created, hidden.StatusCode);
+        Assert.Empty((await Read()).HistoryCards!);
+        Assert.Equal(2L, await Value("SELECT count(*) FROM schedules WHERE workflow_id=$1 AND deleted_at IS NULL", workflow));
+        using var restored = await server.Post(ScheduleRequest(request, content));
+        Assert.Equal(HttpStatusCode.Created, restored.StatusCode);
+        Assert.Equal(config, await Value("SELECT active_schedule_config_id FROM workflows WHERE id=$1", workflow));
+        var restoredCards = (await Read()).HistoryCards!;
+        Assert.Equal(cards.Select(card => (card.Id, card.Name)), restoredCards.Select(card => (card.Id, card.Name)));
+        Assert.Equal(cards.SelectMany(card => card.SeriesIds), restoredCards.SelectMany(card => card.SeriesIds));
+        using var omitted = await server.Post(ScheduleRequest(request, ScheduleFile()));
+        Assert.Equal(HttpStatusCode.Created, omitted.StatusCode);
+        var fallback = await Read();
+        Assert.Null(fallback.HistoryCards);
+        Assert.True(Assert.Single(fallback.Schedules, schedule => schedule.SeriesId == training.SeriesId).Deleted);
+        Assert.Equal(version, await Value("SELECT active_version_id FROM workflows WHERE id=$1", workflow));
+        Assert.Equal(1L, await Value("SELECT count(*) FROM workflow_versions WHERE workflow_id=$1", workflow));
+        Assert.Empty(server.Failures);
+
+        async Task<ServiceWorkflow> Read()
+        {
+            using var response = await server.Send(HttpMethod.Get, "/api/v1/service-history?team=" + Team(request),
+                null!, server.Token("Admin", "user", "wf.read"));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            return Assert.Single((await response.Content.ReadFromJsonAsync(
+                ServiceHistoryJson.Default.ServiceHistoryPage, TestContext.Current.CancellationToken))!.Items);
+        }
+    }
+
     [Fact]
     public async Task ScheduleFileApplier_schedule_only_returns_only_config_and_preserves_active_workflow_with_exact_provenance()
     {
@@ -197,6 +281,8 @@ public sealed partial class RegistrationTests
     [InlineData("""{"instances":[{"id":"x","timezone":"Etc/UTC","interval":"24855.03:14:08"}]}""", "WFV012")]
     [InlineData("""{"instances":[{"id":"x","timezone":"Etc/UTC","interval":"00:01:00","variables":{"secret":"DO-NOT-LEAK"}}]}""", "WFV013")]
     [InlineData("""{"instances":[{"id":"x","timezone":"Etc/UTC","interval":"00:01:00"},{"id":"x","timezone":"Etc/UTC","interval":"00:02:00"}]}""", "WFV014")]
+    [InlineData("""{"instances":[{"id":"x","timezone":"Etc/UTC","interval":"00:01:00"}],"historyCards":[{"id":"x","name":"X","scheduleIds":["missing"]}]}""", "WFV014")]
+    [InlineData("""{"instances":[],"historyCards":null}""", "WFV011")]
     public async Task ScheduleFileApplier_invalid_file_rolls_back_combined_registration(string content, string rule)
     {
         await using var server = await Server.Start(database.DataSource);

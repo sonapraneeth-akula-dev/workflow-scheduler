@@ -9,6 +9,69 @@ namespace Wf.Validation.Tests;
 public sealed class ScheduleFileValidatorTests
 {
     [Fact]
+    public void HistoryCardsAreOptionalOrderedNamedAndCanShareSchedules()
+    {
+        var json = """
+            {"instances":[
+              {"id":"training","name":"Training & validation","interval":"00:01:00","timezone":"Etc/UTC"},
+              {"id":"test","interval":"00:02:00","timezone":"Etc/UTC"}],
+             "historyCards":[
+              {"id":"combined","name":"Combined","scheduleIds":["test","training"]},
+              {"id":"training","name":"Training","visible":false,"scheduleIds":["training"]}]}
+            """;
+        Assert.True(Validate(json).IsValid);
+        var file = JsonSerializer.Deserialize(json, Wf.Contracts.Schedules.ScheduleFileJsonContext.Default.ScheduleFile)!;
+        Assert.Equal(["combined", "training"], file.HistoryCards!.Value.Select(card => card.Id));
+        Assert.True(file.HistoryCards.Value[0].Visible);
+        Assert.False(file.HistoryCards.Value[1].Visible);
+        Assert.Equal("Training & validation", file.Instances[0].Name);
+        Assert.Null(JsonSerializer.Deserialize("""{"instances":[]}""",
+            Wf.Contracts.Schedules.ScheduleFileJsonContext.Default.ScheduleFile)!.HistoryCards);
+        Assert.True(Validate("""{"instances":[],"historyCards":[]}""").IsValid);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("[null]")]
+    [InlineData("""[{"id":"x","name":"X","scheduleIds":[]} ]""")]
+    [InlineData("""[{"id":"x","name":"X","scheduleIds":["missing"]}]""")]
+    [InlineData("""[{"id":"x","name":"X","scheduleIds":["s","s"]}]""")]
+    [InlineData("""[{"id":"x","name":"X","scheduleIds":[null]}]""")]
+    [InlineData("""[{"id":"x","name":"X","scheduleIds":["s"]},{"id":"x","name":"Y","scheduleIds":["s"]}]""")]
+    [InlineData("""[{"id":"bad id","name":"X","scheduleIds":["s"]}]""")]
+    [InlineData("""[{"id":"x","name":" ","scheduleIds":["s"]}]""")]
+    [InlineData("""[{"id":"x","name":" X","scheduleIds":["s"]}]""")]
+    [InlineData("""[{"id":"x","name":"X\u0000","scheduleIds":["s"]}]""")]
+    [InlineData("""[{"id":"x","name":"X","scheduleIds":["s"],"visible":null}]""")]
+    [InlineData("""[{"id":"x","name":"X","scheduleIds":["s"],"unknown":true}]""")]
+    public void InvalidHistoryCardsFailTheEntireFile(string cards)
+    {
+        var result = Validate($$"""
+            {"instances":[{"id":"s","interval":"00:01:00","timezone":"Etc/UTC"}],"historyCards":{{cards}}}
+            """);
+        Assert.False(result.IsValid);
+        Assert.Empty(result.Instances);
+        Assert.Contains(result.Errors, error => error.Path.StartsWith("$.historyCards", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void HistoryCardCountsNamesAndReferencesAreBounded()
+    {
+        var card = """{"id":"x","name":"X","scheduleIds":["s"]}""";
+        Assert.False(Validate($$"""
+            {"instances":[{"id":"s","interval":"00:01:00","timezone":"Etc/UTC"}],
+             "historyCards":[{{string.Join(",", Enumerable.Repeat(card, 33))}}]}
+            """).IsValid);
+        foreach (var oversized in new[] {
+            card.Replace("\"x\"", "\"" + new string('x', 129) + "\"", StringComparison.Ordinal),
+            card.Replace("\"X\"", "\"" + new string('X', 201) + "\"", StringComparison.Ordinal),
+            card.Replace("[\"s\"]", "[" + string.Join(",", Enumerable.Repeat("\"s\"", 33)) + "]", StringComparison.Ordinal) })
+            Assert.False(Validate($$"""
+                {"instances":[{"id":"s","interval":"00:01:00","timezone":"Etc/UTC"}],"historyCards":[{{oversized}}]}
+                """).IsValid);
+    }
+
+    [Fact]
     [RuleCoverage("WFV011", true)]
     [RuleCoverage("WFV012", true)]
     [RuleCoverage("WFV014", true)]

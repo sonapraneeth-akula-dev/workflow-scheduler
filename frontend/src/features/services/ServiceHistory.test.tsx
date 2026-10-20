@@ -19,7 +19,6 @@ import { ServiceHistory } from "./ServiceHistory"
 import {
   ServiceHistoryPreferences,
   profilePreferenceKey,
-  trackingPreferenceKey,
 } from "@/lib/ServiceHistoryPreferences"
 
 vi.mock("./api", async (original) => ({
@@ -76,6 +75,7 @@ const response: Awaited<ReturnType<typeof getServiceHistory>> = {
   runLimit: 10,
   nextCursor: null,
   items: ["build", "never"].map((name) => ({
+    historyCards: null,
     workflow: {
       id: `team/release/${name}`,
       team: "team",
@@ -215,7 +215,10 @@ it("renders individual run outcomes with exact new-tab links, last run and full 
     "66.7% completed successfully"
   )
   expect(screen.queryByText("Daily health details")).not.toBeInTheDocument()
-  expect(within(card).getByText("Choose tracked schedules")).toBeVisible()
+  expect(
+    within(card).getByText("Tracking:", { exact: false })
+  ).toHaveTextContent("All schedules (including future), Unscheduled runs")
+  expect(screen.queryByText("Choose tracked schedules")).not.toBeInTheDocument()
   const never = screen.getByRole("heading", { name: "Never" }).closest("li")!
   expect(
     within(never).getByText("Last run:", { exact: true }).parentElement
@@ -263,7 +266,7 @@ it("switches to the striped semantic table without changing the cached health qu
   expect(
     within(table).getByRole("button", { name: "View last run" })
   ).toBeDisabled()
-  expect(within(table).getAllByText("Choose tracked schedules")).toHaveLength(2)
+  expect(within(table).getAllByText(/^Tracking:/)).toHaveLength(2)
   expect(table.parentElement).toHaveClass("relative", "overflow-auto")
   expect(
     table.querySelector("tbody tr")!.querySelectorAll("[data-run-id]")
@@ -287,7 +290,7 @@ it("uses the personal default run count while changing type and view through the
   expect(shown.change).toHaveBeenLastCalledWith({ ...search, type: "release" })
   expect(screen.queryByLabelText("Health window")).not.toBeInTheDocument()
   expect(
-    screen.getByText("Run instances: latest 10 runs per workflow")
+    screen.getByText("Run instances: latest 10 runs per card")
   ).toBeVisible()
   expect(getServiceHistory).toHaveBeenCalledWith(
     "team",
@@ -681,43 +684,54 @@ const trackedRow = {
   variables: [],
   fire: null,
 } as const
-function namedSchedules() {
+function namedSchedules(multiple = false) {
   vi.mocked(getServiceHistory).mockResolvedValue({
     ...response,
     items: response.items.map((entry) => ({
       ...entry,
       schedules: trackedSchedules,
+      historyCards:
+        entry.workflow.name === "never"
+          ? null
+          : [
+              {
+                id: "training",
+                name: "Training card",
+                seriesIds: multiple
+                  ? trackedSchedules.map((item) => item.seriesId)
+                  : [trackedSchedules[0]!.seriesId],
+              },
+            ],
     })),
   })
 }
 
-it("selects named schedules independently per card and carries the selection to its one history link", async () => {
+it("uses JSON card schedules, ignores browser overrides and carries the selection to its one history link", async () => {
   namedSchedules()
+  localStorage.setItem(
+    profilePreferenceKey(session)!.replace(
+      /serviceRunLimit$/,
+      "scheduleTracking"
+    ),
+    JSON.stringify({
+      "team/release/build": { seriesIds: [], includeManual: true },
+    })
+  )
   vi.mocked(getHistory).mockResolvedValue({
     items: [{ ...trackedRow, variables: [] }],
     nextCursor: null,
     currentScheduleId: null,
     schedules: trackedSchedules,
   })
-  const user = userEvent.setup()
   show()
-  const card = (await screen.findByRole("heading", { name: "Build" })).closest(
-    "li"
-  )!
+  const card = (
+    await screen.findByRole("heading", { name: "Training card" })
+  ).closest("li")!
   expect(
-    within(card).getByLabelText("Tracking for team/release/build")
-  ).toHaveTextContent(
-    "Daily Training Validation, Daily Full Test, Unscheduled runs"
-  )
-  await user.click(within(card).getByText("Choose tracked schedules"))
-  await user.click(
-    within(card).getByRole("checkbox", { name: "Daily Full Test" })
-  )
-  await user.click(
-    within(card).getByRole("checkbox", {
-      name: "Include unscheduled runs",
-    })
-  )
+    within(card).getByLabelText("Tracking for team/release/build/training")
+  ).toHaveTextContent(/^Tracking: Daily Training Validation$/)
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+  expect(screen.queryByText("Choose tracked schedules")).not.toBeInTheDocument()
   await waitFor(() =>
     expect(getHistory).toHaveBeenLastCalledWith(
       { workflowId: "team/release/build" },
@@ -732,48 +746,33 @@ it("selects named schedules independently per card and carries the selection to 
     )
   )
   expect(
-    within(card).getByLabelText("Tracking for team/release/build")
+    within(card).getByLabelText("Tracking for team/release/build/training")
   ).toHaveTextContent(/^Tracking: Daily Training Validation$/)
   expect(
-    within(card).getByRole("link", { name: "History for team/release/build" })
+    within(card).getByRole("link", {
+      name: "History for team/release/build (Training card)",
+    })
   ).toHaveAttribute(
     "href",
     `/t/team/release/w/build/history?seriesIds=${trackedSchedules[0]!.seriesId}&includeManual=false`
   )
   expect(
     within(card).getByRole("link", {
-      name: "View last run for team/release/build",
+      name: "View last run for team/release/build (Training card)",
     })
   ).toHaveAttribute("href", `/runs/${trackedRow.runId}`)
   expect(
     within(card).queryByText("Failed", { exact: true })
   ).not.toBeInTheDocument()
   expect(card.querySelectorAll("[data-run-id]")).toHaveLength(1)
-  expect(
-    JSON.parse(localStorage.getItem(trackingPreferenceKey(session)!)!)
-  ).toEqual({
-    "team/release/build": {
-      seriesIds: [trackedSchedules[0]!.seriesId],
-      includeManual: false,
-    },
-  })
   const other = screen.getByRole("heading", { name: "Never" }).closest("li")!
   expect(
     within(other).getByLabelText("Tracking for team/release/never")
   ).toHaveTextContent("Daily Full Test")
 })
 
-it("restores multiple selected schedules in table format and shows an explicit empty tracked state", async () => {
-  namedSchedules()
-  localStorage.setItem(
-    trackingPreferenceKey(session)!,
-    JSON.stringify({
-      "team/release/build": {
-        seriesIds: trackedSchedules.map((item) => item.seriesId),
-        includeManual: false,
-      },
-    })
-  )
+it("uses multiple configured schedules in table format and shows an explicit empty tracked state", async () => {
+  namedSchedules(true)
   vi.mocked(getHistory).mockResolvedValue({
     items: [],
     nextCursor: null,
@@ -788,14 +787,16 @@ it("restores multiple selected schedules in table format and shows an explicit e
     ).not.toBeInTheDocument()
   )
   expect(
-    within(table).getByLabelText("Tracking for team/release/build")
+    within(table).getByLabelText("Tracking for team/release/build/training")
   ).toHaveTextContent("Daily Training Validation, Daily Full Test")
   expect(within(table).getAllByText("No tracked runs")).not.toHaveLength(0)
   expect(
     within(table).queryByText("Failed", { exact: true })
   ).not.toBeInTheDocument()
   expect(
-    within(table).getByRole("link", { name: "History for team/release/build" })
+    within(table).getByRole("link", {
+      name: "History for team/release/build (Training card)",
+    })
   ).toHaveAttribute(
     "href",
     `/t/team/release/w/build/history?seriesIds=${encodeURIComponent(trackedSchedules.map((item) => item.seriesId).join(","))}&includeManual=false`
@@ -804,15 +805,6 @@ it("restores multiple selected schedules in table format and shows an explicit e
 
 it("does not replace failed selected-schedule queries with unfiltered runs", async () => {
   namedSchedules()
-  localStorage.setItem(
-    trackingPreferenceKey(session)!,
-    JSON.stringify({
-      "team/release/build": {
-        seriesIds: [trackedSchedules[0]!.seriesId],
-        includeManual: false,
-      },
-    })
-  )
   vi.mocked(getHistory).mockRejectedValue(
     new Error("Tracked history unavailable")
   )
@@ -820,7 +812,9 @@ it("does not replace failed selected-schedule queries with unfiltered runs", asy
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Tracked history unavailable"
   )
-  const card = screen.getByRole("heading", { name: "Build" }).closest("li")!
+  const card = screen
+    .getByRole("heading", { name: "Training card" })
+    .closest("li")!
   expect(
     within(card).queryByText("Failed", { exact: true })
   ).not.toBeInTheDocument()
@@ -832,15 +826,6 @@ it("does not replace failed selected-schedule queries with unfiltered runs", asy
 
 it("refreshes customized cards when the owning type receives live updates", async () => {
   namedSchedules()
-  localStorage.setItem(
-    trackingPreferenceKey(session)!,
-    JSON.stringify({
-      "team/release/build": {
-        seriesIds: [trackedSchedules[0]!.seriesId],
-        includeManual: false,
-      },
-    })
-  )
   vi.mocked(getHistory).mockResolvedValue({
     items: [{ ...trackedRow, variables: [] }],
     nextCursor: null,
@@ -857,7 +842,7 @@ it("refreshes customized cards when the owning type receives live updates", asyn
   vi.mocked(useLive).mockImplementation(() => ({ snapshot, retry: vi.fn() }))
   const shown = show()
   await screen.findByRole("link", {
-    name: "View last run for team/release/build",
+    name: "View last run for team/release/build (Training card)",
   })
   await waitFor(() => expect(shown.client.isFetching()).toBe(0))
   const calls = vi.mocked(getHistory).mock.calls.length
@@ -875,50 +860,97 @@ it("refreshes customized cards when the owning type receives live updates", asyn
   expect(await screen.findAllByText("No tracked runs")).not.toHaveLength(0)
 })
 
-it("supports unscheduled-only and no-source tracking without falling back to all runs", async () => {
-  namedSchedules()
-  vi.mocked(getHistory).mockResolvedValue({
-    items: [],
+it("renders separate configured cards in order and applies hidden cards and membership changes on refresh", async () => {
+  const build = response.items[0]!
+  const training = {
+    id: "training",
+    name: "Training",
+    seriesIds: [trackedSchedules[0]!.seriesId],
+  }
+  const full = {
+    id: "full",
+    name: "Full test",
+    seriesIds: [trackedSchedules[1]!.seriesId],
+  }
+  const configured = {
+    ...response,
+    items: [
+      { ...build, schedules: trackedSchedules, historyCards: [training, full] },
+    ],
+  }
+  vi.mocked(getServiceHistory).mockResolvedValue(configured)
+  vi.mocked(getHistory).mockImplementation(async (_scope, filters) => ({
+    items: [{ ...trackedRow, seriesId: filters.seriesIds!, variables: [] }],
     nextCursor: null,
     currentScheduleId: null,
+  }))
+  const shown = show()
+  await screen.findByRole("heading", { name: "Training" })
+  expect(
+    screen
+      .getAllByRole("heading", { level: 3 })
+      .map((heading) => heading.textContent)
+  ).toEqual(["Training", "Full test"])
+  expect(screen.getByText("2 loaded cards")).toBeVisible()
+  await waitFor(() =>
+    expect(getHistory).toHaveBeenCalledWith(
+      { workflowId: "team/release/build" },
+      {
+        seriesIds: trackedSchedules[1]!.seriesId,
+        includeManual: "false",
+        outcome: "Run",
+      },
+      null,
+      expect.any(AbortSignal),
+      10
+    )
+  )
+  vi.mocked(getServiceHistory).mockResolvedValue({
+    ...configured,
+    items: [
+      {
+        ...configured.items[0]!,
+        historyCards: [
+          {
+            ...training,
+            name: "Combined",
+            seriesIds: trackedSchedules.map((schedule) => schedule.seriesId),
+          },
+        ],
+      },
+    ],
   })
-  const user = userEvent.setup()
-  show()
-  const card = (await screen.findByRole("heading", { name: "Build" })).closest(
-    "li"
-  )!
-  await user.click(within(card).getByText("Choose tracked schedules"))
-  await user.click(
-    within(card).getByRole("checkbox", {
-      name: "All schedules, including future schedules",
-    })
+  await userEvent.click(
+    screen.getByRole("button", { name: "Refresh service history" })
   )
+  expect(await screen.findByRole("heading", { name: "Combined" })).toBeVisible()
+  expect(
+    screen.queryByRole("heading", { name: "Full test" })
+  ).not.toBeInTheDocument()
   await waitFor(() =>
     expect(getHistory).toHaveBeenLastCalledWith(
       { workflowId: "team/release/build" },
-      { seriesIds: "none", includeManual: undefined, outcome: "Run" },
+      {
+        seriesIds: trackedSchedules
+          .map((schedule) => schedule.seriesId)
+          .join(","),
+        includeManual: "false",
+        outcome: "Run",
+      },
       null,
       expect.any(AbortSignal),
       10
     )
   )
+  vi.mocked(getServiceHistory).mockResolvedValue({
+    ...configured,
+    items: [{ ...configured.items[0]!, historyCards: [] }],
+  })
+  await shown.client.invalidateQueries({
+    queryKey: ["catalog", "team", "team", "service-history"],
+  })
   expect(
-    within(card).getByLabelText("Tracking for team/release/build")
-  ).toHaveTextContent(/^Tracking: Unscheduled runs$/)
-  await user.click(
-    within(card).getByRole("checkbox", { name: "Include unscheduled runs" })
-  )
-  await waitFor(() =>
-    expect(getHistory).toHaveBeenLastCalledWith(
-      { workflowId: "team/release/build" },
-      { seriesIds: "none", includeManual: "false", outcome: "Run" },
-      null,
-      expect.any(AbortSignal),
-      10
-    )
-  )
-  expect(
-    within(card).getByLabelText("Tracking for team/release/build")
-  ).toHaveTextContent("Nothing selected")
-  expect(card.querySelector("[data-run-id]")).toBeNull()
+    await screen.findByText("No visible service history cards are configured.")
+  ).toBeVisible()
+  expect(screen.queryByRole("heading", { level: 3 })).not.toBeInTheDocument()
 })

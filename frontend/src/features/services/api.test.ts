@@ -28,6 +28,7 @@ function page() {
     items: [
       {
         workflow,
+        historyCards: null,
         runs: [
           {
             id: "019ed132-2f44-7000-8000-000000000002",
@@ -66,6 +67,48 @@ it("uses exact team, optional type, personal run limit, bounded page and cancell
     },
     signal,
   })
+})
+
+it("accepts hidden-all cards and validates configured card identities and schedule membership", async () => {
+  const data = page()
+  const schedule = {
+    seriesId: "019ed132-2f44-7000-8000-000000000020",
+    scheduleId: "019ed132-2f44-7000-8000-000000000030",
+    name: "Training & validation",
+    paused: true,
+    deleted: false,
+  }
+  const card = {
+    id: "training",
+    name: "Training & validation",
+    seriesIds: [schedule.seriesId],
+  }
+  for (const cards of [[], [card]]) {
+    respond({
+      ...data,
+      items: [{ ...data.items[0], schedules: [schedule], historyCards: cards }],
+    })
+    await expect(
+      getServiceHistory("team", undefined, 10, null)
+    ).resolves.toBeDefined()
+  }
+  for (const cards of [
+    [card, card],
+    [{ ...card, seriesIds: [] }],
+    [{ ...card, seriesIds: [schedule.seriesId, schedule.seriesId] }],
+    [{ ...card, id: "bad id" }],
+    [{ ...card, name: " " }],
+    [{ ...card, name: "Bad\u0000" }],
+    [{ ...card, seriesIds: ["019ed132-2f44-7000-8000-000000000021"] }],
+  ]) {
+    respond({
+      ...data,
+      items: [{ ...data.items[0], schedules: [schedule], historyCards: cards }],
+    })
+    await expect(
+      getServiceHistory("team", undefined, 10, null)
+    ).rejects.toThrow()
+  }
 })
 
 it.each([
