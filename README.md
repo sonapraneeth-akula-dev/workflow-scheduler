@@ -827,15 +827,26 @@ schedules from `nyc-housing\schedules.json`; without it the publication script
 skips scheduled workflows. `-RunOnce` additionally starts one manual run, not
 the recurring schedule.
 
-| Schedule profile | Daily time (`Etc/UTC`) | `runFinalTest` | `epochs` |
-| --- | --- | --- | --- |
-| `daily-training-validation` | 00:00 | `false` | 50 |
-| `daily-full-test` | 00:30 | `true` | 100 |
+| Schedule profile | Hours (`Etc/UTC`) | `experimentNumber` | `runFinalTest` | `epochs` |
+| --- | --- | --- | --- | --- |
+| `daily-training-validation` | 00, 04, 08, 12, 16, 20 | 1 (inherited) | `false` | 50 |
+| `daily-full-test` | 02, 06, 10, 14, 18, 22 | 2 (overridden) | `true` | 100 |
 
-Both profiles default to 70/15/15 splits, learning rate 0.1 and
+One automatic run fires every two hours, alternating the profiles; each profile
+runs every four hours. Existing profile IDs retain their series and history
+despite the original `daily-` names.
+
+Both profiles default to experiment number 1, 70/15/15 splits, learning rate 0.1 and
 `forceDownload=false`. Change shared values under `defaults.experiment`, or
 override any parameter in a profile's `variables`, then republish with
-`-IncludeSchedules`. Each profile owns a separate series. Both follow the active
+`-IncludeSchedules`. For example, the full-test instance sets
+`"variables": {"experimentNumber": 2, "runFinalTest": true, "epochs": 100}`,
+overriding the shared `"defaults": {"experiment": {"experimentNumber": 1, ...}}`
+without changing the training instance. Categories such as `experiment` organize
+defaults; override keys stay flat in the instance's `variables`, not nested under
+`experiment`. The **Dataset and cache** JSON report records the effective
+configuration, including `experimentNumber`, and the task log names the experiment.
+Each profile owns a separate series. Both follow the active
 workflow version, skip overlapping runs within their own series and use
 `catchUp=Latest` after downtime. They appear on the workflow's schedule list;
 code schedules are read-only in the UI. Their **Run now** action verifies a

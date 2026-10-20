@@ -64,7 +64,7 @@ public sealed class WorkflowSamplesTests
         Path.GetFullPath(Path.Combine(fixture.AdditionalInputs[0], "..", "..", "samples", "workflows"));
 
     [Fact]
-    public async Task Housing_profiles_validate_against_the_real_workflow_and_schedule_distinct_daily_experiments()
+    public async Task Housing_profiles_override_experiment_variables_and_alternate_every_two_hours()
     {
         using var fixture = new ValidatorFixture();
         var directory = Path.Combine(Samples(fixture), "demo", "teams", "data-science", "linear-regression", "nyc-housing");
@@ -83,9 +83,12 @@ public sealed class WorkflowSamplesTests
         Assert.True(full.Variables["runFinalTest"].GetBoolean());
         Assert.Equal(50, training.Variables["epochs"].GetInt32());
         Assert.Equal(100, full.Variables["epochs"].GetInt32());
-        var now = new DateTimeOffset(2026, 10, 20, 9, 0, 0, TimeSpan.Zero);
-        Assert.Equal(new DateTimeOffset(2026, 10, 21, 0, 0, 0, TimeSpan.Zero), training.Expression.GetNextOccurrence(now));
-        Assert.Equal(new DateTimeOffset(2026, 10, 21, 0, 30, 0, TimeSpan.Zero), full.Expression.GetNextOccurrence(now));
+        Assert.Equal(1, training.Variables["experimentNumber"].GetInt32());
+        Assert.Equal(2, full.Variables["experimentNumber"].GetInt32());
+        Assert.Equal(1, Assert.Single(result.Build.Manifest.Variables, variable => variable.Key == "experimentNumber").Default!.Value.GetInt32());
+        var now = new DateTimeOffset(2026, 10, 20, 1, 0, 0, TimeSpan.Zero);
+        Assert.Equal(new DateTimeOffset(2026, 10, 20, 4, 0, 0, TimeSpan.Zero), training.Expression.GetNextOccurrence(now));
+        Assert.Equal(new DateTimeOffset(2026, 10, 20, 2, 0, 0, TimeSpan.Zero), full.Expression.GetNextOccurrence(now));
         foreach (var profile in schedules.Instances)
         {
             Assert.Equal("Etc/UTC", profile.Definition.Timezone);
@@ -97,9 +100,19 @@ public sealed class WorkflowSamplesTests
             Assert.Equal(15, profile.Variables["validationPercent"].GetInt32());
             Assert.Equal(15, profile.Variables["testPercent"].GetInt32());
             Assert.Equal(0.1, profile.Variables["learningRate"].GetDouble());
-            Assert.Equal(7, profile.Variables.Count);
-            Assert.Equal(profile.Expression.GetNextOccurrence(now)!.Value.AddDays(1),
+            Assert.Equal(8, profile.Variables.Count);
+            Assert.Equal(profile.Expression.GetNextOccurrence(now)!.Value.AddHours(4),
                 profile.Expression.GetNextOccurrence(profile.Expression.GetNextOccurrence(now)!.Value));
+        }
+        var cursor = new DateTimeOffset(2026, 10, 20, 0, 0, 0, TimeSpan.Zero);
+        for (var index = 0; index < 12; index++)
+        {
+            var nextTraining = training.Expression.GetNextOccurrence(cursor)!.Value;
+            var nextFull = full.Expression.GetNextOccurrence(cursor)!.Value;
+            var next = nextTraining < nextFull ? nextTraining : nextFull;
+            Assert.Equal(cursor.AddHours(2), next);
+            Assert.Equal(index % 2 == 0, nextFull < nextTraining);
+            cursor = next;
         }
     }
 }

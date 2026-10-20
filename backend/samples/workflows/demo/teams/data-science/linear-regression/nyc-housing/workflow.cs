@@ -8,10 +8,10 @@ using Wf.Contracts.Definition;
 using Wf.Sdk;
 
 var hosted = args.Contains("--task-host", StringComparer.Ordinal);
-var workflow = Workflow.Define("data-science/linear-regression/nyc-housing", "1.2.2", w => w
+var workflow = Workflow.Define("data-science/linear-regression/nyc-housing", "1.3.0", w => w
     .Type("linear-regression")
     .Metadata("dataset", "nyc-housing")
-    .Variables(v => v.Bool("runFinalTest", true).Bool("forceDownload", false)
+    .Variables(v => v.Int("experimentNumber", 1).Bool("runFinalTest", true).Bool("forceDownload", false)
         .Int("trainingPercent", 70).Int("validationPercent", 15).Int("testPercent", 15)
         .Int("epochs", 100).Double("learningRate", 0.1))
     .Affinity(new PlacementAffinity(AffinityKind.Run))
@@ -41,11 +41,13 @@ var workflow = Workflow.Define("data-science/linear-regression/nyc-housing", "1.
                 ?? throw new InvalidDataException("Dataset cache disappeared before loading.");
             var data = verified with { Reused = ctx.Outputs.Get("dataset", HousingJsonContext.Default.Dataset)!.Reused };
             ctx.Outputs.Set("dataset", data, HousingJsonContext.Default.Dataset);
+            ctx.Log($"Experiment {ctx.Var<int>("experimentNumber")}: runFinalTest={ctx.Var<bool>("runFinalTest")}.");
             await Report(ctx, hosted, "json", "Dataset and cache", new
             {
                 data,
                 configuration = new
                 {
+                    experimentNumber = ctx.Var<int>("experimentNumber"),
                     trainingPercent = data.TrainingPercent, validationPercent = data.ValidationPercent, testPercent = data.TestPercent,
                     epochs = ctx.Var<int>("epochs"), learningRate = ctx.Var<double>("learningRate"),
                     forceDownload = ctx.Var<bool>("forceDownload"), runFinalTest = ctx.Var<bool>("runFinalTest")
