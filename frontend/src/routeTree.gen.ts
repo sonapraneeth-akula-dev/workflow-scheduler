@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as MachinesRouteImport } from './routes/machines'
+import { Route as RecurringJobsRouteImport } from './routes/recurring-jobs'
 import { Route as ServiceHistoryRouteImport } from './routes/service-history'
 import { Route as AdminAuditRouteImport } from './routes/admin.audit'
 import { Route as MachinesIdRouteImport } from './routes/machines.$id'
@@ -41,6 +42,11 @@ const IndexRoute = IndexRouteImport.update({
 const MachinesRoute = MachinesRouteImport.update({
   id: '/machines',
   path: '/machines',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RecurringJobsRoute = RecurringJobsRouteImport.update({
+  id: '/recurring-jobs',
+  path: '/recurring-jobs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ServiceHistoryRoute = ServiceHistoryRouteImport.update({
@@ -154,6 +160,7 @@ const TTeamTypeWWfVersionsVTasksTaskKeyRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/machines': typeof MachinesRouteWithChildren
+  '/recurring-jobs': typeof RecurringJobsRoute
   '/service-history': typeof ServiceHistoryRoute
   '/admin/audit': typeof AdminAuditRoute
   '/machines/$id': typeof MachinesIdRoute
@@ -179,6 +186,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/machines': typeof MachinesRouteWithChildren
+  '/recurring-jobs': typeof RecurringJobsRoute
   '/service-history': typeof ServiceHistoryRoute
   '/admin/audit': typeof AdminAuditRoute
   '/machines/$id': typeof MachinesIdRoute
@@ -204,6 +212,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/machines': typeof MachinesRouteWithChildren
+  '/recurring-jobs': typeof RecurringJobsRoute
   '/service-history': typeof ServiceHistoryRoute
   '/admin/audit': typeof AdminAuditRoute
   '/machines/$id': typeof MachinesIdRoute
@@ -231,6 +240,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/machines'
+    | '/recurring-jobs'
     | '/service-history'
     | '/admin/audit'
     | '/machines/$id'
@@ -256,6 +266,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/machines'
+    | '/recurring-jobs'
     | '/service-history'
     | '/admin/audit'
     | '/machines/$id'
@@ -280,6 +291,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/machines'
+    | '/recurring-jobs'
     | '/service-history'
     | '/admin/audit'
     | '/machines/$id'
@@ -306,6 +318,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   MachinesRoute: typeof MachinesRouteWithChildren
+  RecurringJobsRoute: typeof RecurringJobsRoute
   ServiceHistoryRoute: typeof ServiceHistoryRoute
   AdminAuditRoute: typeof AdminAuditRoute
   RunsIdRoute: typeof RunsIdRoute
@@ -339,6 +352,13 @@ declare module '@tanstack/react-router' {
       path: '/machines'
       fullPath: '/machines'
       preLoaderRoute: typeof MachinesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/recurring-jobs': {
+      id: '/recurring-jobs'
+      path: '/recurring-jobs'
+      fullPath: '/recurring-jobs'
+      preLoaderRoute: typeof RecurringJobsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/service-history': {
@@ -522,6 +542,7 @@ const TTeamTypeWWfVersionsRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   MachinesRoute: MachinesRouteWithChildren,
+  RecurringJobsRoute: RecurringJobsRoute,
   ServiceHistoryRoute: ServiceHistoryRoute,
   AdminAuditRoute: AdminAuditRoute,
   RunsIdRoute: RunsIdRoute,

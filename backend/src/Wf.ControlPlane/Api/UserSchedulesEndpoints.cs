@@ -31,16 +31,17 @@ public static class UserSchedulesEndpoints
             .WithMetadata(new Microsoft.AspNetCore.Mvc.ResponseCacheAttribute { NoStore = true })
             .Produces<ScheduleListPage>().ProducesProblem(400).ProducesProblem(401).ProducesProblem(403)
             .ProducesProblem(500).ProducesProblem(503)
-            .WithDescription("Public Viewer read of nondeleted Code and User schedules for one exact workflowId. " +
-                "Stable ascending schedule UUID keyset; limit 1-100, default 50. Cursor binds workflow and limit. " +
+            .WithDescription("Public Viewer read of nondeleted recurring Code and User schedules, including paused jobs. " +
+                "Optional exact team, type (requires team) and workflowId filters; omitted filters list only authorized types. " +
+                "Stable ascending schedule UUID keyset; limit 1-100, default 50. Global cursors bind filters, limit and visible scopes; workflow cursors remain compatible. " +
                 "The existing per-schedule read projection includes only secret references, never resolved secrets. No SPA client restriction.")
             .AddOpenApiOperationTransformer((operation, _, _) =>
             {
                 operation.Parameters ??= [];
-                foreach (var name in new[] { "workflowId", "limit", "cursor" })
+                foreach (var name in new[] { "team", "type", "workflowId", "limit", "cursor" })
                     operation.Parameters.Add(new OpenApiParameter
                     {
-                        Name = name, In = ParameterLocation.Query, Required = name == "workflowId",
+                        Name = name, In = ParameterLocation.Query,
                         Schema = name == "limit"
                             ? new OpenApiSchema { Type = JsonSchemaType.Integer, Minimum = "1", Maximum = "100" }
                             : new OpenApiSchema { Type = JsonSchemaType.String }
@@ -85,20 +86,38 @@ public static class UserSchedulesEndpoints
         catch (ArgumentException error) { return Results.Problem(statusCode: 400, title: "Invalid schedule query", detail: error.Message); }
         try
         {
-            if (!await AllowedAsync(context, filter.WorkflowId, RegistryRole.Viewer))
-                return Results.Problem(TeamAuthorizationExtensions.Forbidden());
+            List<string> types;
+            if (filter.WorkflowId is { } workflow)
+            {
+                if (!await AllowedAsync(context, workflow, RegistryRole.Viewer))
+                    return Results.Problem(TeamAuthorizationExtensions.Forbidden());
+                WorkflowIdentity.TryGetTypeScope(workflow, out var scope);
+                types = [scope];
+            }
+            else
+            {
+                var visible = await RunQueryEndpoints.AuthorizeFilter(context, source,
+                    context.RequestServices.GetRequiredService<IAuthorizationService>(), filter.Filter);
+                if (visible.Error is not null) return visible.Error;
+                types = visible.Types;
+            }
+            if (filter.CursorBinding is not null && filter.CursorBinding != filter.Binding(types))
+                return Results.Problem(statusCode: 400, title: "Invalid schedule cursor",
+                    detail: "Keep the original filters, page limit and currently authorized scopes.");
             await using var query = source.CreateCommand(ReadScheduleSql + """
-                WHERE s.workflow_id=$1 AND s.deleted_at IS NULL AND w.deleted_at IS NULL
-                    AND ($2::uuid IS NULL OR s.id>$2)
-                ORDER BY s.id LIMIT $3
+                WHERE w.type_id=ANY($1) AND ($2::text IS NULL OR s.workflow_id=$2)
+                    AND s.deleted_at IS NULL AND w.deleted_at IS NULL
+                    AND ($3::uuid IS NULL OR s.id>$3)
+                ORDER BY s.id LIMIT $4
                 """);
-            query.Parameters.AddWithValue(filter.WorkflowId);
+            query.Parameters.AddWithValue(types.ToArray());
+            query.Parameters.AddWithValue(NpgsqlDbType.Text, (object?)filter.WorkflowId ?? DBNull.Value);
             query.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)filter.AfterId ?? DBNull.Value);
             query.Parameters.AddWithValue(filter.Limit + 1);
             var schedules = new List<UserScheduleResponse>();
             await using var rows = await query.ExecuteReaderAsync(context.RequestAborted);
             while (await rows.ReadAsync(context.RequestAborted)) schedules.Add(Schedule(rows));
-            var next = schedules.Count > filter.Limit ? filter.Cursor(schedules[filter.Limit - 1].Id) : null;
+            var next = schedules.Count > filter.Limit ? filter.Cursor(schedules[filter.Limit - 1].Id, types) : null;
             return Results.Json(new ScheduleListPage(schedules.Take(filter.Limit).ToArray(), next), UserScheduleJson.Default.ScheduleListPage);
         }
         catch (NpgsqlException) { return Results.Problem(statusCode: 503, title: "Schedule list unavailable"); }

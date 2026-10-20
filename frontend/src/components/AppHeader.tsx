@@ -19,6 +19,15 @@ export function AppHeader({ children }: { children: ReactNode }) {
         >
           <ServiceHistoryNav />
           <Link
+            to="/recurring-jobs"
+            className="inline-flex min-h-10 items-center px-2"
+            activeProps={{
+              className: "bg-secondary text-secondary-foreground",
+            }}
+          >
+            Recurring jobs
+          </Link>
+          <Link
             to="/runs"
             className="inline-flex min-h-10 items-center px-2"
             activeProps={{

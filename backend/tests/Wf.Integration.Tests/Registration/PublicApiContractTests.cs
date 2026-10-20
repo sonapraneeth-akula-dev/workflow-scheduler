@@ -71,7 +71,7 @@ public sealed partial class UserSchedulesTests
         Assert.True(denied.Headers.CacheControl!.NoStore);
         using var anonymous = await server.Send(HttpMethod.Get, path, new ByteArrayContent([]), useDefaultToken: false);
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
-        foreach (var invalid in new[] { "", "?workflowId=bad", "?workflowId=a/b/c&limit=101",
+        foreach (var invalid in new[] { "?type=release", "?workflowId=bad", "?workflowId=a/b/c&limit=101",
             "?workflowId=a/b/c&workflowId=d/e/f", "?workflowId=a/b/c&unknown=value" })
         {
             using var response = await server.Send(HttpMethod.Get, BasePath + invalid, new ByteArrayContent([]), reader);

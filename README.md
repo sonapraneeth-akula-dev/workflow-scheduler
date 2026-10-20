@@ -1270,7 +1270,19 @@ manual runs and reruns), while the backward-compatible all-runs card includes
 them. A card tracking multiple schedules uses one History table, with an additional
 **Schedule** column identifying each run's named source. A card with no matching
 runs shows an explicit empty state, never unrelated runs.
-These page-content navigation buttons, along with workflow history's
+
+**Recurring jobs** in the navbar opens `/recurring-jobs`: all nondeleted Code
+and User schedules you can view, including paused schedules, grouped by team
+and workflow type. Team and workflow-type filters persist in the URL. Each card
+shows recurrence, schedule timezone, local next-fire time, version selection,
+and links to schedule details and series history. Results load 50 at a time;
+**Load more recurring jobs** adds the next page, and the list refreshes every
+30 seconds. **Run now** requires Operator permission for that series and starts
+one Manual run using the saved variables and version selection. It never resumes
+a paused schedule or changes its next automatic fire. Resolved secret values
+are never included in the listing.
+
+Service-history page-content navigation buttons, along with workflow history's
 **Workflow versions** and **Metrics dashboard** buttons, open new tabs.
 Each shows an outgoing-link icon and announces its new-tab behavior to screen
 readers. Navbar links stay in the current tab; action buttons are unchanged.

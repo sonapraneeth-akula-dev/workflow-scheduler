@@ -4056,11 +4056,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Public Viewer read of nondeleted Code and User schedules for one exact workflowId. Stable ascending schedule UUID keyset; limit 1-100, default 50. Cursor binds workflow and limit. The existing per-schedule read projection includes only secret references, never resolved secrets. No SPA client restriction. */
+        /** @description Public Viewer read of nondeleted recurring Code and User schedules, including paused jobs. Optional exact team, type (requires team) and workflowId filters; omitted filters list only authorized types. Stable ascending schedule UUID keyset; limit 1-100, default 50. Global cursors bind filters, limit and visible scopes; workflow cursors remain compatible. The existing per-schedule read projection includes only secret references, never resolved secrets. No SPA client restriction. */
         get: {
             parameters: {
-                query: {
-                    workflowId: string;
+                query?: {
+                    team?: string;
+                    type?: string;
+                    workflowId?: string;
                     limit?: number;
                     cursor?: string;
                 };

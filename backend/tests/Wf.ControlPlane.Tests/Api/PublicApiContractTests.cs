@@ -111,7 +111,9 @@ public sealed class PublicApiContractTests
     }
 
     [Theory]
-    [InlineData("")]
+    [InlineData("?type=release")]
+    [InlineData("?team=team&team=other")]
+    [InlineData("?team=bad/team")]
     [InlineData("?workflowId=bad")]
     [InlineData("?workflowId=team/type/workflow&limit=0")]
     [InlineData("?workflowId=team/type/workflow&limit=101")]
@@ -119,10 +121,34 @@ public sealed class PublicApiContractTests
     [InlineData("?workflowId=team/type/workflow&workflowId=other/type/workflow")]
     [InlineData("?workflowId=team/type/workflow&status=Running")]
     [InlineData("?workflowId=team/type/workflow&cursor=invalid")]
-    public void PublicApiContract_schedule_list_rejects_unscoped_ambiguous_or_malformed_requests(string query)
+    public void PublicApiContract_schedule_list_rejects_ambiguous_or_malformed_requests(string query)
     {
         var context = new DefaultHttpContext();
         context.Request.QueryString = new(query);
+        Assert.Throws<ArgumentException>(() => ScheduleListQuery.Parse(context.Request.Query));
+    }
+
+    [Fact]
+    public void PublicApiContract_global_schedule_cursor_binds_filters_limit_and_current_visible_types()
+    {
+        var context = new DefaultHttpContext();
+        var all = ScheduleListQuery.Parse(context.Request.Query);
+        Assert.Null(all.WorkflowId);
+        Assert.Null(all.Filter.Team);
+        Assert.Equal(50, all.Limit);
+        context.Request.QueryString = new("?team=team&type=release&limit=1");
+        var query = ScheduleListQuery.Parse(context.Request.Query);
+        var last = Guid.NewGuid();
+        var cursor = query.Cursor(last, ["team/release"]);
+        context.Request.QueryString = new("?team=team&type=release&limit=1&cursor=" + cursor);
+        var parsed = ScheduleListQuery.Parse(context.Request.Query);
+        Assert.Equal(last, parsed.AfterId);
+        Assert.Equal(parsed.Binding(["team/release"]), parsed.CursorBinding);
+        Assert.NotEqual(parsed.Binding([]), parsed.CursorBinding);
+        context.Request.QueryString = new("?team=team&type=release&limit=2&cursor=" + cursor);
+        var resized = ScheduleListQuery.Parse(context.Request.Query);
+        Assert.NotEqual(resized.Binding(["team/release"]), resized.CursorBinding);
+        context.Request.QueryString = new("?workflowId=team/release/workflow&limit=1&cursor=" + cursor);
         Assert.Throws<ArgumentException>(() => ScheduleListQuery.Parse(context.Request.Query));
     }
 
