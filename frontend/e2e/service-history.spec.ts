@@ -89,11 +89,15 @@ test("Regression contains distinct Linear and Logistic workflows with their own 
             .locator("..")
             .locator("..")
           await expect(card).toBeVisible()
-          await expect(
-            card.getByRole("link", { name: /^History for / })
-          ).toHaveAttribute("href", /includeManual=false/)
+          const href = await card
+            .getByRole("link", { name: /^History for / })
+            .getAttribute("href")
+          const includeManual = new URL(href!, page.url()).searchParams.get(
+            "includeManual"
+          )
+          expect(JSON.parse(includeManual!)).toBe("false")
         }
-        await expect(container.locator("ul > li")).toHaveCount(2)
+        await expect(container.locator(":scope > ul > li")).toHaveCount(2)
       }
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth)
