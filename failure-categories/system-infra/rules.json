@@ -1,5 +1,6 @@
 {
   "rules": [
+    { "id": "regression-network", "contains": "Regression sample infrastructure failure", "category": "Network" },
     { "id": "demo-network", "contains": "Synthetic infrastructure network failure", "category": "Network" },
     { "id": "connection-refused", "contains": "connection refused", "category": "Network" },
     { "id": "dns-resolution", "contains": "No such host is known", "category": "Network" },

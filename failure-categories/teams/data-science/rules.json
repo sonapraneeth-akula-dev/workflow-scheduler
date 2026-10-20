@@ -1,0 +1,5 @@
+{
+  "rules": [
+    { "id": "regression-validation", "contains": "Regression sample service validation failure", "category": "Validation" }
+  ]
+}

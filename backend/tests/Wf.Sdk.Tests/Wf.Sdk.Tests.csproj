@@ -4,6 +4,7 @@
     <PackageReference Include="Grpc.Net.Client" />
     <ProjectReference Include="..\..\src\Wf.Sdk\Wf.Sdk.csproj" />
     <ProjectReference Include="..\..\samples\workflows\demo\teams\data-science\regression\linear-regression\model\HousingModel.csproj" />
+    <ProjectReference Include="..\..\samples\workflows\demo\teams\data-science\regression\logistic-regression\model\LogisticModel.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Update="Snapshots\*.json" CopyToOutputDirectory="PreserveNewest" />

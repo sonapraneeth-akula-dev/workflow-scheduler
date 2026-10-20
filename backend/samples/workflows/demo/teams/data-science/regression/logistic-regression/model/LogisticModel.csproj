@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\..\linear-regression\model\HousingModel.csproj" />
+  </ItemGroup>
+</Project>

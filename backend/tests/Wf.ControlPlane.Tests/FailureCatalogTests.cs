@@ -51,6 +51,21 @@ public sealed class FailureCatalogTests
             Catalog().Classify("demo", "No eligible healthy worker became available.", FailureCategory.Placement));
     }
 
+    [Fact]
+    public void Regression_demo_failures_and_actual_timeouts_keep_explicit_domains_categories_and_rules()
+    {
+        Assert.Equal(new("Infra", "Network", "system-infra/regression-network"),
+            Catalog().Classify("data-science", "Regression sample infrastructure failure: feature store connection refused.",
+                FailureCategory.PlatformError));
+        Assert.Equal(new("Service", "Validation", "data-science/regression-validation"),
+            Catalog().Classify("data-science", "Regression sample service validation failure: quality gate rejected training.",
+                FailureCategory.ValidationError));
+        Assert.Equal(new("Service", "Timeout", null), Catalog().Classify("data-science", null, FailureCategory.Timeout));
+        Assert.Equal(new("Service", "Timeout", null), Catalog().Classify("data-science", "Task execution was cancelled.", FailureCategory.Timeout));
+        Assert.Equal(new("Service", "Unclassified", null),
+            Catalog().Classify("another-team", "Regression sample service validation failure.", FailureCategory.ValidationError));
+    }
+
     [Theory]
     [InlineData("""{"rules":[null]}""")]
     [InlineData("""{"rules":null}""")]

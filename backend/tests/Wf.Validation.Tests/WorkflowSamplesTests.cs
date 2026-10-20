@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Wf.Contracts.Registry;
+using Wf.Contracts.Schedules;
 using Wf.Validation.Rules;
 using Wf.Validation.Schedules;
 
@@ -9,7 +10,7 @@ namespace Wf.Validation.Tests;
 public sealed class WorkflowSamplesTests
 {
     [Theory]
-    [InlineData("demo", "Demo", 4, 11)]
+    [InlineData("demo", "Demo", 4, 12)]
     [InlineData("production", "Production", 1, 2)]
     public void Source_tree_ownership_deployment_and_project_references_match_the_registry(
         string tree, string deployment, int teams, int workflows)
@@ -62,6 +63,41 @@ public sealed class WorkflowSamplesTests
 
     private static string Samples(ValidatorFixture fixture) =>
         Path.GetFullPath(Path.Combine(fixture.AdditionalInputs[0], "..", "..", "samples", "workflows"));
+
+    [Fact]
+    public async Task Logistic_regression_sample_has_real_task_and_run_deadlines_and_a_random_recurring_profile()
+    {
+        using var fixture = new ValidatorFixture();
+        var directory = Path.Combine(Samples(fixture), "demo", "teams", "data-science", "regression", "logistic-regression");
+        var result = await Validator.ValidateAsync(directory, fixture.Cache, fixture.AdditionalInputs, ValidatorFixture.Token);
+        Assert.True(result.IsValid, string.Join("; ", result.Errors.Select(error => error.Message)) +
+            result.BuildFailure?.StandardOutput + result.BuildFailure?.StandardError);
+        Assert.NotNull(result.Build);
+        Assert.Equal("data-science/regression/logistic-regression", result.Build.Manifest.Name);
+        Assert.Equal("regression", result.Build.Manifest.Metadata.Type);
+        Assert.Equal(TimeSpan.FromMinutes(2), result.Build.Manifest.RunTimeout);
+        foreach (var key in new[] { "train", "validate", "test" })
+        {
+            var task = Assert.Single(Assert.Single(result.Build.Manifest.Nodes, node => node.Key == key).Tasks);
+            Assert.Equal(TimeSpan.FromSeconds(15), task.Policy.AttemptTimeout);
+            Assert.False(task.Policy.AutoRetry);
+        }
+        Assert.Equal(TimeSpan.FromMinutes(2),
+            Assert.Single(Assert.Single(result.Build.Manifest.Nodes, node => node.Key == "run-budget").Tasks).Policy.AttemptTimeout);
+        var schedules = ScheduleFileValidator.Validate(
+            await File.ReadAllBytesAsync(Path.Combine(directory, "schedules.json"), ValidatorFixture.Token),
+            result.Build.Manifest.Variables, cancellationToken: ValidatorFixture.Token);
+        Assert.True(schedules.IsValid);
+        var schedule = Assert.Single(schedules.Instances);
+        Assert.Equal(TimeSpan.FromMinutes(5), schedule.Definition.Interval);
+        Assert.Equal("random", schedule.Variables["mode"].GetString());
+        Assert.Equal(10, schedule.Variables["timeoutPercent"].GetInt32());
+        Assert.Equal(10, schedule.Variables["infraFailurePercent"].GetInt32());
+        Assert.Equal(10, schedule.Variables["serviceFailurePercent"].GetInt32());
+        Assert.Null(JsonSerializer.Deserialize(
+            await File.ReadAllBytesAsync(Path.Combine(directory, "schedules.json"), ValidatorFixture.Token),
+            ScheduleFileJsonContext.Default.ScheduleFile)!.HistoryCards);
+    }
 
     [Fact]
     public async Task Housing_profiles_override_experiment_variables_and_alternate_every_two_hours()

@@ -9,7 +9,8 @@
     "names": {
       "data-science": "Data Science",
       "data-science/regression": "Regression",
-      "data-science/regression/linear-regression": "Linear Regression - NYC Housing Prices"
+      "data-science/regression/linear-regression": "Linear Regression - NYC Housing Prices",
+      "data-science/regression/logistic-regression": "Logistic Regression - NYC Price Class"
     }
   },
   "roleBindings": [],

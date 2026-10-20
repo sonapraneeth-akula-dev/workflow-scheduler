@@ -49,7 +49,12 @@ public sealed class FailureCatalog
         }
         var type = runtimeCategory is FailureCategory.AgentLost or FailureCategory.PlatformError or
             FailureCategory.Placement or FailureCategory.ResourceLimit ? "Infra" : "Service";
-        return new(type, runtimeCategory == FailureCategory.Placement ? "Placement" : "Unclassified", null);
+        return new(type, runtimeCategory switch
+        {
+            FailureCategory.Placement => "Placement",
+            FailureCategory.Timeout => "Timeout",
+            _ => "Unclassified"
+        }, null);
     }
 
     private static FailureRule[] Read(string path)

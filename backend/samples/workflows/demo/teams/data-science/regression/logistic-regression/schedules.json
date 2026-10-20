@@ -1,0 +1,19 @@
+{
+  "$schema": "../../../../../../../src/Wf.Contracts/Schemas/schedules.schema.json",
+  "instances": [
+    {
+      "id": "classification-experiments",
+      "name": "Logistic regression experiments",
+      "interval": "00:05:00",
+      "timezone": "Etc/UTC",
+      "overlap": "Skip",
+      "catchUp": "Latest",
+      "variables": {
+        "mode": "random",
+        "timeoutPercent": 10,
+        "infraFailurePercent": 10,
+        "serviceFailurePercent": 10
+      }
+    }
+  ]
+}

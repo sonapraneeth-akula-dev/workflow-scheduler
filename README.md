@@ -831,8 +831,8 @@ $env:WF_ACCESS_TOKEN = 'local-development' # explicit loopback Development only
 Remove-Item Env:\WF_ACCESS_TOKEN
 ```
 
-`-IncludeSchedules` deliberately registers the sample's two recurring code
-schedules from `regression\linear-regression\schedules.json`; without it the publication script
+`-IncludeSchedules` deliberately registers both regression workflows' recurring code
+schedules from their `schedules.json` files; without it the publication script
 skips scheduled workflows. `-RunOnce` additionally starts one manual run, not
 the recurring schedule.
 
@@ -892,6 +892,46 @@ dotnet run --file .\backend\samples\workflows\demo\teams\data-science\regression
 Direct execution prints reports; registered execution publishes them through
 the normal authorized report pipeline. The previous demo sources below remain
 as explicit opt-in examples/test fixtures, not the default local workflow set.
+
+### NYC housing logistic regression
+
+`data-science/regression/logistic-regression` shares the **Regression** workflow
+type and verified housing cache with linear regression. It predicts whether a
+sale price meets `priceThreshold` (default $1,000,000), using square footage,
+training-only standardization and binary cross-entropy gradient descent.
+Validation reports do not train the model; the final held-out test reports
+accuracy, log loss, precision/recall, confusion counts, a training-majority
+baseline and a CSV of predictions. Undefined precision/recall remain null,
+not fabricated zeroes. Successful execution does not guarantee model quality.
+
+Its recurring profile runs every five minutes. `mode=random` samples one
+outcome per run: 70% normal execution, 10% timeout (equally split between task
+and run deadlines), 10% infrastructure failure and 10% service failure.
+`timeoutPercent`, `infraFailurePercent` and `serviceFailurePercent` configure
+these probabilities; each must be 0-100 and their sum at most 100.
+The selected outcome, fault stage and seed are committed in the configuration
+report and node outputs before execution. `seed=0` generates a recorded seed;
+a positive seed repeats the selection. These percentages describe injected
+faults, not guarantees about real dataset/download or execution failures.
+
+For repeatable diagnosis, force `mode=success`, `task-timeout`, `run-timeout`,
+`infra-failure` or `service-failure`. `faultStage` selects `train`, `validate`
+or `test` (default random); a test-stage fault requires `runFinalTest=true`.
+Task-timeout scenarios genuinely wait for the selected task's 15-second
+deadline: the task is **TimedOut**, the run **Failed**, category **Timeout**.
+Run-timeout scenarios wait for the actual two-minute run deadline and produce
+a **TimedOut** run. Retries are disabled; timeout status is never fabricated.
+Infra faults use runtime `PlatformError`, classified as **Infra / Network**;
+service faults use `ValidationError`, classified as **Service / Validation**.
+Messages identify the stage, seed and
+deliberately simulated cause; no real infrastructure is disrupted.
+
+```powershell
+dotnet run --file .\backend\samples\workflows\demo\teams\data-science\regression\logistic-regression\workflow.cs -- --var mode=success --var seed=42
+```
+
+Publish with the same `publish-samples.ps1 -IncludeSchedules` command above.
+Its default history card includes both scheduled and manual diagnostic runs.
 
 ### Node and task conditions
 
@@ -1258,7 +1298,7 @@ cards/tables. IDs, URLs, metadata values, filters, schedules and run history
 remain unchanged. The sample team configurations are authoritative for these labels.
 
 To browse the published samples, open **Service history** in the navigation,
-select **Data Science**, then **Linear Regression** (or **All workflow types**).
+select **Data Science**, then **Regression** (or **All workflow types**).
 The direct team view is `/t/data-science/services`; choose **History** on the
 **NYC Housing Prices** card for every run of that workflow. Archived example
 teams appear only if explicitly published. Source files alone do not appear in
