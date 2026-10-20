@@ -58,7 +58,7 @@ public sealed class AgentLogService : IAsyncDisposable
             var grant = dispatch.Grants.SingleOrDefault(grant => grant.Kind == "logs");
             if (grant is not null)
                 LogSpooler.DurableWrite(Path.Combine(spool.DirectoryPath, "upload-grant.pb"), grant.ToByteArray());
-            return Track(spool, grant, dispatch.Task, dispatch.ReservationEpoch);
+            return Track(spool, grant, dispatch.Task, dispatch.ReservationEpoch, holdOpen: resume);
         }
         catch { await spool.DisposeAsync(); throw; }
     }
@@ -92,7 +92,7 @@ public sealed class AgentLogService : IAsyncDisposable
             }
             var grantPath = Path.Combine(directory, "upload-grant.pb");
             var grant = File.Exists(grantPath) ? UploadGrant.Parser.ParseFrom(File.ReadAllBytes(grantPath)) : null;
-            Track(spool, grant, attempt, 0);
+            Track(spool, grant, attempt, 0, holdOpen: live.Contains(LogIndex.PrefixFor(attempt)));
         }
     }
 
@@ -101,11 +101,12 @@ public sealed class AgentLogService : IAsyncDisposable
 
     public void ResetMirrors() => mirror?.Reset();
 
-    private Capture Track(LogSpooler spool, UploadGrant? grant, AttemptRef task, ulong epoch)
+    private Capture Track(LogSpooler spool, UploadGrant? grant, AttemptRef task, ulong epoch, bool holdOpen = false)
     {
         var capture = new Capture(spool, this) { ReservationEpoch = epoch };
         spool.Committed += (line, frame) => mirror?.Append(task, capture.ReservationEpoch, line, frame);
-        if (spool.IsComplete) capture.Closed.TrySetResult();
+        // Recovery still needs to replay acknowledged records before releasing a completed spool.
+        if (spool.IsComplete && !holdOpen) capture.Closed.TrySetResult();
         if (!captures.TryAdd(spool.DirectoryPath, capture))
             throw new InvalidOperationException("Attempt log capture already exists.");
         capture.Upload = RunAsync();

@@ -177,7 +177,23 @@ public sealed class TaskHostPoolTests : IDisposable
             cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(TaskOutcome.TimedOut, result.Outcome);
         Assert.Equal("Timeout", result.Error.Category);
+        Assert.Contains("exceeded", result.Error.Message);
+        Assert.Contains("deadline", result.Error.Message);
         Assert.False(result.Error.NonRetryable);
+    }
+
+    [Fact]
+    public async Task Execution_transport_does_not_expire_at_the_default_HttpClient_100_second_timeout()
+    {
+        await using var pool = Pool();
+        await pool.PrewarmAsync(Package, TestContext.Current.CancellationToken);
+        var dispatch = Dispatch("transport-duration", TimeSpan.FromSeconds(130));
+        dispatch.VariablesJson = ByteString.CopyFromUtf8("""{"amount":102}""");
+        var elapsed = Stopwatch.StartNew();
+        var result = await pool.ExecuteAsync(Package, dispatch,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(TaskOutcome.Succeeded, result.Outcome);
+        Assert.True(elapsed.Elapsed >= TimeSpan.FromSeconds(102));
     }
 
     [Fact]

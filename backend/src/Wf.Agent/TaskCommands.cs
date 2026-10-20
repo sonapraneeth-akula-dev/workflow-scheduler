@@ -50,7 +50,7 @@ public sealed class TaskCommands(AgentOptions options, PackageCache cache, TaskH
             logger.LogWarning("Discarded stale recovered task host at machine epoch {Epoch}.", attempt.Dispatch.ReservationEpoch);
         }
         if (logs is not null)
-            await logs.RecoverAsync(stoppingToken, attempts.Where(attempt => (attempt.Error is null || attempt.SpoolDirectory is not null) &&
+            await logs.RecoverAsync(stoppingToken, attempts.Where(attempt => (attempt.Error is null && attempt.Completed is null || attempt.SpoolDirectory is not null) &&
                 attempt.Dispatch.ReservationEpoch >= outbox.ReservationEpoch).Select(attempt => attempt.Dispatch.Task));
         foreach (var attempt in attempts.Where(attempt => attempt.SpoolDirectory is not null &&
                      attempt.Dispatch.ReservationEpoch >= outbox.ReservationEpoch))

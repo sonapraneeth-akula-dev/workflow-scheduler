@@ -382,6 +382,9 @@ public sealed partial class TaskHostPool : IAsyncDisposable
             if (result.Task is null || !result.Task.Equals(dispatch.Task) ||
                 result.Outcome == TaskOutcome.Unspecified || !System.Enum.IsDefined(result.Outcome))
                 throw new InvalidDataException("Task host returned an invalid attempt result.");
+            if (result.Outcome == TaskOutcome.TimedOut && result.Error?.Category == "Timeout")
+                result.Error.Message = $"Task '{dispatch.Task.NodeKey}/{dispatch.Task.TaskKey}' exceeded its execution deadline " +
+                    $"({dispatch.DeadlineAt.ToDateTimeOffset():O}). {result.Error.Message}";
             if (host.Limiter?.MemoryLimitExceeded == true || limits?.RamMb > 0 && result.Error?.Category == "ResourceLimit")
                 throw new ResourceLimitException();
             StopSampling();
@@ -743,7 +746,7 @@ public sealed partial class TaskHostPool : IAsyncDisposable
                 catch { socket.Dispose(); throw; }
             }
         };
-        var http = new HttpClient(handler);
+        var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
         http.DefaultRequestHeaders.Add("x-wf-host-token", token);
         return GrpcChannel.ForAddress("http://localhost", new GrpcChannelOptions
         {

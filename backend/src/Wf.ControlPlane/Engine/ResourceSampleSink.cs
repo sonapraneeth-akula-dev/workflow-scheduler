@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Npgsql;
+using Wf.Contracts;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Resources;
 using Wf.ControlPlane.Engine.Agents;
@@ -9,6 +10,7 @@ using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Reservations;
 using Wf.ControlPlane.Storage;
 using Wf.Engine.Core.Results;
+using Wf.Engine.Core.StateMachine;
 
 namespace Wf.ControlPlane.Engine;
 
@@ -85,6 +87,12 @@ public sealed class ResourceSampleSink(NpgsqlDataSource source, RunStore runs, I
                 }
                 pointer = old.Previous;
             }
+        }
+        if (TransitionTable.IsTerminal((ExecutionStatus)status))
+        {
+            runs.LogInactiveResource(identity, session.AgentId, sample.SampleSequence, status);
+            await transaction.CommitAsync(token);
+            return;
         }
         if (status is not (2 or 3 or 4) || sample.SampleSequence != checked((ulong)count + 1))
             throw new ArgumentException($"Resource sample {sample.SampleSequence} is out of order (expected {count + 1}) " +

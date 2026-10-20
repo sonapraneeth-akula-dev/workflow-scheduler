@@ -115,6 +115,8 @@ var workflow = Workflow.Define("tests/hosts/fixture", "1.0.0", w => w.Type("test
                 await File.WriteAllTextAsync(marker, Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
             await Task.Delay(TimeSpan.FromSeconds(30), ctx.CancellationToken);
         })
+        .Task("transport-duration", async ctx =>
+            await Task.Delay(TimeSpan.FromSeconds(ctx.Var<int>("amount")), ctx.CancellationToken))
         .Task("resources", async ctx =>
         {
             var memory = new byte[32 * 1024 * 1024];

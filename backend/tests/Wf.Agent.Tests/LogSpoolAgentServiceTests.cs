@@ -69,6 +69,39 @@ public sealed class LogSpoolAgentServiceTests
     }
 
     [Fact]
+    public async Task Recovered_completed_spool_stays_alive_until_final_result_records_are_replayed()
+    {
+        using var files = new LogFiles();
+        var attempt = LogSpoolTests.Attempt();
+        var at = DateTimeOffset.UtcNow;
+        await using (var spool = new LogSpooler(files.Root, attempt, new SecretMasker([])))
+        {
+            await spool.WriteHostAsync(2, at, "stdout", "before completion", TestContext.Current.CancellationToken);
+            await spool.CompleteAsync();
+        }
+        var options = new AgentOptions([new Uri("http://localhost")], Guid.NewGuid().ToString(), "logs", "ci", 1,
+            resultJournalDirectory: Path.Combine(files.Root, "results"), logSpoolDirectory: files.Root);
+        await using var service = new AgentLogService(options, TimeProvider.System, NullLogger<AgentLogService>.Instance,
+            NullLogger<LogChunkUploader>.Instance);
+        await service.RecoverAsync(TestContext.Current.CancellationToken, [attempt]);
+        var capture = await service.BeginAsync(new Dispatch { Task = attempt }, resume: true);
+        Assert.False(capture.Upload.IsCompleted);
+        Assert.True(await capture.WriteRecordAsync(new Wf.Contracts.Host.V1.AttemptRecord
+        {
+            Sequence = 2, Task = attempt, Log = new Wf.Contracts.Host.V1.HostLog
+            {
+                At = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(at),
+                Stream = "stdout", Text = "before completion"
+            }
+        }));
+        var index = await capture.Spool.SnapshotAsync(TestContext.Current.CancellationToken);
+        Assert.True(index.Complete);
+        Assert.Equal(1, index.Lines);
+        await capture.CompleteAsync();
+        await capture.Upload.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
     public void Log_configuration_uses_explicit_paths_and_positive_invariant_byte_limits()
     {
         using var files = new LogFiles();

@@ -270,7 +270,10 @@ public sealed class ResourceMetricsTests(ResourceMetricsDatabase database, ITest
         {
             Task = Reference(run.Snapshot.RunId), At = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow), Outcome = TaskOutcome.Succeeded
         } }, Token);
-        await Assert.ThrowsAsync<ArgumentException>(() => host.Sink.AcceptAsync(current, Sample(run.Snapshot.RunId, 6, points[0]), Token));
+        await host.Sink.AcceptAsync(current, Sample(run.Snapshot.RunId, 6, points[0]), Token);
+        await host.Sink.AcceptAsync(current, Sample(run.Snapshot.RunId, 7, points[0]), Token);
+        await Assert.ThrowsAsync<ArgumentException>(() => host.Sink.AcceptAsync(current,
+            Sample(run.Snapshot.RunId, 3, Observation(1, 1, 300, 1, 100)), Token));
         await host.Sink.AcceptAsync(current, Sample(run.Snapshot.RunId, 1, points[0]), Token);
         Assert.Equal(5, Assert.Single(await host.Summaries(run.Snapshot.RunId)).SampleCount);
     }

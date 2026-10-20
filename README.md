@@ -921,6 +921,16 @@ Task-timeout scenarios genuinely wait for the selected task's 15-second
 deadline: the task is **TimedOut**, the run **Failed**, category **Timeout**.
 Run-timeout scenarios wait for the actual two-minute run deadline and produce
 a **TimedOut** run. Retries are disabled; timeout status is never fabricated.
+The task-host transport has no independent 100-second HTTP timeout: execution
+remains bounded by the dispatched task/run deadline and cancellation grace.
+Recorded timeout messages name the task and execution deadline, retaining the
+original worker explanation.
+Agent restart recovery keeps completed log spools alive until result records
+have been replayed. Authenticated late resource observations for an already
+terminal attempt are acknowledged with a warning, without changing its stored
+resource history; conflicting historical samples and foreign attempts still
+fail validation. This prevents a stale telemetry record from stranding the
+worker's durable outbox after a timeout.
 Infra faults use runtime `PlatformError`, classified as **Infra / Network**;
 service faults use `ValidationError`, classified as **Service / Validation**.
 Messages identify the stage, seed and

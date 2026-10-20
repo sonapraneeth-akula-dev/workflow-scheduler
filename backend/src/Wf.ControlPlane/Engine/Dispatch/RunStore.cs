@@ -495,6 +495,11 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
         await transaction.CommitAsync(cancellationToken);
     }
 
+    internal void LogInactiveResource(Wf.Engine.Core.Results.ResultIdentity identity, Guid agentId, ulong sequence, short status) =>
+        logger.LogWarning("Discarded late resource sample {Sequence} for terminal task {RunId}/{TaskKey}/{Attempt} " +
+            "from agent {AgentId} (status {Status}); committed resource history is unchanged.",
+            sequence, identity.RunId, identity.TaskKey, identity.Attempt, agentId, status);
+
     internal void LogStaleReservation(Wf.Engine.Core.Results.ResultIdentity identity, Guid agentId, ulong epoch) =>
         logger.LogWarning("Discarded expired or fenced reservation epoch {Epoch} from agent {AgentId}, run {RunId}, task {TaskKey}, attempt {Attempt}.",
             epoch, agentId, identity.RunId, identity.TaskKey, identity.Attempt);
