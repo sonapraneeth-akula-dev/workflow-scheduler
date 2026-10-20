@@ -1,19 +1,47 @@
 {
   "$schema": "../../../../../../../src/Wf.Contracts/Schemas/schedules.schema.json",
+  "defaults": {
+    "scenario": {
+      "mode": "random",
+      "timeoutPercent": 10,
+      "infraFailurePercent": 10,
+      "serviceFailurePercent": 10
+    }
+  },
   "instances": [
     {
       "id": "classification-experiments",
-      "name": "Logistic regression experiments",
+      "name": "Training & validation",
       "interval": "00:05:00",
       "timezone": "Etc/UTC",
       "overlap": "Skip",
       "catchUp": "Latest",
       "variables": {
-        "mode": "random",
-        "timeoutPercent": 10,
-        "infraFailurePercent": 10,
-        "serviceFailurePercent": 10
+        "runFinalTest": false
       }
+    },
+    {
+      "id": "classification-full-test",
+      "name": "Full test",
+      "interval": "00:05:00",
+      "timezone": "Etc/UTC",
+      "overlap": "Skip",
+      "catchUp": "Latest",
+      "variables": {
+        "runFinalTest": true
+      }
+    }
+  ],
+  "historyCards": [
+    {
+      "id": "training-validation",
+      "name": "Training & validation",
+      "scheduleIds": ["classification-experiments"]
+    },
+    {
+      "id": "full-test",
+      "name": "Full test",
+      "scheduleIds": ["classification-full-test"]
     }
   ]
 }

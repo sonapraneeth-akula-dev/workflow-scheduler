@@ -803,7 +803,9 @@ it("uses JSON card schedules, ignores browser overrides and carries the selectio
     within(card).queryByText("Failed", { exact: true })
   ).not.toBeInTheDocument()
   expect(card.querySelectorAll("[data-run-id]")).toHaveLength(1)
-  const other = screen.getByRole("heading", { name: "Never" }).closest("li")!
+  const other = screen
+    .getByRole("heading", { name: "Never", level: 4 })
+    .closest("li")!
   expect(
     within(other).getByLabelText("Tracking for team/release/never")
   ).toHaveTextContent("Daily Full Test")
@@ -930,7 +932,7 @@ it("renders separate configured cards in order and applies hidden cards and memb
   await screen.findByRole("heading", { name: "Training" })
   expect(
     screen
-      .getAllByRole("heading", { level: 3 })
+      .getAllByRole("heading", { level: 4 })
       .map((heading) => heading.textContent)
   ).toEqual(["Training", "Full test"])
   expect(screen.getByText("2 loaded cards")).toBeVisible()
@@ -1026,6 +1028,69 @@ function expectOutcome(label: string, count: number) {
   const tile = screen.getByText(label, { exact: true }).closest("div")!
   expect(tile.querySelector("dd")).toHaveTextContent(new RegExp(`^${count}$`))
 }
+
+it("keeps Regression as the type and places each algorithm's configured cards in its own workflow container", async () => {
+  vi.mocked(getHistory).mockResolvedValue({
+    items: [],
+    nextCursor: null,
+    currentScheduleId: null,
+  })
+  vi.mocked(getServiceHistory).mockResolvedValue({
+    ...response,
+    items: ["linear-regression", "logistic-regression"].map(
+      (algorithm, index) => {
+        const base = response.items[index]!
+        const schedules = trackedSchedules.map((schedule, position) => ({
+          ...schedule,
+          seriesId: `019ed132-2f44-7000-8000-${String(index * 2 + position + 20).padStart(12, "0")}`,
+        }))
+        return {
+          ...base,
+          workflow: {
+            ...base.workflow,
+            id: `team/regression/${algorithm}`,
+            type: "regression",
+            name: algorithm,
+            metadata: { type: "regression", values: {} },
+          },
+          schedules,
+          historyCards: ["Training & validation", "Full test"].map(
+            (name, card) => ({
+              id: `card-${card}`,
+              name,
+              seriesIds: [schedules[card]!.seriesId],
+            })
+          ),
+        }
+      }
+    ),
+  })
+  const shown = show()
+  const regression = await screen.findByRole("region", {
+    name: "Regression",
+  })
+  for (const algorithm of ["Linear Regression", "Logistic Regression"]) {
+    const container = within(regression).getByRole("region", {
+      name: `${algorithm} workflow`,
+    })
+    expect(
+      within(container).getByRole("heading", { name: algorithm, level: 3 })
+    ).toBeVisible()
+    expect(within(container).getAllByRole("listitem")).toHaveLength(2)
+    for (const name of ["Training & validation", "Full test"])
+      expect(
+        within(container).getByRole("heading", { name, level: 4 })
+      ).toBeVisible()
+  }
+  expect(within(regression).getByText("4 loaded cards")).toBeVisible()
+  shown.rerender({ ...search, view: "table" })
+  expect(await within(regression).findByRole("table")).toBeVisible()
+  expect(within(regression).getAllByRole("rowheader")).toHaveLength(4)
+  shown.rerender({ ...search, groupBy: "metadata", groupKey: "component" })
+  expect(
+    screen.queryByRole("region", { name: /Regression workflow$/ })
+  ).not.toBeInTheDocument()
+})
 
 it("opens the collapsible summary by default and counts terminal primary causes, not recovered or optional failures", async () => {
   const build = response.items[0]!

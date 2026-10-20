@@ -904,7 +904,12 @@ accuracy, log loss, precision/recall, confusion counts, a training-majority
 baseline and a CSV of predictions. Undefined precision/recall remain null,
 not fabricated zeroes. Successful execution does not guarantee model quality.
 
-Its recurring profile runs every five minutes. `mode=random` samples one
+It has separate **Training & validation** and **Full test** profiles, each running
+every five minutes and tracking its own Service History card. Training retains
+the `classification-experiments` schedule ID and existing series/history, with
+`runFinalTest=false`; the new `classification-full-test` instance sets it to
+`true`. Both share the scenario defaults under `defaults.scenario`.
+`mode=random` samples one
 outcome per run: 70% normal execution, 10% timeout (equally split between task
 and run deadlines), 10% infrastructure failure and 10% service failure.
 `timeoutPercent`, `infraFailurePercent` and `serviceFailurePercent` configure
@@ -1251,6 +1256,13 @@ each with a stable unique `id`, friendly `name`, optional `visible` (default
   {"id":"combined","name":"All experiments","visible":false,"scheduleIds":["daily-training-validation","daily-full-test"]}
 ]
 ```
+
+In card format, workflow-type containers with configured cards contain a separate
+workflow container for each algorithm. **Regression** remains the workflow type;
+**Linear Regression** and **Logistic Regression** each contain their own
+**Training & validation** and **Full test** cards. The table retains one row per
+configured card, including its exact workflow identity. Metadata grouping remains
+available and does not change card membership or run counts.
 
 One schedule can appear in multiple cards. Add/remove references, change names,
 reorder cards or set `visible:false`, then publish the schedule file; refresh/live

@@ -339,14 +339,23 @@ function WorkflowGroup({
   view,
   runLimit,
   presentation,
+  groupWorkflows,
 }: {
   label: string
   entries: TrackedWorkflow[]
   view: ServiceSearch["view"]
   runLimit: number
   presentation: Presentation | null
+  groupWorkflows: boolean
 }) {
   const id = useId()
+  const workflows = new Map<string, TrackedWorkflow[]>()
+  for (const entry of entries) {
+    if (!workflows.has(entry.workflow.id)) workflows.set(entry.workflow.id, [])
+    workflows.get(entry.workflow.id)!.push(entry)
+  }
+  const nested =
+    groupWorkflows && entries.some((entry) => entry.cardName !== undefined)
   return (
     <section
       aria-labelledby={id}
@@ -361,51 +370,42 @@ function WorkflowGroup({
         </span>
       </div>
       {view === "cards" ? (
-        <ul className="grid min-w-0 items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {entries.map((entry) => {
-            const { workflow } = entry
-            return (
-              <li
-                key={entry.key}
-                className="flex min-w-0 flex-col gap-4 border bg-background p-3"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <h3 className="min-w-0 text-base font-semibold break-words">
-                    {entry.cardName ??
-                      presentationName(
-                        presentation,
-                        workflow.name,
-                        workflow.id
-                      )}
-                  </h3>
-                  <WorkflowStatus entry={entry} />
-                </div>
-                <p
-                  className="truncate font-mono text-xs text-muted-foreground"
-                  title={workflow.id}
+        nested ? (
+          <div className="grid min-w-0 items-stretch gap-4 2xl:grid-cols-2">
+            {[...workflows].map(([workflowId, cards]) => {
+              const workflow = cards[0]!.workflow
+              const name = presentationName(
+                presentation,
+                workflow.name,
+                workflowId
+              )
+              return (
+                <section
+                  key={workflowId}
+                  aria-label={`${name} workflow`}
+                  data-workflow-container={workflowId}
+                  className="flex min-w-0 flex-col gap-3 border bg-background p-3"
                 >
-                  {workflow.id}
-                </p>
-                <FailureSummary
-                  summary={workflow.latestRun?.failureSummary}
-                  status={workflow.latestRun?.status}
-                />
-                <p className="text-sm">
-                  <span className="font-medium">Last run:</span>{" "}
-                  {entry.trackingPending ? (
-                    "Loading..."
-                  ) : entry.trackingError ? (
-                    "Unavailable"
-                  ) : (
-                    <LastRun entry={entry} />
-                  )}
-                </p>
-                <WorkflowTracking entry={entry} runLimit={runLimit} />
-                <WorkflowActions entry={entry} />
-              </li>
-            )
-          })}
-        </ul>
+                  <h3 className="text-base font-semibold break-words">
+                    {name}
+                  </h3>
+                  <WorkflowCards
+                    entries={cards}
+                    runLimit={runLimit}
+                    presentation={presentation}
+                    nested
+                  />
+                </section>
+              )
+            })}
+          </div>
+        ) : (
+          <WorkflowCards
+            entries={entries}
+            runLimit={runLimit}
+            presentation={presentation}
+          />
+        )
       ) : (
         <div
           role="region"
@@ -483,6 +483,65 @@ function WorkflowGroup({
         </div>
       )}
     </section>
+  )
+}
+
+function WorkflowCards({
+  entries,
+  runLimit,
+  presentation,
+  nested = false,
+}: {
+  entries: TrackedWorkflow[]
+  runLimit: number
+  presentation: Presentation | null
+  nested?: boolean
+}) {
+  const Heading = nested ? "h4" : "h3"
+  return (
+    <ul
+      className={`grid min-w-0 flex-1 items-stretch gap-3 md:grid-cols-2 ${nested ? "" : "xl:grid-cols-3 2xl:grid-cols-4"}`}
+    >
+      {entries.map((entry) => {
+        const { workflow } = entry
+        return (
+          <li
+            key={entry.key}
+            className="flex min-w-0 flex-col gap-4 border bg-background p-3"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <Heading className="min-w-0 text-base font-semibold break-words">
+                {entry.cardName ??
+                  presentationName(presentation, workflow.name, workflow.id)}
+              </Heading>
+              <WorkflowStatus entry={entry} />
+            </div>
+            <p
+              className="truncate font-mono text-xs text-muted-foreground"
+              title={workflow.id}
+            >
+              {workflow.id}
+            </p>
+            <FailureSummary
+              summary={workflow.latestRun?.failureSummary}
+              status={workflow.latestRun?.status}
+            />
+            <p className="text-sm">
+              <span className="font-medium">Last run:</span>{" "}
+              {entry.trackingPending ? (
+                "Loading..."
+              ) : entry.trackingError ? (
+                "Unavailable"
+              ) : (
+                <LastRun entry={entry} />
+              )}
+            </p>
+            <WorkflowTracking entry={entry} runLimit={runLimit} />
+            <WorkflowActions entry={entry} />
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 
@@ -811,6 +870,7 @@ export function ServiceHistory({
         )
         .map(([value, entries]) => (
           <WorkflowGroup
+            groupWorkflows={search.groupBy === "type"}
             presentation={config}
             runLimit={history.runLimit}
             key={value === undefined ? "missing" : JSON.stringify(value)}

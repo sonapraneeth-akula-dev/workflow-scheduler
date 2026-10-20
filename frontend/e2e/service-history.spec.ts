@@ -57,6 +57,66 @@ test("outcome summary uses readable severity colors and separate Infra and Servi
   }
 })
 
+test("Regression contains distinct Linear and Logistic workflows with their own training and full-test cards", async ({
+  page,
+}) => {
+  test.skip(
+    !process.env.WF_REGRESSION_SAMPLE,
+    "Requires the published regression samples."
+  )
+  test.setTimeout(90_000)
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme })
+    for (const width of [390, 1999]) {
+      await page.setViewportSize({ width, height: 1100 })
+      await page.goto("/t/data-science/services?type=regression")
+      const regression = page.getByRole("region", {
+        name: "Regression",
+        exact: true,
+      })
+      await expect(regression).toBeVisible()
+      await expect(
+        regression.getByText("4 loaded cards", { exact: true })
+      ).toBeVisible()
+      for (const algorithm of ["linear", "logistic"]) {
+        const container = regression.locator(
+          `[data-workflow-container="data-science/regression/${algorithm}-regression"]`
+        )
+        await expect(container).toBeVisible()
+        for (const name of ["Training & validation", "Full test"]) {
+          const card = container
+            .getByRole("heading", { name, exact: true, level: 4 })
+            .locator("..")
+            .locator("..")
+          await expect(card).toBeVisible()
+          await expect(
+            card.getByRole("link", { name: /^History for / })
+          ).toHaveAttribute("href", /includeManual=false/)
+        }
+        await expect(container.locator("ul > li")).toHaveCount(2)
+      }
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth)
+      ).toBeLessThanOrEqual(width)
+      const audit = await new AxeBuilder({ page })
+        .withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"])
+        .analyze()
+      expect(audit.violations).toEqual([])
+    }
+  }
+  await page.getByRole("radio", { name: "Table format" }).click()
+  const table = page
+    .getByRole("region", { name: "Regression", exact: true })
+    .getByRole("table")
+  await expect(table.getByRole("rowheader")).toHaveCount(4)
+  await expect(
+    table.getByRole("rowheader").filter({ hasText: "logistic-regression" })
+  ).toHaveCount(2)
+  await expect(
+    table.getByRole("rowheader").filter({ hasText: "linear-regression" })
+  ).toHaveCount(2)
+})
+
 test("navbar discovers team/type service views and restores format with individual new-tab run actions", async ({
   page,
 }) => {

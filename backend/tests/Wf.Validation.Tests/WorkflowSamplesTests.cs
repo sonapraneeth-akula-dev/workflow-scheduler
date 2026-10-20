@@ -65,7 +65,7 @@ public sealed class WorkflowSamplesTests
         Path.GetFullPath(Path.Combine(fixture.AdditionalInputs[0], "..", "..", "samples", "workflows"));
 
     [Fact]
-    public async Task Logistic_regression_sample_has_real_task_and_run_deadlines_and_a_random_recurring_profile()
+    public async Task Logistic_regression_sample_has_real_deadlines_and_separate_random_training_and_full_test_cards()
     {
         using var fixture = new ValidatorFixture();
         var directory = Path.Combine(Samples(fixture), "demo", "teams", "data-science", "regression", "logistic-regression");
@@ -88,15 +88,27 @@ public sealed class WorkflowSamplesTests
             await File.ReadAllBytesAsync(Path.Combine(directory, "schedules.json"), ValidatorFixture.Token),
             result.Build.Manifest.Variables, cancellationToken: ValidatorFixture.Token);
         Assert.True(schedules.IsValid);
-        var schedule = Assert.Single(schedules.Instances);
-        Assert.Equal(TimeSpan.FromMinutes(5), schedule.Definition.Interval);
-        Assert.Equal("random", schedule.Variables["mode"].GetString());
-        Assert.Equal(10, schedule.Variables["timeoutPercent"].GetInt32());
-        Assert.Equal(10, schedule.Variables["infraFailurePercent"].GetInt32());
-        Assert.Equal(10, schedule.Variables["serviceFailurePercent"].GetInt32());
-        Assert.Null(JsonSerializer.Deserialize(
+        Assert.Equal(2, schedules.Instances.Length);
+        var training = Assert.Single(schedules.Instances, item => item.Definition.Id == "classification-experiments");
+        var full = Assert.Single(schedules.Instances, item => item.Definition.Id == "classification-full-test");
+        Assert.Equal("Training & validation", training.Definition.Name);
+        Assert.False(training.Variables["runFinalTest"].GetBoolean());
+        Assert.Equal("Full test", full.Definition.Name);
+        Assert.True(full.Variables["runFinalTest"].GetBoolean());
+        foreach (var schedule in schedules.Instances)
+        {
+            Assert.Equal(TimeSpan.FromMinutes(5), schedule.Definition.Interval);
+            Assert.Equal("random", schedule.Variables["mode"].GetString());
+            Assert.Equal(10, schedule.Variables["timeoutPercent"].GetInt32());
+            Assert.Equal(10, schedule.Variables["infraFailurePercent"].GetInt32());
+            Assert.Equal(10, schedule.Variables["serviceFailurePercent"].GetInt32());
+        }
+        var cards = JsonSerializer.Deserialize(
             await File.ReadAllBytesAsync(Path.Combine(directory, "schedules.json"), ValidatorFixture.Token),
-            ScheduleFileJsonContext.Default.ScheduleFile)!.HistoryCards);
+            ScheduleFileJsonContext.Default.ScheduleFile)!.HistoryCards!.Value;
+        Assert.Equal(2, cards.Length);
+        Assert.Equal(["classification-experiments"], Assert.Single(cards, card => card.Name == "Training & validation").ScheduleIds);
+        Assert.Equal(["classification-full-test"], Assert.Single(cards, card => card.Name == "Full test").ScheduleIds);
     }
 
     [Fact]
