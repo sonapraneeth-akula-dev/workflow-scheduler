@@ -2051,6 +2051,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{id}/conditions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Pinned node/task Boolean conditions and durable evaluation evidence. Fresh Run Viewer authorization; no query parameters. Actual is derived only from a recorded decision. Only referenced Boolean defaults are returned, never arbitrary variables or output objects. Producer identifies the successful task attempt that committed the referenced key before evaluation, not arbitrary computation lineage. Null means unavailable/not recorded. Variable override/default origin was not recorded; declaredDefault is not proof of how the run value was supplied. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RunConditionsResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{id}/reservation-queue": {
         parameters: {
             query?: never;
@@ -5523,6 +5606,27 @@ export interface components {
             /** @default true */
             expected: boolean;
         };
+        ConditionDebugDetails: {
+            entityKey: string;
+            variableKey: null | string;
+            nodeKey: null | string;
+            outputKey: null | string;
+            expected: boolean;
+            actual: null | boolean;
+            outcome: null | string;
+            /** Format: date-time */
+            evaluatedAt: null | string;
+            evaluatedSequence: null | string;
+            sourceKind: string;
+            declaredDefault: null | boolean;
+            /** Format: uuid */
+            sourceRunId: string;
+            producerTaskKey: null | string;
+            /** Format: int32 */
+            producerAttempt: null | number | string;
+            /** Format: date-time */
+            producedAt: null | string;
+        };
         DashboardRankings: {
             slowest: components["schemas"]["DashboardRow"][];
             failureRate: components["schemas"]["DashboardRow"][];
@@ -5951,6 +6055,14 @@ export interface components {
             per_type: {
                 [key: string]: number | string;
             };
+        };
+        RunConditionsResponse: {
+            /** Format: uuid */
+            runId: string;
+            /** Format: uuid */
+            versionId: string;
+            lastSeq: string;
+            conditions: components["schemas"]["ConditionDebugDetails"][];
         };
         RunDelta: {
             runId: string;

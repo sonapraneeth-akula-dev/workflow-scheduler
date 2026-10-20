@@ -108,6 +108,47 @@ const run: RunSnapshot = {
 describe("live graph rendering", () => {
   beforeEach(() => vi.clearAllMocks())
 
+  it("keeps the authored condition visible after decision and exposes inherited task debug controls", () => {
+    render(
+      <RunGraph
+        plan={{
+          ...plan,
+          nodes: plan.nodes.map((node) =>
+            node.key === "finish"
+              ? { ...node, when: { variableKey: "enabled", expected: true } }
+              : node
+          ),
+        }}
+        run={{
+          ...run,
+          nodes: { ...run.nodes, finish: 10 },
+          tasks: { "finish/sdk": 10 },
+          conditionOutcomes: { finish: "NotMatched" },
+        }}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: /finish/i }))
+    const selected = within(
+      screen.getByRole("region", { name: "Selected node finish" })
+    )
+    expect(
+      selected.getByText(
+        "Condition: variable enabled equals true; false skips without an attempt."
+      )
+    ).toBeVisible()
+    expect(
+      selected.getByText("Condition: false; skipped without an attempt.")
+    ).toBeVisible()
+    expect(
+      selected.getByRole("button", { name: "Show debug details for finish" })
+    ).toHaveAttribute("aria-expanded", "false")
+    expect(
+      selected.getByRole("button", {
+        name: "Show debug details for finish/sdk",
+      })
+    ).toBeVisible()
+  })
+
   it("explains node and task skips from durable condition decisions", () => {
     render(
       <RunGraph

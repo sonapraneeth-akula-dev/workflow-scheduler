@@ -845,6 +845,25 @@ Decisions appear in the run graph and event/snapshot APIs, persist through
 recovery, and are not re-evaluated for retries. Reruns evaluate conditions again
 for work that is not reused. Definitions without conditions retain their behavior.
 
+In the run graph, select a node and use **Show debug details** beside its
+condition or a task's condition. The expression remains visible after evaluation.
+Details include the pinned workflow version, expected/actual Boolean value,
+recorded outcome, evaluation time/event, and the referenced value source.
+Tasks skipped by a node condition show that inherited gate rather than an
+invented task evaluation. **Refresh debug details** reloads committed evidence.
+
+`GET /api/v1/runs/{id}/conditions` provides the same read-only evidence with
+Run Viewer authorization and `Cache-Control: no-store`. It returns only declared
+conditions, referenced Boolean defaults and source metadata, not complete
+variables, output objects or invalid non-Boolean values. Output provenance names
+the successful task/attempt that committed the referenced key before evaluation,
+including the immediate source run for reused node outputs; later commits are
+not substituted. It does not trace arbitrary computations inside task code.
+Run-variable details show the captured variable reference and declared default,
+but historical default-versus-override origin was not recorded. Missing decision
+times or producer attribution remain explicitly unavailable, including legacy
+runs; they are never inferred from current values.
+
 For the housing sample, `runFinalTest` defaults to `true`. Supply
 `--var runFinalTest=false` during direct execution, or override that Boolean in
 the trigger form/API, to skip the final-test node and its reports while keeping

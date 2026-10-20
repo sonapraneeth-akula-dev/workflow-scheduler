@@ -85,6 +85,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Admin.RetentionJson.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, MetricsJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunTimelineJsonContext.Default);
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunConditionsJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Series.SeriesTrendsJson.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Dashboards.DashboardJson.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Subscriptions.SubscriptionJson.Default);

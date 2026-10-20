@@ -19,6 +19,7 @@ import {
   type VersionPlan,
 } from "@/features/taskplan/api"
 import { TaskOutputs } from "@/features/runs/TaskOutputs"
+import { ConditionDebug } from "@/features/runs/ConditionDebug"
 import type { TimelineAttempt } from "@/features/runs/timeline-api"
 import { completedTimelineQuery } from "@/features/runs/timeline-query"
 import { executionStatuses, type RunSnapshot } from "@/lib/live/runApi"
@@ -388,8 +389,16 @@ export function RunGraph({
               Condition:{" "}
               {conditionDescriptions[run.conditionOutcomes[node.key]!]}
             </p>
-          ) : node.when ? (
-            <p>Condition: {describeCondition(node.when)}</p>
+          ) : null}
+          {node.when ? <p>Condition: {describeCondition(node.when)}</p> : null}
+          {node.when || run.conditionOutcomes?.[node.key] ? (
+            <ConditionDebug
+              key={`${run.runId}/${node.key}`}
+              runId={run.runId}
+              versionId={plan.versionId}
+              entityKey={node.key}
+              revision={JSON.stringify([run.status, run.conditionOutcomes])}
+            />
           ) : null}
           <p className="text-muted-foreground">
             {node.tasks.length} {node.tasks.length === 1 ? "task" : "tasks"}{" "}
@@ -438,6 +447,13 @@ export function RunGraph({
                 {node.tasks.map((task) => {
                   const status = run.tasks[`${node.key}/${task.key}`]
                   const retryOn = retryableFailures(task)
+                  const blockedByNode =
+                    status === 10 &&
+                    run.conditionOutcomes?.[node.key] !== undefined &&
+                    run.conditionOutcomes[node.key] !== "Matched" &&
+                    !run.conditionOutcomes[`${node.key}/${task.key}`]
+                      ? node.key
+                      : undefined
                   return (
                     <li key={task.key}>
                       <span className="font-medium">{task.key}</span>{" "}
@@ -460,8 +476,24 @@ export function RunGraph({
                             ]
                           }
                         </p>
-                      ) : task.when ? (
+                      ) : null}
+                      {task.when ? (
                         <p>Condition: {describeCondition(task.when)}</p>
+                      ) : null}
+                      {task.when ||
+                      run.conditionOutcomes?.[`${node.key}/${task.key}`] ||
+                      blockedByNode ? (
+                        <ConditionDebug
+                          key={`${run.runId}/${node.key}/${task.key}`}
+                          runId={run.runId}
+                          versionId={plan.versionId}
+                          entityKey={`${node.key}/${task.key}`}
+                          blockedByNode={blockedByNode}
+                          revision={JSON.stringify([
+                            run.status,
+                            run.conditionOutcomes,
+                          ])}
+                        />
                       ) : null}
                       <p className="mt-1 text-xs text-muted-foreground">
                         Failure retries:{" "}
