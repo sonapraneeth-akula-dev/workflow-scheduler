@@ -68,6 +68,21 @@ test("navbar opens recurring job tables grouped by type and workflow and team/ty
     await expect(group).toHaveAttribute("data-workflow-id", job.workflowId)
     await expect(group).toContainText(job.workflowId)
     await expect(group.getByRole("heading", { level: 4 })).toBeVisible()
+    const header = group.locator(":scope > tr").first()
+    await expect(header.getByText("Workflow", { exact: true })).toBeVisible()
+    const count = jobs.filter(
+      (item) => item.workflowId === job.workflowId
+    ).length
+    await expect(
+      header.getByText(`${count} ${count === 1 ? "job" : "jobs"} shown`, {
+        exact: true,
+      })
+    ).toBeVisible()
+    expect(
+      await header.evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).borderTopWidth)
+      )
+    ).toBeGreaterThanOrEqual(4)
     expect(await row.locator("xpath=ancestor::section").count()).toBe(2)
   }
   await expect(page.getByRole("table")).toHaveCount(1)

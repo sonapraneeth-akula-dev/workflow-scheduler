@@ -196,10 +196,17 @@ it("groups table rows by authorized team, workflow type and exact workflow with 
   expect(
     within(linear).getByRole("rowheader", { name: fullTest.name })
   ).toBeVisible()
-  expect(linear.querySelector('th[scope="rowgroup"]')).toHaveAttribute(
-    "colspan",
-    "8"
+  const header = linear.querySelector<HTMLTableCellElement>(
+    'th[scope="rowgroup"]'
+  )!
+  expect(header).toHaveAttribute("colspan", "8")
+  expect(header.parentElement).toHaveClass(
+    "border-t-4",
+    "border-t-primary",
+    "bg-secondary"
   )
+  expect(within(header).getByText("Workflow", { exact: true })).toBeVisible()
+  expect(within(header).getByText("2 jobs shown")).toBeVisible()
   expect(
     within(alpha).getByRole("region", { name: "Alpha Science / Validation" })
   ).toBeVisible()
@@ -235,6 +242,9 @@ it("groups table rows by authorized team, workflow type and exact workflow with 
     "data-workflow-id",
     paused.workflowId
   )
+  expect(
+    within(pausedRow.parentElement!).getByText("1 job shown")
+  ).toBeVisible()
   expect(within(pausedRow).getByText("UI schedule")).toBeVisible()
   expect(within(pausedRow).getByText("Cron: 0 9 * * 1-5")).toBeVisible()
   expect(

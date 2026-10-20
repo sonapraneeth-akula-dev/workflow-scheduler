@@ -240,18 +240,35 @@ export function RecurringJobs({
                                   aria-label={name}
                                   data-workflow-id={workflowId}
                                 >
-                                  <tr className="border-b bg-muted/50">
+                                  <tr className="border-t-4 border-b border-t-primary bg-secondary text-secondary-foreground">
                                     <th
                                       scope="rowgroup"
                                       colSpan={8}
-                                      className="p-3"
+                                      className="p-4"
                                     >
-                                      <h4 className="font-semibold break-words">
-                                        {name}
-                                      </h4>
-                                      <p className="font-mono text-xs font-normal break-all text-muted-foreground">
-                                        {workflowId}
-                                      </p>
+                                      <div className="flex flex-wrap items-start justify-between gap-3">
+                                        <div className="min-w-0 space-y-1">
+                                          <p className="text-xs font-medium tracking-wide uppercase">
+                                            Workflow
+                                          </p>
+                                          <h4 className="text-lg font-semibold break-words">
+                                            {name}
+                                          </h4>
+                                          <p className="font-mono text-xs font-normal break-all">
+                                            {workflowId}
+                                          </p>
+                                        </div>
+                                        <Badge
+                                          variant="outline"
+                                          className="bg-background"
+                                        >
+                                          {entries.length}{" "}
+                                          {entries.length === 1
+                                            ? "job"
+                                            : "jobs"}{" "}
+                                          shown
+                                        </Badge>
+                                      </div>
                                     </th>
                                   </tr>
                                   {entries.map((job) => (

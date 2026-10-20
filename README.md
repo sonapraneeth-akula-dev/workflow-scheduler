@@ -1293,7 +1293,8 @@ runs shows an explicit empty state, never unrelated runs.
 
 **Recurring jobs** in the navbar opens `/recurring-jobs`: all nondeleted Code
 and User schedules you can view, including paused schedules, in tables grouped
-by team, workflow type and workflow. Each workflow has a labeled row group;
+by team, workflow type and workflow. Each workflow has a distinct header band
+with a strong divider, workflow name, exact ID and count of jobs shown;
 each scheduled job has its own row with status, source, recurrence, schedule
 timezone, local next-fire time, version selection, and links to schedule details
 and series history. Team and workflow-type filters persist in the URL. Tables
