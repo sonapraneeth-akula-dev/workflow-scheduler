@@ -46,6 +46,24 @@ public static class RunFailures
             WITH selected AS (
                 SELECT r.id,r.workflow_id,r.run_day,r.status FROM unnest($1::uuid[]) w(id)
                 JOIN runs r ON r.run_day=uuid_v7_run_day(w.id) AND r.id=w.id
+            ), undispatched_events AS (
+                SELECT DISTINCT ON (r.id,e.entity_key) r.id,r.workflow_id,r.run_day,r.status,e.entity_key,e.ts,
+                    convert_from(e.payload,'UTF8')::jsonb AS data
+                FROM selected r JOIN run_events e ON e.run_day=r.run_day AND e.run_id=r.id
+                WHERE e.kind=2 AND e.attempt IS NULL AND e.entity_key IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM task_attempts a
+                    WHERE a.run_day=r.run_day AND a.run_id=r.id AND a.task_key=e.entity_key
+                )
+                ORDER BY r.id,e.entity_key,e.seq DESC
+            ), undispatched AS (
+                SELECT e.id,e.workflow_id,e.entity_key AS task_key,NULL::smallint AS attempt,
+                    (e.data->>'FailureCategory')::smallint AS failure_category,e.data->>'FailureReason' AS error,
+                    e.ts AS ended_at,split_part(e.entity_key,'/',1) AS node_key,
+                    CASE WHEN (e.data->>'State')::smallint=6 OR n.status=6 OR e.status=3 THEN 'Optional'
+                        ELSE 'Failed' END AS impact
+                FROM undispatched_events e LEFT JOIN node_runs n ON n.run_day=e.run_day AND n.run_id=e.id
+                    AND n.node_key=split_part(e.entity_key,'/',1)
+                WHERE (e.data->>'State')::smallint IN (6,7,8)
             ), failures AS (
                 SELECT r.id,r.workflow_id,a.task_key,a.attempt,a.failure_category,a.error,a.ended_at,
                     split_part(a.task_key,'/',1) AS node_key,
@@ -63,6 +81,8 @@ public static class RunFailures
                     ORDER BY l.attempt DESC LIMIT 1
                 ) latest ON true
                 UNION ALL
+                SELECT * FROM undispatched
+                UNION ALL
                 SELECT r.id,r.workflow_id,NULL,NULL,n.failure_category,NULL,n.ended_at,n.node_key,
                     CASE WHEN n.status=6 OR r.status=3 THEN 'Optional' ELSE 'Failed' END
                 FROM selected r JOIN node_runs n ON n.run_day=r.run_day AND n.run_id=r.id AND n.status IN (6,7,8)
@@ -70,6 +90,9 @@ public static class RunFailures
                     SELECT 1 FROM task_attempts a WHERE a.run_day=n.run_day AND a.run_id=n.run_id
                         AND split_part(a.task_key,'/',1)=n.node_key AND a.status IN (6,7,8)
                         AND (n.failure_category IS NULL OR a.failure_category IS NOT DISTINCT FROM n.failure_category)
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM undispatched u WHERE u.id=n.run_id AND u.node_key=n.node_key
+                        AND (n.failure_category IS NULL OR u.failure_category IS NOT DISTINCT FROM n.failure_category)
                 )
             )
             SELECT id,workflow_id,task_key,attempt,failure_category,error,node_key,impact
@@ -86,10 +109,14 @@ public static class RunFailures
             var recorded = reader.IsDBNull(5) ? null : reader.GetString(5);
             var classification = catalog.Classify(workflow[0], recorded, runtime);
             var messageRecorded = !string.IsNullOrWhiteSpace(recorded);
-            var message = messageRecorded ? recorded!.Trim() : MissingMessage(runtime);
+            var taskKey = reader.IsDBNull(2) ? null : reader.GetString(2);
+            var attempt = reader.IsDBNull(3) ? (int?)null : reader.GetInt16(3);
+            var message = messageRecorded ? recorded!.Trim()
+                : runtime == FailureCategory.Placement && taskKey is not null && attempt is null
+                    ? "No eligible healthy worker became available before the placement deadline. The task did not start."
+                    : MissingMessage(runtime);
             var detail = new RunFailureDetail(classification.Type, classification.Category, message,
-                reader.GetString(6), reader.IsDBNull(2) ? null : reader.GetString(2),
-                reader.IsDBNull(3) ? null : reader.GetInt16(3), reader.GetString(7), runtime?.ToString(),
+                reader.GetString(6), taskKey, attempt, reader.GetString(7), runtime?.ToString(),
                 classification.RuleId, messageRecorded);
             if (!result.TryGetValue(id, out var failures)) result.Add(id, failures = []);
             failures.Add(detail);

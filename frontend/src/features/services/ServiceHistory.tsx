@@ -42,7 +42,7 @@ function WorkflowActions({ entry }: { entry: TrackedWorkflow }) {
   const newTabDescription = useId()
   const label = cardName ? `${workflow.id} (${cardName})` : workflow.id
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="mt-auto flex flex-wrap gap-2">
       <span id={newTabDescription} hidden>
         Opens in a new tab.
       </span>
@@ -192,13 +192,13 @@ function WorkflowGroup({
         </span>
       </div>
       {view === "cards" ? (
-        <ul className="grid min-w-0 items-start gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        <ul className="grid min-w-0 items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {entries.map((entry) => {
             const { workflow } = entry
             return (
               <li
                 key={entry.key}
-                className="min-w-0 space-y-4 border bg-background p-3"
+                className="flex min-w-0 flex-col gap-4 border bg-background p-3"
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <h3 className="min-w-0 text-base font-semibold break-words">
@@ -592,7 +592,8 @@ export function ServiceHistory({
       >
         {[
           ["bg-success", "Succeeded"],
-          ["bg-destructive", "Failed or timed out"],
+          ["bg-destructive", "Failed"],
+          ["bg-chart-4", "Timed out"],
           ["bg-warning", "Aborted"],
           ["bg-info", "Queued, running or aborting"],
         ].map(([color, label]) => (

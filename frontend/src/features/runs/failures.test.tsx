@@ -78,7 +78,6 @@ describe("failure diagnostics", () => {
     expect(failureLabels(summary)).toBe("Infra / Network (Recovered x2)")
     for (const invalid of [
       { ...failure, taskKey: null },
-      { ...failure, attempt: null },
       { ...failure, taskKey: "other/request" },
       { ...failure, type: "Unknown" },
       { ...failure, message: "" },
@@ -102,6 +101,48 @@ describe("failure diagnostics", () => {
     expect(screen.getByText(/Scheduler category: TaskError/)).toHaveTextContent(
       "Mapping: system-infra/demo-network."
     )
+  })
+  it("shows undispatched placement failures without inventing an execution attempt or truncating the reason", () => {
+    const placement: FailureDetail = {
+      ...failure,
+      type: "Infra",
+      category: "Placement",
+      runtimeCategory: "Placement",
+      attempt: null,
+      impact: "Failed",
+      ruleId: null,
+      messageRecorded: false,
+      message:
+        "No eligible healthy worker became available before the placement deadline. The task did not start.",
+    }
+    expect(failureDetailSchema.parse(placement)).toEqual(placement)
+    const placementSummary: FailureSummaryData = {
+      count: 1,
+      recoveredCount: 0,
+      primary: placement,
+      groups: [
+        { type: "Infra", category: "Placement", impact: "Failed", count: 1 },
+      ],
+    }
+    render(<FailureSummary status="Failed" summary={placementSummary} />)
+    expect(screen.getByText("Infra / Placement (Failed)")).toBeVisible()
+    expect(screen.getByText(placement.message)).not.toHaveClass("truncate")
+    expect(screen.getByText("Task: fetch/request (not started)")).toBeVisible()
+  })
+  it("labels undispatched task diagnostics separately from node failures", async () => {
+    vi.mocked(getTimeline).mockResolvedValue({
+      runId: run.runId,
+      lastSeq: 12,
+      status: "Failed",
+      attempts: [],
+      failures: [{ ...failure, attempt: null, impact: "Failed" }],
+      failureSummary: null,
+    })
+    show({ ...run, status: 4 })
+    await userEvent.click(await screen.findByText(/All recorded failures/))
+    expect(await screen.findByText("fetch/request - not started")).toBeVisible()
+    expect(screen.queryByText(/node failure/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/attempt 1/)).not.toBeInTheDocument()
   })
   it("distinguishes old backends from missing recorded failure details", () => {
     const { rerender } = render(<FailureSummary status="Failed" />)

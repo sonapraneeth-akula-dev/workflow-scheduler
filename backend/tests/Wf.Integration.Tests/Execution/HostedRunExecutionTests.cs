@@ -58,6 +58,29 @@ public sealed partial class HostedRunExecutionTests(HostedExecutionDatabase data
         Assert.Equal("WaitingForMachine", (await runtime.Load()).Snapshot.TaskWaitReasons["work/task"]);
     }
 
+    [Fact]
+    public async Task Placement_wait_limit_records_why_the_task_never_started()
+    {
+        await using var runtime = await Runtime.Create(database, w => w
+            .Node("work", n => n.Task("task", _ => { }, p => p.Limits(ramMb: 32768))));
+        await runtime.Tick();
+        runtime.Clock.Now = runtime.Clock.Now.AddMinutes(10);
+        await runtime.Tick();
+        var run = await runtime.Load();
+        Assert.Equal(RunStatus.Failed, run.Snapshot.Status);
+        Assert.Empty(await runtime.Pending());
+        Assert.Equal(0L, await runtime.Scalar("SELECT count(*) FROM task_attempts WHERE run_id=$1"));
+        var payload = Assert.IsType<byte[]>(await runtime.Scalar("""
+            SELECT payload FROM run_events WHERE run_id=$1 AND kind=2 AND entity_key='work/task'
+            ORDER BY seq DESC LIMIT 1
+            """));
+        using var change = JsonDocument.Parse(payload);
+        Assert.Equal((int)FailureCategory.Placement, change.RootElement.GetProperty("FailureCategory").GetInt32());
+        var reason = change.RootElement.GetProperty("FailureReason").GetString();
+        Assert.Contains("10-minute placement wait limit", reason);
+        Assert.Contains("did not start", reason);
+    }
+
     [Theory]
     [InlineData("TaskError", false, true, 1, 0)]
     [InlineData("PlatformError", false, true, 0, 1)]

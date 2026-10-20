@@ -63,7 +63,9 @@ export function RunFailures({ run }: { run: RunSnapshot }) {
                     <p className="mb-1 text-xs font-medium [overflow-wrap:anywhere]">
                       {failure.taskKey ?? failure.nodeKey}
                       {failure.attempt === null
-                        ? " - no dispatched attempt"
+                        ? failure.taskKey === null
+                          ? " - node failure"
+                          : " - not started"
                         : ` - attempt ${failure.attempt}`}
                     </p>
                     <FailureMessage failure={failure} />

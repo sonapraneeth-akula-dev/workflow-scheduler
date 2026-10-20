@@ -13,6 +13,37 @@ public sealed class RunStateTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 15, 0, 0, 0, TimeSpan.Zero);
 
+    [Theory]
+    [InlineData(ExecutionStatus.Failed)]
+    [InlineData(ExecutionStatus.SoftFailed)]
+    [InlineData(ExecutionStatus.TimedOut)]
+    public void Task_failure_reasons_are_replayable_without_overwriting_the_run_reason(ExecutionStatus status)
+    {
+        var run = Active();
+        var before = run.Snapshot;
+        var change = run.CreateEvent(EventEntity.Task, "node/task", (int)status, Now) with
+            { FailureReason = "A recorded scheduler failure." };
+        run.Apply(change);
+        Assert.Equal(change.FailureReason, run.Events[^1].FailureReason);
+        Assert.Null(run.Snapshot.FailureReason);
+        var restored = RunState.Restore(before, [change], Assert.Fail);
+        Assert.Equal(JsonSerializer.Serialize(run.Snapshot), JsonSerializer.Serialize(restored.Snapshot));
+    }
+
+    [Theory]
+    [InlineData(ExecutionStatus.Succeeded, 10)]
+    [InlineData(ExecutionStatus.Failed, 0)]
+    [InlineData(ExecutionStatus.Failed, 501)]
+    public void Invalid_task_failure_reasons_leave_state_untouched(ExecutionStatus status, int length)
+    {
+        var run = Active();
+        var before = run.Snapshot;
+        var change = run.CreateEvent(EventEntity.Task, "node/task", (int)status, Now) with
+            { FailureReason = new string('x', length) };
+        Assert.Throws<InvalidOperationException>(() => run.Apply(change));
+        Assert.Same(before, run.Snapshot);
+    }
+
     [Fact]
     public void Progress_is_replayable_attempt_metadata_without_restarting_timers_or_changing_state()
     {

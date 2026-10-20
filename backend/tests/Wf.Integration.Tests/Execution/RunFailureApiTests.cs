@@ -14,6 +14,47 @@ namespace Wf.Integration.Tests.Execution;
 
 public sealed partial class RunTimelineApiTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Undispatched_task_failure_events_explain_placement_without_inventing_attempts_or_duplicate_node_failures(
+        bool recordedReason)
+    {
+        var (team, group) = await Registry();
+        var store = Store();
+        var run = await Create(team);
+        var at = DateTimeOffset.UtcNow;
+        await store.AppendAsync(run, EventEntity.Run, null, (int)RunStatus.Running, at, Token);
+        foreach (var status in new[] { ExecutionStatus.Ready, ExecutionStatus.Dispatched, ExecutionStatus.Running })
+            await store.AppendAsync(run, EventEntity.Node, "node", (int)status, at, Token);
+        await store.AppendAsync(run, run.CreateEvent(EventEntity.Task, "node/task", (int)ExecutionStatus.Ready, at) with
+            { WaitingReason = "WaitingForMachine" }, Token);
+        const string reason = "No eligible healthy worker became available within the 10-minute placement wait limit. The task did not start.";
+        await store.AppendAsync(run, run.CreateEvent(EventEntity.Task, "node/task", (int)ExecutionStatus.Failed,
+            at.AddMinutes(10)) with
+        {
+            FailureCategory = FailureCategory.Placement,
+            FailureReason = recordedReason ? reason : null
+        }, Token);
+        await store.AppendAsync(run, EventEntity.Node, "node", (int)ExecutionStatus.Failed, at.AddMinutes(10), Token);
+        await store.AppendAsync(run, EventEntity.Run, null, (int)RunStatus.Failed, at.AddMinutes(10), Token);
+        await using var api = await MetricsApiServer.Start(database.DataSource, Token);
+        var timeline = await Read(api, run.Snapshot.RunId, api.Jwt(group));
+        Assert.Empty(timeline.Attempts);
+        var failure = Assert.Single(timeline.Failures);
+        Assert.Equal(("Infra", "Placement", "Placement", "Failed"),
+            (failure.Type, failure.Category, failure.RuntimeCategory, failure.Impact));
+        Assert.Equal("node", failure.NodeKey);
+        Assert.Equal("node/task", failure.TaskKey);
+        Assert.Null(failure.Attempt);
+        Assert.Equal(recordedReason, failure.MessageRecorded);
+        Assert.Contains("did not start", failure.Message);
+        Assert.DoesNotContain("No failure message", failure.Message);
+        if (recordedReason) Assert.Equal(reason, failure.Message);
+        Assert.Equal(1, timeline.FailureSummary!.Count);
+        Assert.Equal(failure, timeline.FailureSummary.Primary);
+    }
+
     [Fact]
     public async Task Failure_projection_distinguishes_undispatched_missing_messages_and_pending_retries()
     {
@@ -21,16 +62,22 @@ public sealed partial class RunTimelineApiTests
         var store = Store();
         var undispatched = await Create(team);
         await store.AppendAsync(undispatched, EventEntity.Run, null, (int)RunStatus.Running, DateTimeOffset.UtcNow, Token);
-        foreach (var status in new[] { ExecutionStatus.Ready, ExecutionStatus.Dispatched, ExecutionStatus.Running, ExecutionStatus.Failed })
+        foreach (var status in new[] { ExecutionStatus.Ready, ExecutionStatus.Dispatched, ExecutionStatus.Running })
             await store.AppendAsync(undispatched, EventEntity.Node, "node", (int)status, DateTimeOffset.UtcNow, Token);
-        await Execute("UPDATE node_runs SET failure_category=$2 WHERE run_id=$1",
-            undispatched.Snapshot.RunId, (short)FailureCategory.Placement);
+        await store.AppendAsync(undispatched,
+            undispatched.CreateEvent(EventEntity.Node, "node", (int)ExecutionStatus.Failed, DateTimeOffset.UtcNow) with
+                { FailureCategory = FailureCategory.Placement }, Token);
+        await using (var category = database.DataSource.CreateCommand("SELECT failure_category FROM node_runs WHERE run_id=$1"))
+        {
+            category.Parameters.AddWithValue(undispatched.Snapshot.RunId);
+            Assert.Equal((short)FailureCategory.Placement, await category.ExecuteScalarAsync(Token));
+        }
         await store.AppendAsync(undispatched, EventEntity.Run, null, (int)RunStatus.Failed, DateTimeOffset.UtcNow, Token);
         await using var api = await MetricsApiServer.Start(database.DataSource, Token);
         var timeline = await Read(api, undispatched.Snapshot.RunId, api.Jwt(group));
         Assert.Empty(timeline.Attempts);
         var missing = Assert.Single(timeline.Failures);
-        Assert.Equal(("Infra", "Unclassified", "Failed"), (missing.Type, missing.Category, missing.Impact));
+        Assert.Equal(("Infra", "Placement", "Failed"), (missing.Type, missing.Category, missing.Impact));
         Assert.False(missing.MessageRecorded);
         Assert.Null(missing.TaskKey);
         Assert.Null(missing.Attempt);

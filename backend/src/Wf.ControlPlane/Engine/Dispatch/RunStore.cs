@@ -251,10 +251,11 @@ public sealed class RunStore(NpgsqlDataSource dataSource, ILogger<RunStore> logg
         {
             var metric = run.Snapshot.Metrics!.Nodes[change.Key!];
             await ExecuteAsync(connection, """
-                UPDATE node_runs SET status=$3,started_at=$4,ended_at=$5
+                UPDATE node_runs SET status=$3,started_at=$4,ended_at=$5,failure_category=COALESCE($6,failure_category)
                 WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND node_key=$2
                 """, cancellationToken, change.RunId, change.Key!, (short)change.State,
-                (object?)metric.StartedAt ?? DBNull.Value, (object?)metric.EndedAt ?? DBNull.Value);
+                (object?)metric.StartedAt ?? DBNull.Value, (object?)metric.EndedAt ?? DBNull.Value,
+                (object?)(short?)change.FailureCategory ?? DBNull.Value);
         }
         // Dispatch inserts the new attempt after this event; there is no attempt row to update yet.
         if (change.Entity == EventEntity.Task && change.Progress is null && (ExecutionStatus)change.State != ExecutionStatus.Dispatched &&

@@ -244,7 +244,8 @@ public sealed class RunExecutionService(NpgsqlDataSource source, RunRecovery rec
                 {
                     await Emit(EventEntity.Task, key,
                         (int)(task.Failure == FailurePolicy.Soft ? ExecutionStatus.SoftFailed : ExecutionStatus.Failed),
-                        FailureCategory.Placement);
+                        FailureCategory.Placement,
+                        reason: "No eligible healthy worker became available within the 10-minute placement wait limit. The task did not start.");
                     return null;
                 }
                 if (decision.Agent is not null) return decision;
@@ -266,9 +267,10 @@ public sealed class RunExecutionService(NpgsqlDataSource source, RunRecovery rec
         }
 
         async Task Emit(EventEntity entity, string? key, int state, FailureCategory? category = null,
-            ConditionOutcome? condition = null) =>
+            ConditionOutcome? condition = null, string? reason = null) =>
             await RunStore.AppendAsync(connection, run,
-                run.CreateEvent(entity, key, state, now) with { FailureCategory = category, ConditionOutcome = condition }, token);
+                run.CreateEvent(entity, key, state, now) with
+                    { FailureCategory = category, ConditionOutcome = condition, FailureReason = reason }, token);
 
         async Task ChangeNode(NodeStateChange change, FailureCategory? category = null, ConditionOutcome? condition = null)
         {

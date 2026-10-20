@@ -94,14 +94,18 @@ export async function getTimeline(
     (result.failures ?? []).some(
       (failure) =>
         failure.taskKey !== null &&
-        !result.attempts.some(
-          (attempt) =>
-            attempt.taskKey === failure.taskKey &&
-            attempt.attempt === failure.attempt &&
-            ["Failed", "SoftFailed", "TimedOut"].includes(
-              attempt.terminalStatus ?? ""
+        (failure.attempt === null
+          ? result.attempts.some(
+              (attempt) => attempt.taskKey === failure.taskKey
             )
-        )
+          : !result.attempts.some(
+              (attempt) =>
+                attempt.taskKey === failure.taskKey &&
+                attempt.attempt === failure.attempt &&
+                ["Failed", "SoftFailed", "TimedOut"].includes(
+                  attempt.terminalStatus ?? ""
+                )
+            ))
     ) ||
     result.attempts.some((row) => {
       const previous = attempts.get(row.taskKey) ?? 0

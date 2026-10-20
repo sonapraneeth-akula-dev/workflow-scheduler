@@ -44,15 +44,17 @@ export function StatusBadge({ status }: { status: Status }) {
   const color =
     status === "Succeeded"
       ? "border-success/35 bg-success/10 text-success"
-      : status === "Failed" || status === "TimedOut"
+      : status === "Failed"
         ? "border-destructive/35 bg-destructive/10 text-destructive"
-        : ["SoftFailed", "Retrying", "Aborting"].includes(status)
-          ? "border-warning/35 bg-warning/10 text-warning"
-          : ["Ready", "Dispatched", "Running", "Reused", "Queued"].includes(
-                status
-              )
-            ? "border-info/35 bg-info/10 text-info"
-            : "bg-muted text-muted-foreground"
+        : status === "TimedOut"
+          ? "border-chart-4/35 bg-chart-4/10 text-chart-4"
+          : ["SoftFailed", "Retrying", "Aborting"].includes(status)
+            ? "border-warning/35 bg-warning/10 text-warning"
+            : ["Ready", "Dispatched", "Running", "Reused", "Queued"].includes(
+                  status
+                )
+              ? "border-info/35 bg-info/10 text-info"
+              : "bg-muted text-muted-foreground"
   return (
     <Badge variant="outline" className={color}>
       <Icon aria-hidden="true" focusable="false" />

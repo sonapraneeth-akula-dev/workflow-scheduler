@@ -21,7 +21,7 @@ export const failureDetailSchema = z
   })
   .refine(
     (value) =>
-      (value.taskKey === null) === (value.attempt === null) &&
+      (value.attempt === null || value.taskKey !== null) &&
       (value.taskKey === null || value.taskKey.split("/")[0] === value.nodeKey)
   )
 export const failureSummarySchema = z

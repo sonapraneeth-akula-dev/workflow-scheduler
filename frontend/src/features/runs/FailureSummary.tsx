@@ -26,11 +26,16 @@ export function FailureSummary({
         {labels}
       </p>
       <p
-        className="truncate text-muted-foreground"
+        className="[overflow-wrap:anywhere] text-muted-foreground"
         title={summary.primary.message}
       >
         {summary.primary.message}
       </p>
+      {summary.primary.taskKey !== null && summary.primary.attempt === null ? (
+        <p className="[overflow-wrap:anywhere] text-muted-foreground">
+          Task: {summary.primary.taskKey} (not started)
+        </p>
+      ) : null}
     </div>
   )
 }

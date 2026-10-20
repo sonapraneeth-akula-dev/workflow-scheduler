@@ -85,6 +85,49 @@ describe("committed timeline boundary", () => {
     expect((await getTimeline(runId)).attempts).toEqual([])
   })
   it.each([
+    { attempts: [], attempt: null, valid: true },
+    { attempts: [row], attempt: 1, valid: true },
+    { attempts: [row], attempt: null, valid: false },
+    { attempts: [], attempt: 1, valid: false },
+    { attempts: [row], attempt: 2, valid: false },
+    {
+      attempts: [
+        { ...row, terminalStatus: "Succeeded", failureCategory: null },
+      ],
+      attempt: 1,
+      valid: false,
+    },
+  ])(
+    "validates task failure identity against actual dispatch evidence: %j",
+    async ({ attempts, attempt, valid }) => {
+      const failure = {
+        type: "Infra",
+        category: "Placement",
+        message:
+          "No eligible healthy worker became available. The task did not start.",
+        nodeKey: "node",
+        taskKey: "node/task",
+        attempt,
+        impact: "Failed",
+        runtimeCategory: "Placement",
+        ruleId: null,
+        messageRecorded: false,
+      }
+      get.mockResolvedValue({
+        response: new Response(),
+        data: {
+          runId,
+          lastSeq: 7,
+          status: "Failed",
+          attempts,
+          failures: [failure],
+        },
+      })
+      if (valid) expect((await getTimeline(runId)).failures).toEqual([failure])
+      else await expect(getTimeline(runId)).rejects.toThrow("inconsistent")
+    }
+  )
+  it.each([
     { nodeKey: "other" },
     { taskKey: "invalid" },
     { attempt: 0 },

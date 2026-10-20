@@ -36,12 +36,19 @@ public sealed class FailureCatalogTests
     [Theory]
     [InlineData(FailureCategory.AgentLost)]
     [InlineData(FailureCategory.PlatformError)]
-    [InlineData(FailureCategory.Placement)]
     [InlineData(FailureCategory.ResourceLimit)]
     public void Unmatched_typed_infrastructure_failures_keep_their_domain_without_inventing_a_message_match(FailureCategory category)
     {
         Assert.Equal(new("Infra", "Unclassified", null), Catalog().Classify("demo", null, category));
         Assert.Equal(new("Infra", "Unclassified", null), Catalog().Classify("demo", "unmapped reason", category));
+    }
+
+    [Fact]
+    public void Typed_placement_failures_explain_the_scheduler_cause_without_a_message_rule()
+    {
+        Assert.Equal(new("Infra", "Placement", null), Catalog().Classify("demo", null, FailureCategory.Placement));
+        Assert.Equal(new("Infra", "Placement", null),
+            Catalog().Classify("demo", "No eligible healthy worker became available.", FailureCategory.Placement));
     }
 
     [Theory]

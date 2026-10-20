@@ -234,6 +234,21 @@ it("renders individual run outcomes with exact new-tab links, last run and full 
   ).toBeVisible()
 })
 
+it("stretches cards within each grid row and anchors their actions to the bottom", async () => {
+  show()
+  const card = (await screen.findByRole("heading", { name: "Build" })).closest(
+    "li"
+  )!
+  expect(card.parentElement).toHaveClass("items-stretch")
+  for (const name of ["Build", "Never"]) {
+    const item = screen.getByRole("heading", { name }).closest("li")!
+    expect(item).toHaveClass("flex", "flex-col", "gap-4")
+    expect(
+      within(item).getByRole("link", { name: /^History for / }).parentElement
+    ).toHaveClass("mt-auto")
+  }
+})
+
 it("switches to the striped semantic table without changing the cached health query", async () => {
   const shown = show()
   await screen.findByText("Build", { exact: true })
@@ -353,6 +368,10 @@ it("distinguishes every outcome with an accessible status icon and matching colo
     items: [
       {
         ...entry,
+        workflow: {
+          ...entry.workflow,
+          latestRun: { ...entry.workflow.latestRun!, status: "TimedOut" },
+        },
         runs: statuses.map((status, index) => ({
           ...entry.runs[0]!,
           id: `019ed132-2f44-7000-8000-${(100 - index).toString(16).padStart(12, "0")}`,
@@ -369,9 +388,19 @@ it("distinguishes every outcome with an accessible status icon and matching colo
     "bg-info",
     "bg-success",
     "bg-destructive",
-    "bg-destructive",
+    "bg-chart-4",
     "bg-warning",
   ]
+  const legend = screen.getByLabelText("Run status legend")
+  expect(within(legend).getByText("Failed", { exact: true })).toBeVisible()
+  expect(within(legend).getByText("Timed out", { exact: true })).toBeVisible()
+  expect(
+    within(legend).queryByText("Failed or timed out")
+  ).not.toBeInTheDocument()
+  expect(screen.getByText("TimedOut", { exact: true })).toHaveClass(
+    "bg-chart-4/10",
+    "text-chart-4"
+  )
   screen
     .getAllByRole("link", { name: /Opens in a new tab/ })
     .forEach((link, index) => {

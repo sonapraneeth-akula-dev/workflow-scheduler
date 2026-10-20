@@ -199,8 +199,13 @@ public sealed class RunState
             Reject("Placement metadata requires a waiting Ready task or a dispatched task with a nonempty agent ID.");
         if (@event.FailureReason is { } reason &&
             (string.IsNullOrWhiteSpace(reason) || reason.Length > 500 ||
-             @event.Entity != EventEntity.Run || (RunStatus)@event.State != RunStatus.Failed))
-            Reject("A failure reason requires a failed run and 1-500 nonblank characters.");
+             !(@event.Entity switch
+             {
+                 EventEntity.Run => (RunStatus)@event.State == RunStatus.Failed,
+                 EventEntity.Task => (ExecutionStatus)@event.State is ExecutionStatus.Failed or ExecutionStatus.SoftFailed or ExecutionStatus.TimedOut,
+                 _ => false
+             })))
+            Reject("A failure reason requires a failed run or task and 1-500 nonblank characters.");
         if (@event.FailureCategory is { } category && (!Enum.IsDefined(category) ||
             !(@event.Entity switch
             {

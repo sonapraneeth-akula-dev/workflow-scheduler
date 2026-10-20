@@ -1160,6 +1160,8 @@ incident/audit investigation; missing legacy attribution is never invented.
 Service history cards and tables show individual run instances inline.
 Each status-colored icon represents one run, with a distinct status symbol,
 run ID and timestamp; clicking it opens that exact run in a new tab.
+Failed runs use a red cross; timed-out runs use a purple alarm clock and a
+separate legend entry.
 **View last run** opens the exact latest run and is
 disabled for never-run workflows; **History** opens that workflow's run history.
 Cards are configured only in the workflow's applied `schedules.json`, not in the
@@ -1214,6 +1216,8 @@ Success rates use the completed instances currently shown. The percentage sits
 beside the recent-run count; its accessible label explains completed success.
 Run icons wrap after at most ten per row, growing card height rather than
 reserving extra column width for larger preferences.
+Cards within each grid row share the tallest card's natural height, with action
+buttons aligned at the bottom; expanded failure details remain fully visible.
 Workflows without runs remain visible with an explicit empty state.
 Older saved view URLs ignore the obsolete `window` parameter; personal run
 count takes precedence. The service-history API uses `runLimit=1..30`
@@ -1274,8 +1278,9 @@ literal, case-insensitive substring matching against the recorded, redacted
 message: first shared infrastructure rule, then first owning-team rule, in
 file order. A match labels the failure **Infra** or **Service** without changing
 its original message, scheduler category or retry policy. Unmatched messages
-show **Unclassified**; typed AgentLost, PlatformError, Placement and
-ResourceLimit failures default to Infra, other failures to Service.
+show **Unclassified**, except typed Placement failures show **Infra / Placement**.
+Typed AgentLost, PlatformError and ResourceLimit failures default to Infra,
+other failures to Service.
 
 The control plane validates and loads the catalogue at startup; malformed
 rules fail startup explicitly. The default catalogue is packaged with the
@@ -1294,7 +1299,14 @@ Successful retries remain **Recovered**, not run failures. Run details show
 every recorded failed attempt under **Failure diagnostics**; Timeline and
 the exact-attempt output inspector show its full message and scheduler category.
 Missing historical messages are explicitly identified, never reconstructed
-as original text. Completed runs load diagnostics once; active runs require
+as original text. Pre-dispatch task failures are read from committed task events
+even when no attempt was created. Placement wait failures explain that no
+eligible healthy worker became available and the task did not start; new events
+record the 10-minute wait limit. Historical typed placement events without a
+message receive a scheduler-category explanation, not a fabricated original
+message or attempt. Summaries wrap the reason and mark unstarted tasks explicitly.
+Placement wait failures remain **Failed**, separate from execution **Timed out**.
+Completed runs load diagnostics once; active runs require
 **Refresh failures**, without adding graph polling.
 
 `RunSnapshot.Metrics` projects run, lifecycle-stage/node, task and attempt timing

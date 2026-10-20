@@ -20,7 +20,7 @@ const outcomes = {
   Aborting: { icon: OctagonPause, color: "bg-info" },
   Succeeded: { icon: CircleCheck, color: "bg-success" },
   Failed: { icon: CircleX, color: "bg-destructive" },
-  TimedOut: { icon: AlarmClock, color: "bg-destructive" },
+  TimedOut: { icon: AlarmClock, color: "bg-chart-4" },
   Aborted: { icon: Ban, color: "bg-warning" },
 }
 
