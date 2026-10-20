@@ -1261,8 +1261,9 @@ each with a stable unique `id`, friendly `name`, optional `visible` (default
 
 Selecting a workflow type shows a top-level panel per workflow, without a
 redundant type container. On the **Regression** page, **Linear Regression** and
-**Logistic Regression** are peer panels, each containing its own **Training &
-validation** and **Full test** instance cards. Across all workflow types, type
+**Logistic Regression** are peer panels stacked vertically at every screen size,
+each containing its own **Training & validation** and **Full test** instance cards.
+Across all workflow types, workflow panels also stack vertically, while type
 containers retain the nested workflow panels. Table format retains one row per
 configured card, including its exact workflow identity. Metadata grouping remains
 available and does not change card membership or run counts.

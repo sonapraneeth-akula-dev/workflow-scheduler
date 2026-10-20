@@ -106,14 +106,12 @@ test("a selected Regression type shows peer Linear and Logistic workflow panels 
         }
         await expect(container.locator(":scope > ul > li")).toHaveCount(2)
       }
-      if (width === 1999) {
-        const linear = await panels.nth(0).boundingBox()
-        const logistic = await panels.nth(1).boundingBox()
-        expect(linear).not.toBeNull()
-        expect(logistic).not.toBeNull()
-        expect(linear!.y).toBe(logistic!.y)
-        expect(logistic!.x).toBeGreaterThan(linear!.x)
-      }
+      const linear = await panels.nth(0).boundingBox()
+      const logistic = await panels.nth(1).boundingBox()
+      expect(linear).not.toBeNull()
+      expect(logistic).not.toBeNull()
+      expect(logistic!.y).toBeGreaterThanOrEqual(linear!.y + linear!.height)
+      expect(logistic!.x).toBe(linear!.x)
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth)
       ).toBeLessThanOrEqual(width)

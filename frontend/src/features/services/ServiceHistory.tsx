@@ -374,7 +374,7 @@ function WorkflowGroup({
       </div>
       {view === "cards" ? (
         nested ? (
-          <div className="grid min-w-0 items-stretch gap-4 2xl:grid-cols-2">
+          <div className="grid min-w-0 items-stretch gap-4">
             {[...workflows].map(([workflowId, cards]) => {
               const workflow = cards[0]!.workflow
               const name = presentationName(
@@ -877,13 +877,7 @@ export function ServiceHistory({
         .map((type) => (
           <WorkflowTypeLive key={`${team}/${type}`} team={team} type={type} />
         ))}
-      <div
-        className={
-          groupByWorkflow
-            ? "grid min-w-0 items-stretch gap-4 2xl:grid-cols-2"
-            : "space-y-4"
-        }
-      >
+      <div className="space-y-4">
         {[...groups]
           .sort(([a], [b]) =>
             a === undefined ? 1 : b === undefined ? -1 : a.localeCompare(b)
