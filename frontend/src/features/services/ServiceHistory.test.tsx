@@ -1076,6 +1076,26 @@ it("opens the collapsible summary by default and counts terminal primary causes,
   expect(
     within(categories).queryByText(/Capacity|Cancelled/)
   ).not.toBeInTheDocument()
+  expect(
+    screen.getByText("Failed runs", { exact: true }).closest("div")
+  ).toHaveClass("bg-destructive/10", "text-destructive")
+  for (const label of ["Timed out runs", "Unknown cause"])
+    expect(screen.getByText(label, { exact: true }).closest("div")).toHaveClass(
+      "bg-warning/10",
+      "text-warning"
+    )
+  const infra = within(categories).getByRole("region", {
+    name: "Infra failure breakdown",
+  })
+  const service = within(categories).getByRole("region", {
+    name: "Service failure breakdown",
+  })
+  expect(infra).toHaveClass("bg-destructive/10")
+  expect(service).toHaveClass("bg-destructive/10")
+  expect(within(infra).getAllByRole("listitem")).toHaveLength(1)
+  expect(within(service).getAllByRole("listitem")).toHaveLength(2)
+  expect(within(infra).queryByText(/Service \//)).not.toBeInTheDocument()
+  expect(within(service).queryByText(/Infra \//)).not.toBeInTheDocument()
   const disclosure = screen.getByText("Run outcome summary").closest("details")!
   expect(disclosure).toHaveAttribute("open")
   await userEvent.click(screen.getByText("Run outcome summary"))
@@ -1135,6 +1155,12 @@ it("deduplicates shared runs across configured cards and updates summary members
   ).toBeVisible()
   expectOutcome("Failed runs", 0)
   expectOutcome("Infra failures", 0)
+  expect(
+    screen.getByText("Failed runs", { exact: true }).closest("div")
+  ).not.toHaveClass("bg-destructive/10")
+  expect(
+    screen.getByRole("region", { name: "Infra failure breakdown" })
+  ).not.toHaveClass("bg-destructive/10")
 })
 
 it("does not show zero counts while configured-card history is still loading", async () => {

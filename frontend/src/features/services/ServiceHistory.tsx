@@ -177,16 +177,25 @@ function OutcomeSummary({
                 Refreshing outcome summary...
               </p>
             ) : null}
-            <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              {[
-                ["Timed out runs", timedOut],
-                ["Failed runs", failed],
-                ["Infra failures", infra],
-                ["Service failures", service],
-                ["Unknown cause", unknown],
-              ].map(([label, count]) => (
-                <div key={label} className="min-w-0 border bg-background p-3">
-                  <dt className="text-sm text-muted-foreground">{label}</dt>
+            <dl className="grid gap-3 sm:grid-cols-3">
+              {(
+                [
+                  ["Timed out runs", timedOut],
+                  ["Failed runs", failed],
+                  ["Unknown cause", unknown],
+                ] as const
+              ).map(([label, count]) => (
+                <div
+                  key={label}
+                  className={`min-w-0 border p-3 ${
+                    count === 0
+                      ? "bg-background"
+                      : label === "Failed runs"
+                        ? "border-destructive/35 bg-destructive/10 text-destructive"
+                        : "border-warning/35 bg-warning/10 text-warning"
+                  }`}
+                >
+                  <dt className="text-sm">{label}</dt>
                   <dd className="text-2xl font-semibold tabular-nums">
                     {count}
                   </dd>
@@ -200,29 +209,68 @@ function OutcomeSummary({
               Timed out runs means the run deadline expired. Unknown cause means
               no primary terminal failure was recorded.
             </p>
-            <div role="group" aria-label="Failure categories">
+            <div
+              role="group"
+              aria-label="Failure categories"
+              className="space-y-3"
+            >
               <h2 className="text-sm font-semibold">Failure categories</h2>
-              {categories.size ? (
-                <ul className="mt-2 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-3">
-                  {[...categories]
-                    .sort(([a], [b]) => a.localeCompare(b))
-                    .map(([label, count]) => (
-                      <li
-                        key={label}
-                        className="flex min-w-0 justify-between gap-3 border bg-background p-2"
+              {(
+                [
+                  ["Infra", infra],
+                  ["Service", service],
+                ] as const
+              ).map(([type, total]) => {
+                const breakdown = [...categories]
+                  .filter(([label]) => label.startsWith(`${type} / `))
+                  .sort(([a], [b]) => a.localeCompare(b))
+                return (
+                  <section
+                    key={type}
+                    aria-label={`${type} failure breakdown`}
+                    className={`min-w-0 space-y-2 border p-3 ${
+                      total
+                        ? "border-destructive/35 bg-destructive/10"
+                        : "bg-background"
+                    }`}
+                  >
+                    <dl>
+                      <div
+                        className={`flex items-baseline justify-between gap-3 ${total ? "text-destructive" : ""}`}
                       >
-                        <span className="break-words">{label}</span>
-                        <span className="font-semibold tabular-nums">
-                          {count}
-                        </span>
-                      </li>
-                    ))}
-                </ul>
-              ) : (
+                        <dt className="font-medium">{type} failures</dt>
+                        <dd className="text-2xl font-semibold tabular-nums">
+                          {total}
+                        </dd>
+                      </div>
+                    </dl>
+                    {breakdown.length ? (
+                      <ul className="grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-3">
+                        {breakdown.map(([label, count]) => (
+                          <li
+                            key={label}
+                            className="flex min-w-0 justify-between gap-3 border border-destructive/35 bg-background p-2"
+                          >
+                            <span className="break-words">{label}</span>
+                            <span className="font-semibold tabular-nums">
+                              {count}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        No classified {type} failures in these runs.
+                      </p>
+                    )}
+                  </section>
+                )
+              })}
+              {categories.size === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   No classified terminal failures in these runs.
                 </p>
-              )}
+              ) : null}
             </div>
           </>
         )}

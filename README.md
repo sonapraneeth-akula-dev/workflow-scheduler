@@ -1224,6 +1224,10 @@ separate legend entry.
 The **Run outcome summary** accordion above the cards is open by default;
 Enter or Space toggles it. It shows timed-out runs, failed runs, Infra failures,
 Service failures, unknown causes and counts by failure type/category.
+Nonzero failure counts use red accents; timeout and unknown-cause warnings use
+yellow/amber accents, with labels and numbers retained in both themes. Infra and
+Service breakdowns occupy separate rows, each containing only its own categories.
+Zero counts remain neutral.
 Counts use unique run IDs across the currently loaded, visible configured cards
 in the selected team/type, with each card's personal recent-run limit applied
 before deduplication. Shared runs count once. These are not all-time totals:

@@ -1,6 +1,62 @@
 import AxeBuilder from "@axe-core/playwright"
 import { expect, test } from "@playwright/test"
 
+test("outcome summary uses readable severity colors and separate Infra and Service category rows", async ({
+  page,
+}) => {
+  test.setTimeout(90_000)
+  const team = process.env.WF_SUMMARY_TEAM ?? "ui-tests"
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme })
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.goto(`/t/${encodeURIComponent(team)}/services`)
+      const disclosure = page.locator("details").filter({
+        has: page.locator("summary", { hasText: "Run outcome summary" }),
+      })
+      await expect(disclosure).toHaveAttribute("open", "")
+      await expect(disclosure.getByText(/unique runs? across/)).toBeVisible()
+      const infra = disclosure.getByRole("region", {
+        name: "Infra failure breakdown",
+      })
+      const service = disclosure.getByRole("region", {
+        name: "Service failure breakdown",
+      })
+      await expect(infra).toBeVisible()
+      await expect(service).toBeVisible()
+      await expect(
+        infra.locator("li").filter({ hasText: /^Service \// })
+      ).toHaveCount(0)
+      await expect(
+        service.locator("li").filter({ hasText: /^Infra \// })
+      ).toHaveCount(0)
+      const infraBox = await infra.boundingBox()
+      const serviceBox = await service.boundingBox()
+      expect(infraBox).not.toBeNull()
+      expect(serviceBox).not.toBeNull()
+      expect(serviceBox!.y).toBeGreaterThanOrEqual(
+        infraBox!.y + infraBox!.height
+      )
+      for (const label of ["Failed runs", "Timed out runs", "Unknown cause"]) {
+        const tile = disclosure.getByText(label, { exact: true }).locator("..")
+        const count = Number(await tile.locator("dd").textContent())
+        expect(Number.isInteger(count)).toBe(true)
+        if (count)
+          await expect(tile).toHaveClass(
+            label === "Failed runs" ? /bg-destructive\/10/ : /bg-warning\/10/
+          )
+      }
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth)
+      ).toBeLessThanOrEqual(width)
+      const audit = await new AxeBuilder({ page })
+        .withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"])
+        .analyze()
+      expect(audit.violations).toEqual([])
+    }
+  }
+})
+
 test("navbar discovers team/type service views and restores format with individual new-tab run actions", async ({
   page,
 }) => {
