@@ -16,8 +16,15 @@ or an existing PostgreSQL 17+ database. From the repository root:
 
 For an isolated three-VM K3s platform, use `.\infra\ha-lab\start.ps1` from an
 elevated PowerShell 7 terminal. See `infra/ha-lab/README.md` for requirements,
-private networking, preserved VM identity, and lifecycle commands. This
-provisions a separate platform without restarting the native stack.
+private networking, replicated application roles, preserved worker identity,
+drain-aware releases and measured VM-crash checkpoint recovery. This provisions
+a separate platform without restarting the native stack. The lab's live admin
+view is `http://127.0.0.1:5180/admin/system` after starting its loopback forwarder.
+
+For planned production Azure instances, `infra/azure-vm/README.md` supplies
+private zonal VM templates, scoped managed identities, versioned Key Vault
+configuration, production Entra/TLS images and a safe rollout runbook. These
+assets were checked offline; no Azure resources have been provisioned.
 
 ```powershell
 dotnet run --project .\backend\src\Wf.AppHost
@@ -315,22 +322,24 @@ still need the same protected `Storage__UploadHmacKey`. See
 `docs/operations/shared-blob-storage.md` for identity, emulator, and security
 configuration. The default remains `FileSystem` for existing local profiles.
 
-Swarm or Kubernetes can host the same application images, but neither a Swarm
-stack nor Kubernetes manifests are currently supplied. For orchestration-level
-local testing, a [kind multi-node cluster](https://kind.sigs.k8s.io/docs/user/configuration/)
-is a suitable next profile: for example, two API replicas, two engine replicas,
-three agents, one development PostgreSQL instance, a migration job, shared blob
-storage and a gateway. This is a proposed topology, not an installed cluster.
-Containerized kind nodes do not replace an isolated machine/VM reboot test.
+The supplied `infra/ha-lab` profile runs K3s on three isolated Hyper-V VMs,
+with two API replicas, two controllers, three workers, two frontend gateways,
+a one-time migration job and shared lab data services. Application resources
+use the `kardia` namespace and `kardia-*` names; K3s components remain separate.
+Its sequential rollout and actual worker/leader VM-loss checks completed real
+checkpointed SDK tasks. See its runbook for measured times and limitations.
+No Swarm stack is supplied. Container-only restart tests do not replace the
+lab's actual isolated VM power-loss check.
 
 Keep workflow/scheduling/task business logic shared. Deployment changes include
 service discovery, leader-aware HTTP/2 routing, readiness and graceful shutdown,
 one-time migrations, secrets, shared storage and durable per-agent volumes.
-Our trusted Compose authentication profile also hard-codes Docker subnets and
+The trusted Compose authentication profile also hard-codes Docker subnets and
 allowed service origins; those assumptions cannot simply be copied into a
 Kubernetes namespace. Use an explicit suitable security/network profile rather
-than weakening the existing guards. See [Kubernetes workload roles](https://kubernetes.io/docs/concepts/workloads/)
-and [Swarm deployment requirements](https://docs.docker.com/engine/swarm/stack-deploy/).
+than weakening the existing guards. The HA lab has its own loopback-only
+Development profile. `infra/azure-vm` instead supplies Production Entra/TLS and
+managed-identity settings for separate Azure VMs without depending on K3s.
 
 The real
 lifecycle acceptance test requires a normal Debug CLI build and explicit
@@ -2983,7 +2992,8 @@ bodies return 413; short/wrong-hash bodies return 400; invalid/expired grants
 return 403. Partial uploads are never published. `BlobUploadGrants` is shared
 with the filesystem adapter; mediated uploads also work with an injected
 `AzureBlobStore` without process-local SAS completion state. The default host
-uses the filesystem store; Azure profile/credential wiring follows separately.
+uses the filesystem store; see `docs/operations/shared-blob-storage.md` and
+`infra/azure-vm/README.md` for Azure profile and managed-identity wiring.
 Never log upload URLs, grants or HMAC keys.
 The host restricts raw ASP.NET Core request/routing logs to Warning so
 capabilities in paths and live access-token query strings are not logged.

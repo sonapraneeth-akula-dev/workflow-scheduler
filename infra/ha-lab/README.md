@@ -285,3 +285,19 @@ lock and a terminating controller still admitting work after its HTTP listener
 closed. Resource publication now rechecks authority around blob I/O outside
 fenced transactions; shutdown withdraws new engine admission immediately while
 allowing already accepted durable events to flush.
+
+## Azure production instances
+
+Use `..\azure-vm\README.md` for the separate production profile: named private
+zonal frontend/API/controller/agent VMs, immutable application images,
+scoped managed identities, versioned Key Vault configuration and Entra/TLS.
+It reuses the application's shared storage, lease fencing, durable journals,
+checkpoint recovery and explicit drain/resume protocol; it does not require
+K3s or copy this lab's login bypass and emulator credentials.
+
+The Azure templates, image builds and isolated installer/TLS/authentication
+checks were validated locally. Azure resources were **not** provisioned;
+live Entra/IMDS/RBAC, Azure networking and cloud VM/data-service failover require
+an authorized nonproduction deployment before promotion. Follow the
+one-at-a-time rollout procedure there; the initial installer deliberately
+refuses to replace an existing role container or silently discard worker state.
