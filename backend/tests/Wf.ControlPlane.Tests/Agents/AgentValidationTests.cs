@@ -10,6 +10,10 @@ public sealed class AgentValidationTests
         yield return [new Action<Hello>(hello => hello.Id = "hostname")];
         yield return [new Action<Hello>(hello => hello.Id = Guid.Empty.ToString())];
         yield return [new Action<Hello>(hello => hello.ProtocolVersion = 0)];
+        yield return [new Action<Hello>(hello => hello.ProcessInstanceId = "invalid")];
+        yield return [new Action<Hello>(hello => hello.ProcessInstanceId = Guid.Empty.ToString("D"))];
+        yield return [new Action<Hello>(hello => hello.ProcessInstanceId = Guid.NewGuid().ToString("N"))];
+        yield return [new Action<Hello>(hello => hello.ProcessInstanceId = "A2111FD3-F78E-455B-BBE0-75AEAE01FDD1")];
         yield return [new Action<Hello>(hello => hello.Name = "")];
         yield return [new Action<Hello>(hello => hello.Pool = "")];
         yield return [new Action<Hello>(hello => hello.Version = "")];
@@ -28,6 +32,16 @@ public sealed class AgentValidationTests
             hello.Inflight.Add(task);
             hello.Inflight.Add(task);
         })];
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("a2111fd3-f78e-455b-bbe0-75aeae01fdd1")]
+    public void Process_identity_is_optional_for_legacy_agents_and_canonical_when_present(string process)
+    {
+        var hello = ValidHello();
+        hello.ProcessInstanceId = process;
+        Assert.NotEqual(Guid.Empty, AgentRegistry.ValidateHello(hello, DateTimeOffset.UnixEpoch).SessionId);
     }
 
     [Theory]

@@ -62,8 +62,8 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
             await using var command = new NpgsqlCommand("""
                 INSERT INTO agents
                     (id,name,os,arch,cores,ram_mb,max_tasks,labels,pool,status,last_heartbeat_at,agent_version,session_id,slots_used,
-                        supports_calibration_commands,supports_drain_commands)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$11,$12,$13,$14,$15)
+                        supports_calibration_commands,supports_drain_commands,process_instance_id)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$11,$12,$13,$14,$15,$16)
                 ON CONFLICT (id) DO UPDATE SET
                     name=EXCLUDED.name,os=EXCLUDED.os,arch=EXCLUDED.arch,cores=EXCLUDED.cores,
                     ram_mb=EXCLUDED.ram_mb,max_tasks=EXCLUDED.max_tasks,
@@ -72,7 +72,8 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
                     last_heartbeat_at=EXCLUDED.last_heartbeat_at,agent_version=EXCLUDED.agent_version,
                     session_id=EXCLUDED.session_id,slots_used=EXCLUDED.slots_used,cpu_percent=0,ram_used_mb=0,disk_free_mb=0,
                     supports_calibration_commands=EXCLUDED.supports_calibration_commands,
-                    supports_drain_commands=EXCLUDED.supports_drain_commands
+                    supports_drain_commands=EXCLUDED.supports_drain_commands,
+                    process_instance_id=EXCLUDED.process_instance_id
                 RETURNING status,labels,pool
                 """, connection, transaction);
             command.Parameters.AddWithValue(agent.Id);
@@ -90,6 +91,8 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
             command.Parameters.AddWithValue(agent.SlotsUsed);
             command.Parameters.AddWithValue(hello.SupportsCalibrationCommands);
             command.Parameters.AddWithValue(hello.SupportsDrainCommands);
+            command.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Uuid,
+                hello.ProcessInstanceId.Length == 0 ? DBNull.Value : Guid.Parse(hello.ProcessInstanceId));
             AgentStatus status;
             ImmutableDictionary<string, string> labels;
             string pool;
@@ -204,6 +207,10 @@ public sealed class AgentRegistry(NpgsqlDataSource dataSource, TimeProvider time
             "x64" => AgentArchitecture.X64, "arm64" => AgentArchitecture.Arm64,
             _ => throw new ArgumentException("Hello.arch must be x64 or arm64.", nameof(hello))
         };
+        if (hello.ProcessInstanceId.Length != 0 &&
+            (!Guid.TryParseExact(hello.ProcessInstanceId, "D", out var process) || process == Guid.Empty ||
+             hello.ProcessInstanceId != process.ToString("D")))
+            throw new ArgumentException("Hello.process_instance_id must be empty or a canonical non-empty UUID.", nameof(hello));
         ValidateMetadata(hello.Labels, hello.Pool);
         var inflight = new HashSet<string>(StringComparer.Ordinal);
         foreach (var attempt in hello.Inflight)

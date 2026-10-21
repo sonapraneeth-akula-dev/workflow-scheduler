@@ -63,6 +63,8 @@ message Hello {
   bool supports_calibration_commands = 13;
   bool supports_drain_commands = 14;
   bool supports_log_mirroring = 15;
+  // Stable across reconnects, different for each agent process; empty for legacy agents.
+  string process_instance_id = 16;
 }
 
 message MirrorLogs {

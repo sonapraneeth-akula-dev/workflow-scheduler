@@ -648,6 +648,25 @@ acknowledgement from the current session at the exact machine epoch. A deadline
 or disconnected agent alone never frees live capacity. Released means safe for
 maintenance, not Healthy: the machine stays Draining without automatic re-enable.
 
+Admin `POST /api/v1/machines/{id}/resume` accepts
+`{ "drainId": "<exact released drain UUID>", "reason": "maintenance verified" }`.
+Migration `0049_agent_drain_resume.sql` records an optional process identity in
+Hello and the process which physically acknowledged release. Resume requires a
+**different, restarted agent process**, a fresh heartbeat, no occupied slots,
+no assigned attempts and no live reservations. A gRPC reconnect with a new
+session but the same process does not qualify: that process still has its local
+drain gate. Status and before/after audit commit atomically; an audit failure
+leaves the machine Draining. Repeating after a successful resume is a no-op;
+an intervening different drain returns 409.
+
+For rollout automation, include `"requireResumable": true` in the drain request.
+This refuses an older agent **before** maintenance starts if it cannot supply
+process identity. Old Hello messages remain compatible with registration and
+ordinary drain, but a release without recorded process proof cannot be guessed
+safe for resume after an upgrade. Deploy the process-identity-capable agent
+before requesting a resumable maintenance cycle. Resume never overrides
+placement/retry policy or reconstructs lost in-task memory.
+
 `dotnet test backend\tests\Wf.Integration.Tests --filter "FullyQualifiedName~Agents.DrainTests"`
 exercises actual PostgreSQL, HTTP/2 agents, packaged SDK hosts and a spare agent:
 graceful completion, deadline cancellation with gated cleanup, forced process-tree

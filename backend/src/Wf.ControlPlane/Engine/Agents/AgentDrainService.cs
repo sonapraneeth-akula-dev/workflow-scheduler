@@ -14,7 +14,7 @@ public sealed record AgentDrainRecord(Guid Id, Guid AgentId, string Status, Date
 public sealed class AgentDrainService(NpgsqlDataSource source, RunStore runs, AgentRegistry registry, TimeProvider time)
 {
     public async Task<AgentDrainRecord> RequestAsync(Guid machine, int maxDrainSeconds, string reason,
-        string actor, string actorKind, CancellationToken token)
+        string actor, string actorKind, CancellationToken token, bool requireResumable = false)
     {
         if (machine == Guid.Empty || maxDrainSeconds is < 1 or > 86400 ||
             string.IsNullOrWhiteSpace(reason) || Encoding.UTF8.GetByteCount(reason) > 1024 ||
@@ -25,14 +25,20 @@ public sealed class AgentDrainService(NpgsqlDataSource source, RunStore runs, Ag
         await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock($1)", token, ReservationManager.AllocationLock);
         short status;
         bool supported;
-        await using (var query = new NpgsqlCommand("SELECT status,supports_drain_commands FROM agents WHERE id=$1 FOR UPDATE", connection))
+        bool processIdentified;
+        await using (var query = new NpgsqlCommand("""
+            SELECT status,supports_drain_commands,process_instance_id IS NOT NULL FROM agents WHERE id=$1 FOR UPDATE
+            """, connection))
         {
             query.Parameters.AddWithValue(machine);
             await using var reader = await query.ExecuteReaderAsync(token);
             if (!await reader.ReadAsync(token)) throw new KeyNotFoundException("Machine not found.");
             status = reader.GetInt16(0);
             supported = reader.GetBoolean(1);
+            processIdentified = reader.GetBoolean(2);
         }
+        if (requireResumable && !processIdentified)
+            throw new InvalidOperationException("A resumable drain requires an agent process identity before maintenance.");
         var existing = await ReadAsync(connection, machine, token);
         if (existing is not null) return existing;
         if (status == 2 || !supported)
@@ -138,12 +144,56 @@ public sealed class AgentDrainService(NpgsqlDataSource source, RunStore runs, Ag
         await RunStore.ExecuteAsync(connection, """
             UPDATE agents SET slots_used=0,reservation_fenced_epoch=reservation_epoch WHERE id=$1
             """, token, session.AgentId);
-        await RunStore.ExecuteAsync(connection, "UPDATE drain_requests SET released_at=$2 WHERE id=$1", token, id, now);
+        await RunStore.ExecuteAsync(connection, """
+            UPDATE drain_requests d SET released_at=$2,released_process_instance_id=a.process_instance_id
+            FROM agents a WHERE d.id=$1 AND a.id=d.agent_id
+            """, token, id, now);
         var record = await ReadAsync(connection, session.AgentId, token)
             ?? throw new InvalidDataException("Committed drain disappeared.");
         await AuditAsync(connection, actor, actorKind, "machine.drain.completed", record, token);
         await transaction.CommitAsync(token);
         await registry.LoadAsync(token);
+    }
+
+    public async Task ResumeAsync(Guid machine, Guid drainId, string reason, string actor, string actorKind,
+        CancellationToken token)
+    {
+        if (machine == Guid.Empty || drainId == Guid.Empty ||
+            string.IsNullOrWhiteSpace(reason) || Encoding.UTF8.GetByteCount(reason) > 1024 ||
+            !Guid.TryParseExact(actor, "D", out var principal) || principal == Guid.Empty || actorKind is not ("User" or "App"))
+            throw new ArgumentException("Resume requires a machine, drain identity, bounded reason and audit principal.");
+        await using var connection = await source.OpenConnectionAsync(token);
+        await using var transaction = await connection.BeginTransactionAsync(token);
+        await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock($1)", token, ReservationManager.AllocationLock);
+        await using (var query = new NpgsqlCommand("""
+            SELECT a.status,a.slots_used,a.last_heartbeat_at,a.process_instance_id,
+                d.id,d.released_at,d.released_process_instance_id,
+                NOT EXISTS(SELECT 1 FROM reservations r WHERE r.agent_id=a.id AND r.released_at IS NULL),
+                NOT EXISTS(SELECT 1 FROM task_attempts t WHERE t.agent_id=a.id AND t.status IN (2,3))
+            FROM agents a LEFT JOIN drain_requests d ON d.agent_id=a.id WHERE a.id=$1 FOR UPDATE OF a
+            """, connection))
+        {
+            query.Parameters.AddWithValue(machine);
+            await using var reader = await query.ExecuteReaderAsync(token);
+            if (!await reader.ReadAsync(token)) throw new KeyNotFoundException("Machine not found.");
+            if (reader.IsDBNull(4) && reader.GetInt16(0) == 0) return;
+            if (reader.GetInt16(0) != 2 || reader.GetInt32(1) != 0 ||
+                reader.GetFieldValue<DateTimeOffset>(2) <= time.GetUtcNow() - AgentRegistry.HeartbeatTimeout ||
+                reader.IsDBNull(3) || reader.IsDBNull(4) || reader.GetGuid(4) != drainId ||
+                reader.IsDBNull(5) || reader.IsDBNull(6) || reader.GetGuid(3) == reader.GetGuid(6) ||
+                !reader.GetBoolean(7) || !reader.GetBoolean(8))
+                throw new InvalidOperationException("Resume requires physical release and a fresh, idle, restarted agent process.");
+        }
+        await RunStore.ExecuteAsync(connection, "DELETE FROM drain_requests WHERE agent_id=$1 AND id=$2", token, machine, drainId);
+        await RunStore.ExecuteAsync(connection, "UPDATE agents SET status=0 WHERE id=$1", token, machine);
+        await RunStore.ExecuteAsync(connection, """
+            INSERT INTO audit_log(actor,actor_kind,action,target_kind,target_id,summary)
+            VALUES($1,$2,'machine.resume','Machine',$3,jsonb_build_object('drainId',$4::text,'reason',$5::text,
+                'before',jsonb_build_object('status','Draining'),'after',jsonb_build_object('status','Healthy')))
+            """, token, actor, actorKind, machine.ToString("D"), drainId.ToString("D"), reason);
+        await transaction.CommitAsync(token);
+        await registry.LoadAsync(token);
+        registry.NotifyDispatch(machine);
     }
 
     private static Task AuditAsync(NpgsqlConnection connection, string actor, string kind, string action,

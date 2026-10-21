@@ -23,6 +23,10 @@ public sealed class AgentTelemetryTests
         Assert.NotEmpty(hello.Version);
         Assert.Equal(1U, hello.ProtocolVersion);
         Assert.Equal("10", hello.Labels["dotnet"]);
+        Assert.True(Guid.TryParseExact(hello.ProcessInstanceId, "D", out var process));
+        Assert.NotEqual(Guid.Empty, process);
+        Assert.Equal(hello.ProcessInstanceId, telemetry.CreateHello(options).ProcessInstanceId);
+        Assert.NotEqual(hello.ProcessInstanceId, new AgentTelemetry(TimeProvider.System).CreateHello(options).ProcessInstanceId);
     }
 
     [Fact]

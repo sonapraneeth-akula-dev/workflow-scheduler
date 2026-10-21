@@ -14,6 +14,7 @@ public interface IAgentTelemetry
 
 public sealed partial class AgentTelemetry(TimeProvider timeProvider, TaskCommands? tasks = null) : IAgentTelemetry
 {
+    private readonly string processInstanceId = Guid.NewGuid().ToString("D");
     private (ulong Idle, ulong Total)? previousCpu;
 
     public Hello CreateHello(AgentOptions options)
@@ -28,6 +29,7 @@ public sealed partial class AgentTelemetry(TimeProvider timeProvider, TaskComman
             Cores = (uint)Environment.ProcessorCount, RamMb = total / (1024 * 1024),
             Version = typeof(AgentTelemetry).Assembly.GetName().Version!.ToString(),
             ProtocolVersion = 1, SupportsCalibrationCommands = true, SupportsDrainCommands = true, SupportsLogMirroring = true,
+            ProcessInstanceId = processInstanceId,
             Labels = { options.Labels.ToDictionary() }, Inflight = { tasks?.Inflight ?? [] }
         };
     }

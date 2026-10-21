@@ -5917,7 +5917,7 @@ export interface paths {
             };
         };
         put?: never;
-        /** @description Global Admin only. Stops new dispatches durably, including across reconnects. maxDrainSeconds is 1..86400; reason is required (up to 1024 UTF-8 bytes). Running tasks may finish until the deadline, then unfinished attempts are physically stopped and re-placed using their original retry and placement policies. Released requires a current-session physical acknowledgement, never a timer. The machine remains Draining after release. Repeating the request returns the original drain without changing its deadline. Legacy agents return 409. */
+        /** @description Global Admin only. Stops new dispatches durably, including across reconnects. maxDrainSeconds is 1..86400; reason is required (up to 1024 UTF-8 bytes). Running tasks may finish until the deadline, then unfinished attempts are physically stopped and re-placed using their original retry and placement policies. Released requires a current-session physical acknowledgement, never a timer. The machine remains Draining after release. Repeating the request returns the original drain without changing its deadline. Legacy agents return 409. Optional requireResumable=true also requires process identity support before beginning maintenance. */
         post: {
             parameters: {
                 query?: never;
@@ -5941,6 +5941,118 @@ export interface paths {
                     content: {
                         "application/json": components["schemas"]["AgentDrainRecord"];
                     };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Payload Too Large */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unsupported Media Type */
+                415: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/machines/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Global Admin only. Re-enables an explicitly drained machine after physical release and a fresh, idle, restarted agent process has registered. A network reconnect alone is insufficient. Requires the exact drainId and a reason (up to 1024 UTF-8 bytes), a current heartbeat, no live reservations and no assigned attempts. Legacy agents without process identity cannot resume. A repeat with no current drain on an already healthy machine is a no-op; another drain identity returns 409. The status change and before/after audit commit atomically. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AgentResumeRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
                 };
                 /** @description Bad Request */
                 400: {
@@ -6499,6 +6611,13 @@ export interface components {
         AgentDrainRequest: {
             /** Format: int32 */
             maxDrainSeconds: number | string;
+            reason: string;
+            /** @default false */
+            requireResumable: boolean;
+        };
+        AgentResumeRequest: {
+            /** Format: uuid */
+            drainId: string;
             reason: string;
         };
         ArtifactGrant: {
