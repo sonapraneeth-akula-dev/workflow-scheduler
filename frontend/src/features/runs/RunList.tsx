@@ -9,8 +9,9 @@ import { accessDenied } from "@/features/catalog/api"
 import { getRuns, type RunPageCursor, type RunRow } from "./api"
 import { runFilterSchema, type RunSearch } from "./search"
 import { FailureSummary } from "./FailureSummary"
+import { SignOffSummary } from "./SignOffSummary"
 
-const rowHeight = 160
+const rowHeight = 208
 const overscan = 3
 
 function groupValue(row: RunRow, filters: RunSearch): string | undefined {
@@ -141,6 +142,7 @@ function Results({ rows, filters }: { rows: RunRow[]; filters: RunSearch }) {
                 summary={row.failureSummary}
                 status={row.status}
               />
+              <SignOffSummary state={row.signOff} runId={row.id} compact />
             </li>
           ))}
         </ol>

@@ -6,6 +6,7 @@ using Npgsql;
 using NpgsqlTypes;
 using Wf.Contracts.Registry;
 using Wf.Contracts.Reports;
+using Wf.Contracts.Runs;
 using Wf.ControlPlane.Auth;
 
 namespace Wf.ControlPlane.Api;
@@ -94,6 +95,10 @@ public static class ReportIndexEndpoints
                     Kind = reader.GetString(3), Title = reader.GetString(4), Tags = reader.GetFieldValue<string[]>(5),
                     SizeBytes = reader.GetInt64(6), CreatedAt = reader.GetFieldValue<DateTimeOffset>(7)
                 });
+            await reader.DisposeAsync();
+            var signoffs = await SignOffRead.Reports(source, runId, items.Select(item => item.Id), token);
+            for (var index = 0; index < items.Count; index++)
+                items[index] = items[index] with { SignOff = signoffs.GetValueOrDefault(items[index].Id, SignOffState.Empty) };
             return Results.Json(new ReportIndexResponse { RunId = runId, Items = items.ToArray() },
                 ReportIndexJsonContext.Default.ReportIndexResponse);
         }

@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.WebUtilities;
 using Wf.Contracts;
+using Wf.Contracts.Runs;
 using Wf.ControlPlane.Auth;
 
 namespace Wf.ControlPlane.Api;
@@ -15,6 +16,8 @@ public sealed record RunQueryRow(Guid Id, string WorkflowId, Guid VersionId, Gui
     [JsonRequired]
     public RunMetadata? Metadata { get; init; }
     public RunFailureSummary? FailureSummary { get; init; }
+    [JsonRequired]
+    public SignOffState SignOff { get; init; } = SignOffState.Empty;
 }
 public sealed record RunMetadata(string Type, IReadOnlyDictionary<string, string> Values)
 {

@@ -3,6 +3,7 @@ import { ApiError, publicApi } from "@/lib/api/client"
 import type { components } from "@/lib/api/schema"
 import { runStatuses } from "@/features/catalog/api"
 import { failureSummarySchema } from "./failures"
+import { signOffStateSchema } from "./signoff-api"
 import {
   seriesSelectionSchema,
   trackedScheduleSchema,
@@ -56,6 +57,7 @@ const rowSchema = z.object({
   version: z.string().min(1).max(256).nullable(),
   status: z.enum(runStatuses).nullable(),
   failureSummary: failureSummarySchema.nullish(),
+  signOff: signOffStateSchema.nullable(),
   startedAt: instantSchema.nullable(),
   endedAt: instantSchema.nullable(),
   durationMs: z.number().finite().nonnegative().nullable(),
@@ -186,7 +188,11 @@ export async function getHistory(
           ? filters.includeManual === "false"
           : selected !== null && !selected.includes(row.seriesId)) ||
         (isRun
-          ? !row.runId || !row.versionId || !row.status || !row.trigger
+          ? !row.runId ||
+            !row.versionId ||
+            !row.status ||
+            !row.trigger ||
+            !row.signOff
           : !row.fire ||
             !["Skipped", "Missed"].includes(row.fire.outcome) ||
             row.versionId !== null ||
@@ -196,6 +202,7 @@ export async function getHistory(
             row.startedAt !== null ||
             row.endedAt !== null ||
             row.abort !== null ||
+            row.signOff !== null ||
             row.variables.length !== 0) ||
         (row.kind === "Fire" &&
           row.fire !== null &&

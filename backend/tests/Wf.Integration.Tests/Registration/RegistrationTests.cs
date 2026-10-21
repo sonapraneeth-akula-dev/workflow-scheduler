@@ -668,6 +668,10 @@ public sealed partial class RegistrationTests(RegistrationDatabase database) : I
                 app.MapPermissionsEndpoints();
                 app.MapRegistryEndpoints();
                 app.MapCatalogEndpoints();
+                app.MapRunQueryEndpoints();
+                app.MapRunHistoryEndpoints();
+                app.MapReportIndexEndpoints();
+                app.MapReportContentEndpoints();
             }
             if (live)
             {

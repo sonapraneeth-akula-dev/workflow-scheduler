@@ -57,6 +57,7 @@ vi.mock("@tanstack/react-router", () => ({
   ),
 }))
 const row: HistoryRow = {
+  signOff: { revision: "0", status: "NotSignedOff", latest: null },
   kind: "Run",
   at: "2026-10-16T07:00:00Z",
   workflowId: "team/release/build",
@@ -392,7 +393,7 @@ describe("historical table", () => {
       table.querySelector(`time[datetime="${row.abort!.at}"]`)
     ).toHaveAttribute("title", row.abort!.at)
     expect(table).toHaveTextContent("Stop deployment")
-    expect(screen.getAllByRole("columnheader")).toHaveLength(7)
+    expect(screen.getAllByRole("columnheader")).toHaveLength(8)
     expect(table).not.toHaveTextContent("Variables")
     expect(table).not.toHaveTextContent("credential")
     expect(table).not.toHaveTextContent("count (Long)")
@@ -524,7 +525,7 @@ describe("historical table", () => {
     expect(
       screen.queryByRole("columnheader", { name: "Cancellation" })
     ).not.toBeInTheDocument()
-    expect(screen.getAllByRole("columnheader")).toHaveLength(6)
+    expect(screen.getAllByRole("columnheader")).toHaveLength(7)
     expect(screen.queryByText("Not cancelled")).not.toBeInTheDocument()
   })
   it("distinguishes unchanged successful runs from recorded and legacy cancellations", async () => {

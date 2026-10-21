@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.WebUtilities;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Registry;
+using Wf.Contracts.Runs;
 using Wf.ControlPlane.Auth;
 
 namespace Wf.ControlPlane.Api;
@@ -37,6 +38,8 @@ public sealed record CatalogLatestRun(Guid Id, string Status, DateTimeOffset Cre
     DateTimeOffset? StartedAt, DateTimeOffset? EndedAt)
 {
     public RunFailureSummary? FailureSummary { get; init; }
+    [JsonRequired]
+    public SignOffState SignOff { get; init; } = SignOffState.Empty;
 }
 public sealed record CatalogWorkflow(string Id, string Team, string Type, string Name,
     CatalogVersion? ActiveVersion, CatalogVersion LatestVersion, WorkflowMetadata Metadata, CatalogLatestRun? LatestRun);

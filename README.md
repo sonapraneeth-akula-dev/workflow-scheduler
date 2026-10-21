@@ -2155,6 +2155,12 @@ with a required reason. Panels refresh every 30 seconds or on **Refresh sign-off
 After a failed or uncertain write, no automatic retry occurs: the reason stays
 visible and read-only until the dialog is closed; reopening reads current state
 before allowing another change.
+Runs, workflow/series history, service-history cards and report tabs include
+current sign-off summaries. Run summaries retain the latest actor, time and
+reason, including revocation, and link directly to the run's sign-off history.
+Report badges remain independent from workflow approval. Summary reads batch
+only already-authorized page targets; they do not issue one request per row.
+Schedule events without a run show sign-off as not applicable.
 
 Dry-run executes the same core using explicit task mocks, without invoking any
 original task delegate or external service:

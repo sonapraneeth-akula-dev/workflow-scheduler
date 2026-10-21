@@ -7,6 +7,7 @@ import { NativeSelect } from "@/components/ui/native-select"
 import { useLive } from "@/lib/live/useLive"
 import { getReportIndex, type ReportItem } from "./api"
 import { ReportView } from "./ReportView"
+import { SignOffBadge } from "@/features/runs/SignOffSummary"
 
 const stages = new Map([
   ["$init", "System init"],
@@ -168,7 +169,8 @@ export function ReportIndex({ runId }: { runId: string }) {
                     <span className="font-medium">{report.title}</span>{" "}
                     <span className="text-xs">
                       {report.sourceKey} | Attempt {report.attempt}
-                    </span>
+                    </span>{" "}
+                    <SignOffBadge state={report.signOff} />
                   </Tabs.Trigger>
                 ))}
               </Tabs.List>

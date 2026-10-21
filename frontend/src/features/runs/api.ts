@@ -3,6 +3,7 @@ import { ApiError, publicApi } from "@/lib/api/client"
 import type { components } from "@/lib/api/schema"
 import { runStatuses } from "@/features/catalog/api"
 import { failureSummarySchema } from "./failures"
+import { signOffStateSchema } from "./signoff-api"
 import {
   instantMicros,
   instantSchema,
@@ -24,6 +25,7 @@ const rowSchema = z.object({
   startedAt: instantSchema.nullable(),
   endedAt: instantSchema.nullable(),
   failureSummary: failureSummarySchema.nullish(),
+  signOff: signOffStateSchema,
   metadata: z
     .object({
       type: z.string().min(1),

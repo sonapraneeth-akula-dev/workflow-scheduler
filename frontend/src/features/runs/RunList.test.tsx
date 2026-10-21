@@ -33,6 +33,7 @@ vi.mock("@tanstack/react-router", () => ({
   ),
 }))
 const row: RunRow = {
+  signOff: { revision: "0", status: "NotSignedOff", latest: null },
   id: "019ed132-2f44-7000-8000-000000000010",
   workflowId: "team/release/build",
   versionId: "019ed132-2f44-7000-8000-000000000001",
@@ -74,13 +75,13 @@ describe("filtered run list", () => {
     const scroll = screen.getByRole("region", {
       name: "Scrollable run results",
     })
-    fireEvent.scroll(scroll, { target: { scrollTop: 1000 * 160 } })
+    fireEvent.scroll(scroll, { target: { scrollTop: 1000 * 208 } })
     expect(container.querySelectorAll("[data-run-row]")).toHaveLength(10)
     expect(container.querySelectorAll("[data-run-row]")[0]).toHaveAttribute(
       "aria-posinset",
       "998"
     )
-    fireEvent.scroll(scroll, { target: { scrollTop: 9999 * 160 } })
+    fireEvent.scroll(scroll, { target: { scrollTop: 9999 * 208 } })
     expect(screen.getAllByRole("link")[0]).toHaveAttribute(
       "href",
       `/runs/${rows.at(-4)!.id}`
@@ -158,7 +159,7 @@ describe("filtered run list", () => {
   it("hides cached results on revoked access and exposes retry without automatic polling", async () => {
     vi.mocked(getRuns).mockResolvedValue({ items: [row], nextCursor: null })
     const { client } = show(<RunList search={{}} />)
-    await screen.findByRole("link")
+    await screen.findByRole("link", { name: row.workflowId })
     vi.mocked(getRuns).mockRejectedValue(
       new ApiError(new Response(null, { status: 403 }), {
         title: "Viewer access revoked.",

@@ -141,6 +141,12 @@ public static class ReportCompareEndpoints
                 return Problem(404, "Report comparison match not found", "report_match_not_found");
             if (left.Count != 1 || right.Count != 1)
                 return Problem(409, "Report comparison match is ambiguous", "report_match_ambiguous");
+            await reader.DisposeAsync();
+            var signoffs = await Task.WhenAll(
+                SignOffRead.Reports(source, input.LeftRunId, [left[0].Id], token),
+                SignOffRead.Reports(source, input.RightRunId, [right[0].Id], token));
+            left[0] = left[0] with { SignOff = signoffs[0].GetValueOrDefault(left[0].Id, Wf.Contracts.Runs.SignOffState.Empty) };
+            right[0] = right[0] with { SignOff = signoffs[1].GetValueOrDefault(right[0].Id, Wf.Contracts.Runs.SignOffState.Empty) };
             return Results.Json(new ReportCompareResponse { SeriesId = input.SeriesId, Left = left[0], Right = right[0] },
                 ReportCompareJsonContext.Default.ReportCompareResponse);
         }

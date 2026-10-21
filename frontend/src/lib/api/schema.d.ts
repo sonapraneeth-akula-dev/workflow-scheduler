@@ -6538,6 +6538,7 @@ export interface components {
             /** Format: date-time */
             endedAt: null | string;
             failureSummary?: null | components["schemas"]["RunFailureSummary"];
+            signOff: components["schemas"]["SignOffState"];
         };
         CatalogMetadataField: {
             key: string;
@@ -6962,6 +6963,7 @@ export interface components {
             sizeBytes: number | string;
             /** Format: date-time */
             createdAt: string;
+            signOff: components["schemas"]["SignOffState"];
         };
         ReportIndexResponse: {
             /** Format: uuid */
@@ -7196,6 +7198,7 @@ export interface components {
             version: null | string;
             triggeredByName?: null | string;
             failureSummary?: null | components["schemas"]["RunFailureSummary"];
+            signOff: null | components["schemas"]["SignOffState"];
         };
         RunHistorySchedule: {
             /** Format: uuid */
@@ -7261,6 +7264,7 @@ export interface components {
             endedAt: null | string;
             metadata: null | components["schemas"]["RunMetadata"];
             failureSummary?: null | components["schemas"]["RunFailureSummary"];
+            signOff: components["schemas"]["SignOffState"];
         };
         RunSnapshotResponse: {
             /** Format: uuid */

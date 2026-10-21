@@ -340,10 +340,13 @@ public sealed class RunQueryTests(AuthorizationDatabase database) : IClassFixtur
             Assert.True(operation.GetProperty("responses").TryGetProperty(code, out _));
         var schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
         var properties = schemas.GetProperty("RunQueryRow").GetProperty("properties");
-        Assert.Equal(new[] { "createdAt", "endedAt", "id", "metadata", "seriesId", "startedAt", "status", "team", "type", "versionId", "workflowId" },
+        Assert.Equal(new[] { "createdAt", "endedAt", "failureSummary", "id", "metadata", "seriesId", "signOff", "startedAt", "status", "team", "type", "versionId", "workflowId" },
             properties.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal));
         Assert.Equal("uuid", properties.GetProperty("id").GetProperty("format").GetString());
         Assert.Equal("date-time", properties.GetProperty("createdAt").GetProperty("format").GetString());
+        Assert.Equal("#/components/schemas/SignOffState", properties.GetProperty("signOff").GetProperty("$ref").GetString());
+        Assert.Contains("signOff", schemas.GetProperty("RunQueryRow").GetProperty("required")
+            .EnumerateArray().Select(value => value.GetString()));
     }
 
     [Fact]

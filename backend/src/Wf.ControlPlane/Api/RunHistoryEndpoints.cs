@@ -219,12 +219,16 @@ public static class RunHistoryEndpoints
         if (more) rows.RemoveAt(rows.Count - 1);
         var failures = await RunFailures.Summaries(context, source,
             rows.Where(row => row.Row.Kind == "Run" && row.Row.RunId.HasValue).Select(row => row.Row.RunId!.Value));
+        var signoffs = await SignOffRead.Runs(source,
+            rows.Where(row => row.Row.Kind == "Run" && row.Row.RunId.HasValue).Select(row => row.Row.RunId!.Value),
+            context.RequestAborted);
         for (var index = 0; index < rows.Count; index++)
         {
             var row = rows[index];
             rows[index] = (row.Row with
             {
-                FailureSummary = row.Row.Kind == "Run" && row.Row.RunId is { } id ? failures.GetValueOrDefault(id) : null
+                FailureSummary = row.Row.Kind == "Run" && row.Row.RunId is { } id ? failures.GetValueOrDefault(id) : null,
+                SignOff = row.Row.Kind == "Run" && row.Row.RunId is { } run ? signoffs.GetValueOrDefault(run, SignOffState.Empty) : null
             }, row.Position);
         }
         var workflows = filter.Runs.WorkflowId is { } workflowId ? new[] { workflowId } :

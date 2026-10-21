@@ -37,6 +37,7 @@ const runId = "019ed132-2f44-7000-8000-000000000001"
 const reportId = "019ed132-2f44-7000-8000-000000000002"
 const data: ReportViewData = {
   report: {
+    signOff: { revision: "0", status: "NotSignedOff", latest: null },
     id: reportId,
     runId,
     sourceKey: "$post/summary",

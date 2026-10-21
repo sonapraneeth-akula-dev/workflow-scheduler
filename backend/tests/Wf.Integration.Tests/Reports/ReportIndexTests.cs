@@ -23,7 +23,7 @@ public sealed class ReportIndexTests(ReportPublishDatabase database, ITestOutput
     private static CancellationToken Token => TestContext.Current.CancellationToken;
     private static string Path(Guid run) => $"/api/v1/runs/{run:D}/reports";
     private static readonly string[] ItemFields =
-        ["attempt", "createdAt", "id", "kind", "runId", "sizeBytes", "sourceKey", "tags", "title"];
+        ["attempt", "createdAt", "id", "kind", "runId", "signOff", "sizeBytes", "sourceKey", "tags", "title"];
 
     [Fact]
     public async Task ReportIndex_actual_PG_HTTP_returns_exact_metadata_filters_stable_historical_sources_and_required_schema()

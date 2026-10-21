@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Wf.Contracts.Runs;
 
 namespace Wf.Contracts.Reports;
 
@@ -20,6 +21,8 @@ public sealed record ReportIndexItem
     public required string[] Tags { get; init; }
     public required long SizeBytes { get; init; }
     public required DateTimeOffset CreatedAt { get; init; }
+    [JsonRequired]
+    public SignOffState SignOff { get; init; } = SignOffState.Empty;
 }
 
 [JsonSerializable(typeof(ReportIndexResponse))]

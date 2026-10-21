@@ -1,8 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text;
 using Npgsql;
 using Wf.Contracts.Runs;
+using Wf.ControlPlane.Storage;
 
 namespace Wf.Integration.Tests.Registration;
 
@@ -114,18 +116,7 @@ public sealed partial class RegistrationTests
         await using var server = await Server.Start(database.DataSource, runs: true);
         var seed = await SeedRerun(server);
         var bearer = RerunOperator(server, seed.Group);
-        var report = Guid.CreateVersion7();
-        await Execute("""
-            INSERT INTO task_attempts(run_day,run_id,task_key,attempt,status,deadline_at)
-            VALUES(uuid_v7_run_day($1),$1,'build/compile',1,6,now()+interval '1 hour')
-            """, seed.Snapshot.RunId);
-        await Execute("INSERT INTO report_ids(id,run_day) VALUES($1,uuid_v7_run_day($2))", report, seed.Snapshot.RunId);
-        await Execute("""
-            INSERT INTO reports(run_day,id,run_id,source_key,attempt,kind,title,tags,size_bytes,blob_uri,sha256,created_at)
-            SELECT run_day,$2,run_id,task_key,attempt,'text','Review report',ARRAY[]::text[],0,
-                'reports/'||run_id::text||'/'||$2::text,decode(repeat('00',32),'hex'),now()
-            FROM task_attempts WHERE run_id=$1 ORDER BY task_key,attempt LIMIT 1
-            """, seed.Snapshot.RunId, report);
+        var report = await SeedSignOffReport(server, seed.Snapshot.RunId);
         Assert.Equal(1L, await Value("SELECT count(*) FROM reports WHERE id=$1", report));
         var reportPath = SignOffPath(seed.Snapshot.RunId, report);
         using (var response = await SignOffWrite(server, reportPath, bearer))
@@ -285,5 +276,84 @@ public sealed partial class RegistrationTests
         Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
         Assert.Single((await SignOffRead(server, path, bearer)).History);
         Assert.Empty(server.Failures);
+    }
+
+    [Fact]
+    public async Task SignOff_actual_HTTP_current_summaries_reach_runs_workflow_history_catalog_service_cards_and_report_index()
+    {
+        await using var server = await Server.Start(database.DataSource, runs: true);
+        var viewer = Guid.NewGuid();
+        var seed = await SeedRerun(server, viewerGroup: viewer);
+        var writer = RerunOperator(server, seed.Group);
+        var reader = server.Token("", "user", "api.read", groups: [viewer]);
+        var run = seed.Snapshot.RunId;
+        var report = await SeedSignOffReport(server, run);
+        var path = SignOffPath(run);
+        using (var approved = await SignOffWrite(server, path, writer))
+            Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
+        using (var approved = await SignOffWrite(server, SignOffPath(run, report), writer, reason: "Report checked independently"))
+            Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
+        var workflow = seed.Request.WorkflowId!;
+        var team = workflow.Split('/')[0];
+        foreach (var url in new[]
+        {
+            "/api/v1/runs?workflowId=" + workflow,
+            "/api/v1/workflows/" + workflow + "/history",
+            "/api/v1/workflows?team=" + team,
+            "/api/v1/service-history?team=" + team,
+            $"/api/v1/runs/{run:D}/reports"
+        })
+        {
+            using var response = await server.Send(HttpMethod.Get, url, null!, reader);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var json = await Json(response);
+            var item = Assert.Single(json.GetProperty("items").EnumerateArray());
+            var summary = url.Contains("service-history", StringComparison.Ordinal)
+                ? item.GetProperty("workflow").GetProperty("latestRun").GetProperty("signOff")
+                : url.StartsWith("/api/v1/workflows?team=", StringComparison.Ordinal)
+                    ? item.GetProperty("latestRun").GetProperty("signOff") : item.GetProperty("signOff");
+            Assert.Equal("SignedOff", summary.GetProperty("status").GetString());
+            Assert.Equal("1", summary.GetProperty("revision").GetString());
+            Assert.Equal(Server.Actor, summary.GetProperty("latest").GetProperty("actorId").GetGuid());
+            if (url.Contains("service-history", StringComparison.Ordinal))
+                Assert.Equal(summary, Assert.Single(item.GetProperty("runs").EnumerateArray()).GetProperty("signOff"),
+                    System.Text.Json.JsonElement.DeepEquals);
+        }
+        using (var revoked = await SignOffWrite(server, path, writer, "1", "Workflow regression", revoke: true))
+            Assert.Equal(HttpStatusCode.OK, revoked.StatusCode);
+        using (var response = await server.Send(HttpMethod.Get, "/api/v1/runs?workflowId=" + workflow, null!, reader))
+        {
+            var summary = Assert.Single((await Json(response)).GetProperty("items").EnumerateArray()).GetProperty("signOff");
+            Assert.Equal("Revoked", summary.GetProperty("status").GetString());
+            Assert.Equal("Workflow regression", summary.GetProperty("latest").GetProperty("reason").GetString());
+        }
+        using (var response = await server.Send(HttpMethod.Get, $"/api/v1/runs/{run:D}/reports", null!, reader))
+            Assert.Equal("SignedOff", Assert.Single((await Json(response)).GetProperty("items").EnumerateArray())
+                .GetProperty("signOff").GetProperty("status").GetString());
+        await Execute("DELETE FROM role_bindings WHERE principal_id=$1", viewer);
+        using (var denied = await server.Send(HttpMethod.Get, "/api/v1/runs?workflowId=" + workflow, null!, reader))
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        Assert.Empty(server.Failures);
+    }
+
+    private async Task<Guid> SeedSignOffReport(Server server, Guid run)
+    {
+        var report = Guid.CreateVersion7();
+        var payload = Encoding.UTF8.GetBytes("review evidence");
+        var hash = SHA256.HashData(payload);
+        var key = $"reports/{run:D}/{report:D}";
+        using var stream = new MemoryStream(payload);
+        await server.Blobs.UploadAsync(new BlobContent(BlobKind.Reports, Convert.ToHexStringLower(hash), payload.Length, key),
+            stream, TestContext.Current.CancellationToken);
+        await Execute("""
+            INSERT INTO task_attempts(run_day,run_id,task_key,attempt,status,deadline_at)
+            VALUES(uuid_v7_run_day($1),$1,'build/compile',1,6,now()+interval '1 hour') ON CONFLICT DO NOTHING
+            """, run);
+        await Execute("INSERT INTO report_ids(id,run_day) VALUES($1,uuid_v7_run_day($2))", report, run);
+        await Execute("""
+            INSERT INTO reports(run_day,id,run_id,source_key,attempt,kind,title,tags,size_bytes,blob_uri,sha256,created_at)
+            VALUES(uuid_v7_run_day($1),$2,$1,'build/compile',1,'text','Review report',ARRAY[]::text[],$3,$4,$5,now())
+            """, run, report, (long)payload.Length, key, hash);
+        return report;
     }
 }

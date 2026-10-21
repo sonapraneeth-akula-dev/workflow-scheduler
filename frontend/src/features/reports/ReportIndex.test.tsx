@@ -27,6 +27,7 @@ vi.mock("./ReportView", () => ({
 }))
 const runId = "019ed132-2f44-7000-8000-000000000001"
 const base: ReportItem = {
+  signOff: { revision: "0", status: "NotSignedOff", latest: null },
   id: "019ed132-2f44-7000-8000-000000000010",
   runId,
   sourceKey: "$post/summary",
@@ -87,14 +88,16 @@ describe("grouped live report index", () => {
   it("opens each report in an embedded subtab with retained source and attempt", async () => {
     show()
     const summary = await screen.findByRole("tab", {
-      name: "Release summary $post/summary | Attempt 2",
+      name: "Release summary $post/summary | Attempt 2 Not signed off",
     })
     expect(summary).toHaveAttribute("aria-selected", "true")
     expect(
       screen.getByRole("region", { name: "Report viewer" })
     ).toHaveTextContent(`${runId}/${base.id} embedded`)
     await userEvent.click(
-      screen.getByRole("tab", { name: "Metrics build/measure | Attempt 2" })
+      screen.getByRole("tab", {
+        name: "Metrics build/measure | Attempt 2 Not signed off",
+      })
     )
     expect(
       screen.getByRole("region", { name: "Report viewer" })
@@ -287,12 +290,12 @@ describe("grouped live report index", () => {
     show()
     expect(
       await screen.findByRole("tab", {
-        name: "Release summary $post/summary | Attempt 2",
+        name: "Release summary $post/summary | Attempt 2 Not signed off",
       })
     ).toBeVisible()
     await userEvent.click(
       screen.getByRole("tab", {
-        name: "Release summary build/measure | Attempt 3",
+        name: "Release summary build/measure | Attempt 3 Not signed off",
       })
     )
     expect(

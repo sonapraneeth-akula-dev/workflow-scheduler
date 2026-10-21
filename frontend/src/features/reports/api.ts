@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { ApiError, publicApi } from "@/lib/api/client"
 import type { components } from "@/lib/api/schema"
+import { signOffStateSchema } from "@/features/runs/signoff-api"
 
 const idSchema = z
   .uuid()
@@ -27,6 +28,7 @@ const reportSchema = z.object({
   tags: z.array(metadataText(128)).max(32),
   sizeBytes: z.int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   createdAt: z.iso.datetime({ offset: true }),
+  signOff: signOffStateSchema,
 })
 const indexSchema = z.object({
   runId: idSchema,

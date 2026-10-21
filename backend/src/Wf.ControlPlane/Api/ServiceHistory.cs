@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.OpenApi;
 using Npgsql;
 using Wf.Contracts.Schedules;
+using Wf.Contracts.Runs;
 
 namespace Wf.ControlPlane.Api;
 
@@ -77,7 +78,7 @@ public static partial class CatalogEndpoints
         }
         try
         {
-            var page = await ReadWorkflowPage(context, source, authorization, filter, includeFailures: false);
+            var page = await ReadWorkflowPage(context, source, authorization, filter, includeRunDetails: false);
             var runs = new Dictionary<string, List<CatalogLatestRun>>(StringComparer.Ordinal);
             if (page.Items.Count > 0)
             {
@@ -107,15 +108,26 @@ public static partial class CatalogEndpoints
                 }
             }
             var failures = await RunFailures.Summaries(context, source, runs.Values.SelectMany(instances => instances).Select(run => run.Id));
+            var signoffs = await SignOffRead.Runs(source, runs.Values.SelectMany(instances => instances).Select(run => run.Id)
+                .Concat(page.Items.Where(item => item.LatestRun is not null).Select(item => item.LatestRun!.Id)),
+                context.RequestAborted);
             var schedules = await RunHistoryEndpoints.ReadSchedules(source, page.Items.Select(item => item.Id).ToArray(), context.RequestAborted);
             var cards = await ReadHistoryCards(source, page.Items.Select(item => item.Id).ToArray(), context.RequestAborted);
             var items = page.Items.Select(workflow => new ServiceWorkflow(
                 workflow.LatestRun is not { } latest ? workflow : workflow with
                 {
-                    LatestRun = latest with { FailureSummary = failures.GetValueOrDefault(latest.Id) }
+                    LatestRun = latest with
+                    {
+                        FailureSummary = failures.GetValueOrDefault(latest.Id),
+                        SignOff = signoffs.GetValueOrDefault(latest.Id, SignOffState.Empty)
+                    }
                 },
                 (runs.GetValueOrDefault(workflow.Id) ?? []).Select(run =>
-                    run with { FailureSummary = failures.GetValueOrDefault(run.Id) }).ToArray())
+                    run with
+                    {
+                        FailureSummary = failures.GetValueOrDefault(run.Id),
+                        SignOff = signoffs.GetValueOrDefault(run.Id, SignOffState.Empty)
+                    }).ToArray())
                 {
                     Schedules = schedules.GetValueOrDefault(workflow.Id)?.ToArray() ?? [],
                     HistoryCards = cards.GetValueOrDefault(workflow.Id)

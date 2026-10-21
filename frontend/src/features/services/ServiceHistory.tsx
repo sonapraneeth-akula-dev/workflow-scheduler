@@ -29,6 +29,7 @@ import {
 } from "./api"
 import { RunHistoryStrip } from "./RunHistoryStrip"
 import { FailureSummary } from "@/features/runs/FailureSummary"
+import { SignOffSummary } from "@/features/runs/SignOffSummary"
 import { getHistory } from "@/features/runs/history"
 import {
   defaultTracking,
@@ -318,7 +319,17 @@ function WorkflowStatus({ entry }: { entry: TrackedWorkflow }) {
     return (
       <span className="text-sm text-muted-foreground">No tracked runs</span>
     )
-  return <StatusBadge status={entry.workflow.latestRun?.status ?? "NeverRun"} />
+  return (
+    <div className="min-w-0 space-y-2">
+      <StatusBadge status={entry.workflow.latestRun?.status ?? "NeverRun"} />
+      {entry.workflow.latestRun ? (
+        <SignOffSummary
+          state={entry.workflow.latestRun.signOff}
+          runId={entry.workflow.latestRun.id}
+        />
+      ) : null}
+    </div>
+  )
 }
 
 function WorkflowTypeLive({ team, type }: { team: string; type: string }) {
@@ -634,7 +645,7 @@ export function ServiceHistory({
       const tracked = trackedQueries[index]!
       const runs = (tracked.error ? [] : (tracked.data?.items ?? [])).map(
         (row) => {
-          if (!row.runId || !row.status)
+          if (!row.runId || !row.status || !row.signOff)
             throw new Error("Tracked run history returned a non-run row.")
           return {
             id: row.runId,
@@ -643,6 +654,7 @@ export function ServiceHistory({
             startedAt: row.startedAt,
             endedAt: row.endedAt,
             failureSummary: row.failureSummary,
+            signOff: row.signOff,
           }
         }
       )

@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.WebUtilities;
 using Wf.Contracts.Definition;
+using Wf.Contracts.Runs;
 using Wf.ControlPlane.Live;
 
 namespace Wf.ControlPlane.Api;
@@ -21,6 +22,8 @@ public sealed record RunHistoryRow(string Kind, DateTimeOffset At, string Workfl
     public string? Version { get; init; }
     public string? TriggeredByName { get; init; }
     public RunFailureSummary? FailureSummary { get; init; }
+    [JsonRequired]
+    public SignOffState? SignOff { get; init; }
 }
 public sealed record RunHistoryPage(RunHistoryRow[] Items, string? NextCursor)
 {

@@ -2,6 +2,7 @@ import { z } from "zod"
 import { ApiError, publicApi } from "@/lib/api/client"
 import type { components } from "@/lib/api/schema"
 import { failureSummarySchema } from "@/features/runs/failures"
+import { signOffStateSchema } from "@/features/runs/signoff-api"
 
 export const runStatuses = [
   "Queued",
@@ -85,6 +86,7 @@ export const catalogWorkflowSchema = z.object({
       id: z.uuid(),
       status: z.enum(runStatuses),
       failureSummary: failureSummarySchema.nullish(),
+      signOff: signOffStateSchema,
       createdAt: z.iso.datetime({ offset: true }),
       startedAt: z.iso.datetime({ offset: true }).nullable(),
       endedAt: z.iso.datetime({ offset: true }).nullable(),

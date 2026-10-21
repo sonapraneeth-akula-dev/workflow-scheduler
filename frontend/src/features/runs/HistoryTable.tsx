@@ -13,6 +13,7 @@ import { accessDenied, runStatuses } from "@/features/catalog/api"
 import { TriggerBadge } from "./TriggerBadge"
 import { RunNowButton } from "@/features/series/RunNowButton"
 import { FailureSummary } from "./FailureSummary"
+import { SignOffSummary } from "./SignOffSummary"
 import {
   scheduleName,
   trackingDescription,
@@ -256,6 +257,7 @@ export function HistoryTable({
                   "Date / time (local)",
                   "Run ID",
                   "Status / Scheduling",
+                  "Sign-off",
                   "Duration",
                   "Trigger",
                   ...(hasSchedules ? ["Schedule"] : []),
@@ -345,6 +347,13 @@ export function HistoryTable({
                       {scheduleReason ? (
                         <p className="max-w-xs break-words">{scheduleReason}</p>
                       ) : null}
+                    </td>
+                    <td className="min-w-56 p-3">
+                      {row.kind === "Run" && row.runId && row.signOff ? (
+                        <SignOffSummary state={row.signOff} runId={row.runId} />
+                      ) : (
+                        "Not applicable"
+                      )}
                     </td>
                     <td className="p-3 whitespace-nowrap">
                       {row.durationMs === null

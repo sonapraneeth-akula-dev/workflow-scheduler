@@ -33,6 +33,7 @@ function page() {
           {
             id: "019ed132-2f44-7000-8000-000000000002",
             status: "Succeeded",
+            signOff: { revision: "0", status: "NotSignedOff", latest: null },
             createdAt: "2026-10-05T12:00:00Z",
             startedAt: null,
             endedAt: null,

@@ -13,6 +13,10 @@ import type { ServiceWorkflow } from "./api"
 import { useState } from "react"
 import { failureLabels } from "@/features/runs/failures"
 import { FailureSummary } from "@/features/runs/FailureSummary"
+import {
+  SignOffSummary,
+  signOffDescription,
+} from "@/features/runs/SignOffSummary"
 
 const outcomes = {
   Queued: { icon: Clock, color: "bg-info" },
@@ -47,7 +51,7 @@ export function RunHistoryStrip({
             const failure = run.failureSummary
               ? ` ${failureLabels(run.failureSummary)}: ${run.failureSummary.primary.message}.`
               : ""
-            const label = `${run.status} run ${run.id}, ${formatTimestamp(run.createdAt)} (${run.createdAt}).${failure} Opens in a new tab.`
+            const label = `${run.status} run ${run.id}, ${formatTimestamp(run.createdAt)} (${run.createdAt}).${failure} Sign-off: ${signOffDescription(run.signOff)}. Opens in a new tab.`
             return (
               <Link
                 key={run.id}
@@ -116,6 +120,25 @@ export function RunHistoryStrip({
                   </li>
                 ))}
             </ul>
+          ) : null}
+          {runs.some((run) => run.signOff.latest) ? (
+            <details className="max-w-sm text-xs">
+              <summary className="rounded focus-visible:outline-2 focus-visible:outline-ring">
+                Sign-off details for run instances
+              </summary>
+              <ul className="mt-2 space-y-3">
+                {runs
+                  .filter((run) => run.signOff.latest)
+                  .map((run) => (
+                    <li key={run.id}>
+                      <p className="truncate font-mono" title={run.id}>
+                        {run.id}
+                      </p>
+                      <SignOffSummary state={run.signOff} runId={run.id} />
+                    </li>
+                  ))}
+              </ul>
+            </details>
           ) : null}
         </details>
       ) : null}

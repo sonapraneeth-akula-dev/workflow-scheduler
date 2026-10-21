@@ -111,7 +111,7 @@ public static partial class CatalogEndpoints
     }
 
     private static async Task<CatalogWorkflowPage> ReadWorkflowPage(HttpContext context, NpgsqlDataSource source,
-        IAuthorizationService authorization, CatalogQuery filter, bool includeFailures = true)
+        IAuthorizationService authorization, CatalogQuery filter, bool includeRunDetails = true)
     {
         var teams = await VisibleTeams(context, source, authorization, filter.Team);
         var types = teams.SelectMany(team => team.Types
@@ -157,13 +157,22 @@ public static partial class CatalogEndpoints
         var more = items.Count > filter.Limit;
         if (more) items.RemoveAt(items.Count - 1);
         await reader.DisposeAsync();
-        if (includeFailures)
+        if (includeRunDetails)
         {
             var failures = await RunFailures.Summaries(context, source,
                 items.Where(item => item.LatestRun is not null).Select(item => item.LatestRun!.Id));
+            var signoffs = await SignOffRead.Runs(source,
+                items.Where(item => item.LatestRun is not null).Select(item => item.LatestRun!.Id), context.RequestAborted);
             for (var index = 0; index < items.Count; index++)
                 if (items[index].LatestRun is { } run)
-                    items[index] = items[index] with { LatestRun = run with { FailureSummary = failures.GetValueOrDefault(run.Id) } };
+                    items[index] = items[index] with
+                    {
+                        LatestRun = run with
+                        {
+                            FailureSummary = failures.GetValueOrDefault(run.Id),
+                            SignOff = signoffs.GetValueOrDefault(run.Id, Wf.Contracts.Runs.SignOffState.Empty)
+                        }
+                    };
         }
         return new(items, more ? CatalogQuery.Cursor(items[^1].Id) : null);
     }

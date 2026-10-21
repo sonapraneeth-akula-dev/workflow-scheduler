@@ -94,6 +94,11 @@ const response: Awaited<ReturnType<typeof getServiceHistory>> = {
           : {
               id: "019ed132-2f44-7000-8000-000000000002",
               status: "Failed",
+              signOff: {
+                revision: "0",
+                status: "NotSignedOff" as const,
+                latest: null,
+              },
               createdAt: "2026-10-18T00:00:00Z",
               startedAt: null,
               endedAt: null,
@@ -106,6 +111,11 @@ const response: Awaited<ReturnType<typeof getServiceHistory>> = {
             (status, index) => ({
               id: `019ed132-2f44-7000-8000-${String(2 - index).padStart(12, "0")}`,
               status,
+              signOff: {
+                revision: "0",
+                status: "NotSignedOff" as const,
+                latest: null,
+              },
               createdAt: `2026-10-18T00:00:0${2 - index}Z`,
               startedAt: null,
               endedAt: null,
@@ -713,6 +723,7 @@ const trackedRow = {
   versionId: "019ed132-2f44-7000-8000-000000000001",
   version: "1.0.0",
   status: "Succeeded",
+  signOff: { revision: "0", status: "NotSignedOff", latest: null },
   startedAt: null,
   endedAt: null,
   durationMs: null,

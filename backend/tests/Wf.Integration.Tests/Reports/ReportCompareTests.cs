@@ -28,7 +28,7 @@ public sealed class ReportCompareTests(ReportPublishDatabase database) : IClassF
     private static CancellationToken Token => TestContext.Current.CancellationToken;
     private static readonly byte[] Payload = Encoding.UTF8.GetBytes("private compare payload");
     private static readonly string[] ItemFields =
-        ["attempt", "createdAt", "id", "kind", "runId", "sizeBytes", "sourceKey", "tags", "title"];
+        ["attempt", "createdAt", "id", "kind", "runId", "signOff", "sizeBytes", "sourceKey", "tags", "title"];
 
     [Fact]
     public async Task ReportCompare_actual_PG17_signed_HTTP_compares_any_two_runs_with_exact_metadata_and_required_OpenAPI()
@@ -66,6 +66,10 @@ public sealed class ReportCompareTests(ReportPublishDatabase database) : IClassF
             Assert.Equal(tags, item.GetProperty("tags").EnumerateArray().Select(value => value.GetString()));
             Assert.Equal(Payload.Length, item.GetProperty("sizeBytes").GetInt64());
             Assert.Equal(TimeSpan.Zero, item.GetProperty("createdAt").GetDateTimeOffset().Offset);
+            var signOff = item.GetProperty("signOff");
+            Assert.Equal("0", signOff.GetProperty("revision").GetString());
+            Assert.Equal("NotSignedOff", signOff.GetProperty("status").GetString());
+            Assert.Equal(JsonValueKind.Null, signOff.GetProperty("latest").ValueKind);
         }
         Private(body);
         using var alternate = await fixture.Get(Path(pair with { Left = third, Right = pair.Left }, title: title));

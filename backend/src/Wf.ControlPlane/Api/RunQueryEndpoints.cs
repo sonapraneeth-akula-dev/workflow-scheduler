@@ -5,6 +5,7 @@ using Npgsql;
 using NpgsqlTypes;
 using Wf.Contracts;
 using Wf.Contracts.Registry;
+using Wf.Contracts.Runs;
 using Wf.ControlPlane.Auth;
 
 namespace Wf.ControlPlane.Api;
@@ -138,8 +139,13 @@ public static class RunQueryEndpoints
         if (more) items.RemoveAt(items.Count - 1);
         await reader.DisposeAsync();
         var failures = await RunFailures.Summaries(context, source, items.Select(item => item.Id));
+        var signoffs = await SignOffRead.Runs(source, items.Select(item => item.Id), context.RequestAborted);
         for (var index = 0; index < items.Count; index++)
-            items[index] = items[index] with { FailureSummary = failures.GetValueOrDefault(items[index].Id) };
+            items[index] = items[index] with
+            {
+                FailureSummary = failures.GetValueOrDefault(items[index].Id),
+                SignOff = signoffs.GetValueOrDefault(items[index].Id, SignOffState.Empty)
+            };
         return Results.Ok(new RunQueryPage(items, more ? filter.Cursor(items[^1].Id, types) : null));
     }
 

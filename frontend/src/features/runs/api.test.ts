@@ -7,6 +7,7 @@ vi.mock("@/lib/api/client", async (original) => ({
   publicApi: { GET: get },
 }))
 const row = {
+  signOff: { revision: "0", status: "NotSignedOff", latest: null },
   id: "019ed132-2f44-7000-8000-000000000010",
   workflowId: "team/release/build",
   versionId: "019ed132-2f44-7000-8000-000000000001",

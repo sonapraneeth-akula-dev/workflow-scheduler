@@ -10,7 +10,10 @@ public enum SignOffAction { SignOff, Revoke }
 public sealed record SignOffRequest(string Reason);
 public sealed record SignOffEvent(string Revision, SignOffAction Action, string Reason,
     Guid ActorId, string ActorName, DateTimeOffset At);
-public sealed record SignOffState(string Revision, SignOffStatus Status, SignOffEvent? Latest);
+public sealed record SignOffState(string Revision, SignOffStatus Status, SignOffEvent? Latest)
+{
+    public static SignOffState Empty { get; } = new("0", SignOffStatus.NotSignedOff, null);
+}
 public sealed record SignOffResponse(Guid RunId, Guid? ReportId, string WorkflowId, Guid VersionId,
     bool IsTerminal, SignOffState State, SignOffEvent[] History, string? NextBefore);
 

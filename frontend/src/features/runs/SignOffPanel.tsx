@@ -5,7 +5,6 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import { ErrorNotice } from "@/components/ErrorNotice"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -24,29 +23,9 @@ import {
   getSignOff,
   signOffReasonSchema,
   type SignOffEvent,
-  type SignOffState,
   type SignOffTarget,
 } from "./signoff-api"
-
-export function SignOffBadge({ state }: { state: SignOffState }) {
-  return (
-    <Badge
-      variant={
-        state.status === "SignedOff"
-          ? "default"
-          : state.status === "Revoked"
-            ? "destructive"
-            : "outline"
-      }
-    >
-      {state.status === "SignedOff"
-        ? "Signed off"
-        : state.status === "Revoked"
-          ? "Revoked"
-          : "Not signed off"}
-    </Badge>
-  )
-}
+import { SignOffBadge } from "./SignOffSummary"
 
 function EventDetails({ event }: { event: SignOffEvent }) {
   return (
@@ -109,6 +88,7 @@ export function SignOffPanel(target: SignOffTarget) {
         "run-history",
         "service-history",
         "reports",
+        "catalog",
       ])
         void client.invalidateQueries({ queryKey: [key] })
     },
@@ -146,6 +126,7 @@ export function SignOffPanel(target: SignOffTarget) {
 
   return (
     <section
+      id={reportId ? `signoff-${reportId}` : "signoff"}
       ref={panel}
       tabIndex={-1}
       aria-label={`${label} sign-off`}

@@ -7,6 +7,7 @@ vi.mock("@/lib/api/client", async (original) => ({
   publicApi: { GET: get },
 }))
 export const historyRow: HistoryRow = {
+  signOff: { revision: "0", status: "NotSignedOff", latest: null },
   kind: "Run",
   at: "2026-10-16T07:00:00.000001Z",
   workflowId: "team/release/build",
@@ -146,6 +147,7 @@ describe("history contracts", () => {
     const fire: HistoryRow = {
       ...historyRow,
       kind: "Fire",
+      signOff: null,
       runId: null,
       versionId: null,
       version: null,

@@ -43,6 +43,7 @@ const runIds = [
   "019ed132-2f44-7000-8000-000000000012",
 ]
 const row = (runId: string): HistoryRow => ({
+  signOff: { revision: "0", status: "NotSignedOff", latest: null },
   kind: "Run",
   runId,
   seriesId,
@@ -61,6 +62,7 @@ const row = (runId: string): HistoryRow => ({
   fire: null,
 })
 const report: ReportItem = {
+  signOff: { revision: "0", status: "NotSignedOff", latest: null },
   id: "019ed132-2f44-7000-8000-000000000020",
   runId: runIds[0]!,
   sourceKey: "$post/summary",
