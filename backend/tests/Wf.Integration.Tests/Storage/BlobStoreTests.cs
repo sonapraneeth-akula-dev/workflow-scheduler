@@ -8,6 +8,8 @@ using Azure.Storage.Blobs.Models;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Configuration;
 using Wf.ControlPlane.Storage;
 
 namespace Wf.Integration.Tests.Storage;
@@ -16,6 +18,22 @@ public sealed class BlobStoreTests(BlobStoreEnvironment environment) : IClassFix
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
     private static readonly byte[] Data = Encoding.UTF8.GetBytes("portable streamed content");
+
+    [Fact]
+    public async Task Configured_replicas_share_verified_blobs_without_a_shared_filesystem()
+    {
+        await using var scope = await environment.CreateAsync(azure: true);
+        var container = scope.ContainerUri!.Segments[^1];
+        var first = environment.ConfiguredStore(container);
+        var second = environment.ConfiguredStore(container);
+        var content = Content(Data);
+        await first.UploadAsync(content, new MemoryStream(Data, writable: false), Token);
+        using var downloaded = new MemoryStream();
+        await second.DownloadAsync(content, downloaded, Token);
+        Assert.Equal(Data, downloaded.ToArray());
+        await second.UploadAsync(content, new MemoryStream(Data, writable: false), Token);
+        await scope.AssertNoStagingAsync();
+    }
 
     [Theory]
     [InlineData(false)]
@@ -425,6 +443,7 @@ public sealed class BlobStoreEnvironment : IAsyncLifetime
 {
     private IContainer? azurite;
     private BlobServiceClient service = null!;
+    private string emulatorConnectionString = "";
 
     public async ValueTask InitializeAsync()
     {
@@ -440,8 +459,19 @@ public sealed class BlobStoreEnvironment : IAsyncLifetime
         await azurite.StartAsync(TestContext.Current.CancellationToken);
         service = new BlobServiceClient(new Uri($"http://127.0.0.1:{azurite.GetMappedPublicPort(10000)}/wfstore"),
             new StorageSharedKeyCredential("wfstore", key), ClientOptions());
+        emulatorConnectionString = $"DefaultEndpointsProtocol=http;AccountName=wfstore;AccountKey={key};BlobEndpoint={service.Uri};";
         await service.GetPropertiesAsync(TestContext.Current.CancellationToken);
     }
+
+    public IBlobStore ConfiguredStore(string container) =>
+        BlobStoreConfiguration.Create(new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?>
+            {
+                ["Storage:Provider"] = "AzureBlob",
+                ["Storage:Azure:Container"] = container,
+                ["Storage:Azure:EmulatorConnectionString"] = emulatorConnectionString
+            }).Build(), RandomNumberGenerator.GetBytes(32), TimeProvider.System,
+            WebApplication.CreateSlimBuilder(new WebApplicationOptions { EnvironmentName = "Development" }).Environment);
 
     public async Task<BlobStoreScope> CreateAsync(bool azure,
         long maximumBytes = 32 * 1024 * 1024, TimeProvider? clock = null)

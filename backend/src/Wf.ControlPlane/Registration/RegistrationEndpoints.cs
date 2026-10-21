@@ -15,19 +15,19 @@ public static class RegistrationEndpoints
     private static readonly TimeSpan GrantLifetime = TimeSpan.FromMinutes(10);
     private const long MaximumRegistrationBytes = 8 * 1024 * 1024;
 
-    public static IServiceCollection AddWorkflowRegistrations(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddWorkflowRegistrations(this IServiceCollection services, IConfiguration configuration,
+        IHostEnvironment? environment = null)
     {
         byte[] key;
         try { key = Convert.FromBase64String(configuration["Storage:UploadHmacKey"] ?? ""); }
         catch (FormatException) { throw new InvalidOperationException("Storage:UploadHmacKey must be a base64-encoded key of at least 256 random bits."); }
         if (key.Length < 32)
             throw new InvalidOperationException("Storage:UploadHmacKey must be a base64-encoded key of at least 256 random bits.");
-        var root = configuration["Storage:Root"] ?? Path.Combine(AppContext.BaseDirectory, "wf-data", "blobs");
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<RegistryWriter>();
         services.TryAddSingleton(new WorkflowEnvironmentPolicy(configuration["WF_WORKFLOW_ENVIRONMENT"] ?? "prod"));
         services.TryAddSingleton<IBlobStore>(provider =>
-            new FileSystemBlobStore(root, key, timeProvider: provider.GetRequiredService<TimeProvider>()));
+            BlobStoreConfiguration.Create(configuration, key, provider.GetRequiredService<TimeProvider>(), environment));
         services.AddSingleton(provider => new BlobUploadGrants(key, RegistrationService.MaximumPackageBytes,
             provider.GetRequiredService<TimeProvider>()));
         services.AddPackageDownloads(key);

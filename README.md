@@ -308,6 +308,13 @@ replicas provide active/standby failover, not additional active scheduler
 throughput. API and agent replication are different scaling concerns.
 Replicated agents need distinct persistent identities and durable journals.
 
+API/controller replicas can select the existing shared Azure implementation with
+`Storage__Provider=AzureBlob`, an HTTPS `Storage__Azure__ServiceUri`, and a private
+`Storage__Azure__Container`. Authentication uses managed identity; all replicas
+still need the same protected `Storage__UploadHmacKey`. See
+`docs/operations/shared-blob-storage.md` for identity, emulator, and security
+configuration. The default remains `FileSystem` for existing local profiles.
+
 Swarm or Kubernetes can host the same application images, but neither a Swarm
 stack nor Kubernetes manifests are currently supplied. For orchestration-level
 local testing, a [kind multi-node cluster](https://kind.sigs.k8s.io/docs/user/configuration/)

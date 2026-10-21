@@ -106,7 +106,7 @@ builder.Services.AddWorkflowDrain(builder.Configuration, engineEnabled);
 builder.Services.AddSingleton(runtimeInstance);
 builder.Services.AddSingleton<RuntimeActivity>();
 builder.Services.AddHostedService<RuntimeInstanceReporter>();
-builder.Services.AddWorkflowRegistrations(builder.Configuration);
+builder.Services.AddWorkflowRegistrations(builder.Configuration, builder.Environment);
 builder.Services.AddSingleton<ActiveVersionCache>();
 builder.Services.AddHostedService<ActiveVersionCache>(services => services.GetRequiredService<ActiveVersionCache>());
 builder.Services.AddSingleton(new LeaseOptions(runtimeInstance.Id,
