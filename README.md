@@ -43,15 +43,19 @@ New Docker databases use `postgres:18.6-alpine`; the AppHost mounts the volume
 at `/var/lib/postgresql`, with PostgreSQL 18 data in `18/docker`.
 **Existing PostgreSQL 17 volumes require an explicit major-version migration.**
 Do not attach an existing 17 data volume to the 18 image or delete it to make
-startup succeed. Back up databases and globals using PostgreSQL 18 client tools,
-verify the backup, restore into a separate PostgreSQL 18 volume, then verify
-workflow history, reports and agent state before switching the launcher.
-Retain the original volume and matching filesystem blobs for rollback.
+startup succeed. Small disposable databases can use a verified dump/restore
+into a separate volume. For large production databases, prefer an online
+logical-replication migration with a fenced cutover, or evaluate `pg_upgrade`
+for a short maintenance window; a full logical dump is not mandatory.
+See the [PostgreSQL upgrade and blocker review](docs/operations/postgresql-major-upgrade-and-blockers.md)
+for preparation, backup alternatives, cutover, rollback limits and the migrated
+native test profile. Retain the original volume and matching filesystem blobs;
+the old database is not a safe rollback target after new writes reach 18.
 Updating these image pins does not migrate or restart a running database.
 
 Native-profile container names describe their purpose and persistent identity:
 `kardia-postgres-<Local:PostgresVolume>` (default
-`kardia-postgres-wf-postgres-data`), `kardia-agent-linux-<agent-UUID>`,
+`kardia-postgres-wf-postgres-data`), `kardia-local-agent-linux-<API-port>`,
 `kardia-local-prometheus-<port>` and `kardia-local-grafana-<port>`.
 Standalone monitoring uses `kardia-monitoring-prometheus` and
 `kardia-monitoring-grafana`. Compose retains project-scoped service names such
@@ -93,10 +97,12 @@ database volume or local files:
 Remove-Item Env:\ConnectionStrings__wf -ErrorAction SilentlyContinue
 dotnet run --project .\backend\src\Wf.AppHost -- `
   "--Local:DataRoot=$PWD\.wf\native-main" `
-  --Local:PostgresVolume=wf-native-main
+  --Local:PostgresVolume=wf-native-main-pg18
 ```
 
 Reuse these same arguments on subsequent starts to preserve this stack's state.
+If standalone monitoring is already running, also pass
+`--Local:Monitoring=false` to avoid starting another stack on its ports.
 Open `http://127.0.0.1:5173` for the frontend,
 `http://127.0.0.1:5000/healthz` for backend health, and
 `http://127.0.0.1:5000/api/v1/workflows` for the workflow API.
