@@ -51,6 +51,8 @@ builder.Services.AddSingleton(secretStore);
 builder.Services.AddWindowsService(options => options.ServiceName = builder.Configuration["Agent:ServiceName"] ?? "wf-agent");
 builder.Services.AddSystemd();
 builder.Services.AddSingleton(AgentOptions.FromConfiguration(builder.Configuration));
+builder.Services.AddSingleton(provider => AgentGatewayAuthentication.FromConfiguration(builder.Configuration,
+    provider.GetRequiredService<AgentOptions>()));
 var insecurePackageOrigin = builder.Configuration["Agent:InsecurePackageOrigin"] is { } origin
     ? new Uri(origin, UriKind.Absolute) : null;
 if (insecurePackageOrigin is not null && !builder.Configuration.GetValue("Agent:AllowInsecureTransport", false))

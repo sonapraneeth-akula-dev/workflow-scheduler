@@ -1,3 +1,4 @@
+using Azure.Identity;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
@@ -12,7 +13,8 @@ public interface IAgentCommandHandler
 }
 
 public sealed class AgentConnection(AgentOptions options, IAgentTelemetry telemetry,
-    IAgentCommandHandler commands, TimeProvider timeProvider, ILogger<AgentConnection> logger, AgentOutbox? outbox = null) : IDisposable
+    IAgentCommandHandler commands, TimeProvider timeProvider, ILogger<AgentConnection> logger, AgentOutbox? outbox = null,
+    AgentGatewayAuthentication? authentication = null) : IDisposable
 {
     private readonly AgentOutbox outgoing = outbox ?? new AgentOutbox(new ResultJournal(options.ResultJournalDirectory, options.Id));
 
@@ -45,6 +47,10 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
                 {
                     logger.LogWarning("Agent HTTP stream failed ({Error}); retrying a configured engine.", exception.HttpRequestError);
                 }
+                catch (AuthenticationFailedException)
+                {
+                    logger.LogError("Agent managed identity authentication failed; retrying without an anonymous or developer-credential fallback.");
+                }
                 index = (index + 1) % options.Engines.Count;
                 await Task.Delay(redirect is null ? TimeSpan.FromSeconds(1) : TimeSpan.FromMilliseconds(100), timeProvider, stoppingToken);
             }
@@ -55,6 +61,7 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
 
     private async Task<Uri?> ConnectAsync(Uri endpoint, CancellationToken stoppingToken)
     {
+        var headers = authentication is null ? null : await authentication.CreateHeadersAsync(endpoint, stoppingToken);
         using var handler = new SocketsHttpHandler
         {
             ConnectTimeout = TimeSpan.FromSeconds(5),
@@ -68,7 +75,7 @@ public sealed class AgentConnection(AgentOptions options, IAgentTelemetry teleme
         });
         using var registration = new CancellationTokenSource(TimeSpan.FromSeconds(10), timeProvider);
         using var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, registration.Token);
-        using var call = new AgentGateway.AgentGatewayClient(channel).Connect(cancellationToken: session.Token);
+        using var call = new AgentGateway.AgentGatewayClient(channel).Connect(headers: headers, cancellationToken: session.Token);
         (commands as TaskCommands)?.ResetLogMirrors();
         var inventory = telemetry.CreateHello(options);
         var attempts = inventory.Inflight.Concat(outgoing.UnacknowledgedAttempts())
