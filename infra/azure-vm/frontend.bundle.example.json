@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "tls": {
+    "certificatePem": "REPLACE_WITH_PEM_CERTIFICATE_AND_INTERMEDIATES",
+    "privateKeyPem": "REPLACE_WITH_PEM_PRIVATE_KEY",
+    "caPem": "REPLACE_WITH_PRIVATE_CA_PEM_OR_EMPTY_STRING"
+  },
+  "frontend": {
+    "publicHostname": "workflows.example.com",
+    "apiOrigins": [
+      "https://kardia-prod-api-01.kardia.internal:8443",
+      "https://kardia-prod-api-02.kardia.internal:8443"
+    ],
+    "controllerOrigins": [
+      "https://kardia-prod-controller-01.kardia.internal:8444",
+      "https://kardia-prod-controller-02.kardia.internal:8444"
+    ]
+  }
+}

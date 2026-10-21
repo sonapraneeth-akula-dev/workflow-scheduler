@@ -1,4 +1,5 @@
 *.proto text eol=lf
 infra/agent/*.sh text eol=lf
 infra/ha-lab/*.sh text eol=lf
+infra/azure-vm/*.sh text eol=lf
 frontend/** text=auto eol=lf

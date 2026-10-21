@@ -1,0 +1,86 @@
+{
+	admin off
+	persist_config off
+	auto_https off
+}
+
+(controller_proxy) {
+	reverse_proxy {$KARDIA_CONTROLLER_ORIGINS} {
+		lb_policy first
+		health_uri /healthz/leader
+		health_interval 1s
+		health_timeout 2s
+		lb_try_duration 5s
+		flush_interval -1
+		transport http {
+			tls_trust_pool file /certs/ca.crt
+		}
+	}
+}
+
+https://{$KARDIA_PUBLIC_HOSTNAME}:8443 {
+	tls /tls/server.crt /tls/server.key
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+	@notReport not path /api/v1/reports/*/content
+	header @notReport {
+		X-Frame-Options DENY
+		Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; worker-src 'self' blob:; connect-src 'self' https: wss:; frame-src 'self'; object-src 'none'; base-uri 'self'"
+	}
+	@ops path /metrics* /openapi* /swagger*
+	handle @ops {
+		respond 404
+	}
+	handle /healthz/leader {
+		import controller_proxy
+	}
+	@grpc header Content-Type application/grpc*
+	handle @grpc {
+		import controller_proxy
+	}
+	@api path /api /api/* /hubs /hubs/* /healthz /healthz/ready
+	handle @api {
+		reverse_proxy {$KARDIA_API_ORIGINS} {
+			lb_policy round_robin
+			health_uri /healthz/ready
+			health_interval 2s
+			health_timeout 2s
+			lb_try_duration 5s
+			flush_interval -1
+			transport http {
+				tls_trust_pool file /certs/ca.crt
+			}
+		}
+	}
+	handle /assets/* {
+		header Cache-Control no-store
+		header Cache-Control "public, max-age=31536000, immutable" {
+			match status 200 206 304
+		}
+		@current file {
+			root /srv
+			try_files {path}
+		}
+		handle @current {
+			root * /srv
+			file_server
+		}
+		handle {
+			root * /opt/kardia/previous
+			file_server
+		}
+	}
+	handle {
+		root * /srv
+		route {
+			try_files {path} /index.html
+			header /index.html Cache-Control "no-cache, no-store"
+			file_server
+		}
+	}
+}

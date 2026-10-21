@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "tls": {
+    "certificatePem": "REPLACE_WITH_PEM_CERTIFICATE_AND_INTERMEDIATES",
+    "privateKeyPem": "REPLACE_WITH_PEM_PRIVATE_KEY",
+    "caPem": "REPLACE_WITH_PRIVATE_CA_PEM_OR_EMPTY_STRING"
+  },
+  "settings": {
+    "Authentication": { "Mode": "Entra" },
+    "AzureAd": {
+      "Instance": "https://login.microsoftonline.com/",
+      "TenantId": "11111111-1111-4111-8111-111111111111",
+      "ClientId": "22222222-2222-4222-8222-222222222222",
+      "SpaClientId": "33333333-3333-4333-8333-333333333333"
+    },
+    "ConnectionStrings": {
+      "Workflow": "Host=REPLACE.postgres.database.azure.com;Database=workflow;Username=kardia;Password=REPLACE;SSL Mode=VerifyFull;Root Certificate=/certs/ca.crt"
+    },
+    "Storage": {
+      "Provider": "AzureBlob",
+      "UploadHmacKey": "REPLACE_WITH_BASE64_OF_AT_LEAST_32_RANDOM_BYTES_SHARED_BY_ALL_API_AND_CONTROLLERS",
+      "Azure": {
+        "ServiceUri": "https://REPLACE.blob.core.windows.net/",
+        "Container": "kardia-blobs"
+      }
+    },
+    "Engine": { "Enabled": true, "ExecuteRuns": true },
+    "Kestrel": {
+      "Endpoints": {
+        "PrivateHttps": {
+          "Url": "https://0.0.0.0:8444",
+          "Protocols": "Http1AndHttp2",
+          "Certificate": { "Path": "/tls/server.crt", "KeyPath": "/tls/server.key" }
+        }
+      }
+    }
+  }
+}

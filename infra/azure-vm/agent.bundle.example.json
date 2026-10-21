@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "tls": {
+    "caPem": "REPLACE_WITH_PRIVATE_CA_PEM_OR_EMPTY_STRING"
+  },
+  "settings": {
+    "Agent": {
+      "Engines": [
+        "https://kardia-prod-controller-01.kardia.internal:8444",
+        "https://kardia-prod-controller-02.kardia.internal:8444"
+      ],
+      "Pool": "production-linux",
+      "MaxTasks": 2,
+      "Authentication": {
+        "Mode": "ManagedIdentity",
+        "Scope": "api://22222222-2222-4222-8222-222222222222/.default"
+      },
+      "Sampling": { "Enabled": true }
+    },
+    "Secrets": {
+      "Provider": "KeyVault",
+      "Vaults": {
+        "production": { "VaultUri": "https://REPLACE.vault.azure.net/" }
+      }
+    }
+  }
+}
