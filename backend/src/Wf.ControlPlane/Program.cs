@@ -84,6 +84,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunHistoryJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, AuditJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Admin.RetentionJson.Default);
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Admin.SystemNoticeJson.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Admin.SystemJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, MetricsJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunTimelineJsonContext.Default);
@@ -186,6 +187,7 @@ Wf.ControlPlane.Api.Machines.MachineEndpoints.MapMachineEndpoints(app);
 app.MapRunHistoryEndpoints();
 app.MapAuditEndpoints();
 Wf.ControlPlane.Api.Admin.RetentionEndpoints.MapRetentionEndpoints(app);
+Wf.ControlPlane.Api.Admin.SystemNoticeEndpoints.MapSystemNoticeEndpoints(app);
 Wf.ControlPlane.Api.Admin.SystemEndpoints.MapSystemEndpoints(app);
 Wf.ControlPlane.Api.Admin.KubernetesMemoryEndpoints.MapKubernetesMemoryEndpoints(app);
 app.MapMetricsEndpoints();
