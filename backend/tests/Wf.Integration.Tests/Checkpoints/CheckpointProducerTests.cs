@@ -44,6 +44,7 @@ public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IC
         await using var host = await ReportHost.Start(database.DataSource, key: key, configureServices: builder =>
         {
             builder.Services.AddSingleton<CheckpointApplier>();
+            builder.Services.AddSingleton<Wf.ControlPlane.Engine.ResourceSampleSink>();
             builder.Services.AddSingleton(new CheckpointUploadCapabilities(key, TimeProvider.System));
         }, configure: app =>
         {
@@ -141,6 +142,7 @@ public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IC
         await using var host = await ReportHost.Start(database.DataSource, key: key, configureServices: builder =>
         {
             builder.Services.AddSingleton<CheckpointApplier>();
+            builder.Services.AddSingleton<Wf.ControlPlane.Engine.ResourceSampleSink>();
             builder.Services.AddSingleton(new CheckpointUploadCapabilities(key, TimeProvider.System));
         }, configure: app =>
         {
@@ -274,6 +276,7 @@ public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IC
         await using var host = await ReportHost.Start(database.DataSource, key: key, configureServices: builder =>
         {
             builder.Services.AddSingleton<CheckpointApplier>();
+            builder.Services.AddSingleton<Wf.ControlPlane.Engine.ResourceSampleSink>();
             builder.Services.AddSingleton(new CheckpointUploadCapabilities(key, TimeProvider.System));
         }, configure: app =>
         {
@@ -342,6 +345,7 @@ public sealed class CheckpointProducerTests(ReportPublishDatabase database) : IC
         await using var host = await ReportHost.Start(database.DataSource, key: key, configureServices: builder =>
         {
             builder.Services.AddSingleton<CheckpointApplier>();
+            builder.Services.AddSingleton<Wf.ControlPlane.Engine.ResourceSampleSink>();
             builder.Services.AddSingleton(new CheckpointUploadCapabilities(key, TimeProvider.System));
         }, configure: app => app.MapCheckpointUploadEndpoints());
         var archive = await ReportPublishTests.Package();

@@ -2701,6 +2701,11 @@ or uncertain saves consume their sequence so a later save cannot conflict with
 an earlier commit. Save succeeds only after the blob upload, durable agent journal,
 engine index commit, engine ACK, and private host ACK; storage/transport failures
 surface to the task rather than succeeding locally.
+Checkpoint upload transport failures, timeouts, HTTP 5xx, 403 (including a
+superseded session), 408 and 429 are `PlatformError`, subject to the existing
+bounded platform retry budget and `NoAutoRetry`; they are not author task
+failures or unlimited retries. Other rejected HTTP responses remain nonretryable.
+Caller/attempt cancellation is never converted into a retryable storage error.
 
 On a replacement attempt, the engine verifies the latest earlier-attempt blob
 and embeds its JSON in the dispatch. `ctx.Checkpoint.TryLoad<T>()` reads that
@@ -2742,6 +2747,12 @@ header capability for the exact attempt, assigned agent session and reservation
 epoch. It cannot commit the logical checkpoint pointer or accept user tokens,
 arbitrary object paths or redirect targets. Existing HMAC configuration and
 agent transport are reused; no login/logout flow or public read API is added.
+HA gateways resolve upload grants against their configured controller origin,
+not a client's Host header or the agent's first configured engine. Blob reads and
+writes run **outside** the short lease-fenced database transactions. Assignment,
+session, reservation and captured lease are checked again after storage I/O
+before upload success or checkpoint-pointer commit; a slow blob request cannot
+hold allocation/assignment locks or extend the one-second fenced transaction.
 Private host readiness protocol 7 includes checkpoint and progress streams with
 explicit ACKs (engine durability for checkpoints; agent-journal durability for
 progress).

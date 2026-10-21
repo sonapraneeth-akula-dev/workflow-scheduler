@@ -11,11 +11,50 @@ using Wf.Agent;
 using Wf.Agent.Journal;
 using Wf.Contracts.Agent.V1;
 using Wf.ControlPlane.Engine.Agents;
+using Wf.ControlPlane.Engine.Checkpoints;
+using Wf.ControlPlane.Engine.Leadership;
 
 namespace Wf.Integration.Tests.Checkpoints;
 
 public sealed partial class CheckpointApplierTests
 {
+    [Fact]
+    public async Task Actual_gateway_issues_upload_grants_for_its_configured_origin_not_the_agents_first_engine_or_Host_header()
+    {
+        await using var fixture = await Fixture.Create(database);
+        using var registry = new AgentRegistry(database.DataSource, fixture.Runtime.Clock);
+        using var capabilities = new CheckpointUploadCapabilities(
+            System.Security.Cryptography.RandomNumberGenerator.GetBytes(32), fixture.Runtime.Clock);
+        var origin = new Uri("https://configured-second-controller.example.invalid:8444");
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.ConfigureKestrel(options =>
+            options.Listen(IPAddress.Loopback, 0, listen => listen.Protocols = HttpProtocols.Http2));
+        builder.Services.AddGrpc();
+        builder.Services.AddSingleton(registry);
+        builder.Services.AddSingleton(fixture.Runtime.Store);
+        builder.Services.AddSingleton(capabilities);
+        builder.Services.AddSingleton(new LeaseOptions("test-controller", origin));
+        await using var app = builder.Build();
+        app.MapGrpcService<AgentGatewayService>();
+        await app.StartAsync(Token);
+        var address = app.Services.GetRequiredService<IServer>().Features
+            .Get<IServerAddressesFeature>()!.Addresses.Single();
+        using var channel = GrpcChannel.ForAddress(address);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        using var call = new AgentGateway.AgentGatewayClient(channel).Connect(cancellationToken: timeout.Token);
+        await call.RequestStream.WriteAsync(new AgentMessage { Sequence = 1, Hello = fixture.Hello() }, timeout.Token);
+        while (await call.ResponseStream.MoveNext(timeout.Token))
+            if (call.ResponseStream.Current.Dispatch is { } command)
+            {
+                var grant = Assert.Single(command.Grants);
+                Assert.Equal(new Uri(origin, Wf.Contracts.Checkpoints.CheckpointProtocol.EndpointPath).AbsoluteUri, grant.UploadUri);
+                Assert.NotEqual(new Uri(address).Authority, new Uri(grant.UploadUri).Authority);
+                return;
+            }
+        Assert.Fail("The actual gateway did not dispatch its origin-bound upload grant.");
+    }
+
     [Fact]
     public async Task Actual_HTTP2_checkpoint_ack_follows_durable_commit_and_lost_ack_replays_after_agent_journal_restart()
     {

@@ -22,45 +22,19 @@ public sealed class CheckpointApplier(NpgsqlDataSource source, RunStore runs, IB
             throw new ArgumentException("Checkpoint time is in the future.", nameof(saved));
         var lease = runs.CaptureLease();
         await using var connection = await source.OpenConnectionAsync(token);
-        await using var transaction = await connection.BeginTransactionAsync(token);
-        await runs.FenceAsync(connection, transaction, lease, token);
-        await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock($1)", token, ReservationManager.AllocationLock);
-        var assignment = await LockAssignment(connection, session, checkpoint.RunId, checkpoint.TaskKey,
-            checkpoint.Attempt, checkpoint.ReservationEpoch, token);
-        if (assignment is null) return;
-        var (attemptStatus, runStatus) = assignment.Value;
-        DateTimeOffset? previousAt = null;
-        await using (var latest = new NpgsqlCommand("""
-            SELECT sequence,saved_at,attempt,blob_uri,sha256,size_bytes FROM task_checkpoints
-            WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 FOR UPDATE
-            """, connection))
+        await using (var validation = await connection.BeginTransactionAsync(token))
         {
-            latest.Parameters.AddWithValue(checkpoint.RunId);
-            latest.Parameters.AddWithValue(checkpoint.TaskKey);
-            await using var row = await latest.ExecuteReaderAsync(token);
-            if (await row.ReadAsync(token))
-            {
-                var sequence = row.GetInt64(0);
-                if (sequence > checkpoint.Sequence) return;
-                if (sequence == checkpoint.Sequence)
-                {
-                    if (row.GetFieldValue<DateTimeOffset>(1) != checkpoint.SavedAt || row.GetInt16(2) != checkpoint.Attempt ||
-                        row.GetString(3) != checkpoint.BlobKey || row.GetString(4) != checkpoint.Sha256 ||
-                        row.GetInt64(5) != checkpoint.SizeBytes)
-                        throw new ArgumentException("Checkpoint sequence was already committed with different content.");
-                    return;
-                }
-                previousAt = row.GetFieldValue<DateTimeOffset>(1);
-            }
+            await runs.FenceAsync(connection, validation, lease, token);
+            if (!await CanAdvanceAsync(connection, session, checkpoint, token)) return;
+            await validation.CommitAsync(token);
         }
-        if (runStatus is not (RunStatus.Running or RunStatus.Aborting) || attemptStatus is not (2 or 3))
-            throw new ArgumentException("A new checkpoint requires a current active attempt.");
-        if (previousAt is { } previous && checkpoint.SavedAt - previous < CheckpointProtocol.MinimumInterval)
-            throw new ArgumentException("Checkpoint saves must be at least five seconds apart.");
         using var state = new MemoryStream();
         await blobs.DownloadAsync(new(BlobKind.Checkpoints, checkpoint.Sha256, checkpoint.SizeBytes, checkpoint.BlobKey), state, token);
         try { CheckpointProtocol.ValidateState(state.GetBuffer().AsMemory(0, checked((int)state.Length))); }
         catch (JsonException error) { throw new ArgumentException("Checkpoint state is not valid JSON.", nameof(saved), error); }
+        await using var transaction = await connection.BeginTransactionAsync(token);
+        await runs.FenceAsync(connection, transaction, lease, token);
+        if (!await CanAdvanceAsync(connection, session, checkpoint, token)) return;
         await using (var insert = new NpgsqlCommand("""
             INSERT INTO task_checkpoints(run_day,run_id,task_key,attempt,sequence,saved_at,blob_uri,sha256,size_bytes)
             VALUES(uuid_v7_run_day($1),$1,$2,$3,$4,$5,$6,$7,$8)
@@ -82,6 +56,45 @@ public sealed class CheckpointApplier(NpgsqlDataSource source, RunStore runs, IB
         await transaction.CommitAsync(token);
     }
 
+    private async Task<bool> CanAdvanceAsync(NpgsqlConnection connection, AgentSession session,
+        CheckpointReference checkpoint, CancellationToken token)
+    {
+        await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock($1)", token, ReservationManager.AllocationLock);
+        var assignment = await LockAssignment(connection, session, checkpoint.RunId, checkpoint.TaskKey,
+            checkpoint.Attempt, checkpoint.ReservationEpoch, token);
+        if (assignment is null) return false;
+        var (attemptStatus, runStatus) = assignment.Value;
+        DateTimeOffset? previousAt = null;
+        await using (var latest = new NpgsqlCommand("""
+            SELECT sequence,saved_at,attempt,blob_uri,sha256,size_bytes FROM task_checkpoints
+            WHERE run_day=uuid_v7_run_day($1) AND run_id=$1 AND task_key=$2 FOR UPDATE
+            """, connection))
+        {
+            latest.Parameters.AddWithValue(checkpoint.RunId);
+            latest.Parameters.AddWithValue(checkpoint.TaskKey);
+            await using var row = await latest.ExecuteReaderAsync(token);
+            if (await row.ReadAsync(token))
+            {
+                var sequence = row.GetInt64(0);
+                if (sequence > checkpoint.Sequence) return false;
+                if (sequence == checkpoint.Sequence)
+                {
+                    if (row.GetFieldValue<DateTimeOffset>(1) != checkpoint.SavedAt || row.GetInt16(2) != checkpoint.Attempt ||
+                        row.GetString(3) != checkpoint.BlobKey || row.GetString(4) != checkpoint.Sha256 ||
+                        row.GetInt64(5) != checkpoint.SizeBytes)
+                        throw new ArgumentException("Checkpoint sequence was already committed with different content.");
+                    return false;
+                }
+                previousAt = row.GetFieldValue<DateTimeOffset>(1);
+            }
+        }
+        if (runStatus is not (RunStatus.Running or RunStatus.Aborting) || attemptStatus is not (2 or 3))
+            throw new ArgumentException("A new checkpoint requires a current active attempt.");
+        if (previousAt is { } previous && checkpoint.SavedAt - previous < CheckpointProtocol.MinimumInterval)
+            throw new ArgumentException("Checkpoint saves must be at least five seconds apart.");
+        return true;
+    }
+
     public async Task UploadAsync(AgentSession session, CheckpointSaved saved, Stream body, CancellationToken token = default)
     {
         var checkpoint = CheckpointProtocol.Validate(saved);
@@ -99,23 +112,29 @@ public sealed class CheckpointApplier(NpgsqlDataSource source, RunStore runs, IB
         CheckpointProtocol.ValidateState(bytes.AsMemory(0, count));
         var lease = runs.CaptureLease();
         await using var connection = await source.OpenConnectionAsync(token);
-        await using var transaction = await connection.BeginTransactionAsync(token);
-        await runs.FenceAsync(connection, transaction, lease, token);
-        await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock($1)", token, ReservationManager.AllocationLock);
-        (short Attempt, RunStatus Run)? assignment;
-        try
-        {
-            assignment = await LockAssignment(connection, session, checkpoint.RunId, checkpoint.TaskKey,
-                checkpoint.Attempt, checkpoint.ReservationEpoch, token);
-        }
-        catch (ArgumentException error)
-        { throw new UnauthorizedAccessException("Checkpoint upload does not match the current assignment.", error); }
-        if (assignment is not { } active || active.Run is not (RunStatus.Running or RunStatus.Aborting) ||
-            active.Attempt is not (2 or 3))
-            throw new UnauthorizedAccessException("Checkpoint upload requires the current active attempt.");
+        await Authorize();
         using var input = new MemoryStream(bytes, 0, count, writable: false);
         await blobs.UploadAsync(new(BlobKind.Checkpoints, checkpoint.Sha256, checkpoint.SizeBytes, checkpoint.BlobKey), input, token);
-        await transaction.CommitAsync(token);
+        await Authorize();
+
+        async Task Authorize()
+        {
+            await using var transaction = await connection.BeginTransactionAsync(token);
+            await runs.FenceAsync(connection, transaction, lease, token);
+            await RunStore.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock($1)", token, ReservationManager.AllocationLock);
+            (short Attempt, RunStatus Run)? assignment;
+            try
+            {
+                assignment = await LockAssignment(connection, session, checkpoint.RunId, checkpoint.TaskKey,
+                    checkpoint.Attempt, checkpoint.ReservationEpoch, token);
+            }
+            catch (ArgumentException error)
+            { throw new UnauthorizedAccessException("Checkpoint upload does not match the current assignment.", error); }
+            if (assignment is not { } active || active.Run is not (RunStatus.Running or RunStatus.Aborting) ||
+                active.Attempt is not (2 or 3))
+                throw new UnauthorizedAccessException("Checkpoint upload requires the current active attempt.");
+            await transaction.CommitAsync(token);
+        }
     }
 
     public async Task<CheckpointSeed?> LoadAsync(AttemptRef target, CancellationToken token = default)

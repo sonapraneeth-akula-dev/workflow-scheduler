@@ -19,7 +19,8 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
     ReservationLeaseService? reservations = null, CalibrationService? calibrations = null,
     Wf.ControlPlane.Engine.Checkpoints.CheckpointApplier? checkpoints = null,
     Wf.ControlPlane.Engine.Checkpoints.CheckpointUploadCapabilities? checkpointUploads = null,
-    AgentDrainService? drains = null, LiveLogRelay? liveLogs = null, LiveLogSink? logSink = null)
+    AgentDrainService? drains = null, LiveLogRelay? liveLogs = null, LiveLogSink? logSink = null,
+    LeaseOptions? leaseOptions = null)
     : AgentGateway.AgentGatewayBase
 {
     public override async Task Connect(IAsyncStreamReader<AgentMessage> requestStream,
@@ -215,6 +216,9 @@ public sealed class AgentGatewayService(AgentRegistry registry, ILogger<AgentGat
                                         command.Grants.Add(artifactUploads.Create(command, session.AgentId, session.SessionId));
                                     if (checkpointUploads is not null && command.Grants.All(grant => grant.Kind != "checkpoints"))
                                         command.Grants.Add(checkpointUploads.Create(command, session));
+                                    if (leaseOptions is not null)
+                                        foreach (var grant in command.Grants)
+                                            grant.UploadUri = new Uri(leaseOptions.Endpoint, grant.UploadUri).AbsoluteUri;
                                     if (checkpoints is not null)
                                         command.Checkpoint = await checkpoints.LoadForDispatchAsync(command, session, token);
                                     await responseStream.WriteAsync(new ControlMessage

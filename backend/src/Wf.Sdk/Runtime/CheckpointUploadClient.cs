@@ -5,6 +5,8 @@ using Google.Protobuf.WellKnownTypes;
 using Microsoft.AspNetCore.WebUtilities;
 using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Checkpoints;
+using Wf.Contracts;
+using Wf.Contracts.Definition;
 
 namespace Wf.Sdk;
 
@@ -49,10 +51,21 @@ internal static class CheckpointUploadClient
             request.Content.Headers.ContentType = new("application/json");
             request.Headers.Authorization = new("Bearer", grant.BearerToken);
             request.Headers.Add(CheckpointProtocol.MetadataHeader, WebEncoders.Base64UrlEncode(saved.ToByteArray()));
-            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
-            if (response.StatusCode != HttpStatusCode.Created)
-                throw new HttpRequestException($"Checkpoint storage rejected state (HTTP {(int)response.StatusCode}).",
-                    null, response.StatusCode);
+            try
+            {
+                using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+                if (response.StatusCode != HttpStatusCode.Created)
+                    throw new TaskFailureException($"Checkpoint storage rejected state (HTTP {(int)response.StatusCode}).",
+                        retryable: (int)response.StatusCode >= 500 ||
+                            response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests,
+                        category: FailureCategory.PlatformError);
+            }
+            catch (Exception error) when (error is HttpRequestException or IOException ||
+                error is OperationCanceledException && !token.IsCancellationRequested)
+            {
+                throw new TaskFailureException("Checkpoint storage is temporarily unavailable.",
+                    category: FailureCategory.PlatformError, innerException: error);
+            }
             await acknowledge(saved, token);
         }
     }
