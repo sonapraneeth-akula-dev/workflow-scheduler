@@ -2,7 +2,9 @@ using System.Text.Json.Serialization;
 
 namespace Wf.Contracts.Runs;
 
+[JsonConverter(typeof(JsonStringEnumConverter<SignOffStatus>))]
 public enum SignOffStatus { NotSignedOff, SignedOff, Revoked }
+[JsonConverter(typeof(JsonStringEnumConverter<SignOffAction>))]
 public enum SignOffAction { SignOff, Revoke }
 
 public sealed record SignOffRequest(string Reason);

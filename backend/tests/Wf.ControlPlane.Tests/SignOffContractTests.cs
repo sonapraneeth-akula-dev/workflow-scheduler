@@ -6,6 +6,13 @@ namespace Wf.ControlPlane.Tests;
 
 public sealed class SignOffContractTests
 {
+    [Fact]
+    public void SignOff_enum_contract_is_string_based_even_outside_the_source_generated_context()
+    {
+        Assert.Equal("\"SignedOff\"", JsonSerializer.Serialize(SignOffStatus.SignedOff));
+        Assert.Equal("\"Revoke\"", JsonSerializer.Serialize(SignOffAction.Revoke));
+    }
+
     [Theory]
     [InlineData("{}")]
     [InlineData("""{"reason":null}""")]

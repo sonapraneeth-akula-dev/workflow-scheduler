@@ -4,6 +4,7 @@ import { ErrorNotice } from "@/components/ErrorNotice"
 import { Button } from "@/components/ui/button"
 import { ReportRenderer } from "@/renderers/ReportRenderer"
 import { formatTimestamp } from "@/lib/timestamps"
+import { SignOffPanel } from "@/features/runs/SignOffPanel"
 import { getReportView } from "./api"
 
 export function ReportView({
@@ -64,6 +65,11 @@ export function ReportView({
               {formatTimestamp(result.data.report.createdAt)}
             </time>
           </p>
+          <SignOffPanel
+            key={`${runId}-${reportId}`}
+            runId={runId}
+            reportId={reportId}
+          />
           <ReportRenderer
             kind={result.data.report.kind}
             title={result.data.report.title}

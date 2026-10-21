@@ -8,6 +8,33 @@ namespace Wf.Integration.Tests.Registration;
 
 public sealed partial class RegistrationTests
 {
+    [Fact]
+    public async Task SignOff_actual_OpenAPI_declares_path_preconditions_and_string_enums()
+    {
+        await using var server = await Server.Start(database.DataSource, userSchedules: true);
+        using var response = await server.Send(HttpMethod.Get, "/openapi/v1.json", null!);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var document = await Json(response);
+        foreach (var report in new[] { false, true })
+        foreach (var suffix in new[] { "", "/revoke" })
+        {
+            var path = "/api/v1/runs/{id}" + (report ? "/reports/{reportId}" : "") + "/signoff" + suffix;
+            var operation = document.GetProperty("paths").GetProperty(path).GetProperty("post");
+            var parameters = operation.GetProperty("parameters").EnumerateArray().ToArray();
+            Assert.Equal(report ? ["id", "reportId"] : new[] { "id" },
+                parameters.Where(item => item.GetProperty("in").GetString() == "path")
+                    .Select(item => item.GetProperty("name").GetString()).Order());
+            Assert.True(Assert.Single(parameters,
+                item => item.GetProperty("name").GetString() == "If-Match").GetProperty("required").GetBoolean());
+        }
+        var schemas = document.GetProperty("components").GetProperty("schemas");
+        Assert.Equal(["NotSignedOff", "SignedOff", "Revoked"],
+            schemas.GetProperty("SignOffStatus").GetProperty("enum").EnumerateArray().Select(item => item.GetString()));
+        Assert.Equal(["SignOff", "Revoke"],
+            schemas.GetProperty("SignOffAction").GetProperty("enum").EnumerateArray().Select(item => item.GetString()));
+        Assert.Empty(server.Failures);
+    }
+
     private static string SignOffPath(Guid run, Guid? report = null) =>
         $"/api/v1/runs/{run:D}" + (report is { } id ? $"/reports/{id:D}" : "") + "/signoff";
 

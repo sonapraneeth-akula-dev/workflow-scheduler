@@ -20,14 +20,15 @@ public static class SignOffEndpoints
     {
         foreach (var path in new[] { "/api/v1/runs/{id}/signoff", "/api/v1/runs/{id}/reports/{reportId}/signoff" })
         {
-            Describe(endpoints.MapGet(path, Read), false);
-            Describe(endpoints.MapPost(path, Sign), true);
-            Describe(endpoints.MapPost(path + "/revoke", Revoke), true);
+            var report = path.Contains("{reportId}", StringComparison.Ordinal);
+            Describe(endpoints.MapGet(path, Read), false, report);
+            Describe(endpoints.MapPost(path, Sign), true, report);
+            Describe(endpoints.MapPost(path + "/revoke", Revoke), true, report);
         }
         return endpoints;
     }
 
-    private static void Describe(RouteHandlerBuilder endpoint, bool write)
+    private static void Describe(RouteHandlerBuilder endpoint, bool write, bool report)
     {
         endpoint.RequireAuthorization().Produces<SignOffResponse>()
             .ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404)
@@ -40,6 +41,13 @@ public static class SignOffEndpoints
             .AddOpenApiOperationTransformer((operation, _, _) =>
             {
                 operation.Parameters ??= [];
+                foreach (var name in report ? new[] { "id", "reportId" } : ["id"])
+                    operation.Parameters.Add(new OpenApiParameter
+                    {
+                        Name = name, In = ParameterLocation.Path, Required = true,
+                        Description = "Canonical lowercase UUIDv7 identity.",
+                        Schema = new OpenApiSchema { Type = JsonSchemaType.String, Format = "uuid" }
+                    });
                 foreach (var name in write ? new[] { "If-Match" } : ["before", "limit"])
                     operation.Parameters.Add(new OpenApiParameter
                     {

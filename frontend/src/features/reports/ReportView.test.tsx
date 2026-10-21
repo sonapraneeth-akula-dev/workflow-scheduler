@@ -6,6 +6,13 @@ import { getReportView, type ReportViewData } from "./api"
 import { ReportView } from "./ReportView"
 
 vi.mock("./api", () => ({ getReportView: vi.fn() }))
+vi.mock("@/features/runs/SignOffPanel", () => ({
+  SignOffPanel: ({ runId, reportId }: { runId: string; reportId: string }) => (
+    <section aria-label="Report sign-off">
+      {runId}/{reportId}
+    </section>
+  ),
+}))
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children: React.ReactNode }) => (
     <a href="/runs/fixture">{children}</a>
@@ -72,6 +79,9 @@ describe("authenticated report viewer", () => {
       expect.any(AbortSignal)
     )
     expect(screen.getByRole("link", { name: "Back to run" })).toBeVisible()
+    expect(
+      screen.getByRole("region", { name: "Report sign-off" })
+    ).toHaveTextContent(`${runId}/${reportId}`)
   })
   it.each([401, 403, 503])(
     "hides stale content after refused refresh HTTP %i",

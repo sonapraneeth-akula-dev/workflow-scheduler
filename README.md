@@ -2147,6 +2147,14 @@ GET accepts `limit=1..50` (default 20) and exclusive `before=<revision>`;
 `nextBefore` continues older history while `state` always describes the current
 head. Revisions are decimal strings, preserving full 64-bit precision.
 Responses use `Cache-Control: no-store`; every request rechecks current scope.
+The run page's **Workflow sign-off** panel and each report's **Report sign-off**
+panel show current status, reviewer identity, local time, reason, and expandable
+**Sign-off history**, with **Load older sign-offs** for the complete record.
+Operators confirm **Sign off workflow**, **Sign off report**, or **Revoke sign-off**
+with a required reason. Panels refresh every 30 seconds or on **Refresh sign-off**.
+After a failed or uncertain write, no automatic retry occurs: the reason stays
+visible and read-only until the dialog is closed; reopening reads current state
+before allowing another change.
 
 Dry-run executes the same core using explicit task mocks, without invoking any
 original task delegate or external service:

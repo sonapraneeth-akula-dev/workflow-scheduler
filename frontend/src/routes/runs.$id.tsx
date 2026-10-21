@@ -21,6 +21,7 @@ import { TaskOutputs } from "@/features/runs/TaskOutputs"
 import { RunFailures } from "@/features/runs/RunFailures"
 import { TaskLogs } from "@/features/runs/TaskLogs"
 import { QueuedBanner } from "@/features/runs/QueuedBanner"
+import { SignOffPanel } from "@/features/runs/SignOffPanel"
 import { ReportIndex } from "@/features/reports/ReportIndex"
 import { useRun } from "@/lib/live/useRun"
 
@@ -158,6 +159,7 @@ function RunDetail() {
           />
           <RunLineage run={run} />
           <RunFailures key={run.runId} run={run} />
+          <SignOffPanel key={`signoff-${run.runId}`} runId={run.runId} />
           <Tabs.Root defaultValue="graph" className="min-w-0 space-y-3">
             <Tabs.List
               aria-label="Run views"
