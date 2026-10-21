@@ -378,6 +378,117 @@ public sealed class ResourceMetricsTests(ResourceMetricsDatabase database, ITest
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResourceMetrics_slow_blob_io_releases_allocation_and_lease_fences(bool download)
+    {
+        await using var host = await ResourceHost.Start(database.DataSource);
+        var session = await host.Register();
+        var run = await host.Seed(session);
+        using var leader = new LeaseManager(database.DataSource, new("resource-slow", new Uri("http://127.0.0.1:1")),
+            NullLogger<LeaseManager>.Instance);
+        Assert.True(await leader.TryAcquireOrRenewAsync(Token));
+        var lease = leader.RequireLease();
+        var runs = new RunStore(database.DataSource, NullLogger<RunStore>.Instance, leader);
+        await host.Sink.AcceptAsync(session, Sample(run.Snapshot.RunId, 1, Observation(null, null, 0, null, 100)), Token);
+        var paused = new PausedBlobStore(host.Blobs, download);
+        var pending = new ResourceSampleSink(database.DataSource, runs, paused).AcceptAsync(session,
+            Sample(run.Snapshot.RunId, 2, Observation(10, 1, 10, 10, 100)), Token);
+        try
+        {
+            await paused.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5), Token);
+            await Task.Delay(TimeSpan.FromMilliseconds(1250), Token);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(2));
+            Assert.True(await leader.TryAcquireOrRenewAsync(timeout.Token));
+            Assert.Equal(lease, leader.RequireLease());
+            await using var connection = await database.DataSource.OpenConnectionAsync(timeout.Token);
+            await using var transaction = await connection.BeginTransactionAsync(timeout.Token);
+            await leader.FenceAsync(connection, transaction, lease, timeout.Token);
+            await using var gate = new NpgsqlCommand("SELECT pg_try_advisory_xact_lock(746312081::bigint)", connection);
+            Assert.Equal(true, await gate.ExecuteScalarAsync(timeout.Token));
+            await transaction.CommitAsync(timeout.Token);
+        }
+        finally
+        {
+            paused.Release.TrySetResult();
+            try { await pending; }
+            finally { await leader.ReleaseAsync(CancellationToken.None); }
+        }
+        Assert.Equal(2, Assert.Single(await host.Summaries(run.Snapshot.RunId)).SampleCount);
+    }
+
+    [Theory]
+    [InlineData("session")]
+    [InlineData("reservation")]
+    [InlineData("leader")]
+    [InlineData("terminal")]
+    [InlineData("duplicate")]
+    [InlineData("conflict")]
+    public async Task ResourceMetrics_blob_publication_rechecks_authority_and_concurrent_pointer(string change)
+    {
+        await using var host = await ResourceHost.Start(database.DataSource);
+        var session = await host.Register();
+        var run = await host.Seed(session);
+        using var first = new LeaseManager(database.DataSource, new("resource-publish-first", new Uri("http://127.0.0.1:1")),
+            NullLogger<LeaseManager>.Instance);
+        using var second = new LeaseManager(database.DataSource, new("resource-publish-second", new Uri("http://127.0.0.1:2")),
+            NullLogger<LeaseManager>.Instance);
+        Assert.True(await first.TryAcquireOrRenewAsync(Token));
+        await host.Sink.AcceptAsync(session, Sample(run.Snapshot.RunId, 1, Observation(null, null, 0, null, 100)), Token);
+        var paused = new PausedBlobStore(host.Blobs, download: false);
+        var sample = Sample(run.Snapshot.RunId, 2, Observation(10, 1, 10, 10, 100));
+        var pending = new ResourceSampleSink(database.DataSource,
+            new(database.DataSource, NullLogger<RunStore>.Instance, first), paused).AcceptAsync(session, sample, Token);
+        try
+        {
+            await paused.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5), Token);
+            switch (change)
+            {
+                case "session":
+                    await host.Registry.RegisterAsync(host.Identity(session.AgentId), Token);
+                    break;
+                case "reservation":
+                    await host.Execute("UPDATE agents SET reservation_epoch=reservation_epoch+1 WHERE id=$1", session.AgentId);
+                    break;
+                case "leader":
+                    await host.Execute("UPDATE leases SET expires_at=clock_timestamp()-interval '1 second' WHERE name='engine'");
+                    Assert.True(await second.TryAcquireOrRenewAsync(Token));
+                    break;
+                case "terminal":
+                    await host.Execute("UPDATE task_attempts SET status=5 WHERE run_id=$1", run.Snapshot.RunId);
+                    break;
+                case "duplicate":
+                    await host.Sink.AcceptAsync(session, sample, Token);
+                    break;
+                case "conflict":
+                    await host.Sink.AcceptAsync(session,
+                        Sample(run.Snapshot.RunId, 2, Observation(50, 1, 10, 10, 200)), Token);
+                    break;
+            }
+        }
+        finally { paused.Release.TrySetResult(); }
+        try
+        {
+            if (change == "leader")
+                await Assert.ThrowsAsync<NotLeaderException>(() => pending);
+            else if (change is "session" or "conflict")
+                await Assert.ThrowsAsync<ArgumentException>(() => pending);
+            else
+                await pending;
+            var summary = Assert.Single(await host.Summaries(run.Snapshot.RunId));
+            Assert.Equal(change is "duplicate" or "conflict" ? 2 : 1, summary.SampleCount);
+            if (change == "duplicate") Assert.Equal(10, summary.AverageCpuPercent);
+            if (change == "conflict") Assert.Equal(50, summary.AverageCpuPercent);
+        }
+        finally
+        {
+            await first.ReleaseAsync(CancellationToken.None);
+            await second.ReleaseAsync(CancellationToken.None);
+        }
+    }
+
     [Fact]
     public async Task ResourceMetrics_opaque_cursors_fresh_roles_corruption_and_run_retention_fail_closed()
     {
@@ -656,6 +767,32 @@ public sealed class ResourceMetricsTests(ResourceMetricsDatabase database, ITest
         }
         public Task DownloadAsync(BlobContent content, Stream destination, CancellationToken cancellationToken = default) =>
             inner.DownloadAsync(content, destination, cancellationToken);
+    }
+
+    private sealed class PausedBlobStore(IBlobStore inner, bool download) : IBlobStore
+    {
+        private int entered;
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private async Task Pause(CancellationToken token)
+        {
+            if (Interlocked.Exchange(ref entered, 1) != 0) return;
+            Entered.TrySetResult();
+            await Release.Task.WaitAsync(token);
+        }
+
+        public async Task UploadAsync(BlobContent content, Stream source, CancellationToken cancellationToken = default)
+        {
+            if (!download) await Pause(cancellationToken);
+            await inner.UploadAsync(content, source, cancellationToken);
+        }
+
+        public async Task DownloadAsync(BlobContent content, Stream destination, CancellationToken cancellationToken = default)
+        {
+            if (download) await Pause(cancellationToken);
+            await inner.DownloadAsync(content, destination, cancellationToken);
+        }
     }
 }
 

@@ -28,6 +28,14 @@ Authentication uses `ManagedIdentityCredential` directly, not a developer-login
 or environment-secret fallback chain. Host failures remain visible: Azure access
 errors never fall back to a different local filesystem.
 
+Resource-series blob reads and immutable writes run outside database
+transactions, so storage latency cannot hold the allocation lock or exhaust the
+engine's one-second fenced transaction budget. Publishing the series pointer
+rechecks the captured leader epoch, agent session, reservation, attempt state,
+and prior pointer under the existing locks. Concurrent identical samples commit
+once; conflicting replays fail. A rejected publication may leave an unreferenced
+immutable chunk, but cannot advance the summary or acknowledge an invalid write.
+
 An explicitly **Development** host may instead set
 `Storage__Azure__EmulatorConnectionString` for a local Azurite lab. Do not also
 set the managed-identity URI/client ID. Remote emulators require HTTPS and a
