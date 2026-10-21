@@ -33,6 +33,7 @@ if (args.Contains("--lan", StringComparer.Ordinal)) builder.Configuration["Lan:E
 var compose = LocalComposeOptions.Read(builder.Configuration, builder.Environment);
 using var lan = LanListener.Read(builder.Configuration, builder.Environment);
 var engineEnabled = builder.Configuration.GetValue("Engine:Enabled", true);
+var runtimeInstance = RuntimeInstance.Read(builder.Configuration, engineEnabled);
 // Upload paths and live query strings carry bearer capabilities; suppress raw framework request/route logs.
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 var port = builder.Configuration.GetValue("Engine:Port", 5000);
@@ -83,6 +84,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunHistoryJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, AuditJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Admin.RetentionJson.Default);
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Admin.SystemJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, MetricsJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunTimelineJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunConditionsJsonContext.Default);
@@ -101,10 +103,13 @@ builder.Services.AddWorkflowTelemetry(builder.Configuration, engineEnabled, work
 builder.Services.AddSingleton(_ => NotificationOptions.Read(builder.Configuration));
 if (engineEnabled) builder.Services.AddHostedService<NotificationDispatcher>();
 builder.Services.AddWorkflowDrain(builder.Configuration, engineEnabled);
+builder.Services.AddSingleton(runtimeInstance);
+builder.Services.AddSingleton<RuntimeActivity>();
+builder.Services.AddHostedService<RuntimeInstanceReporter>();
 builder.Services.AddWorkflowRegistrations(builder.Configuration);
 builder.Services.AddSingleton<ActiveVersionCache>();
 builder.Services.AddHostedService<ActiveVersionCache>(services => services.GetRequiredService<ActiveVersionCache>());
-builder.Services.AddSingleton(new LeaseOptions(Guid.NewGuid().ToString("N"),
+builder.Services.AddSingleton(new LeaseOptions(runtimeInstance.Id,
     new Uri(builder.Configuration["Engine:PublicEndpoint"] ?? lan?.Endpoint.AbsoluteUri ?? $"http://localhost:{port}", UriKind.Absolute)));
 builder.Services.AddSingleton<LeaseManager>();
 if (engineEnabled)
@@ -163,6 +168,7 @@ if (compose is not null)
     app.Logger.LogWarning("Local Compose {Environment}: login-free Development access is restricted to the dedicated {Network} container network. Publish only on the configured host loopback.",
         compose.Environment, compose.Network);
 app.UseReportResponseHeaders();
+app.UseRuntimeActivity();
 app.UseAuthentication();
 app.UseAuthorization();
 if (engineEnabled) app.MapGrpcService<AgentGatewayService>().RequireAuthorization(AuthExtensions.Agent);
@@ -178,6 +184,7 @@ Wf.ControlPlane.Api.Machines.MachineEndpoints.MapMachineEndpoints(app);
 app.MapRunHistoryEndpoints();
 app.MapAuditEndpoints();
 Wf.ControlPlane.Api.Admin.RetentionEndpoints.MapRetentionEndpoints(app);
+Wf.ControlPlane.Api.Admin.SystemEndpoints.MapSystemEndpoints(app);
 app.MapMetricsEndpoints();
 app.MapRunTimelineEndpoints();
 app.MapTaskLogsEndpoints();

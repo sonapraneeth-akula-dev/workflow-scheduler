@@ -4174,6 +4174,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/system": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Global Admin only. A database-time snapshot of observed API/controller processes, lease leadership, workers and durable active work. Runtime heartbeats expire after 15 seconds; stopped/stale instances remain visible for up to 24 hours. Counters are cumulative per process, not packet tracing. Assigned tasks include Dispatched and Running attempts even on an unhealthy worker; counts do not imply that a process is alive. No desired Kubernetes replicas or unobserved frontend pods are fabricated. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SystemSnapshotResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{id}/metrics": {
         parameters: {
             query?: never;
@@ -7492,6 +7564,78 @@ export interface components {
             lastSeq: string;
             events: components["schemas"]["SystemEvent"][];
             nextCursor: null | string;
+        };
+        SystemInstanceResponse: {
+            id: string;
+            name: string;
+            hostName: string;
+            nodeName: string;
+            podName: null | string;
+            namespace: null | string;
+            role: string;
+            version: string;
+            status: string;
+            isLeader: boolean;
+            /** Format: date-time */
+            startedAt: string;
+            /** Format: date-time */
+            lastHeartbeatAt: string;
+            /** Format: int64 */
+            httpRequests: number | string;
+            /** Format: int32 */
+            liveConnections: number | string;
+            /** Format: int32 */
+            liveSubscriptions: number | string;
+            /** Format: int64 */
+            liveDeliveries: number | string;
+        };
+        SystemSnapshotResponse: {
+            /** Format: date-time */
+            observedAt: string;
+            /** Format: int32 */
+            heartbeatTimeoutSeconds: number | string;
+            instances: components["schemas"]["SystemInstanceResponse"][];
+            workers: components["schemas"]["SystemWorkerResponse"][];
+            totals: components["schemas"]["SystemTotalsResponse"];
+        };
+        SystemTotalsResponse: {
+            /** Format: int64 */
+            queuedRuns: number | string;
+            /** Format: int64 */
+            runningRuns: number | string;
+            /** Format: int64 */
+            abortingRuns: number | string;
+            /** Format: int64 */
+            activeWorkflows: number | string;
+            /** Format: int64 */
+            assignedTasks: number | string;
+            /** Format: int64 */
+            runningTasks: number | string;
+            /** Format: int64 */
+            activeDagNodes: number | string;
+        };
+        SystemWorkerResponse: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            pool: string;
+            status: string;
+            /** Format: date-time */
+            lastHeartbeatAt: string;
+            /** Format: int32 */
+            maxTasks: number | string;
+            /** Format: int32 */
+            slotsUsed: number | string;
+            /** Format: int64 */
+            assignedTasks: number | string;
+            /** Format: int64 */
+            runningTasks: number | string;
+            /** Format: int64 */
+            activeDagNodes: number | string;
+            /** Format: int64 */
+            activeRuns: number | string;
+            /** Format: int64 */
+            activeWorkflows: number | string;
         };
         TaskAction: {
             kind: components["schemas"]["TaskActionKind"];

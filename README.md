@@ -557,6 +557,13 @@ a stale heartbeat reports `Unhealthy` even before the next sweep.
 Inventory and edits reuse the existing global Admin authorization boundary.
 The explicit loopback development profile remains login-free.
 
+Admin `GET /api/v1/admin/system` adds observed API/controller instances, current
+database lease leadership, and per-worker assigned task, parent DAG-node, run
+and workflow counts. Five-second heartbeats expire after 15 seconds; crashes
+are not reported as healthy indefinitely. See the
+[live system inventory guide](docs/operations/live-system-inventory.md) for
+placement metadata, activity-counter semantics and migration ordering.
+
 Admin `PATCH /api/v1/machines/{id}` accepts a nonempty JSON object containing
 `labels`, `pool` and/or `manualCapacity`; labels replace the whole map, and `{ "labels": {} }`
 clears it. Omitted fields stay unchanged; explicit nulls, duplicate/unknown

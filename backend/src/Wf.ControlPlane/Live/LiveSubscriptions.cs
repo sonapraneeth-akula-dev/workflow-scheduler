@@ -11,6 +11,11 @@ public sealed class LiveSubscriptions(IHubContext<LiveHub> hub, IServiceScopeFac
 {
     private readonly ConcurrentDictionary<string, Connection> connections = new(StringComparer.Ordinal);
     private int draining;
+    private long deliveries;
+
+    public int ConnectionCount => connections.Count;
+    public int SubscriptionCount => connections.Values.Sum(connection => connection.Subscriptions.Count);
+    public long DeliveryCount => Interlocked.Read(ref deliveries);
 
     public string[] LogInterests => connections.Values.SelectMany(connection => connection.Subscriptions.Values)
         .Where(subscription => subscription.Scope == "logs").Select(subscription => subscription.Id).Distinct(StringComparer.Ordinal).ToArray();
@@ -159,7 +164,11 @@ public sealed class LiveSubscriptions(IHubContext<LiveHub> hub, IServiceScopeFac
                     await hub.Clients.Client(id).SendAsync("Resync", new LiveResync(subscription.Scope, subscription.Id), linked.Token);
                     return;
                 }
-                if (target is not null) await hub.Clients.Client(id).SendAsync(target, payload, linked.Token);
+                if (target is not null)
+                {
+                    await hub.Clients.Client(id).SendAsync(target, payload, linked.Token);
+                    Interlocked.Increment(ref deliveries);
+                }
             }
             finally { connection.Gate.Release(); }
         }

@@ -61,7 +61,7 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             using var document = JsonDocument.Parse(await exported.Content.ReadAsStringAsync(deadline.Token));
             Assert.StartsWith("3.1.", document.RootElement.GetProperty("openapi").GetString());
             var paths = document.RootElement.GetProperty("paths");
-            foreach (var path in new[] { "/api/v1/runs", "/api/v1/runs/{id}/reports", "/api/v1/audit" })
+            foreach (var path in new[] { "/api/v1/runs", "/api/v1/runs/{id}/reports", "/api/v1/audit", "/api/v1/admin/system" })
                 Assert.True(paths.GetProperty(path).TryGetProperty("get", out _), $"Public read missing: {path}");
             Assert.True(paths.GetProperty("/api/v1/schedules/{id}").TryGetProperty("get", out _));
             Assert.True(paths.GetProperty("/api/v1/schedules").TryGetProperty("get", out _));
@@ -151,6 +151,12 @@ public sealed class RunHistoryProgramTests(RegistrationHostDatabase database, IT
             Assert.Equal("#/components/schemas/ScheduleRunNowResponse", runNow.GetProperty("responses").GetProperty("202")
                 .GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
             var schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
+            Assert.Equal("#/components/schemas/SystemSnapshotResponse",
+                paths.GetProperty("/api/v1/admin/system").GetProperty("get").GetProperty("responses")
+                    .GetProperty("200").GetProperty("content").GetProperty("application/json")
+                    .GetProperty("schema").GetProperty("$ref").GetString());
+            Assert.True(schemas.GetProperty("SystemInstanceResponse").GetProperty("properties").TryGetProperty("nodeName", out _));
+            Assert.True(schemas.GetProperty("SystemWorkerResponse").GetProperty("properties").TryGetProperty("activeDagNodes", out _));
             var liveEvent = schemas.GetProperty("LiveEvent").GetProperty("properties");
             Assert.True(liveEvent.TryGetProperty("attempt", out _));
             var progressSchema = liveEvent.GetProperty("progress");
