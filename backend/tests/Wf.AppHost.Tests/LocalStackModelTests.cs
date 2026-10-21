@@ -1,6 +1,8 @@
 using System.Runtime.CompilerServices;
+using System.Diagnostics;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Text.Json;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Microsoft.Extensions.Configuration;
@@ -339,6 +341,74 @@ public sealed class LocalStackModelTests : IDisposable
         var builder = Builder(("Local:Agents", "2"));
         Assert.Throws<InvalidDataException>(() => LocalStack.Configure(builder));
         Assert.Empty(builder.Resources);
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(17, false)]
+    [InlineData(0, true)]
+    public async Task Native_launcher_uses_checkout_relative_persistent_profile_and_forwards_failures(int exitCode, bool externalDatabase)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "The native PowerShell launcher contract is checked on Windows.");
+        Directory.CreateDirectory(root);
+        var capture = Path.Combine(root, "arguments.json");
+        var start = new ProcessStartInfo("pwsh")
+        {
+            WorkingDirectory = Path.GetTempPath(), UseShellExecute = false,
+            RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        foreach (var argument in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", """
+            function global:dotnet {
+                [System.IO.File]::WriteAllText($env:WF_LAUNCH_CAPTURE, (ConvertTo-Json -InputObject @($args) -Compress))
+                $global:LASTEXITCODE = [int]$env:WF_LAUNCH_EXIT
+            }
+            function global:bun {}
+            function global:docker {}
+            & $env:WF_LAUNCH_SCRIPT
+            exit $LASTEXITCODE
+            """ })
+            start.ArgumentList.Add(argument);
+        start.Environment.Remove("ConnectionStrings__wf");
+        start.Environment.Remove("ConnectionStrings:wf");
+        if (externalDatabase) start.Environment["ConnectionStrings__wf"] = "Host=must-not-connect.invalid";
+        start.Environment["WF_LAUNCH_SCRIPT"] = Path.Combine(Repository(), "start-local.ps1");
+        start.Environment["WF_LAUNCH_CAPTURE"] = capture;
+        start.Environment["WF_LAUNCH_EXIT"] = exitCode.ToString();
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(30));
+        using var process = Process.Start(start)!;
+        var stdout = process.StandardOutput.ReadToEndAsync(deadline.Token);
+        var stderr = process.StandardError.ReadToEndAsync(deadline.Token);
+        try
+        {
+            await process.WaitForExitAsync(deadline.Token);
+            var diagnostic = await stderr;
+            Assert.Equal(externalDatabase ? 1 : exitCode, process.ExitCode);
+            Assert.Empty(await stdout);
+            if (externalDatabase)
+            {
+                Assert.Contains("Clear ConnectionStrings__wf", diagnostic);
+                Assert.False(File.Exists(capture));
+            }
+            else
+            {
+                Assert.Empty(diagnostic);
+                var actual = Assert.IsType<string[]>(JsonSerializer.Deserialize<string[]>(
+                    await File.ReadAllTextAsync(capture, deadline.Token)));
+                Assert.Equal([
+                    "run", "--project", Path.Combine(Repository(), "backend", "src", "Wf.AppHost", "Wf.AppHost.csproj"),
+                    "--", "--Local:DataRoot=" + Path.Combine(Repository(), ".wf", "native-main"),
+                    "--Local:PostgresVolume=wf-native-main-pg18", "--Local:ApiPort=5000",
+                    "--Local:EnginePort=5001", "--Local:UiPort=5173", "--Local:Monitoring=false"
+                ], actual);
+            }
+        }
+        finally
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync(CancellationToken.None);
+            await Task.WhenAll(stdout, stderr);
+        }
     }
 
     private IDistributedApplicationBuilder Builder(params (string Key, string Value)[] settings)

@@ -18,6 +18,22 @@ or an existing PostgreSQL 17+ database. From the repository root:
 dotnet run --project .\backend\src\Wf.AppHost
 ```
 
+For the currently migrated native instance, the single-command launcher is:
+
+```powershell
+pwsh -NoProfile -File .\start-local.ps1
+```
+
+Requires PowerShell 7 and the tools above, not the Aspire CLI. The script uses
+this checkout's `.wf\native-main` state, the persistent `wf-native-main-pg18`
+PostgreSQL 18 volume, API/engine/UI ports 5000/5001/5173, and leaves standalone
+monitoring untouched. It runs in the foreground; **Ctrl+C** stops its AppHost
+resources without deleting the database, blobs or agent identity. Do not start
+a second copy while this instance is already running. External database
+environment overrides are rejected rather than silently connecting this
+profile to another database. The bare AppHost command above remains the
+generic/default profile and may use different state and volumes.
+
 With the Aspire CLI installed, `aspire run` from the repository root or `backend\src\Wf.AppHost`
 starts the same application. The dashboard URL appears in the terminal.
 The AppHost starts migrations, the control plane, one local agent process and
@@ -272,6 +288,37 @@ shared/team failure catalogs:
 ```powershell
 docker build -f .\backend\src\Wf.ControlPlane\Dockerfile -t kardia-control-plane:local .
 ```
+
+### Application roles and local orchestration
+
+The application has API, engine/control-plane and agent roles, plus PostgreSQL
+and blob storage. API-only and engine instances use the same
+`kardia-control-plane` image: `Engine__Enabled=false` disables engine leadership
+and execution; engine instances enable them. Agents use the separate
+`kardia-agent` image. Native AppHost combines API and engine in one process;
+the Compose profile already separates one API, two engines and one agent.
+
+The engines share a single database-backed `engine` lease, so extra engine
+replicas provide active/standby failover, not additional active scheduler
+throughput. API and agent replication are different scaling concerns.
+Replicated agents need distinct persistent identities and durable journals.
+
+Swarm or Kubernetes can host the same application images, but neither a Swarm
+stack nor Kubernetes manifests are currently supplied. For orchestration-level
+local testing, a [kind multi-node cluster](https://kind.sigs.k8s.io/docs/user/configuration/)
+is a suitable next profile: for example, two API replicas, two engine replicas,
+three agents, one development PostgreSQL instance, a migration job, shared blob
+storage and a gateway. This is a proposed topology, not an installed cluster.
+Containerized kind nodes do not replace an isolated machine/VM reboot test.
+
+Keep workflow/scheduling/task business logic shared. Deployment changes include
+service discovery, leader-aware HTTP/2 routing, readiness and graceful shutdown,
+one-time migrations, secrets, shared storage and durable per-agent volumes.
+Our trusted Compose authentication profile also hard-codes Docker subnets and
+allowed service origins; those assumptions cannot simply be copied into a
+Kubernetes namespace. Use an explicit suitable security/network profile rather
+than weakening the existing guards. See [Kubernetes workload roles](https://kubernetes.io/docs/concepts/workloads/)
+and [Swarm deployment requirements](https://docs.docker.com/engine/swarm/stack-deploy/).
 
 The real
 lifecycle acceptance test requires a normal Debug CLI build and explicit
