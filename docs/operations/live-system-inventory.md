@@ -58,6 +58,12 @@ leadership; an `Api` process does not participate in that lease. Multiple
 controllers do **not** imply active-active scheduling. `isLeader` comes from
 the unexpired database lease and a fresh, ready process heartbeat.
 
+On the host stopping signal, a controller immediately stops admitting new
+engine work and advertising itself as a leader, before HTTP/gRPC listeners
+finish draining. Its lease continues renewing only to flush already accepted
+events under their captured epoch; the existing shutdown sequence then releases
+it. This prevents new attempts receiving upload URLs for a terminating listener.
+
 ## Freshness and counts
 
 Processes publish database-timestamped heartbeats every five seconds.

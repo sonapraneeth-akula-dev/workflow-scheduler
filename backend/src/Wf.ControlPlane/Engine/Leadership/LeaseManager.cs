@@ -22,11 +22,13 @@ public sealed class LeaseManager : BackgroundService
     private readonly TimeProvider time;
     private readonly ILogger<LeaseManager> logger;
     private readonly SemaphoreSlim changes = new(1, 1);
+    private readonly CancellationTokenRegistration shutdownRegistration;
     private State state = new(null, 0, TimeSpan.Zero, "");
+    private int accepting = 1;
     private int stopping;
 
     public LeaseManager(NpgsqlDataSource dataSource, LeaseOptions options, ILogger<LeaseManager> logger,
-        TimeProvider? timeProvider = null, LocalComposeOptions? compose = null)
+        TimeProvider? timeProvider = null, LocalComposeOptions? compose = null, IHostApplicationLifetime? lifetime = null)
     {
         this.dataSource = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         this.options = options ?? throw new ArgumentNullException(nameof(options));
@@ -40,12 +42,15 @@ public sealed class LeaseManager : BackgroundService
                 !(compose is not null && LocalComposeOptions.IsEngineOrigin(endpoint)) || endpoint.UserInfo.Length != 0 ||
             endpoint.AbsolutePath != "/" || endpoint.Query.Length != 0 || endpoint.Fragment.Length != 0)
             throw new ArgumentException("Leader endpoint must be an HTTPS origin, or loopback HTTP origin, except for the explicit local Compose engine origins.", nameof(options));
+        // Stop admission before listeners close; renewal still protects already accepted events until their drain.
+        shutdownRegistration = lifetime?.ApplicationStopping.Register(() => Volatile.Write(ref accepting, 0)) ?? default;
     }
 
     public LeaseToken? Current
     {
         get
         {
+            if (Volatile.Read(ref accepting) == 0) return null;
             var observed = Volatile.Read(ref state);
             return observed.Lease is not null && time.GetElapsedTime(observed.ObservedAt) < observed.Remaining
                 ? observed.Lease : null;
@@ -53,7 +58,7 @@ public sealed class LeaseManager : BackgroundService
     }
 
     public bool IsLeader => Current is not null;
-    public string LeaderHint => Volatile.Read(ref state).LeaderHint;
+    public string LeaderHint => Volatile.Read(ref accepting) == 0 ? "" : Volatile.Read(ref state).LeaderHint;
     public LeaseToken RequireLease() => Current ?? throw new NotLeaderException(LeaderHint);
 
     public async Task<bool> TryAcquireOrRenewAsync(CancellationToken cancellationToken = default)
@@ -175,6 +180,7 @@ public sealed class LeaseManager : BackgroundService
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
+        Volatile.Write(ref accepting, 0);
         Interlocked.Exchange(ref stopping, 1);
         await base.StopAsync(cancellationToken);
         await ReleaseAsync(cancellationToken);
@@ -182,6 +188,7 @@ public sealed class LeaseManager : BackgroundService
 
     public override void Dispose()
     {
+        shutdownRegistration.Dispose();
         base.Dispose();
         changes.Dispose();
     }

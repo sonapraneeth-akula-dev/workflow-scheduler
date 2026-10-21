@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Wf.Agent;
@@ -20,6 +21,7 @@ using Wf.Contracts.Agent.V1;
 using Wf.Contracts.Definition;
 using Wf.Contracts.Events;
 using Wf.ControlPlane.Engine.Agents;
+using Wf.ControlPlane.Data;
 using Wf.ControlPlane.Engine.Dispatch;
 using Wf.ControlPlane.Engine.Events;
 using Wf.ControlPlane.Engine.Leadership;
@@ -204,11 +206,14 @@ public sealed class LeaseTests(LeaseDatabase database) : IClassFixture<LeaseData
         Assert.Equal(0L, await count.ExecuteScalarAsync(Token));
     }
 
-    [Fact]
-    public async Task LeaseFencedGroupCommitRetainsUnacknowledgedEventsAcrossActualTransactionTimeout()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LeaseFencedGroupCommitRetainsUnacknowledgedEventsAcrossActualTransactionTimeout(bool stoppingBeforeFlush)
     {
         await Reset();
-        using var leader = Manager(5100);
+        using var lifetime = new Lifetime();
+        using var leader = Manager(5100, lifetime);
         Assert.True(await leader.TryAcquireOrRenewAsync(Token));
         var store = new RunStore(database.DataSource, NullLogger<RunStore>.Instance, leader);
         var run = NewRun();
@@ -238,6 +243,17 @@ public sealed class LeaseTests(LeaseDatabase database) : IClassFixture<LeaseData
             // The production fence terminates a blocked transaction after at most one second.
             await Task.Delay(TimeSpan.FromMilliseconds(1500), Token);
             Assert.False(pending.IsCompleted);
+            if (stoppingBeforeFlush)
+            {
+                lifetime.StopApplication();
+                Assert.False(leader.IsLeader);
+                Assert.Empty(leader.LeaderHint);
+                Assert.Throws<NotLeaderException>(() => leader.RequireLease());
+                await Assert.ThrowsAsync<NotLeaderException>(() => appender.AppendAsync(run.CreateEvent(
+                    EventEntity.Run, null, (int)RunStatus.Running, DateTimeOffset.UtcNow), Token));
+                Assert.True(await leader.TryAcquireOrRenewAsync(Token));
+                Assert.False(leader.IsLeader);
+            }
             await transaction.CommitAsync(Token);
         }
         Assert.Equal(1, (await pending.WaitAsync(TimeSpan.FromSeconds(5), Token)).EventCount);
@@ -465,8 +481,19 @@ public sealed class LeaseTests(LeaseDatabase database) : IClassFixture<LeaseData
             throw new InvalidOperationException("No task commands are expected during leader-connector acceptance.");
     }
 
-    private LeaseManager Manager(int port) => new(database.DataSource,
-        new(Guid.NewGuid().ToString("N"), new Uri($"http://localhost:{port}")), NullLogger<LeaseManager>.Instance);
+    private LeaseManager Manager(int port, IHostApplicationLifetime? lifetime = null) => new(database.DataSource,
+        new(Guid.NewGuid().ToString("N"), new Uri($"http://localhost:{port}")), NullLogger<LeaseManager>.Instance,
+        lifetime: lifetime);
+
+    private sealed class Lifetime : IHostApplicationLifetime, IDisposable
+    {
+        private readonly CancellationTokenSource stopping = new();
+        public CancellationToken ApplicationStarted => CancellationToken.None;
+        public CancellationToken ApplicationStopping => stopping.Token;
+        public CancellationToken ApplicationStopped => CancellationToken.None;
+        public void StopApplication() => stopping.Cancel();
+        public void Dispose() => stopping.Dispose();
+    }
 
     private async Task Reset()
     {
@@ -526,6 +553,5 @@ public sealed class LeaseTests(LeaseDatabase database) : IClassFixture<LeaseData
 public sealed class LeaseDatabase : AgentDatabase
 {
     protected override IReadOnlyList<string> Migrations =>
-        ["0002_runs_events.sql", "0003_attempt_timers.sql", "0005_agents.sql", "0006_dispatch_outbox.sql", "0009_leases.sql",
-            "0011_attempt_replacement.sql"];
+        Migrator.LoadScripts().Select(script => script.Name).ToArray();
 }
