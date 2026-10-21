@@ -2123,6 +2123,31 @@ exact edited inputs and key for **Retry clone**, including across closing and
 reopening the dialog. Validation errors preserve editable JSON. The `run.clone`
 audit entry records lineage and version, not variable values.
 
+**Run and report sign-off.** Approval covers one completed run and its pinned
+workflow version, never the workflow globally or a future run. Each report has
+an independent approval; approving the run does not approve its reports, and
+report approval does not approve the run. Approval does not gate execution.
+Current Run Viewers may read the full sign-off/revocation history. Current Run
+Operators and Admins may sign off or revoke any active approval with a required
+reason. The server records authenticated actor ID, display name (object ID when
+unavailable), reason and UTC time. Revocation preserves earlier approvals.
+
+`GET /api/v1/runs/{id}/signoff` returns current state, pinned workflow/version,
+and newest-first history. Add `/reports/{reportId}` immediately after the run ID
+for a report's independent sign-off. `POST` to the same path signs off;
+`POST .../signoff/revoke` revokes. Both accept only `{"reason":"..."}` (nonblank,
+at most 2000 characters; body at most 16 KiB), require a completed run, and require
+the current strong `ETag` from GET in `If-Match` (initially `"0"`).
+Missing preconditions return 428; stale revisions return 412. Reload after an
+uncertain response before deciding whether to submit another change; stale
+retries cannot silently approve or revoke a newer revision. Current state and
+events commit atomically with `run.signoff`, `run.signoff.revoke`,
+`report.signoff`, or `report.signoff.revoke` audit entries. History is append-only.
+GET accepts `limit=1..50` (default 20) and exclusive `before=<revision>`;
+`nextBefore` continues older history while `state` always describes the current
+head. Revisions are decimal strings, preserving full 64-bit precision.
+Responses use `Cache-Control: no-store`; every request rechecks current scope.
+
 Dry-run executes the same core using explicit task mocks, without invoking any
 original task delegate or external service:
 

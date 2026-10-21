@@ -28,6 +28,7 @@ public static class RunsEndpoints
         endpoints.MapRerunEndpoint();
         endpoints.MapTaskOutputsEndpoints();
         endpoints.MapRunConditionsEndpoints();
+        endpoints.MapSignOffEndpoints();
         endpoints.MapReservationQueueEndpoints();
         endpoints.MapPost("/api/v1/runs/placement-options", PlacementOptions).RequireAuthorization()
             .Accepts<TriggerRunRequest>("application/json").Produces<PlacementOptionsResponse>()
