@@ -6,13 +6,15 @@ param(
     [ValidatePattern('^[a-z0-9][a-z0-9_.-]{0,100}$')]
     [string]$ImageTag,
     [switch]$SkipBuild,
-    [switch]$StageOnly
+    [switch]$StageOnly,
+    [switch]$BootstrapDeploymentActivity
 )
 
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 Import-Module Hyper-V -ErrorAction Stop
 . (Join-Path $PSScriptRoot 'certificate.ps1')
+. (Join-Path $PSScriptRoot 'activity.ps1')
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $root = Join-Path $repository '.wf\ha-lab'
 $dataRoot = Join-Path $root 'data'
@@ -51,17 +53,25 @@ $previous = if (Test-Path $deploymentPath) { Get-Content $deploymentPath -Raw | 
 if ($previous -and $previous.ImageTag -ne $ImageTag -and !$StageOnly) {
     throw 'An installed lab requires a drain-aware release. StageOnly changes desired images without replacing controllers/workers.'
 }
+$activity = $null
+try {
+$activity = Start-LabDeploymentActivity -Kube $kube -Mode Stage -Target $ImageTag `
+    -Bootstrap:$BootstrapDeploymentActivity -InitialInstall:(!$namespace -and !$previous)
+Report-LabDeploymentActivity $activity -Phase Preflight -Outcome Succeeded -Description 'Owned nodes, namespace, shared data and release preconditions verified.'
 $imageRoot = Join-Path $root 'images'
 $null = New-Item -ItemType Directory -Force -Path $imageRoot
 $imageStatePath = Join-Path $imageRoot "$ImageTag.json"
 if (!$SkipBuild) {
     if (Test-Path $imageStatePath) { throw 'An imported image tag is immutable. Use SkipBuild or a new tag.' }
+    Report-LabDeploymentActivity $activity -Phase Build -Subject kardia-control-plane -Description 'Building immutable API/controller image.'
     & docker build --quiet --tag "kardia-control-plane:$ImageTag" `
         --build-arg NUGET_SOURCE=https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public/nuget/v3/index.json `
         --file (Join-Path $repository 'backend\src\Wf.ControlPlane\Dockerfile') $repository
+    Report-LabDeploymentActivity $activity -Phase Build -Subject kardia-agent -Description 'Building immutable worker image.'
     & docker build --quiet --tag "kardia-agent:$ImageTag" `
         --file (Join-Path $repository 'backend\src\Wf.Agent\Dockerfile') (Join-Path $repository 'backend')
     $previousGateway = if ($previous) { "kardia-gateway:$($previous.ImageTag)" } else { 'caddy:2.11.7-alpine' }
+    Report-LabDeploymentActivity $activity -Phase Build -Subject kardia-gateway -Description 'Building frontend image while retaining previous hashed assets.'
     & docker build --quiet --tag "kardia-gateway:$ImageTag" --build-arg LOCAL_BUILD_MODE=ha-lab `
         --build-arg "PREVIOUS_GATEWAY_IMAGE=$previousGateway" `
         --file (Join-Path $repository 'infra\local\gateway.Dockerfile') $repository
@@ -74,17 +84,21 @@ if (Test-Path $imageStatePath) {
 } else {
     $imageIds | ConvertTo-Json | Set-Content $imageStatePath -Encoding utf8NoBOM
 }
+Report-LabDeploymentActivity $activity -Phase Build -Outcome Succeeded -Description 'All three immutable local images are available and verified.'
 $archive = Join-Path $imageRoot "$ImageTag.tar"
 if (!(Test-Path $archive)) { & docker image save --platform linux/amd64 --output $archive @images }
 $sshArgs = @('-i', (Join-Path $root 'id_ed25519'), '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5',
     '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=3', '-o', 'StrictHostKeyChecking=yes',
     '-o', "UserKnownHostsFile=$(Join-Path $root 'known_hosts')")
 foreach ($name in $names) {
+    Report-LabDeploymentActivity $activity -Phase Import -Subject $name -Description 'Copying and importing immutable application images on this node.'
     & scp @sshArgs -o "HostKeyAlias=$name" $archive "kardia@$($addresses[$name]):/home/kardia/kardia-images.tar"
     & ssh @sshArgs -o "HostKeyAlias=$name" "kardia@$($addresses[$name])" `
         'sudo k3s ctr images import --no-unpack /home/kardia/kardia-images.tar && rm /home/kardia/kardia-images.tar'
+    Report-LabDeploymentActivity $activity -Phase Import -Subject $name -Outcome Succeeded -Description 'Application image import completed on this node.'
 }
 
+Report-LabDeploymentActivity $activity -Phase Configure -Description 'Applying application trust, configuration and namespaced observer permissions.'
 $caPath = Join-Path $dataRoot 'certs\ca.crt'
 $appTls = Join-Path $root 'application-tls'
 $null = New-Item -ItemType Directory -Force -Path $appTls
@@ -124,7 +138,9 @@ if ($renew) {
 & kubectl @kube -n kardia create secret tls kardia-service-tls "--cert=$certPath" "--key=$keyPath" `
     --dry-run=client -o json | & kubectl @kube apply -f -
 
+Report-LabDeploymentActivity $activity -Phase Configure -Outcome Succeeded -Description 'Application trust, configuration and namespaced observer permissions applied.'
 $migrationName = "kardia-migrate-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+Report-LabDeploymentActivity $activity -Phase Migrate -Subject $migrationName -Description 'Running the additive schema migration job before application rollout.'
 @{
     apiVersion = 'batch/v1'; kind = 'Job'
     metadata = @{ name = $migrationName; namespace = 'kardia' }
@@ -164,12 +180,22 @@ try {
     if ($job.status.failed -gt 0) { & kubectl @kube -n kardia logs "job/$migrationName" --tail=80 }
     throw
 }
+Report-LabDeploymentActivity $activity -Phase Migrate -Subject $migrationName -Outcome Succeeded -Description 'Schema migration job completed.'
 $manifest = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'application.yaml')).
     Replace('{{IMAGE_TAG}}', $ImageTag).Replace('{{DATA_ADDRESS}}', $hostAddress)
 $manifest | & kubectl @kube apply -f -
+Report-LabDeploymentActivity $activity -Phase Rollout -Description 'Desired images applied; waiting for API and frontend rolling replacements. OnDelete controllers and workers remain staged.'
 & kubectl @kube -n kardia rollout status deployment/kardia-api --timeout=300s
 & kubectl @kube -n kardia rollout status deployment/kardia-frontend --timeout=300s
+Report-LabDeploymentActivity $activity -Phase Rollout -Outcome Succeeded -Description 'API and frontend target images are ready. OnDelete controllers and workers remain staged.'
+if (!$activity.Enabled) {
+    $activity = Start-LabDeploymentActivity -Kube $kube -Mode Stage -Target $ImageTag
+    Report-LabDeploymentActivity $activity -Phase Rollout -Outcome Succeeded `
+        -Description 'Reporting enabled after bootstrap API/frontend rollout. Earlier build/import/migration steps were not recorded.'
+}
 if ($StageOnly) {
+    Report-LabDeploymentActivity $activity -Phase Complete -Outcome Succeeded `
+        -Description 'Staging completed. Controllers and workers are OnDelete; a separate drain-aware Release is still required.'
     Write-Host 'Desired images staged; controllers and workers use OnDelete and have NOT been replaced.'
     return
 }
@@ -201,3 +227,8 @@ if (!$ready) { throw 'Expected two APIs, two controllers with one leader, and th
     ConvertTo-Json | Set-Content $deploymentPath -Encoding utf8NoBOM
 Write-Host "Kardia lab ready: 2 APIs, 2 controllers (one leader), 3 connected workers, 2 frontends; image $ImageTag."
 Write-Host 'No external ingress created. Use a loopback-only kubectl port-forward for browser access.'
+Report-LabDeploymentActivity $activity -Phase Complete -Outcome Succeeded -Description 'Initial deployment completed; all application roles passed live readiness checks.'
+} catch {
+    Fail-LabDeploymentActivity $activity 'Stage'
+    throw
+}

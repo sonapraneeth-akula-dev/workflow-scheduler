@@ -58,6 +58,7 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, MetricsJsonContext.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Admin.RetentionJson.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Admin.SystemNoticeJson.Default);
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Admin.DeploymentActivityJson.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunTimelineJsonContext.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunConditionsJsonContext.Default);
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, SystemEventsJson.Default);
@@ -92,6 +93,7 @@ internal sealed class MetricsApiServer(WebApplication app, HttpClient client, RS
             app.MapMetricsEndpoints();
             Wf.ControlPlane.Api.Admin.RetentionEndpoints.MapRetentionEndpoints(app);
             Wf.ControlPlane.Api.Admin.SystemNoticeEndpoints.MapSystemNoticeEndpoints(app);
+            Wf.ControlPlane.Api.Admin.DeploymentActivityEndpoints.MapDeploymentActivityEndpoints(app);
             app.MapRunTimelineEndpoints();
             app.MapRunConditionsEndpoints();
             Wf.ControlPlane.Api.Series.TrendsEndpoint.MapTrendsEndpoint(app);

@@ -18,7 +18,7 @@ public static class KubernetesMemoryEndpoints
         return endpoints;
     }
 
-    private static async Task<IResult> Read(HttpContext context, KubernetesMemory memory, ILoggerFactory logging)
+    private static async Task<IResult> Read(HttpContext context, KubernetesObserver memory, ILoggerFactory logging)
     {
         context.Response.Headers.CacheControl = "no-store";
         context.Response.Headers.XContentTypeOptions = "nosniff";

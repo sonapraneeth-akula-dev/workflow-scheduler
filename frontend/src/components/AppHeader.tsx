@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
 import { WorkflowNav } from "./WorkflowNav"
+import { SystemNav } from "./SystemNav"
 
 export function AppHeader({ children }: { children: ReactNode }) {
   return (
@@ -37,15 +38,7 @@ export function AppHeader({ children }: { children: ReactNode }) {
           >
             Machines
           </Link>
-          <Link
-            to="/admin/system"
-            className="inline-flex min-h-10 items-center px-2"
-            activeProps={{
-              className: "bg-secondary text-secondary-foreground",
-            }}
-          >
-            Live system
-          </Link>
+          <SystemNav />
           <Link
             to="/admin/audit"
             className="inline-flex min-h-10 items-center px-2"

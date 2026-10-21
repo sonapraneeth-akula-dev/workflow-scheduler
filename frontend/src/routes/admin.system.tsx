@@ -9,7 +9,7 @@ export const Route = createFileRoute("/admin/system")({
 function SystemPage() {
   return (
     <>
-      <h1 className="text-2xl font-semibold">Live system</h1>
+      <h1 className="text-2xl font-semibold">Actual system</h1>
       <SystemNoticeEditor />
       <SystemView />
     </>

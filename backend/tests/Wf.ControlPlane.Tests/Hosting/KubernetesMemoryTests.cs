@@ -30,7 +30,7 @@ public sealed class KubernetesMemoryTests
     [InlineData("1e-100", 1L)]
     [InlineData("0e3", 0L)]
     public void Quantities_use_exact_units_and_round_up_to_whole_bytes(string value, long expected) =>
-        Assert.Equal(expected, KubernetesMemory.ReadBytes(value));
+        Assert.Equal(expected, KubernetesObserver.ReadBytes(value));
 
     [Theory]
     [InlineData("")]
@@ -42,12 +42,12 @@ public sealed class KubernetesMemoryTests
     [InlineData("1e100")]
     [InlineData("9223372036854775808")]
     public void Invalid_or_overflowing_memory_is_not_a_zero_measurement(string value) =>
-        Assert.Throws<FormatException>(() => KubernetesMemory.ReadBytes(value));
+        Assert.Throws<FormatException>(() => KubernetesObserver.ReadBytes(value));
 
     [Fact]
     public void Disabled_monitoring_never_reads_a_service_account()
     {
-        using var memory = new KubernetesMemory(new ConfigurationBuilder().Build(), TimeProvider.System);
+        using var memory = new KubernetesObserver(new ConfigurationBuilder().Build(), TimeProvider.System);
         Assert.False(memory.Enabled);
     }
 
@@ -58,7 +58,7 @@ public sealed class KubernetesMemoryTests
     public void Namespace_cannot_change_the_resource_path(string value)
     {
         using var client = new HttpClient();
-        Assert.Throws<InvalidOperationException>(() => new KubernetesMemory(client, value, () => "token", TimeProvider.System));
+        Assert.Throws<InvalidOperationException>(() => new KubernetesObserver(client, value, () => "token", TimeProvider.System));
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public sealed class KubernetesMemoryTests
         using var handler = new Api();
         using var client = new HttpClient(handler) { BaseAddress = new("https://kubernetes.default.svc/") };
         var tokenVersion = 0;
-        using var memory = new KubernetesMemory(client, "kardia", () => $"rotated-{++tokenVersion}", TimeProvider.System);
+        using var memory = new KubernetesObserver(client, "kardia", () => $"rotated-{++tokenVersion}", TimeProvider.System);
         var result = await memory.ReadAsync(CancellationToken.None);
         var node = Assert.Single(result.Nodes);
         Assert.Equal(3L * 1024 * 1024 * 1024, node.CapacityBytes);
@@ -88,7 +88,7 @@ public sealed class KubernetesMemoryTests
     {
         using var handler = new Api { NoNodeMetrics = true, OldPodSample = true };
         using var client = new HttpClient(handler) { BaseAddress = new("https://kubernetes.default.svc/") };
-        using var memory = new KubernetesMemory(client, "kardia", () => "token", TimeProvider.System);
+        using var memory = new KubernetesObserver(client, "kardia", () => "token", TimeProvider.System);
         var result = await memory.ReadAsync(CancellationToken.None);
         Assert.Null(Assert.Single(result.Nodes).WorkingSetBytes);
         Assert.Null(Assert.Single(result.Pods).WorkingSetBytes);
@@ -100,7 +100,7 @@ public sealed class KubernetesMemoryTests
     {
         using var handler = new Api { Status = HttpStatusCode.Forbidden };
         using var client = new HttpClient(handler) { BaseAddress = new("https://kubernetes.default.svc/") };
-        using var memory = new KubernetesMemory(client, "kardia", () => "token", TimeProvider.System);
+        using var memory = new KubernetesObserver(client, "kardia", () => "token", TimeProvider.System);
         Assert.Equal(HttpStatusCode.Forbidden,
             (await Assert.ThrowsAsync<HttpRequestException>(() => memory.ReadAsync(CancellationToken.None))).StatusCode);
     }
@@ -110,7 +110,7 @@ public sealed class KubernetesMemoryTests
     {
         using var handler = new Api();
         using var client = new HttpClient(handler) { BaseAddress = new("https://kubernetes.default.svc/") };
-        using var memory = new KubernetesMemory(client, "kardia", () => "token\r\nAuthorization: bad", TimeProvider.System);
+        using var memory = new KubernetesObserver(client, "kardia", () => "token\r\nAuthorization: bad", TimeProvider.System);
         await Assert.ThrowsAsync<InvalidDataException>(() => memory.ReadAsync(CancellationToken.None));
         Assert.Empty(handler.Requests);
     }
@@ -119,7 +119,7 @@ public sealed class KubernetesMemoryTests
     public async Task Monitoring_route_requires_global_admin()
     {
         var builder = WebApplication.CreateBuilder();
-        builder.Services.AddSingleton(new KubernetesMemory(new ConfigurationBuilder().Build(), TimeProvider.System));
+        builder.Services.AddSingleton(new KubernetesObserver(new ConfigurationBuilder().Build(), TimeProvider.System));
         await using var app = builder.Build();
         app.MapKubernetesMemoryEndpoints();
         var endpoint = Assert.Single(((IEndpointRouteBuilder)app).DataSources.SelectMany(source => source.Endpoints));

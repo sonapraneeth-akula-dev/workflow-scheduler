@@ -85,6 +85,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, AuditJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Admin.RetentionJson.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Admin.SystemNoticeJson.Default);
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Admin.DeploymentJson.Default);
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Admin.DeploymentActivityJson.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, Wf.ControlPlane.Api.Admin.SystemJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, MetricsJsonContext.Default);
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, RunTimelineJsonContext.Default);
@@ -100,7 +102,7 @@ builder.Services.AddWorkflowOpenApi();
 builder.Services.AddWorkflowLive();
 builder.Services.AddWorkflowLiveLogs();
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton(provider => new KubernetesMemory(builder.Configuration,
+builder.Services.AddSingleton(provider => new KubernetesObserver(builder.Configuration,
     provider.GetRequiredService<TimeProvider>()));
 builder.Services.AddWorkflowTelemetry(builder.Configuration, engineEnabled, workflowEnvironment);
 builder.Services.AddSingleton(_ => NotificationOptions.Read(builder.Configuration));
@@ -190,6 +192,8 @@ Wf.ControlPlane.Api.Admin.RetentionEndpoints.MapRetentionEndpoints(app);
 Wf.ControlPlane.Api.Admin.SystemNoticeEndpoints.MapSystemNoticeEndpoints(app);
 Wf.ControlPlane.Api.Admin.SystemEndpoints.MapSystemEndpoints(app);
 Wf.ControlPlane.Api.Admin.KubernetesMemoryEndpoints.MapKubernetesMemoryEndpoints(app);
+Wf.ControlPlane.Api.Admin.DeploymentEndpoints.MapDeploymentEndpoints(app);
+Wf.ControlPlane.Api.Admin.DeploymentActivityEndpoints.MapDeploymentActivityEndpoints(app);
 app.MapMetricsEndpoints();
 app.MapRunTimelineEndpoints();
 app.MapTaskLogsEndpoints();

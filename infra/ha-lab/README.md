@@ -195,6 +195,51 @@ rollout:
 .\infra\ha-lab\release.ps1 -ImageTag ha-lab-local-2 -MaxDrainSeconds 300
 ```
 
+Deployment transparency is under **Live system -> Deployments**. **Actual
+system** retains runtime topology, RAM and the system-notice editor. Global
+Admins see actual desired/updated/ready images, pod image IDs and container
+reasons/restarts, plus retained migration jobs and recent script-reported
+Stage/Release steps. Stage success is not Release success: an OnDelete workload
+can remain **Awaiting replacement** with healthy pods on its previous image.
+The browser provides no deployment controls.
+
+When first upgrading a lab whose API predates deployment reporting, explicitly
+bootstrap it once:
+
+```powershell
+.\infra\ha-lab\deploy.ps1 -ImageTag ha-lab-reporting-1 -StageOnly -BootstrapDeploymentActivity
+.\infra\ha-lab\release.ps1 -ImageTag ha-lab-reporting-1 -MaxDrainSeconds 300
+```
+
+Bootstrap is accepted only when the old reporting endpoint returns `404`.
+It does not bypass authorization/storage/transport errors and is refused once
+reporting exists. Earlier build/import/migration steps are explicitly
+unrecorded; reporting starts after the new API/frontend rollout.
+Initial installation has the same honest pre-API gap. Normal subsequent
+staging/release requires working reporting before further deployment steps.
+The migration job applies `0051_deployment_activity.sql`; the shared workflow
+PostgreSQL database stores operation heads and ordered events atomically with
+audit. The existing local `deployment.json` remains the installed-image guard,
+not the browser's activity history.
+
+Scripts report through the existing owned-cluster kubectl/loopback development
+boundary; they do not add credentials to the browser or require Kubernetes
+writes from the observer account. Only the script's initiating Admin
+principal can append its operation. Static bounded step descriptions exclude
+command output and secrets. Failures try to record a terminal interruption,
+then stop without continuing rollout steps. If reporting also fails or the
+script is killed, the last Running record remains **Unconfirmed** after ten
+minutes, never manufactured completion. An interrupted report may have committed;
+the API supports exact sequence retries, while rerunning the script creates
+a new operation and uses the existing safe resume/preflight rules.
+
+The observer adds only namespaced read access for the four fixed workloads
+and migration-job inventory; controllers/workers still have no observer token.
+Five-second UI refresh, explicit pause/manual refresh and 20-second stale
+boundaries keep observed rollout and recorded activity independent. Empty
+history means no recorded operations, not no earlier deployments. Details:
+[live system inventory](../../docs/operations/live-system-inventory.md).
+
 `release.ps1` checks ownership, desired images and healthy replicas before
 replacing anything. It updates the observed standby controller before the lease
 leader, waiting for two healthy controller processes and one live leader after

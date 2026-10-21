@@ -13,7 +13,7 @@ public sealed record KubernetesPodMemory(string Name, string Namespace, string U
 public sealed record KubernetesMemorySnapshot(DateTimeOffset ObservedAt, int StaleAfterSeconds,
     IReadOnlyList<KubernetesNodeMemory> Nodes, IReadOnlyList<KubernetesPodMemory> Pods);
 
-public sealed partial class KubernetesMemory : IDisposable
+public sealed partial class KubernetesObserver : IDisposable
 {
     private const string ServiceAccount = "/var/run/secrets/kubernetes.io/serviceaccount";
     private const string Selector = "app in (kardia-api,kardia-controller,kardia-frontend,kardia-worker)";
@@ -24,7 +24,7 @@ public sealed partial class KubernetesMemory : IDisposable
     private readonly X509Certificate2Collection roots = [];
     public bool Enabled => client is not null;
 
-    public KubernetesMemory(IConfiguration configuration, TimeProvider time)
+    public KubernetesObserver(IConfiguration configuration, TimeProvider time)
     {
         this.time = time;
         if (!configuration.GetValue("Kubernetes:Enabled", false)) return;
@@ -49,7 +49,7 @@ public sealed partial class KubernetesMemory : IDisposable
         readToken = () => File.ReadAllText($"{ServiceAccount}/token");
     }
 
-    public KubernetesMemory(HttpClient client, string namespaceName, Func<string> readToken, TimeProvider time)
+    public KubernetesObserver(HttpClient client, string namespaceName, Func<string> readToken, TimeProvider time)
     {
         this.client = client;
         this.namespaceName = ValidateNamespace(namespaceName);

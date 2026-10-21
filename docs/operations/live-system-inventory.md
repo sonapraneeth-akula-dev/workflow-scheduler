@@ -1,6 +1,6 @@
 # Live system inventory
 
-Open **Live system** in the main navigation (`/admin/system`). Global
+Open **Live system -> Actual system** in the main navigation (`/admin/system`). Global
 administrators see application processes, their host/pod metadata, the current
 controller lease, worker assignments and cluster totals. The diagram follows
 browser/frontend -> API -> PostgreSQL durable state -> active/passive controllers
@@ -146,9 +146,97 @@ Non-Kubernetes VM/native deployments leave this optional integration disabled;
 the RAM panel reports that it is not configured rather than claiming K3s
 measurements exist. Application process/work counts continue independently.
 
+## Deployment transparency
+
+**Live system -> Deployments** (`/admin/deployments`) is a separate Global
+Admin-only, read-only view. It never executes a deployment, rollback, pod
+replacement or worker drain. Actual system retains its topology, RAM and notice
+editor. Two independent panels refresh every five seconds while visible;
+**Pause deployment updates** stops automatic polling, and **Refresh deployments**
+refreshes both even while paused. Permission revalidation hides cached data.
+A failed panel hides its previous data without masking the other panel.
+Rollout observations expire after 20 seconds and history snapshots after
+20 seconds, including when paused; stale data is not left looking current.
+
+### Actual Kubernetes rollout
+
+`GET /api/v1/admin/system/deployments` observes the fixed `kardia-api` and
+`kardia-frontend` Deployments, `kardia-controller` StatefulSet and
+`kardia-worker` DaemonSet. Each workload shows its desired image map,
+generation/observed generation, desired/updated/ready/available counts and
+the number of current pods matching all target container/init-container images.
+`In sync` requires matching images and counts plus an observed generation.
+`Ready` by itself does not prove the target version is running.
+
+With `OnDelete`, applying a new desired image leaves existing pods untouched:
+**Awaiting replacement** is intentional staging, not a completed release.
+Known image-pull, container-configuration, crash-loop, scheduling and rollout
+deadline failures are **Blocked**; unobserved generations are **Unknown**.
+Other incomplete rollouts are **Updating**. API reads occur separately;
+this is a bounded observation, not an atomic cluster snapshot.
+
+Expandable pod rows show actual container image/image ID, readiness, node,
+restart count, state/reason and exit code. Successfully terminated init
+containers are distinct from pod readiness. Migration jobs show the newest
+20 `kardia-migrate-*` jobs still retained by Kubernetes; job TTL cleanup can
+remove older evidence. Failed attempt counts are not independently labeled
+as a terminal job failure. No logs, commands, environment variables, secret
+values or arbitrary Kubernetes condition messages reach the browser.
+
+The endpoint requires global `Admin`, rejects query parameters, returns
+`no-store`, and shares the optional `Kubernetes__Enabled`/namespace integration
+and verified projected CA/token transport described above. Disabled
+observation, failed reads, missing resources or truncated lists return `503`,
+never a healthy empty cluster. Workload/pod/job responses have bounded size,
+list length and an eight-second request budget. `observer.yaml` adds only
+namespace-scoped `get` for those four named workloads and `get/list` for jobs;
+existing pod and Metrics API permissions remain. Other namespace jobs/pods,
+secrets, exec, logs and Kubernetes writes remain unavailable.
+
+### Recorded deployment activity
+
+Apply additive migration `0051_deployment_activity.sql` before the new API
+starts. `deployment_operations` and ordered `deployment_activity` events
+live in shared PostgreSQL, not browser memory or per-replica files.
+`GET /api/v1/admin/deployment-activity` returns the latest 20 operations with
+their steps, immutable target tag, Stage/Release mode, initiating principal,
+timestamps and reported status. Records remain stored beyond the UI's recent
+20-operation window; no automatic retention cleanup is added.
+
+These are **script reports**, not an independent assertion that Kubernetes
+finished deploying. Stage success means staging completed; OnDelete roles may
+still be on older images. Release reports include controller replacement,
+physical worker drain, replacement, explicit resume and final verification.
+Running operations silent for over 600 seconds are **Unconfirmed; last
+reported Running**, never silently converted to success or failure.
+Empty history does not mean no deployments occurred. Changes made outside
+the instrumented scripts, earlier deployments and pre-reporting bootstrap
+steps are not fabricated.
+
+The scripts start an operation using
+`POST /api/v1/admin/deployment-activity` with
+`{operationId, mode, target}`, then append
+`POST /api/v1/admin/deployment-activity/{id}/events` with
+`{sequence, phase, subject, outcome, description}`. Global Admin and a valid
+principal object ID are required; only the same initiating object ID **and**
+User/App actor kind can append. Start IDs are canonical lowercase UUID
+strings; sequences are contiguous 1..128. Exact retries are idempotent;
+changed retries, sequence gaps and new steps after terminal completion
+return `409`. Complete/Succeeded and Failed/Failed terminate an operation.
+Each mutation and its `deployment.start`/`deployment.report` audit record
+commit atomically. Storage failures return `503`, with no partial success.
+JSON rejects unknown/duplicate/missing properties and bodies above 8 KiB.
+Descriptions are bounded plain text, not command output or secrets.
+
+See `infra/ha-lab/README.md` for one-time reporting bootstrap and the existing
+drain-aware staging/release commands. Non-Kubernetes/native deployments can
+still read recorded history when upgraded; absent Kubernetes observation
+remains explicitly unavailable. No Azure/native release instrumentation is
+implied by the isolated-lab scripts.
+
 ## Global system notice
 
-Global Admins manage **System notice** on this page, independently of topology
+Global Admins manage **System notice** on Actual system, independently of topology
 polling and animation controls. Choose **Create system notice** or **Edit system
 notice**, enter a plain-text message (1-2000 characters), select Information,
 Warning or Critical, optionally choose a future expiry in your browser's local

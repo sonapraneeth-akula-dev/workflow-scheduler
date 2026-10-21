@@ -578,7 +578,7 @@ a stale heartbeat reports `Unhealthy` even before the next sweep.
 Inventory and edits reuse the existing global Admin authorization boundary.
 The explicit loopback development profile remains login-free.
 
-**Live system** (`/admin/system`) is the global-Admin topology and per-worker
+**Live system -> Actual system** (`/admin/system`) is the global-Admin topology and per-worker
 work view, with observed-activity pulses, pause/resume and reduced-motion support.
 Admin `GET /api/v1/admin/system` adds observed API/controller instances, current
 database lease leadership, and per-worker assigned task, parent DAG-node, run
@@ -591,7 +591,16 @@ missing readings are not zero. See the
 [live system inventory guide](docs/operations/live-system-inventory.md) for
 placement metadata, activity-counter semantics and migration ordering.
 
-Global Admins can also publish one persistent **System notice** from Live system:
+**Live system -> Deployments** (`/admin/deployments`) separates actual Kubernetes
+rollout observations from durable script-reported Stage/Release activity.
+Target versus pod images, desired/updated/ready counts, OnDelete replacements,
+container failures/restarts and retained migration jobs remain visible without
+deployment controls. Five-second refresh, pause/manual refresh, stale/error
+boundaries and unconfirmed interrupted reporters avoid presenting old success
+as current health. Reporting starts with migration `0051_deployment_activity.sql`;
+unrecorded history is labeled, never fabricated.
+
+Global Admins can also publish one persistent **System notice** from Actual system:
 information, warning or critical, with optional expiry. The plain-text bar appears
 above navigation on every signed-in page until cleared or expired. Shared
 PostgreSQL storage, optimistic concurrency and atomic before/after audit protect

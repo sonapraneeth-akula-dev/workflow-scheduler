@@ -12,6 +12,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 Import-Module Hyper-V -ErrorAction Stop
+. (Join-Path $PSScriptRoot 'activity.ps1')
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $root = Join-Path $repository '.wf\ha-lab'
 $state = Get-Content (Join-Path $root 'lab.json') -Raw | ConvertFrom-Json
@@ -35,7 +36,10 @@ $previous = Get-Content $deploymentPath -Raw | ConvertFrom-Json
 if ($previous.LabId -ne $state.Id) { throw 'Foreign deployment record.' }
 if (!(Test-Path (Join-Path $root "images\$ImageTag.json"))) { throw 'Stage this immutable image tag with deploy.ps1 -StageOnly first.' }
 $lock = [IO.File]::Open((Join-Path $root 'release.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+$activity = $null
 try {
+    $activity = Start-LabDeploymentActivity -Kube $kube -Mode Release -Target $ImageTag
+    Report-LabDeploymentActivity $activity -Phase Preflight -Description 'Checking staged targets, owned ready pods and safe OnDelete replacement strategy.'
     function Get-LabPods([string]$Role) {
         (& kubectl @kube -n kardia get pods -l "app=kardia-$Role" -o json | ConvertFrom-Json).items
     }
@@ -77,6 +81,7 @@ try {
         $uid = $Pod.metadata.uid
         $node = $Pod.spec.nodeName
         Write-Host "Replacing $podName on $node."
+        Report-LabDeploymentActivity $activity -Phase Replace -Subject $podName -Description "Replacing the owned $Role pod after its release preconditions."
         @{
             apiVersion = 'v1'; kind = 'DeleteOptions'
             preconditions = @{ uid = $uid }
@@ -90,6 +95,7 @@ try {
             $pods.Count -eq 1 -and $pods[0].metadata.uid -ne $uid -and
                 $pods[0].spec.containers[0].image -eq $Image -and (Test-PodReady $pods[0])
         } 300
+        Report-LabDeploymentActivity $activity -Phase Replace -Subject $podName -Outcome Succeeded -Description "Replacement $Role pod is ready on the target image."
     }
     $expected = @{
         api = @{ Kind = 'deployment'; Count = 2; Image = "kardia-control-plane:$ImageTag" }
@@ -115,6 +121,7 @@ try {
             }).Count -eq 0
         }
     }
+    Report-LabDeploymentActivity $activity -Phase Preflight -Outcome Succeeded -Description 'Staged targets and ready application pods verified.'
     # Standby first; the observed database lease, not pod readiness, identifies the leader.
     while ($true) {
         $pods = @(Get-LabPods 'controller')
@@ -128,12 +135,14 @@ try {
         $candidate = $controllers | Where-Object podName -in $pending.metadata.name |
             Sort-Object isLeader | Select-Object -First 1
         $pod = $pods | Where-Object { $_.metadata.name -eq $candidate.podName }
+        Report-LabDeploymentActivity $activity -Phase Controller -Subject $candidate.podName -Description 'Replacing the observed standby first, or transferring the active controller when no older standby remains.'
         Replace-LabPod $pod 'controller' $expected.controller.Image
         Wait-LabState 'controller re-registration and a live lease leader' {
             $current = @(Get-LabControllers (Get-LabSnapshot))
             $current.Count -eq 2 -and @($current | Where-Object isLeader).Count -eq 1 -and
                 @($current | Where-Object { $_.podName -eq $candidate.podName -and $_.id -ne $candidate.id }).Count -eq 1
         }
+        Report-LabDeploymentActivity $activity -Phase Controller -Subject $candidate.podName -Outcome Succeeded -Description 'Fresh controller registered and exactly one active lease leader observed.'
     }
     $reason = "HA lab rollout $ImageTag"
     foreach ($name in $names) {
@@ -148,6 +157,7 @@ try {
         if ($existing.Status -eq 200 -and $existing.Value.reason -ne $reason) {
             throw "Worker $name has another operator's drain; it will not be resumed or replaced."
         }
+        Report-LabDeploymentActivity $activity -Phase Drain -Subject $name -Description 'Waiting for physical release of this worker; current resumable work may finish or checkpoint.'
         $receipt = if ($existing.Status -eq 200) { $existing.Value } else {
             Write-Host "Draining $name; allowing up to $MaxDrainSeconds seconds for current work."
             (Invoke-LabApi "$path/drain" (@{
@@ -159,8 +169,10 @@ try {
             if ($current.id -ne $receipt.id) { throw "Drain identity changed for $name." }
             $current.status -eq 'Released'
         } ($MaxDrainSeconds + 120)
+        Report-LabDeploymentActivity $activity -Phase Drain -Subject $name -Outcome Succeeded -Description 'Durable drain receipt confirms physical worker release.'
         Replace-LabPod $pods[0] 'worker' $expected.worker.Image
         $resume = @{ drainId = $receipt.id; reason = $reason } | ConvertTo-Json -Compress
+        Report-LabDeploymentActivity $activity -Phase Resume -Subject $name -Description 'Resuming the fresh idle worker with its retained durable identity.'
         Wait-LabState "fresh idle process and audited resume for $name" {
             (Invoke-LabApi "$path/resume" $resume @(204, 409)).Status -eq 204
         }
@@ -168,7 +180,9 @@ try {
             @((Get-LabSnapshot).workers | Where-Object { $_.id -eq $worker.id -and $_.status -eq 'Healthy' }).Count -eq 1
         }
         Write-Host "Worker $name resumed with its original identity."
+        Report-LabDeploymentActivity $activity -Phase Resume -Subject $name -Outcome Succeeded -Description 'Worker is healthy and dispatchable after its audited resume.'
     }
+    Report-LabDeploymentActivity $activity -Phase Verify -Description 'Verifying all actual images, readiness, registered worker identities and controller lease leadership.'
     Wait-LabState 'complete release runtime inventory' {
         $snapshot = Get-LabSnapshot
         $controllers = @(Get-LabControllers $snapshot)
@@ -188,5 +202,9 @@ try {
         [IO.File]::WriteAllText($temporary, $record)
         [IO.File]::Move($temporary, $deploymentPath, $true)
     } finally { if (Test-Path $temporary) { Remove-Item $temporary } }
+    Report-LabDeploymentActivity $activity -Phase Complete -Outcome Succeeded -Description 'All application roles verified on the target image; replaced workers physically drained and explicitly resumed.'
     Write-Host "Release $ImageTag complete: all roles healthy; each replaced worker physically drained, restarted and explicitly resumed."
+} catch {
+    Fail-LabDeploymentActivity $activity 'Release'
+    throw
 } finally { $lock.Dispose() }
