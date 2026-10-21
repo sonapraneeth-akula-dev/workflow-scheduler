@@ -187,6 +187,35 @@ as an unattended release procedure. Migrations still need an expand-only,
 backward-compatible design; this script cannot make arbitrary schema changes
 safe to roll back.
 
+For an installed lab, stage a new immutable tag, then complete the sequential
+rollout:
+
+```powershell
+.\infra\ha-lab\deploy.ps1 -ImageTag ha-lab-local-2 -StageOnly
+.\infra\ha-lab\release.ps1 -ImageTag ha-lab-local-2 -MaxDrainSeconds 300
+```
+
+`release.ps1` checks ownership, desired images and healthy replicas before
+replacing anything. It updates the observed standby controller before the lease
+leader, waiting for two healthy controller processes and one live leader after
+each replacement. Each worker receives an audited, process-identity-capable
+drain. The script waits for **physical Released acknowledgement**, not zero
+counters or a timer, then replaces only that exact pod UID, retains the host's
+worker state and resumes using the exact drain receipt. Resume requires a
+different, freshly registered idle process. Work exceeding the drain deadline
+is stopped and follows its original retry/placement policy; non-retryable tasks
+are not promised transparent recovery.
+
+Failures stop the sequence without automatically re-enabling drained workers
+or declaring a completed deployment. Fix the cause, then rerun `release.ps1`
+with the **same staged tag**: completed healthy workers are skipped, and only
+drains bearing that release's reason are continued. Another operator's drain
+is refused. The durable deployment record changes only after actual images,
+readiness and runtime inventory agree. Do not concurrently stage another
+release. Legacy workers without process identity support are refused before
+draining; upgrade them only during an independently verified quiescent
+maintenance window.
+
 `/admin/system` reports observed process/worker heartbeats and durable task/run
 counts, with the real responding API and observed traffic deltas. It does not
 invent frontend placement or make a healthy-lease claim from a Kubernetes pod's
