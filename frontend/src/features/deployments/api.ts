@@ -2,6 +2,7 @@ import { z } from "zod"
 import { ApiError } from "@/lib/api/client"
 import { accessToken } from "@/lib/auth/session"
 import { parseJson } from "@/lib/json"
+import type { components } from "@/lib/api/schema"
 
 const text = z
   .string()
@@ -100,7 +101,7 @@ export const deploymentSnapshotSchema = z
       new Set(value.pods.map((row) => row.uid)).size === value.pods.length &&
       new Set(value.jobs.map((row) => row.name)).size === value.jobs.length,
     "Deployment observations contain duplicate identities."
-  )
+  ) satisfies z.ZodType<components["schemas"]["DeploymentSnapshot"]>
 const phase = z.enum([
   "Preflight",
   "Build",
@@ -160,7 +161,7 @@ export const deploymentHistorySchema = z.object({
         )
     )
     .max(20),
-})
+}) satisfies z.ZodType<components["schemas"]["DeploymentActivityHistory"]>
 export type DeploymentSnapshot = z.infer<typeof deploymentSnapshotSchema>
 export type DeploymentHistory = z.infer<typeof deploymentHistorySchema>
 

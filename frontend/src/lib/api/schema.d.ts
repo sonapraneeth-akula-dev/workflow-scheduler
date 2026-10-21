@@ -4318,6 +4318,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/system/deployments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Global Admin read-only Kubernetes observations for the four Kardia workloads, their pods and recent migration jobs. Target images and observed updated/ready counts are separate: OnDelete staging is not a completed release. No environment variables, secrets, commands, logs or deployment controls are returned. Lists are bounded; failed, truncated, disabled or unauthorized observation is 503, never healthy empty state. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeploymentSnapshot"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{id}/metrics": {
         parameters: {
             query?: never;
@@ -6674,6 +6746,288 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/deployment-activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Global Admin recent 20 reported Stage/Release operations and their ordered events. Script-reported history is separate from Kubernetes observations. No records means no recorded history, not no deployments. A silent reporter leaves an unconfirmed Running operation, never synthetic success. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeploymentActivityHistory"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** @description Global Admin deployment-script reporting, not deployment execution. Required valid principal object ID. Start uses a caller-generated canonical lowercase UUID operationId for idempotency; events require the next contiguous sequence (1..128). Exact retries are idempotent; changed retries or gaps are 409. Only the initiating principal may append. Complete/Succeeded and Failed/Failed are terminal; later events are rejected. All changes and audit records commit atomically. Strict JSON, 8 KiB body, bounded plain text; do not report secrets, command output or environment values. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DeploymentOperationRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeploymentOperation"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Payload Too Large */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unsupported Media Type */
+                415: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/deployment-activity/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Global Admin deployment-script reporting, not deployment execution. Required valid principal object ID. Start uses a caller-generated canonical lowercase UUID operationId for idempotency; events require the next contiguous sequence (1..128). Exact retries are idempotent; changed retries or gaps are 409. Only the initiating principal may append. Complete/Succeeded and Failed/Failed are terminal; later events are rejected. All changes and audit records commit atomically. Strict JSON, 8 KiB body, bounded plain text; do not report secrets, command output or environment values. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DeploymentEventRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeploymentOperation"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Payload Too Large */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unsupported Media Type */
+                415: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/subscriptions": {
         parameters: {
             query?: never;
@@ -7262,6 +7616,132 @@ export interface components {
         DependencyDefinition: {
             node: string;
             when?: components["schemas"]["DependencyCondition"];
+        };
+        DeploymentActivityEvent: {
+            /** Format: int32 */
+            sequence: number | string;
+            /** Format: date-time */
+            at: string;
+            phase: string;
+            subject: null | string;
+            outcome: string;
+            description: string;
+        };
+        DeploymentActivityHistory: {
+            /** Format: date-time */
+            observedAt: string;
+            /** Format: int32 */
+            unconfirmedAfterSeconds: number | string;
+            operations: components["schemas"]["DeploymentOperation"][];
+        };
+        DeploymentCondition: {
+            type: string;
+            status: string;
+            reason: null | string;
+        };
+        DeploymentContainer: {
+            name: string;
+            init: boolean;
+            image: string;
+            imageId: null | string;
+            state: string;
+            reason: null | string;
+            /** Format: int32 */
+            exitCode: null | number | string;
+            /** Format: int32 */
+            restarts: number | string;
+            ready: boolean;
+        };
+        DeploymentEventRequest: {
+            /** Format: int32 */
+            sequence: number | string;
+            phase: string;
+            subject: null | string;
+            outcome: string;
+            description: string;
+        };
+        DeploymentJob: {
+            name: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            finishedAt: null | string;
+            state: string;
+            /** Format: int32 */
+            active: number | string;
+            /** Format: int32 */
+            succeeded: number | string;
+            /** Format: int32 */
+            failed: number | string;
+            images: string[];
+            conditions: components["schemas"]["DeploymentCondition"][];
+        };
+        DeploymentOperation: {
+            id: string;
+            mode: string;
+            target: string;
+            actor: string;
+            actorKind: string;
+            /** Format: date-time */
+            startedAt: string;
+            /** Format: date-time */
+            lastReportedAt: string;
+            status: string;
+            /** Format: int32 */
+            sequence: number | string;
+            events: components["schemas"]["DeploymentActivityEvent"][];
+        };
+        DeploymentOperationRequest: {
+            operationId: string;
+            mode: string;
+            target: string;
+        };
+        DeploymentPod: {
+            name: string;
+            uid: string;
+            role: string;
+            nodeName: string;
+            phase: string;
+            ready: boolean;
+            terminating: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            conditions: components["schemas"]["DeploymentCondition"][];
+            containers: components["schemas"]["DeploymentContainer"][];
+        };
+        DeploymentSnapshot: {
+            /** Format: date-time */
+            observedAt: string;
+            /** Format: int32 */
+            staleAfterSeconds: number | string;
+            namespace: string;
+            workloads: components["schemas"]["DeploymentWorkload"][];
+            pods: components["schemas"]["DeploymentPod"][];
+            jobs: components["schemas"]["DeploymentJob"][];
+        };
+        DeploymentWorkload: {
+            name: string;
+            kind: string;
+            strategy: string;
+            /** Format: int64 */
+            generation: number | string;
+            /** Format: int64 */
+            observedGeneration: null | number | string;
+            /** Format: int32 */
+            desired: number | string;
+            /** Format: int32 */
+            updated: number | string;
+            /** Format: int32 */
+            ready: number | string;
+            /** Format: int32 */
+            available: number | string;
+            /** Format: int32 */
+            matchingImages: number | string;
+            state: string;
+            targetImages: {
+                [key: string]: string;
+            };
+            conditions: components["schemas"]["DeploymentCondition"][];
         };
         /** @enum {unknown} */
         FailureCategory: "TaskError" | "Timeout" | "AgentLost" | "PlatformError" | "ValidationError" | "Aborted" | "ResourceLimit" | "Placement";
