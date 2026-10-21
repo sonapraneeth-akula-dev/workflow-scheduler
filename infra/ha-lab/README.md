@@ -221,3 +221,67 @@ counts, with the real responding API and observed traffic deltas. It does not
 invent frontend placement or make a healthy-lease claim from a Kubernetes pod's
 Running status. `kubectl --kubeconfig .\.wf\ha-lab\kubeconfig -n kardia get pods -o wide`
 shows the full Kubernetes placement, including the frontend pods.
+
+## Actual checkpointed work
+
+The optional `smoke` workflow creates three parallel DAG nodes and six real SDK
+tasks, restricted to the `kardia-lab` Linux pool. It saves an integer progress
+checkpoint after each five-second step and records completed steps, resumed
+steps, attempt and machine in task outputs. It performs no external side
+effects and creates no schedule. Its registry is explicitly `Demo`; do not
+publish it into production.
+
+With the loopback forwarder healthy, publish from the repository root:
+
+```powershell
+$env:WF_ACCESS_TOKEN = 'local-development'
+$env:SSL_CERT_FILE = (Resolve-Path .\.wf\ha-lab\data\certs\ca.crt).Path
+dotnet run --project .\backend\src\Wf.Cli -- publish .\infra\ha-lab\smoke `
+  --engine http://127.0.0.1:5180 --git-commit (git rev-parse HEAD) `
+  --git-author 'HA lab operator' --input .\backend\src\Wf.Sdk `
+  --input .\backend\src\Wf.Contracts --input .\backend\src\Wf.Engine.Core `
+  --input .\backend\src\Wf.Validation --work-directory .\.wf\ha-lab\smoke-publish
+Remove-Item Env:\WF_ACCESS_TOKEN
+Remove-Item Env:\SSL_CERT_FILE
+$body = @{
+  workflowId = 'ha-lab/acceptance/recovery'
+  version = '1.0.2'
+  variables = @{ steps = 24 }
+} | ConvertTo-Json
+Invoke-RestMethod http://127.0.0.1:5180/api/v1/runs -Method Post `
+  -ContentType application/json -Body $body `
+  -Headers @{ 'Idempotency-Key' = "lab-$([guid]::NewGuid().ToString('N'))" }
+```
+
+`steps` accepts 1..60, default 24 (approximately two minutes per task).
+Watch `/admin/system` and the run's graph, timeline, logs and outputs. Verify
+the final logical task statuses and resumed progress, not merely a healthy
+replacement pod. A checkpoint is application-owned persisted state, not a
+snapshot of arbitrary memory. Multiple failures still consume the configured
+retry budget; deliberately killing every worker repeatedly can exhaust it.
+
+### Verified live recovery
+
+On October 21, 2026, the real six-task SDK fixture ran across all three lab VMs,
+using shared PostgreSQL/Azurite over verified TLS, not mocked task assignments:
+
+| Scenario | Durable run ID | Observed result |
+| --- | --- | --- |
+| Sequential controller/worker rollout, one-second worker drain deadlines | `01a15e47-7d36-77d4-96a0-3fa9db1fda72` | All six logical tasks succeeded and resumed checkpoint progress; all 36 steps completed. Role replacement took 82.74 seconds; workload finished 370.77 seconds after release began. |
+| Forced power-off of `kardia-lab-01`, hosting the active controller and two running tasks | `01a15e4e-10be-7ab8-9090-72044bff0caf` | Another controller held a higher fenced epoch after 11.41 seconds. Both crashed tasks resumed checkpoint progress on other workers; all six logical tasks completed all 18 steps. Workload recovery took 322.03 seconds. |
+
+The faulted VM was restarted, its management address refreshed, and all three
+nodes/workers returned healthy. The other VMs were not restarted. The loopback
+admin view was available after restoration. Local, Git-ignored
+`roll-evidence.json` and `fault-evidence.json` retain per-attempt identity,
+checkpoint and output evidence. Times are observations, not recovery SLOs:
+lease expiry, heartbeat-loss policy, retry backoff and remaining capacity all
+affect recovery. Surviving tasks can also retry after controller-bound upload
+capabilities become stale; this is checkpoint recovery, not uninterrupted RAM
+continuation or exactly-once external side effects.
+
+The checks exposed and fixed resource blob I/O holding the global allocation
+lock and a terminating controller still admitting work after its HTTP listener
+closed. Resource publication now rechecks authority around blob I/O outside
+fenced transactions; shutdown withdraws new engine admission immediately while
+allowing already accepted durable events to flush.

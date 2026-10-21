@@ -1,0 +1,16 @@
+{
+  "team": "ha-lab",
+  "deployment": "Demo",
+  "types": [
+    {
+      "team": "ha-lab",
+      "name": "acceptance",
+      "description": "Explicitly triggered isolated-lab recovery checks",
+      "metadataSchema": {
+        "keys": [
+          { "key": "environment", "required": true, "allowedValues": ["dev"] }
+        ]
+      }
+    }
+  ]
+}
