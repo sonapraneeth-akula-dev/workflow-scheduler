@@ -189,7 +189,7 @@ test("shared navbar preserves Service history routes and submenu keyboard focus"
   await expect(menu).not.toBeVisible()
 })
 
-test("Run now from a paused grouped table row persists a Manual run without changing saved schedule settings", async ({
+test("Trigger now from a paused grouped table row persists a Manual run without changing saved schedule settings", async ({
   page,
   request,
 }) => {
@@ -240,7 +240,7 @@ test("Run now from a paused grouped table row persists a Manual run without chan
           `/api/v1/schedules/${schedule.id}/run-now` &&
         response.request().method() === "POST"
     )
-    await row.getByRole("button", { name: "Run now", exact: true }).focus()
+    await row.getByRole("button", { name: "Trigger now", exact: true }).focus()
     await page.keyboard.press("Enter")
     const response = await accepted
     expect(response.status()).toBe(202)

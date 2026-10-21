@@ -846,7 +846,7 @@ runs every four hours. Existing profile IDs retain their series and history
 despite the original `daily-` names.
 
 The same file defines two visible Service History cards, **Training & validation**
-and **Full test**, each tracking its matching recurring instance. **Run now**
+and **Full test**, each tracking its matching recurring instance. **Trigger now**
 from either schedule remains in that schedule's card. Change `historyCards`
 membership or `visible` in JSON and republish; no UI configuration is involved.
 
@@ -863,7 +863,7 @@ configuration, including `experimentNumber`, and the task log names the experime
 Each profile owns a separate series. Both follow the active
 workflow version, skip overlapping runs within their own series and use
 `catchUp=Latest` after downtime. They appear on the workflow's schedule list;
-code schedules are read-only in the UI. Their **Run now** action verifies a
+code schedules are read-only in the UI. Their **Trigger now** action verifies a
 profile manually without moving its next automatic fire time.
 
 Open `/t/data-science/regression/w/linear-regression/history`. **Reports**
@@ -1048,7 +1048,7 @@ running for execution; this is the scheduler's own schedule, not a terminal job.
 Open `http://127.0.0.1:5173/t/demo/release/w/five-minute-demo/history`.
 The schedule detail page is `/schedules/<schedule-id>`; obtain its ID from
 `GET /api/v1/schedules?workflowId=demo/release/five-minute-demo`.
-That page shows the recurrence and offers **Run now**. Open a run:
+That page shows the recurrence and offers **Trigger now**. Open a run:
 **Graph** shows the nodes and their task lists; **Outputs** selects an exact
 task attempt and displays its recorded input/output JSON; **Reports** opens
 **Node and task inputs / outputs**, a table with four node-level aggregate rows
@@ -1177,7 +1177,7 @@ recorded explanation, or explicitly report an unavailable scheduling reason.
 The history table omits variables; it focuses on outcomes, timing, versions
 and cancellation audit.
 The **Trigger** column shows the authenticated user's recorded display name
-under **Manual**, including manual **Run now** executions of a schedule.
+under **Manual**, including manual **Trigger now** executions of a schedule.
 The name is captured when the trigger is accepted and retained with the run
 through command recovery; viewing history as a different user does not change it.
 Legacy runs and principals without a name show **User name not recorded**.
@@ -1284,7 +1284,7 @@ Latest status, last-run links, run icons and success rates all use the selected
 sources; filtering happens on the server **before** the recent-run limit.
 **History** carries that same selection into the existing workflow history page,
 and its ordinary status/outcome filters preserve the tracking selection.
-Runs started through **Run now** remain associated with their selected schedule;
+Runs started through **Trigger now** remain associated with their selected schedule;
 configured cards exclude runs without a schedule series (including standalone
 manual runs and reruns), while the backward-compatible all-runs card includes
 them. A card tracking multiple schedules uses one History table, with an additional
@@ -1303,7 +1303,7 @@ timezone, local next-fire time, version selection, and links to schedule details
 and series history. Team and workflow-type filters persist in the URL. Tables
 scroll within a keyboard-focusable region on narrow screens. Results load 50
 at a time; **Load more recurring jobs** adds the next page. The list refreshes
-every 30 seconds. **Run now** requires Operator permission for that series and starts
+every 30 seconds. **Trigger now** requires Operator permission for that series and starts
 one Manual run using the saved variables and version selection. It never resumes
 a paused schedule or changes its next automatic fire. Resolved secret values
 are never included in the listing.

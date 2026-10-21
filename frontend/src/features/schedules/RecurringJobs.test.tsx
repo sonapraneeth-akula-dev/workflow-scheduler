@@ -256,12 +256,12 @@ it("groups table rows by authorized team, workflow type and exact workflow with 
   expect(screen.getByRole("combobox", { name: "Workflow type" })).toBeDisabled()
 })
 
-it("uses the existing scoped Run now action for the selected paused schedule without resume/edit writes", async () => {
+it("uses the existing scoped Trigger now action for the selected paused schedule without resume/edit writes", async () => {
   show()
   const row = (
     await screen.findByRole("rowheader", { name: paused.name })
   ).closest("tr")!
-  const button = await within(row).findByRole("button", { name: "Run now" })
+  const button = await within(row).findByRole("button", { name: "Trigger now" })
   button.focus()
   await userEvent.keyboard("{Enter}")
   expect(await within(row).findByRole("status")).toHaveTextContent(
@@ -285,7 +285,7 @@ it("uses the existing scoped Run now action for the selected paused schedule wit
   ).not.toBeInTheDocument()
 })
 
-it("keeps jobs visible to a Viewer but hides Run now without Operator permission", async () => {
+it("keeps jobs visible to a Viewer but hides Trigger now without Operator permission", async () => {
   vi.mocked(getPermissions).mockImplementation(async (resource) => ({
     ...resource,
     viewer: true,
@@ -297,7 +297,7 @@ it("keeps jobs visible to a Viewer but hides Run now without Operator permission
   await screen.findByRole("rowheader", { name: job.name })
   await waitFor(() => expect(shown.client.isFetching()).toBe(0))
   expect(
-    screen.queryByRole("button", { name: "Run now" })
+    screen.queryByRole("button", { name: "Trigger now" })
   ).not.toBeInTheDocument()
   expect(runNow).not.toHaveBeenCalled()
 })
@@ -435,7 +435,7 @@ it("hides cached jobs after failed or revoked reads and reloads after an explici
     screen.queryByRole("rowheader", { name: job.name })
   ).not.toBeInTheDocument()
   expect(
-    screen.queryByRole("button", { name: "Run now" })
+    screen.queryByRole("button", { name: "Trigger now" })
   ).not.toBeInTheDocument()
   vi.mocked(getRecurringJobs).mockResolvedValue(response)
   await userEvent.click(

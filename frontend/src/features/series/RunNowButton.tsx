@@ -31,7 +31,9 @@ export function RunNowButton({
     retry: false,
     mutationFn: () => {
       if (!permissions.can("Operator"))
-        throw new Error("Operator permission is required to run this schedule.")
+        throw new Error(
+          "Operator permission is required to trigger this schedule."
+        )
       key.current ??= crypto.randomUUID()
       return runNow(scheduleId, key.current)
     },
@@ -51,8 +53,8 @@ export function RunNowButton({
           {mutation.isPending
             ? "Accepting run..."
             : mutation.isError
-              ? "Retry Run now"
-              : "Run now"}
+              ? "Retry trigger"
+              : "Trigger now"}
         </Button>
       </Can>
       {permissions.error ? <ErrorNotice error={permissions.error} /> : null}

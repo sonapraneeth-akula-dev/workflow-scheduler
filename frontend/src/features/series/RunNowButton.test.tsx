@@ -52,7 +52,7 @@ function show(disabled = false) {
     client,
   }
 }
-describe("Run now action", () => {
+describe("Trigger now action", () => {
   beforeEach(() => vi.resetAllMocks())
   it.each([false, true])(
     "hides actions for a Viewer/Author without Operator (author=%s)",
@@ -87,7 +87,7 @@ describe("Run now action", () => {
     vi.mocked(getPermissions).mockResolvedValue(grant)
     show(true)
     expect(
-      await screen.findByRole("button", { name: "Run now" })
+      await screen.findByRole("button", { name: "Trigger now" })
     ).toBeDisabled()
     expect(runNow).not.toHaveBeenCalled()
   })
@@ -97,7 +97,7 @@ describe("Run now action", () => {
     const { client } = show()
     const invalidate = vi.spyOn(client, "invalidateQueries")
     const user = userEvent.setup()
-    ;(await screen.findByRole("button", { name: "Run now" })).focus()
+    ;(await screen.findByRole("button", { name: "Trigger now" })).focus()
     await user.keyboard("{Enter}")
     expect(await screen.findByRole("status")).toHaveTextContent("Manual")
     expect(screen.getByRole("status")).toHaveTextContent(
@@ -114,15 +114,15 @@ describe("Run now action", () => {
       .mockRejectedValueOnce(new Error("Response lost."))
       .mockResolvedValue({ runId })
     show()
-    fireEvent.click(await screen.findByRole("button", { name: "Run now" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Trigger now" }))
     expect(await screen.findByRole("alert")).toHaveTextContent("Response lost.")
     expect(screen.getByText(/Retry reuses the same request key/)).toBeVisible()
     expect(runNow).toHaveBeenCalledTimes(1)
     const firstKey = vi.mocked(runNow).mock.calls[0]![1]
-    fireEvent.click(screen.getByRole("button", { name: "Retry Run now" }))
+    fireEvent.click(screen.getByRole("button", { name: "Retry trigger" }))
     await screen.findByRole("status")
     expect(runNow).toHaveBeenLastCalledWith(scheduleId, firstKey)
-    fireEvent.click(screen.getByRole("button", { name: "Run now" }))
+    fireEvent.click(screen.getByRole("button", { name: "Trigger now" }))
     await waitFor(() => expect(runNow).toHaveBeenCalledTimes(3))
     expect(vi.mocked(runNow).mock.calls[2]![1]).not.toBe(firstKey)
   })
@@ -131,7 +131,9 @@ describe("Run now action", () => {
     vi.mocked(runNow).mockReturnValue(new Promise(() => {}))
     show()
     const user = userEvent.setup()
-    await user.dblClick(await screen.findByRole("button", { name: "Run now" }))
+    await user.dblClick(
+      await screen.findByRole("button", { name: "Trigger now" })
+    )
     expect(runNow).toHaveBeenCalledTimes(1)
     expect(
       screen.getByRole("button", { name: "Accepting run..." })
@@ -140,7 +142,7 @@ describe("Run now action", () => {
   it("removes the action after permission revocation", async () => {
     vi.mocked(getPermissions).mockResolvedValue(grant)
     const { client } = show()
-    await screen.findByRole("button", { name: "Run now" })
+    await screen.findByRole("button", { name: "Trigger now" })
     vi.mocked(getPermissions).mockResolvedValue({ ...grant, operator: false })
     await client.invalidateQueries({ queryKey: ["permissions"] })
     await waitFor(() =>

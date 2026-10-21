@@ -32,7 +32,7 @@ vi.mock("@/features/series/RunNowButton", () => ({
     seriesId: string
   }) => (
     <button data-schedule={scheduleId} data-series={seriesId}>
-      Run now
+      Trigger now
     </button>
   ),
 }))
@@ -360,9 +360,9 @@ describe("historical table", () => {
     })
     show({ status: "Succeeded" })
     expect(
-      await screen.findByRole("button", { name: "Run now" })
+      await screen.findByRole("button", { name: "Trigger now" })
     ).toHaveAttribute("data-schedule", row.versionId)
-    expect(screen.getByRole("button", { name: "Run now" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Trigger now" })).toHaveAttribute(
       "data-series",
       row.seriesId
     )
@@ -372,10 +372,10 @@ describe("historical table", () => {
     vi.mocked(getHistory).mockResolvedValue(page([]))
     show()
     await screen.findByText(
-      "Run now unavailable: this series has no current schedule."
+      "Trigger now unavailable: this series has no current schedule."
     )
     expect(
-      screen.queryByRole("button", { name: "Run now" })
+      screen.queryByRole("button", { name: "Trigger now" })
     ).not.toBeInTheDocument()
   })
   it("renders exact committed abort and version links without variable columns or values", async () => {

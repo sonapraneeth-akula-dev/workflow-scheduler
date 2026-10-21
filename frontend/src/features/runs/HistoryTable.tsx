@@ -212,7 +212,7 @@ export function HistoryTable({
         />
       ) : scope.seriesId && scheduleId === null ? (
         <p className="text-sm text-muted-foreground">
-          Run now unavailable: this series has no current schedule.
+          Trigger now unavailable: this series has no current schedule.
         </p>
       ) : null}
       <p className="text-sm text-muted-foreground">

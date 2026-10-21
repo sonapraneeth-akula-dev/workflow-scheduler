@@ -6,7 +6,7 @@ import { z } from "zod"
 import { scheduleSchema, seriesFiresSchema } from "../src/lib/api/client"
 import { parseJson } from "../src/lib/json"
 
-test("Run now from paused schedule and series history creates only same-series Manual runs", async ({
+test("Trigger now from paused schedule and series history creates only same-series Manual runs", async ({
   page,
   request,
 }) => {
@@ -53,7 +53,7 @@ test("Run now from paused schedule and series history creates only same-series M
         new URL(response.url()).pathname.endsWith(`/${schedule.id}/run-now`) &&
         response.request().method() === "POST"
     )
-    await page.getByRole("button", { name: "Run now", exact: true }).focus()
+    await page.getByRole("button", { name: "Trigger now", exact: true }).focus()
     await page.keyboard.press("Enter")
     const first = await firstAccepted
     expect(first.status()).toBe(202)
@@ -79,7 +79,7 @@ test("Run now from paused schedule and series history creates only same-series M
         new URL(response.url()).pathname.endsWith(`/${schedule.id}/run-now`) &&
         response.request().method() === "POST"
     )
-    await page.getByRole("button", { name: "Run now", exact: true }).focus()
+    await page.getByRole("button", { name: "Trigger now", exact: true }).focus()
     await page.keyboard.press("Enter")
     const second = await secondAccepted
     expect(second.status()).toBe(202)
@@ -172,11 +172,11 @@ test("Run now from paused schedule and series history creates only same-series M
     await page.reload()
     await expect(
       page.getByText(
-        "Run now unavailable: this series has no current schedule."
+        "Trigger now unavailable: this series has no current schedule."
       )
     ).toBeVisible()
     await expect(
-      page.getByRole("button", { name: "Run now", exact: true })
+      page.getByRole("button", { name: "Trigger now", exact: true })
     ).toHaveCount(0)
     await expect(table.getByRole("row")).toHaveCount(3)
   } finally {
@@ -189,7 +189,7 @@ test("Run now from paused schedule and series history creates only same-series M
   }
 })
 
-test("code-origin schedules remain read-only but permit Operator Run now", async ({
+test("code-origin schedules remain read-only but permit Operator Trigger now", async ({
   page,
   request,
 }) => {
@@ -214,7 +214,7 @@ test("code-origin schedules remain read-only but permit Operator Run now", async
   const accepted = page.waitForResponse((response) =>
     new URL(response.url()).pathname.endsWith(`/${schedule.id}/run-now`)
   )
-  await page.getByRole("button", { name: "Run now", exact: true }).click()
+  await page.getByRole("button", { name: "Trigger now", exact: true }).click()
   const response = await accepted
   expect(response.status()).toBe(202)
   const { runId } = z.object({ runId: z.uuid() }).parse(await response.json())

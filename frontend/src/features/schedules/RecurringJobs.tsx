@@ -146,10 +146,10 @@ export function RecurringJobs({
         </div>
       </div>
       <p className="text-sm text-muted-foreground">
-        Run now requires Operator permission and starts one manual run using the
-        schedule's saved variables and version selection. It does not resume a
-        paused job or move its next automatic fire. This list refreshes every 30
-        seconds.
+        Trigger now requires Operator permission and starts one manual run using
+        the schedule's saved variables and version selection. It does not resume
+        a paused job or move its next automatic fire. This list refreshes every
+        30 seconds.
       </p>
       {query.isPending ? <p role="status">Loading recurring jobs...</p> : null}
       {query.error ? <ErrorNotice error={query.error} /> : null}
