@@ -583,7 +583,11 @@ work view, with observed-activity pulses, pause/resume and reduced-motion suppor
 Admin `GET /api/v1/admin/system` adds observed API/controller instances, current
 database lease leadership, and per-worker assigned task, parent DAG-node, run
 and workflow counts. Five-second heartbeats expire after 15 seconds; crashes
-are not reported as healthy indefinitely. See the
+are not reported as healthy indefinitely. The view separates current replicas
+from inactive process history and shows active and passive controllers.
+On the K3s lab, an optional read-only Metrics API integration adds measured
+node/VM and application-pod RAM, capacity, placement and sample freshness;
+missing readings are not zero. See the
 [live system inventory guide](docs/operations/live-system-inventory.md) for
 placement metadata, activity-counter semantics and migration ordering.
 

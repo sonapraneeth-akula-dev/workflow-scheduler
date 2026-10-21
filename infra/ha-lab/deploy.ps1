@@ -112,6 +112,7 @@ if ($renew) {
     apiVersion = 'v1'; kind = 'Namespace'
     metadata = @{ name = 'kardia'; labels = @{ 'io.kardia.lab' = $state.Id; 'app.kubernetes.io/part-of' = 'kardia' } }
 } | ConvertTo-Json -Depth 5 | & kubectl @kube apply -f -
+& kubectl @kube apply -f (Join-Path $PSScriptRoot 'observer.yaml')
 & kubectl @kube -n kardia create configmap kardia-runtime "--from-env-file=$(Join-Path $PSScriptRoot 'runtime.env')" `
     --dry-run=client -o json | & kubectl @kube apply -f -
 & kubectl @kube -n kardia create configmap kardia-lab-ca "--from-file=ca.crt=$caPath" `

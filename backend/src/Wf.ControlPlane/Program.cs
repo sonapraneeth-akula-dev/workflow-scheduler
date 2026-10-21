@@ -99,6 +99,8 @@ builder.Services.AddWorkflowOpenApi();
 builder.Services.AddWorkflowLive();
 builder.Services.AddWorkflowLiveLogs();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton(provider => new KubernetesMemory(builder.Configuration,
+    provider.GetRequiredService<TimeProvider>()));
 builder.Services.AddWorkflowTelemetry(builder.Configuration, engineEnabled, workflowEnvironment);
 builder.Services.AddSingleton(_ => NotificationOptions.Read(builder.Configuration));
 if (engineEnabled) builder.Services.AddHostedService<NotificationDispatcher>();
@@ -185,6 +187,7 @@ app.MapRunHistoryEndpoints();
 app.MapAuditEndpoints();
 Wf.ControlPlane.Api.Admin.RetentionEndpoints.MapRetentionEndpoints(app);
 Wf.ControlPlane.Api.Admin.SystemEndpoints.MapSystemEndpoints(app);
+Wf.ControlPlane.Api.Admin.KubernetesMemoryEndpoints.MapKubernetesMemoryEndpoints(app);
 app.MapMetricsEndpoints();
 app.MapRunTimelineEndpoints();
 app.MapTaskLogsEndpoints();

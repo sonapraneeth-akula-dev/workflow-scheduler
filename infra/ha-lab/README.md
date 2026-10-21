@@ -221,6 +221,19 @@ counts, with the real responding API and observed traffic deltas. It does not
 invent frontend placement or make a healthy-lease claim from a Kubernetes pod's
 Running status. `kubectl --kubeconfig .\.wf\ha-lab\kubeconfig -n kardia get pods -o wide`
 shows the full Kubernetes placement, including the frontend pods.
+The live diagram shows all current controller replicas, explicitly labeled
+active leader or passive standby; stopped/missed-heartbeat process history is
+collapsed separately rather than counted as desired replicas.
+
+The **K3s / Kubernetes RAM** section displays measured memory working sets for
+all three nodes and every application pod, including frontends and passive
+controllers. Node physical/allocatable memory, pod placement/readiness and
+sample times are shown. Readings refresh every 15 seconds; unavailable/stale
+samples never become invented zero usage. `observer.yaml` gives only API
+replicas read-only namespaced pod/pod-metrics and cluster node/node-metrics
+access through a rotating projected token and verified cluster CA. Workers
+and controllers receive no Kubernetes API token. This is RAM monitoring,
+not persistent storage or checkpoint replication.
 
 ## Actual checkpointed work
 

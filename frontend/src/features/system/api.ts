@@ -2,6 +2,7 @@ import { z } from "zod"
 import { ApiError, publicApi } from "@/lib/api/client"
 import type { components } from "@/lib/api/schema"
 import { parseJson } from "@/lib/json"
+import { accessToken } from "@/lib/auth/session"
 
 const label = z
   .string()
@@ -95,6 +96,66 @@ const snapshotSchema = z
   ) satisfies z.ZodType<components["schemas"]["SystemSnapshotResponse"]>
 
 export type SystemSnapshot = z.infer<typeof snapshotSchema>
+const memorySample = {
+  workingSetBytes: count.nullable(),
+  sampledAt: timestamp.nullable(),
+}
+const pairedSample = (row: {
+  workingSetBytes: number | null
+  sampledAt: string | null
+}) => (row.workingSetBytes === null) === (row.sampledAt === null)
+const kubernetesMemorySchema = z.object({
+  observedAt: timestamp,
+  staleAfterSeconds: z.int().positive(),
+  nodes: z.array(
+    z
+      .object({
+        name: label,
+        capacityBytes: z.int().positive(),
+        allocatableBytes: count,
+        ...memorySample,
+      })
+      .refine(pairedSample, "RAM and sample time must be present together.")
+  ),
+  pods: z.array(
+    z
+      .object({
+        name: label,
+        namespace: label,
+        uid: label,
+        nodeName: label,
+        role: z.enum([
+          "kardia-api",
+          "kardia-controller",
+          "kardia-frontend",
+          "kardia-worker",
+        ]),
+        phase: z.enum(["Pending", "Running", "Succeeded", "Failed", "Unknown"]),
+        ready: z.boolean(),
+        ...memorySample,
+      })
+      .refine(pairedSample, "RAM and sample time must be present together.")
+  ),
+}) satisfies z.ZodType<components["schemas"]["KubernetesMemorySnapshot"]>
+export type KubernetesMemorySnapshot = z.infer<typeof kubernetesMemorySchema>
+
+export async function getKubernetesMemory(
+  signal?: AbortSignal
+): Promise<KubernetesMemorySnapshot> {
+  const token = await accessToken()
+  const response = await fetch("/api/v1/admin/system/kubernetes-memory", {
+    signal,
+    cache: "no-store",
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  })
+  const text = await response.text()
+  if (!response.ok)
+    throw new ApiError(
+      response,
+      text.startsWith("{") ? parseJson(text) : undefined
+    )
+  return kubernetesMemorySchema.parse(parseJson(text))
+}
 export interface SystemObservation {
   snapshot: SystemSnapshot
   respondingInstanceId: string | null

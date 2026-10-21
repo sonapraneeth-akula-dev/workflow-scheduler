@@ -100,8 +100,51 @@ live deliveries count successful SignalR sends, not browser acknowledgements
 or packet capture. Counters reset only with a new process ID and reach the
 inventory on the next heartbeat.
 
-Frontend pods, desired replica counts, network packet rates, and machine
-health that the application has not observed are not fabricated.
+Desired replica counts, network packet rates and unobserved machine health are
+not fabricated. Kubernetes pod placement and RAM use are separate observations,
+not inferred from application heartbeat counts.
+
+## Kubernetes RAM
+
+The **K3s / Kubernetes RAM** section reads actual node and application-pod memory
+working sets from the Kubernetes Metrics API. It refreshes every 15 seconds,
+independently of the two-second application snapshot, and follows the same
+pause/permission boundaries. **Refresh RAM** explicitly refreshes even while
+paused. Node rows show used memory, physical capacity and allocatable memory;
+pod rows include frontend, API, active/passive controller and worker pods,
+their host nodes, readiness and measurement timestamps. Kubernetes pod metrics
+do not themselves identify the database lease leader; use the controller
+topology for active/passive status.
+
+This means **RAM**, not persistent storage, a saved checkpoint, a container
+memory reservation or arbitrary process-memory migration. Node working set
+includes K3s/system workloads, so it need not equal the sum of application
+pods. Missing samples remain absent, not zero. Samples older than 60 seconds,
+implausibly future-dated samples and stalled live snapshots are labeled stale
+or hidden. A current Kubernetes request failure hides old RAM readings while
+leaving independently healthy application observations available.
+
+`GET /api/v1/admin/system/kubernetes-memory` requires global Admin, rejects
+query parameters and returns `no-store`. Disabled or failed observation returns
+`503`, not a healthy empty cluster. The API uses bounded requests, verifies the
+Kubernetes service TLS certificate against the projected cluster CA, never
+follows redirects with its bearer token, and rereads the short-lived projected
+token for rotation. Only metadata, readiness and RAM measurements leave this
+endpoint; the token and CA private keys never reach browsers.
+
+Enable `Kubernetes__Enabled=true` and `Kubernetes__Namespace=<app-namespace>`
+only on API replicas with the projected service-account CA/token mounted at
+`/var/run/secrets/kubernetes.io/serviceaccount`. Metrics Server must already be
+available. `infra/ha-lab/observer.yaml` grants `get/list` on pods and pod metrics
+in `kardia`, plus node metadata/node metrics cluster-wide. No secret reads,
+exec, logs, node proxy, writes or other-namespace pod access are granted.
+`deploy.ps1` applies those named read-only roles before rolling the API.
+Controllers and workers retain disabled token automount and do not receive
+these observation permissions. CA replacement requires an API rollout.
+
+Non-Kubernetes VM/native deployments leave this optional integration disabled;
+the RAM panel reports that it is not configured rather than claiming K3s
+measurements exist. Application process/work counts continue independently.
 
 ## Browser regression checks
 

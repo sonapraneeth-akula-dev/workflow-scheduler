@@ -4246,6 +4246,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/system/kubernetes-memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Global Admin only. Read-only Kubernetes node and application-pod RAM working sets. Measurements come from metrics.k8s.io; missing samples are null, never fabricated zero. Separate from application heartbeats; unavailable/unauthorized cluster monitoring returns 503. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["KubernetesMemorySnapshot"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{id}/metrics": {
         parameters: {
             query?: never;
@@ -6896,6 +6968,38 @@ export interface components {
         /** @enum {unknown} */
         FailurePolicy: "Hard" | "Soft";
         JsonElement: unknown;
+        KubernetesMemorySnapshot: {
+            /** Format: date-time */
+            observedAt: string;
+            /** Format: int32 */
+            staleAfterSeconds: number | string;
+            nodes: components["schemas"]["KubernetesNodeMemory"][];
+            pods: components["schemas"]["KubernetesPodMemory"][];
+        };
+        KubernetesNodeMemory: {
+            name: string;
+            /** Format: int64 */
+            capacityBytes: number | string;
+            /** Format: int64 */
+            allocatableBytes: number | string;
+            /** Format: int64 */
+            workingSetBytes: null | number | string;
+            /** Format: date-time */
+            sampledAt: null | string;
+        };
+        KubernetesPodMemory: {
+            name: string;
+            namespace: string;
+            uid: string;
+            nodeName: string;
+            role: string;
+            phase: string;
+            ready: boolean;
+            /** Format: int64 */
+            workingSetBytes: null | number | string;
+            /** Format: date-time */
+            sampledAt: null | string;
+        };
         LabelSelector: {
             key: string;
             value?: components["schemas"]["SelectorValue"];

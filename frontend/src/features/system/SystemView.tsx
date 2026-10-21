@@ -8,6 +8,7 @@ import { ApiError } from "@/lib/api/client"
 import { formatTimestamp } from "@/lib/timestamps"
 import { getSystem, systemFrame, type SystemFrame } from "./api"
 import "./SystemView.css"
+import { KubernetesMemoryView } from "./KubernetesMemoryView"
 
 const queryKey = ["admin-system"] as const
 const cardWidth = 208
@@ -213,7 +214,7 @@ function Topology({
             <p>Kardia frontend</p>
             <p>Authenticated snapshot request / response</p>
             <p className="text-xs text-muted-foreground">
-              Frontend server placement is not reported.
+              This browser's serving frontend identity is not reported.
             </p>
           </Card>
           {instances.map((row, index) => (
@@ -635,6 +636,7 @@ export function SystemView() {
             ))}
           </dl>
           <Topology frame={frame} animate={motion && !paused} />
+          <KubernetesMemoryView paused={paused} now={now} />
           <p className="text-sm text-muted-foreground">
             Assigned work can remain on an unhealthy worker until recovery and
             physical fencing settle. Per-worker run and workflow counts overlap

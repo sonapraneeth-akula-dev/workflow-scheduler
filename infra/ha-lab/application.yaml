@@ -32,6 +32,7 @@ spec:
     spec:
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
+      serviceAccountName: kardia-observer
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 60
       hostAliases:
@@ -52,6 +53,10 @@ spec:
             - configMapRef: {name: kardia-runtime}
             - secretRef: {name: kardia-application}
           env:
+            - name: Kubernetes__Enabled
+              value: "true"
+            - name: Kubernetes__Namespace
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
             - name: Engine__Enabled
               value: "false"
             - name: Engine__Port
@@ -81,6 +86,7 @@ spec:
             requests: {cpu: 150m, memory: 256Mi}
             limits: {cpu: "1", memory: 640Mi}
           volumeMounts:
+            - {name: kubernetes-api, mountPath: /var/run/secrets/kubernetes.io/serviceaccount, readOnly: true}
             - {name: tls, mountPath: /tls, readOnly: true}
             - {name: ca, mountPath: /certs, readOnly: true}
           startupProbe:
@@ -98,6 +104,16 @@ spec:
             periodSeconds: 10
             failureThreshold: 6
       volumes:
+        - name: kubernetes-api
+          projected:
+            defaultMode: 0444
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items: [{key: ca.crt, path: ca.crt}]
         - name: tls
           secret: {secretName: kardia-service-tls}
         - name: ca

@@ -4,7 +4,12 @@ import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { SystemView } from "./SystemView"
-import { getSystem, systemFrame, type SystemObservation } from "./api"
+import {
+  getKubernetesMemory,
+  getSystem,
+  systemFrame,
+  type SystemObservation,
+} from "./api"
 import { observation } from "./testFixture"
 import { ApiError } from "@/lib/api/client"
 
@@ -39,6 +44,7 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("./api", async (original) => ({
   ...(await original<typeof import("./api")>()),
   getSystem: vi.fn(),
+  getKubernetesMemory: vi.fn(),
 }))
 
 function show() {
@@ -61,6 +67,12 @@ describe("live admin system view", () => {
     state.checking = false
     state.error = null
     vi.mocked(getSystem).mockResolvedValue(structuredClone(observation))
+    vi.mocked(getKubernetesMemory).mockResolvedValue({
+      observedAt: observation.snapshot.observedAt,
+      staleAfterSeconds: 60,
+      nodes: [],
+      pods: [],
+    })
   })
   it("renders real roles, placements, worker counts and a keyboard-accessible diagram without executing names", async () => {
     show()
@@ -106,6 +118,7 @@ describe("live admin system view", () => {
     state.permitted = false
     show()
     expect(getSystem).not.toHaveBeenCalled()
+    expect(getKubernetesMemory).not.toHaveBeenCalled()
     expect(
       screen.getByRole("button", { name: "Refresh system" })
     ).toBeDisabled()
