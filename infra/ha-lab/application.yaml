@@ -1,0 +1,414 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kardia-api
+  namespace: kardia
+spec:
+  selector:
+    app: kardia-api
+  ports:
+    - name: https
+      port: 8443
+      targetPort: 8443
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kardia-api
+  namespace: kardia
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: kardia-api
+  template:
+    metadata:
+      labels:
+        app: kardia-api
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      hostAliases:
+        - ip: "{{DATA_ADDRESS}}"
+          hostnames: [kardia-lab-data]
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: kardia-api
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: kardia-api
+          image: kardia-control-plane:{{IMAGE_TAG}}
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef: {name: kardia-runtime}
+            - secretRef: {name: kardia-application}
+          env:
+            - name: Engine__Enabled
+              value: "false"
+            - name: Engine__Port
+              value: "8081"
+            - name: Api__Port
+              value: "8080"
+            - name: Lan__Port
+              value: "8443"
+            - name: Lan__Address
+              valueFrom: {fieldRef: {fieldPath: status.hostIP}}
+            - name: Runtime__Name
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: Runtime__HostName
+              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+            - name: Runtime__NodeName
+              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+            - name: Runtime__PodName
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: Runtime__Namespace
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1654
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 150m, memory: 256Mi}
+            limits: {cpu: "1", memory: 640Mi}
+          volumeMounts:
+            - {name: tls, mountPath: /tls, readOnly: true}
+            - {name: ca, mountPath: /certs, readOnly: true}
+          startupProbe:
+            exec:
+              command: [curl, --fail, --silent, --max-time, "2", http://127.0.0.1:8080/healthz]
+            periodSeconds: 2
+            failureThreshold: 90
+          readinessProbe:
+            exec:
+              command: [curl, --fail, --silent, --max-time, "2", http://127.0.0.1:8080/healthz/ready]
+            periodSeconds: 2
+          livenessProbe:
+            exec:
+              command: [curl, --fail, --silent, --max-time, "2", http://127.0.0.1:8080/healthz]
+            periodSeconds: 10
+            failureThreshold: 6
+      volumes:
+        - name: tls
+          secret: {secretName: kardia-service-tls}
+        - name: ca
+          configMap: {name: kardia-lab-ca}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kardia-controller
+  namespace: kardia
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: kardia-controller
+  ports:
+    - name: https
+      port: 8444
+      targetPort: 8444
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kardia-controller
+  namespace: kardia
+spec:
+  serviceName: kardia-controller
+  replicas: 2
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: OnDelete
+  selector:
+    matchLabels:
+      app: kardia-controller
+  template:
+    metadata:
+      labels:
+        app: kardia-controller
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 90
+      hostAliases:
+        - ip: "{{DATA_ADDRESS}}"
+          hostnames: [kardia-lab-data]
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: kardia-controller
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: kardia-controller
+          image: kardia-control-plane:{{IMAGE_TAG}}
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef: {name: kardia-runtime}
+            - secretRef: {name: kardia-application}
+          env:
+            - name: Engine__Enabled
+              value: "true"
+            - name: Engine__ExecuteRuns
+              value: "true"
+            - name: Engine__Port
+              value: "8181"
+            - name: Api__Port
+              value: "8180"
+            - name: Lan__Port
+              value: "8444"
+            - name: Lan__Address
+              valueFrom: {fieldRef: {fieldPath: status.hostIP}}
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: Engine__PublicEndpoint
+              value: "https://$(POD_NAME).kardia-controller.kardia.svc.cluster.local:8444"
+            - name: Engine__ApiEndpoint
+              value: "https://kardia-api.kardia.svc.cluster.local:8443"
+            - name: Runtime__Name
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: Runtime__HostName
+              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+            - name: Runtime__NodeName
+              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+            - name: Runtime__PodName
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: Runtime__Namespace
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1654
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 200m, memory: 384Mi}
+            limits: {cpu: "1", memory: 640Mi}
+          volumeMounts:
+            - {name: tls, mountPath: /tls, readOnly: true}
+            - {name: ca, mountPath: /certs, readOnly: true}
+          startupProbe:
+            exec:
+              command: [curl, --fail, --silent, --max-time, "2", http://127.0.0.1:8180/healthz]
+            periodSeconds: 2
+            failureThreshold: 90
+          readinessProbe:
+            exec:
+              command: [curl, --fail, --silent, --max-time, "2", http://127.0.0.1:8180/healthz/ready]
+            periodSeconds: 2
+          livenessProbe:
+            exec:
+              command: [curl, --fail, --silent, --max-time, "2", http://127.0.0.1:8180/healthz]
+            periodSeconds: 10
+            failureThreshold: 6
+      volumes:
+        - name: tls
+          secret: {secretName: kardia-service-tls}
+        - name: ca
+          configMap: {name: kardia-lab-ca}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kardia-worker
+  namespace: kardia
+spec:
+  updateStrategy:
+    type: OnDelete
+  selector:
+    matchLabels:
+      app: kardia-worker
+  template:
+    metadata:
+      labels:
+        app: kardia-worker
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 90
+      initContainers:
+        - name: kardia-worker-state
+          image: kardia-agent:{{IMAGE_TAG}}
+          imagePullPolicy: Never
+          command:
+            - sh
+            - -ec
+            - |
+              if [ ! -s /state/identity ]; then
+                test -z "$(ls -A /state)" || { echo 'Worker state exists without identity; restore it.' >&2; exit 1; }
+                cat /proc/sys/kernel/random/uuid > /state/identity
+              fi
+              chown -R 1654:1654 /state
+              chmod 700 /state
+              chmod 600 /state/identity
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - {name: state, mountPath: /state}
+      containers:
+        - name: kardia-worker
+          image: kardia-agent:{{IMAGE_TAG}}
+          imagePullPolicy: Never
+          command:
+            - sh
+            - -ec
+            - |
+              export Agent__Id="$(cat /state/identity)"
+              exec dotnet /app/wf-agent.dll
+          env:
+            - name: SSL_CERT_FILE
+              value: /certs/ca.crt
+            - name: Agent__Name
+              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+            - name: Agent__Labels__node
+              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+            - name: Agent__Labels__pod
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: Agent__Labels__cluster
+              value: kardia-ha-lab
+            - name: Agent__Pool
+              value: kardia-lab
+            - name: Agent__MaxTasks
+              value: "2"
+            - name: Agent__Engines__0
+              value: https://kardia-controller-0.kardia-controller.kardia.svc.cluster.local:8444
+            - name: Agent__Engines__1
+              value: https://kardia-controller-1.kardia-controller.kardia.svc.cluster.local:8444
+            - name: Agent__ResultJournalDirectory
+              value: /state/results
+            - name: Agent__LogSpoolDirectory
+              value: /state/logs
+            - name: Agent__PackageCache
+              value: /state/packages
+            - name: Secrets__LocalDirectory
+              value: /state/secrets
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1654
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 200m, memory: 256Mi}
+            limits: {cpu: "2", memory: 768Mi}
+          volumeMounts:
+            - {name: state, mountPath: /state}
+            - {name: ca, mountPath: /certs, readOnly: true}
+      volumes:
+        - name: state
+          hostPath:
+            path: /var/lib/kardia-ha-lab/worker
+            type: DirectoryOrCreate
+        - name: ca
+          configMap: {name: kardia-lab-ca}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kardia-frontend
+  namespace: kardia
+spec:
+  selector:
+    app: kardia-frontend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kardia-frontend
+  namespace: kardia
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: kardia-frontend
+  template:
+    metadata:
+      labels:
+        app: kardia-frontend
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 45
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: kardia-frontend
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: kardia-frontend
+          image: kardia-gateway:{{IMAGE_TAG}}
+          imagePullPolicy: Never
+          ports:
+            - {name: http, containerPort: 8080}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            # The official Caddy binary carries this file capability.
+            capabilities: {drop: [ALL], add: [NET_BIND_SERVICE]}
+          resources:
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+          volumeMounts:
+            - {name: caddy, mountPath: /etc/caddy, readOnly: true}
+            - {name: ca, mountPath: /certs, readOnly: true}
+          readinessProbe:
+            httpGet: {path: /, port: http}
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: {path: /, port: http}
+            periodSeconds: 10
+      volumes:
+        - name: caddy
+          configMap: {name: kardia-frontend}
+        - name: ca
+          configMap: {name: kardia-lab-ca}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kardia-api
+  namespace: kardia
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: kardia-api}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kardia-controller
+  namespace: kardia
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: kardia-controller}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kardia-frontend
+  namespace: kardia
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: kardia-frontend}

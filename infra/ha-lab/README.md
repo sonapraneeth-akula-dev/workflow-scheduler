@@ -123,3 +123,67 @@ docker compose --project-name kardia-ha-lab-data `
 
 PostgreSQL TLS configuration follows its version 18 SSL and `pg_hba.conf`
 references; Azurite path-style account handling follows its official README.
+
+## Application roles
+
+With the platform and shared data ready, deploy from an elevated PowerShell
+7.4+ terminal:
+
+```powershell
+.\infra\ha-lab\deploy.ps1 -ImageTag ha-lab-local-1
+.\infra\ha-lab\forward.ps1
+```
+
+Open `http://127.0.0.1:5180/admin/system`. The forwarder binds **only**
+`127.0.0.1`, reconnects when its frontend pod is replaced, and chooses another
+owned, TLS-verified K3s API server when one is unavailable. It does not change the
+default kubectl context. Native ports `5000`, `5001`, and `5173` remain untouched.
+Keep the forwarder running while using the browser; Ctrl+C stops that forwarder.
+
+`deploy.ps1` builds the existing application Dockerfiles, imports the same
+Linux/amd64 images into all three machines, runs migrations once before applying
+the application resources, and checks the **actual runtime inventory** before
+reporting success. `-SkipBuild` reuses images already built with that tag.
+Imported tags are immutable: use a new tag for a new build. Archives and image
+identities are retained in protected `.wf\ha-lab\images`.
+The public .NET package mirror is used for the lab's control-plane build.
+
+All application resources use namespace `kardia` and `kardia-*` names:
+
+| Role | Kubernetes workload | Placement and state |
+| --- | --- | --- |
+| Frontend | Deployment, 2 replicas | Separate hosts; same-origin TLS proxy to APIs/controllers |
+| API | Deployment, 2 replicas | Separate hosts; private-address HTTPS port 8443 |
+| Controller | StatefulSet, 2 replicas | Separate hosts; unique HTTPS endpoint on port 8444; one database lease leader, one standby |
+| Worker | DaemonSet, 1 per machine | 2 task slots each; persistent UUID, result journals, logs, package cache and local secret directory |
+
+API/controller host networking reuses the application's existing explicit trusted
+Development LAN listener; loopback ports differ between the roles to prevent
+collisions. Every private node IP and controller/service DNS name is covered by
+the protected application certificate. Only the public CA certificate and the
+required leaf key are mounted, never the CA private key. The frontend and workers
+validate upstream certificates. This is intentionally a login-free **isolated
+local lab**, not an Azure production configuration.
+
+Workers retain `/var/lib/kardia-ha-lab/worker` on each owned VM across pod
+replacements. Missing identity alongside existing state fails rather than
+silently registering a different worker. Permanently losing a disk loses that
+worker's local journal; durable controller work and retry policy, not copied RAM,
+govern placement elsewhere.
+
+API/frontend updates use readiness-gated rolling deployments with zero planned
+unavailable replicas and one surge replica. Pod disruption budgets retain a
+replica during voluntary evictions. Controllers/workers use **OnDelete**:
+applying a new image does not interrupt their live processes. A different tag on
+an installed lab is refused unless `-StageOnly` is explicit. That option updates
+API/frontend deployments and desired controller/worker images; it does **not**
+complete a controller/worker rollout or re-enable a drained worker. Do not use it
+as an unattended release procedure. Migrations still need an expand-only,
+backward-compatible design; this script cannot make arbitrary schema changes
+safe to roll back.
+
+`/admin/system` reports observed process/worker heartbeats and durable task/run
+counts, with the real responding API and observed traffic deltas. It does not
+invent frontend placement or make a healthy-lease claim from a Kubernetes pod's
+Running status. `kubectl --kubeconfig .\.wf\ha-lab\kubeconfig -n kardia get pods -o wide`
+shows the full Kubernetes placement, including the frontend pods.

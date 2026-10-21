@@ -4,6 +4,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
+. (Join-Path $PSScriptRoot 'certificate.ps1')
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\.wf\ha-lab'))
 $statePath = Join-Path $root 'lab.json'
 if (!(Test-Path $statePath)) { throw 'Run infra\ha-lab\start.ps1 before provisioning lab data.' }
@@ -95,35 +96,8 @@ try {
         } finally { $server.Dispose() }
     }
     if ($renew) {
-        $key = [Security.Cryptography.RSA]::Create(3072)
-        try {
-            $request = [Security.Cryptography.X509Certificates.CertificateRequest]::new(
-                'CN=kardia-lab-data', $key, [Security.Cryptography.HashAlgorithmName]::SHA256,
-                [Security.Cryptography.RSASignaturePadding]::Pkcs1)
-            $san = [Security.Cryptography.X509Certificates.SubjectAlternativeNameBuilder]::new()
-            $san.AddDnsName('kardia-lab-data')
-            $san.AddIpAddress([Net.IPAddress]::Parse('127.0.0.1'))
-            $san.AddIpAddress([Net.IPAddress]::Parse($hostAddress))
-            $request.CertificateExtensions.Add($san.Build())
-            $request.CertificateExtensions.Add(
-                [Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($false, $false, 0, $true))
-            $request.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
-                [Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature -bor
-                [Security.Cryptography.X509Certificates.X509KeyUsageFlags]::KeyEncipherment, $true))
-            $eku = [Security.Cryptography.OidCollection]::new()
-            $null = $eku.Add([Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.1'))
-            $request.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($eku, $false))
-            $request.CertificateExtensions.Add(
-                [Security.Cryptography.X509Certificates.X509SubjectKeyIdentifierExtension]::new($request.PublicKey, $false))
-            $request.CertificateExtensions.Add(
-                [Security.Cryptography.X509Certificates.X509AuthorityKeyIdentifierExtension]::CreateFromCertificate($ca, $true, $false))
-            $server = $request.Create($ca, [datetimeoffset]::UtcNow.AddMinutes(-5),
-                [datetimeoffset]::UtcNow.AddDays(30), [Security.Cryptography.RandomNumberGenerator]::GetBytes(16))
-            try {
-                [IO.File]::WriteAllText($serverPath, $server.ExportCertificatePem())
-                [IO.File]::WriteAllText($serverKeyPath, $key.ExportPkcs8PrivateKeyPem())
-            } finally { $server.Dispose() }
-        } finally { $key.Dispose() }
+        New-LabServerCertificate $ca $serverPath $serverKeyPath @('kardia-lab-data') `
+            @([Net.IPAddress]::Parse('127.0.0.1'), [Net.IPAddress]::Parse($hostAddress))
     }
 } finally { $ca.Dispose() }
 
