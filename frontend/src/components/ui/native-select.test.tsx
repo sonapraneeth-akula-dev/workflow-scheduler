@@ -66,7 +66,7 @@ describe("shared native dropdown", () => {
     )
     expect(
       container.querySelector('[data-slot="native-select-wrapper"]')
-    ).toHaveClass("w-full")
+    ).toHaveClass("w-full", "h-fit")
     expect(screen.getByRole("combobox")).toHaveAttribute("data-size", "sm")
     expect(screen.getByRole("combobox")).not.toHaveAttribute("size")
   })

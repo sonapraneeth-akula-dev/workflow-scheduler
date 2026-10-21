@@ -46,6 +46,51 @@ async function accessible(page: Page) {
 }
 const headers = { authorization: `Bearer ${fixture.adminToken}` }
 
+test("machine filter dropdown arrows stay centered inside controls beside taller label filters", async ({
+  page,
+}) => {
+  await login(page, fixture.adminToken)
+  const form = page.getByRole("form", { name: "Machine filters" })
+  for (const width of [1920, 1440, 1280, 768, 375]) {
+    await page.setViewportSize({ width, height: 900 })
+    for (const theme of ["light", "dark"]) {
+      await page.evaluate((value) => {
+        document.documentElement.classList.toggle("dark", value === "dark")
+      }, theme)
+      for (const label of ["OS", "Health"]) {
+        const select = form.getByRole("combobox", { name: label, exact: true })
+        const control = await select.boundingBox()
+        const wrapper = await select.locator("..").boundingBox()
+        const arrow = await select
+          .locator("..")
+          .locator('[data-slot="native-select-icon"]')
+          .boundingBox()
+        expect(control).not.toBeNull()
+        expect(wrapper).not.toBeNull()
+        expect(arrow).not.toBeNull()
+        expect(Math.abs(wrapper!.height - control!.height)).toBeLessThan(1)
+        expect(arrow!.y).toBeGreaterThanOrEqual(control!.y)
+        expect(arrow!.y + arrow!.height).toBeLessThanOrEqual(
+          control!.y + control!.height
+        )
+        expect(
+          Math.abs(
+            arrow!.y + arrow!.height / 2 - (control!.y + control!.height / 2)
+          )
+        ).toBeLessThan(1)
+      }
+      expect(
+        await form.evaluate((element) => {
+          const bounds = element.getBoundingClientRect()
+          return (
+            bounds.right <= innerWidth && element.scrollWidth <= bounds.width
+          )
+        })
+      ).toBe(true)
+    }
+  }
+})
+
 test("Admin sees mixed fleet and held reservation, filters, edits audited metadata and receives cross-page heartbeat updates", async ({
   page,
   request,
