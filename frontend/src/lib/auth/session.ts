@@ -16,6 +16,17 @@ const configuration = z.object({
 })
 
 function isDevelopmentAuth(): boolean {
+  if (import.meta.env.VITE_AUTH_MODE === "ha-lab") {
+    if (
+      import.meta.env.MODE !== "ha-lab" ||
+      location.hostname !== "127.0.0.1"
+    ) {
+      throw new Error(
+        "HA lab authentication requires its explicit build mode and IPv4 loopback host."
+      )
+    }
+    return true
+  }
   if (import.meta.env.VITE_AUTH_MODE === "local-compose") {
     if (
       import.meta.env.MODE !== "local-compose" ||

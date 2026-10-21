@@ -66,6 +66,10 @@ cloud-init's NoCloud datasource reference, and K3s's HA embedded-etcd and server
 configuration references. Do not use this local lab as a production Azure
 profile; this script creates no cloud resources.
 
+The browser's explicit `ha-lab` build profile permits login-free access only at
+`127.0.0.1`. It does not expand the Local Compose hostname allowlist or enable
+a bypass in production Entra builds. Never expose this lab frontend publicly.
+
 ## Shared lab data
 
 After starting the VMs, run in PowerShell **7.4 or newer**, with Azure CLI installed:
