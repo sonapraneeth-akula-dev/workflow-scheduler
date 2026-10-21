@@ -196,7 +196,7 @@ describe("live admin system view", () => {
     expect(screen.getByText("No observed application processes.")).toBeVisible()
     expect(screen.getByText("No registered workers.")).toBeVisible()
   })
-  it("keeps the complete inventory when the diagram has a bounded row count", async () => {
+  it("shows every current process in the diagram without truncating replicas", async () => {
     const many: SystemObservation = structuredClone(observation)
     many.snapshot.instances = Array.from({ length: 10 }, (_, index) => ({
       ...observation.snapshot.instances[0],
@@ -205,13 +205,55 @@ describe("live admin system view", () => {
     }))
     vi.mocked(getSystem).mockResolvedValue(many)
     show()
-    expect(
-      await screen.findByText(/Diagram shows the first eight/)
-    ).toBeVisible()
+    const diagram = await screen.findByRole("region", {
+      name: "Observed application flow",
+    })
+    expect(within(diagram).getByText("kardia-api-9")).toBeVisible()
+    expect(screen.queryByText(/Diagram shows the first eight/)).toBeNull()
     const inventory = screen.getByRole("region", {
       name: "Application instance inventory",
     })
     expect(within(inventory).getAllByRole("row")).toHaveLength(11)
+  })
+  it("keeps stopped and missed-heartbeat history out of the live topology and shows passive controllers", async () => {
+    const current: SystemObservation = structuredClone(observation)
+    const inactive = Array.from({ length: 12 }, (_, index) => ({
+      ...observation.snapshot.instances[0],
+      id: index.toString(16).padStart(32, "0"),
+      name: `old-api-${index}`,
+      status: index === 0 ? ("Unhealthy" as const) : ("Stopped" as const),
+    }))
+    current.snapshot.instances.unshift(...inactive)
+    current.snapshot.instances.push({
+      ...observation.snapshot.instances[1],
+      id: "33333333333333333333333333333333",
+      name: "kardia-controller-passive",
+      isLeader: false,
+    })
+    vi.mocked(getSystem).mockResolvedValue(current)
+    show()
+    const diagram = await screen.findByRole("region", {
+      name: "Observed application flow",
+    })
+    expect(within(diagram).queryByText("Stopped")).toBeNull()
+    expect(within(diagram).queryByText("old-api-0")).toBeNull()
+    expect(within(diagram).getAllByText("kardia-api <script>")).toHaveLength(1)
+    expect(within(diagram).getByText("Passive standby")).toBeVisible()
+    expect(within(diagram).getByText("Active leader")).toBeVisible()
+    const inventory = screen.getByRole("region", {
+      name: "Application instance inventory",
+    })
+    expect(within(inventory).getAllByRole("row")).toHaveLength(4)
+    expect(within(inventory).getByText("Passive standby")).toBeVisible()
+    const history = screen.getByRole("group", {
+      name: "Inactive process observations (12)",
+    })
+    expect(within(history).getByText("old-api-0")).not.toBeVisible()
+    await userEvent.click(
+      within(history).getByText("Inactive process observations (12)")
+    )
+    expect(within(history).getByText("old-api-0")).toBeVisible()
+    expect(within(history).getByText("Unhealthy")).toBeVisible()
   })
   it("does not animate unrelated live sends toward this browser", async () => {
     const current = structuredClone(observation)

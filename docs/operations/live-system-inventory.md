@@ -3,9 +3,11 @@
 Open **Live system** in the main navigation (`/admin/system`). Global
 administrators see application processes, their host/pod metadata, the current
 controller lease, worker assignments and cluster totals. The diagram follows
-browser/frontend -> API -> PostgreSQL durable state -> elected controller ->
-workers. Its controller card references an existing process; it does not
-invent another replica when API and controller share a process.
+browser/frontend -> API -> PostgreSQL durable state -> active/passive controllers
+-> workers. Each controller card references an existing process; it does not
+invent another replica when API and controller share a process. Every fresh
+controller is shown, labeled **Active leader**, **Passive standby**, or without
+a ready lease when draining. Only the active leader connects to workers.
 
 Snapshots refresh every two seconds while the page is active. A failed
 request or permission check hides cached inventory. If a request stalls
@@ -14,8 +16,12 @@ left looking healthy. **Pause live updates** retains a clearly labeled
 historical snapshot and disables automatic refresh; **Refresh system** can
 still fetch an explicit snapshot. **Animate observed activity** controls
 motion independently. Reduced-motion preferences disable the one-shot
-flow animations. Keyboard-scrollable tables contain every process/worker;
-the diagram limits each tier to eight entries and states that limit.
+flow animations. Keyboard-scrollable diagrams and tables show all current
+replicas without an eight-entry limit. Healthy and draining processes appear
+in the live topology and main process table. **Inactive process observations**
+holds stopped and missed-heartbeat history in a collapsed section, so retired
+rollout processes cannot push live replicas out of the diagram. An expired
+heartbeat is not proof that a process stopped.
 
 Request/response pulses identify the actual API process from its response
 header. Worker pulses require an observed heartbeat change or an increase in

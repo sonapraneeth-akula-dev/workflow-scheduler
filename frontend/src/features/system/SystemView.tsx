@@ -15,6 +15,15 @@ const cardHeight = 156
 const rowHeight = 184
 const columns = [16, 280, 544, 808, 1072] as const
 const center = (row: number) => 40 + row * rowHeight + cardHeight / 2
+type Instance = SystemFrame["snapshot"]["instances"][number]
+const currentProcess = (row: Instance) =>
+  row.status === "Healthy" || row.status === "Draining"
+
+function controllerRole(row: Instance) {
+  if (row.role !== "ApiController") return "Not a controller"
+  if (row.status !== "Healthy") return "No active lease"
+  return row.isLeader ? "Active leader" : "Passive standby"
+}
 
 function Health({ status }: { status: string }) {
   return (
@@ -101,9 +110,11 @@ function Topology({
   animate: boolean
 }) {
   const { snapshot, respondingInstanceId } = frame
-  const instances = snapshot.instances.slice(0, 8)
-  const workers = snapshot.workers.slice(0, 8)
-  const leader = snapshot.instances.find((row) => row.isLeader)
+  const instances = snapshot.instances.filter(currentProcess)
+  const workers = snapshot.workers
+  const controllers = instances.filter((row) => row.role === "ApiController")
+  const leaderIndex = controllers.findIndex((row) => row.isLeader)
+  const leader = controllers[leaderIndex]
   const response = animate ? snapshot.observedAt : undefined
   const height = 64 + Math.max(1, instances.length, workers.length) * rowHeight
   return (
@@ -114,8 +125,9 @@ function Topology({
       <p className="text-sm text-muted-foreground">
         Pulses: snapshot requests and responses, increased assignments, worker
         heartbeats, or live sends. Lines show logical paths through durable
-        state, not packet traces. The controller lease card points to the same
-        process listed in the API tier.
+        state, not packet traces. All current controller replicas appear,
+        including passive standbys; these are the same processes listed in the
+        API tier. Inactive process observations appear separately below.
       </p>
       <div
         role="region"
@@ -149,17 +161,18 @@ function Topology({
                 />
               </g>
             ))}
-            {leader ? (
+            {controllers.map((controller, index) => (
               <Wire
+                key={controller.id}
                 from={[columns[2] + cardWidth, center(0)]}
-                to={[columns[3], center(0)]}
+                to={[columns[3], center(index)]}
               />
-            ) : null}
+            ))}
             {leader
               ? workers.map((worker, index) => (
                   <g key={worker.id}>
                     <Wire
-                      from={[columns[3] + cardWidth, center(0) - 4]}
+                      from={[columns[3] + cardWidth, center(leaderIndex) - 4]}
                       to={[columns[4], center(index) - 4]}
                       pulse={
                         animate && frame.dispatchWorkers.includes(worker.id)
@@ -168,7 +181,7 @@ function Topology({
                       }
                     />
                     <Wire
-                      from={[columns[3] + cardWidth, center(0) + 4]}
+                      from={[columns[3] + cardWidth, center(leaderIndex) + 4]}
                       to={[columns[4], center(index) + 4]}
                       pulse={
                         animate && frame.heartbeatWorkers.includes(worker.id)
@@ -185,7 +198,7 @@ function Topology({
             "Browser / frontend",
             "API processes",
             "Durable state",
-            "Elected controller",
+            "Controllers: active / passive",
             "Worker machines / pods",
           ].map((title, index) => (
             <p
@@ -235,22 +248,34 @@ function Topology({
               Database placement is not reported.
             </p>
           </Card>
-          <Card
-            column={columns[3]}
-            row={0}
-            title={leader?.name ?? "No active controller lease"}
-          >
-            <p>
-              {leader
-                ? "One active leader; other controllers standby"
-                : "No fresh ready process holds the database lease."}
-            </p>
-            {leader ? (
+          {controllers.map((controller, index) => (
+            <Card
+              key={controller.id}
+              column={columns[3]}
+              row={index}
+              title={controller.name}
+            >
+              <p>
+                <Health status={controller.status} />
+              </p>
+              <p>{controllerRole(controller)}</p>
+              <p className="truncate" title={controller.nodeName}>
+                Host node: {controller.nodeName}
+              </p>
               <p className="text-xs text-muted-foreground">
                 Same process as the API entry; not another replica.
               </p>
-            ) : null}
-          </Card>
+            </Card>
+          ))}
+          {!controllers.length ? (
+            <Card
+              column={columns[3]}
+              row={0}
+              title="No active controller lease"
+            >
+              <p>No fresh ready controller process is observed.</p>
+            </Card>
+          ) : null}
           {workers.map((worker, index) => (
             <Card
               key={worker.id}
@@ -284,28 +309,40 @@ function Topology({
           ) : null}
         </div>
       </div>
-      {snapshot.instances.length > 8 || snapshot.workers.length > 8 ? (
-        <p>
-          Diagram shows the first eight API processes and workers. Complete
-          inventories below.
+      {controllers.length > 0 && !leader ? (
+        <p role="alert">
+          No active controller lease; standby processes do not imply a healthy
+          leader.
         </p>
       ) : null}
     </figure>
   )
 }
 
-function Inventories({ frame }: { frame: SystemFrame }) {
+function ProcessInventory({
+  instances,
+  historical = false,
+}: {
+  instances: Instance[]
+  historical?: boolean
+}) {
   return (
     <>
       <div
         role="region"
-        aria-label="Application instance inventory"
+        aria-label={
+          historical
+            ? "Inactive application instance inventory"
+            : "Application instance inventory"
+        }
         tabIndex={0}
         className="max-w-full overflow-x-auto"
       >
         <table className="w-full text-left text-sm text-foreground">
           <caption className="mb-2 text-left font-semibold">
-            API and controller processes
+            {historical
+              ? "Stopped and missed-heartbeat process observations"
+              : "API and controller processes"}
           </caption>
           <thead>
             <tr>
@@ -325,7 +362,7 @@ function Inventories({ frame }: { frame: SystemFrame }) {
             </tr>
           </thead>
           <tbody>
-            {frame.snapshot.instances.map((row) => (
+            {instances.map((row) => (
               <tr key={row.id} className="border-t align-top">
                 <th
                   scope="row"
@@ -339,13 +376,7 @@ function Inventories({ frame }: { frame: SystemFrame }) {
                   {row.role === "ApiController"
                     ? "API + controller"
                     : "API only"}
-                  <p>
-                    {row.isLeader
-                      ? "Active leader"
-                      : row.role === "ApiController"
-                        ? "No active lease"
-                        : "Not a controller"}
-                  </p>
+                  <p>{controllerRole(row)}</p>
                 </td>
                 <td className="max-w-64 p-2 break-all">
                   <p>Node: {row.nodeName}</p>
@@ -371,10 +402,36 @@ function Inventories({ frame }: { frame: SystemFrame }) {
             ))}
           </tbody>
         </table>
-        {!frame.snapshot.instances.length ? (
-          <p>No observed application processes.</p>
-        ) : null}
+        {!instances.length ? <p>No observed application processes.</p> : null}
       </div>
+    </>
+  )
+}
+
+function Inventories({ frame }: { frame: SystemFrame }) {
+  const instances = frame.snapshot.instances.filter(currentProcess)
+  const inactive = frame.snapshot.instances.filter(
+    (row) => !currentProcess(row)
+  )
+  return (
+    <>
+      <ProcessInventory instances={instances} />
+      {inactive.length ? (
+        <details
+          aria-label={`Inactive process observations (${inactive.length})`}
+        >
+          <summary className="cursor-pointer font-semibold">
+            Inactive process observations ({inactive.length})
+          </summary>
+          <p className="my-2 text-sm text-muted-foreground">
+            Stopped means that process reported shutdown. Unhealthy means its
+            heartbeat expired, not proof that it stopped. Rollouts retain old
+            process observations for up to 24 hours; these are not current
+            replica counts.
+          </p>
+          <ProcessInventory instances={inactive} historical />
+        </details>
+      ) : null}
       <div
         role="region"
         aria-label="Worker assignment inventory"
