@@ -14,6 +14,11 @@ or an existing PostgreSQL 17+ database. From the repository root:
 | Fully native; no Docker | Same AppHost with `ConnectionStrings__wf` set | Existing native PostgreSQL 17+ |
 | Containerized local environment | `Wf.Cli local up --env dev` or `ppe`, below | Isolated Compose PostgreSQL and application containers |
 
+For an isolated three-VM K3s platform, use `.\infra\ha-lab\start.ps1` from an
+elevated PowerShell 7 terminal. See `infra/ha-lab/README.md` for requirements,
+private networking, preserved VM identity, and lifecycle commands. This
+provisions a separate platform without restarting the native stack.
+
 ```powershell
 dotnet run --project .\backend\src\Wf.AppHost
 ```
