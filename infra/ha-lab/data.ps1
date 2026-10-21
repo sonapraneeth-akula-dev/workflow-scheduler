@@ -140,7 +140,7 @@ $hmac = [IO.File]::ReadAllText((Join-Path $dataRoot 'secrets\upload-hmac-key'))
 ConnectionStrings__Workflow=Host=kardia-lab-data;Port=55432;Database=workflow;Username=kardia;Password=$databasePassword;SSL Mode=VerifyFull;Root Certificate=/certs/ca.crt
 Storage__Provider=AzureBlob
 Storage__Azure__Container=kardia-blobs
-Storage__Azure__EmulatorConnectionString=$($connectionString.Replace('127.0.0.1', 'kardia-lab-data'))
+Storage__Azure__EmulatorConnectionString=$($connectionString.Replace('127.0.0.1', $hostAddress))
 Storage__UploadHmacKey=$hmac
 "@ | Set-Content (Join-Path $dataRoot 'application.env') -Encoding utf8NoBOM
 Write-Host "Lab data ready: PostgreSQL $hostAddress`:55432; HTTPS blobs $hostAddress`:55443."

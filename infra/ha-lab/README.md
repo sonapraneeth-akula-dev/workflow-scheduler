@@ -104,6 +104,11 @@ pointing at the Default Switch host address. Database clients use `VerifyFull`;
 blob clients must trust that CA. Emulator configuration requires an explicit
 Development application environment; it is not a production authentication
 shortcut.
+The emulator's SDK endpoint uses the Default Switch host **IP**, included in the
+server certificate. Do not replace it with `kardia-lab-data`: the .NET SDK treats
+DNS-hosted URLs as production-style addresses and can discard the container
+segment when constructing blob paths. PostgreSQL still uses the verified DNS
+alias.
 
 Rerunning preserves credentials, volumes, and CA identity. It refreshes host
 bindings and renews the 30-day server certificate when needed, recreating only
