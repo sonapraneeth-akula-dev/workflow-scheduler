@@ -2,6 +2,7 @@ import { z } from "zod"
 import { ApiError } from "@/lib/api/client"
 import { accessToken } from "@/lib/auth/session"
 import { parseJson } from "@/lib/json"
+import type { components } from "@/lib/api/schema"
 
 export const noticeSchema = z.object({
   message: z
@@ -16,7 +17,7 @@ export const noticeSchema = z.object({
     ),
   severity: z.enum(["Info", "Warning", "Critical"]),
   expiresAt: z.iso.datetime({ offset: true }).nullable(),
-})
+}) satisfies z.ZodType<components["schemas"]["SystemNotice"]>
 const revisionSchema = z
   .string()
   .regex(/^(0|[1-9][0-9]{0,18})$/)
@@ -25,7 +26,7 @@ const responseSchema = z.object({
   revision: revisionSchema,
   notice: noticeSchema.nullable(),
   canManage: z.boolean(),
-})
+}) satisfies z.ZodType<components["schemas"]["SystemNoticeResponse"]>
 export type SystemNotice = z.infer<typeof noticeSchema>
 export type SystemNoticeSnapshot = z.infer<typeof responseSchema>
 export const noticeQueryKey = ["system-notice"] as const

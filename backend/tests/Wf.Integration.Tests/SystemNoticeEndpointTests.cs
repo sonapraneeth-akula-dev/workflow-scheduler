@@ -188,6 +188,30 @@ public sealed class SystemNoticeEndpointTests(RegistrationHostDatabase database)
         finally { await Execute("INSERT INTO system_notice(singleton) VALUES(true)"); }
     }
 
+    [Fact]
+    public async Task OpenAPI_exports_notice_contract_JSON_and_required_strong_preconditions()
+    {
+        await using var api = await MetricsApiServer.Start(database.DataSource, Token);
+        using var response = await api.Get("/openapi/v1.json", api.Jwt(role: "Admin"), Token);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Token));
+        var paths = document.RootElement.GetProperty("paths");
+        paths.GetProperty(ReadPath).GetProperty("get");
+        foreach (var method in new[] { "put", "delete" })
+        {
+            var operation = paths.GetProperty(WritePath).GetProperty(method);
+            Assert.Contains(operation.GetProperty("parameters").EnumerateArray(),
+                parameter => parameter.GetProperty("name").GetString() == "If-Match" &&
+                    parameter.GetProperty("required").GetBoolean());
+        }
+        var body = paths.GetProperty(WritePath).GetProperty("put").GetProperty("requestBody");
+        Assert.True(body.GetProperty("required").GetBoolean());
+        body.GetProperty("content").GetProperty("application/json");
+        var schema = document.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("SystemNotice");
+        Assert.Equal(new[] { "expiresAt", "message", "severity" },
+            schema.GetProperty("required").EnumerateArray().Select(value => value.GetString()).Order());
+    }
+
     private async Task<SystemNoticeResponse> Read(HttpResponseMessage response)
     {
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
