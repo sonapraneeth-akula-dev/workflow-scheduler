@@ -271,13 +271,16 @@ public sealed class LocalStackModelTests : IDisposable
             .Select(unicast => unicast.Address).First(ip => ip.AddressFamily == AddressFamily.InterNetwork &&
                 !System.Net.IPAddress.IsLoopback(ip)).ToString();
 
-    [Fact]
-    public async Task LocalStack_three_native_and_one_Linux_agent_have_isolated_persistent_identities_labels_and_work_directories()
+    [Theory]
+    [InlineData(5000)]
+    [InlineData(5999)]
+    public async Task LocalStack_three_native_and_one_Linux_agent_have_isolated_persistent_identities_labels_and_work_directories(int apiPort)
     {
         Dictionary<string, string>? identities = null;
         for (var iteration = 0; iteration < 2; iteration++)
         {
-            var builder = Builder(("Local:Agents", "3"), ("Local:LinuxAgent", "true"), ("ConnectionStrings:wf", "Host=127.0.0.1"));
+            var builder = Builder(("Local:Agents", "3"), ("Local:LinuxAgent", "true"), ("Local:ApiPort", apiPort.ToString()),
+                ("ConnectionStrings:wf", "Host=127.0.0.1"));
             LocalStack.Configure(builder);
             await using var app = builder.Build();
             var resources = builder.Resources.Where(resource => resource is ProjectResource or ContainerResource &&
@@ -307,7 +310,7 @@ public sealed class LocalStackModelTests : IDisposable
                     Assert.Equal("/var/lib/wf-agent/results", environment["Agent__ResultJournalDirectory"]);
                     Assert.Equal("/var/lib/wf-agent/secrets", environment["Secrets__LocalDirectory"]);
                     Assert.Equal("wf-local-agent-" + Guid.Parse(environment["Agent__Id"]).ToString("N"), mounts.Source);
-                    Assert.Equal("kardia-agent-linux-" + Guid.Parse(environment["Agent__Id"]).ToString("N"),
+                    Assert.Equal("kardia-local-agent-linux-" + apiPort,
                         Assert.Single(linux.Annotations.OfType<ContainerNameAnnotation>()).Name);
                 }
                 else

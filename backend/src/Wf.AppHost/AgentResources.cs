@@ -60,7 +60,7 @@ public static class AgentResources
     }
 
     internal static void Add(IDistributedApplicationBuilder builder, IResourceBuilder<ProjectResource> host,
-        string root, IReadOnlyList<LocalAgent> agents)
+        string root, IReadOnlyList<LocalAgent> agents, int apiPort)
     {
         foreach (var descriptor in agents)
         {
@@ -72,7 +72,7 @@ public static class AgentResources
                 var backend = Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", ".."));
                 agent = builder.AddDockerfile(descriptor.ResourceName, backend,
                         Path.Combine(backend, "src", "Wf.Agent", "Dockerfile"))
-                    .WithContainerName("kardia-agent-linux-" + descriptor.Id.ToString("N"))
+                    .WithContainerName("kardia-local-agent-linux-" + apiPort.ToString(CultureInfo.InvariantCulture))
                     .WithVolume(name: "wf-local-agent-" + descriptor.Id.ToString("N"), target: "/var/lib/wf-agent")
                     .WithEnvironment("Agent__AllowInsecureTransport", "true")
                     .WaitFor(host);

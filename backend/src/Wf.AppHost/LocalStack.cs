@@ -81,7 +81,7 @@ public static class LocalStack
                 .WithEnvironment("Lan__Port", lan.Port.ToString(System.Globalization.CultureInfo.InvariantCulture))
                 .WithEnvironment("Lan__Certificate", lan.Certificate)
                 .WithEnvironment("Lan__Key", lan.Key);
-        AgentResources.Add(builder, host, root, agents);
+        AgentResources.Add(builder, host, root, agents, apiPort);
         var frontend = Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", "..", "..", "frontend"));
         var ui = builder.AddExecutable("wf-ui", "bun", frontend)
             .WithHttpEndpoint(port: uiPort, targetPort: uiPort, isProxied: false)
