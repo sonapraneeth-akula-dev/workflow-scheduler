@@ -1,5 +1,28 @@
 # Live system inventory
 
+Open **Live system** in the main navigation (`/admin/system`). Global
+administrators see application processes, their host/pod metadata, the current
+controller lease, worker assignments and cluster totals. The diagram follows
+browser/frontend -> API -> PostgreSQL durable state -> elected controller ->
+workers. Its controller card references an existing process; it does not
+invent another replica when API and controller share a process.
+
+Snapshots refresh every two seconds while the page is active. A failed
+request or permission check hides cached inventory. If a request stalls
+past the 15-second freshness window, old inventory is hidden rather than
+left looking healthy. **Pause live updates** retains a clearly labeled
+historical snapshot and disables automatic refresh; **Refresh system** can
+still fetch an explicit snapshot. **Animate observed activity** controls
+motion independently. Reduced-motion preferences disable the one-shot
+flow animations. Keyboard-scrollable tables contain every process/worker;
+the diagram limits each tier to eight entries and states that limit.
+
+Request/response pulses identify the actual API process from its response
+header. Worker pulses require an observed heartbeat change or an increase in
+assigned work between snapshots. First observations and unchanged counters
+do not manufacture worker traffic. Sends to other live clients are reported
+on the API process, not animated as messages to this browser.
+
 `GET /api/v1/admin/system` requires the global `Admin` application role on
 every request. A team administrator is not a system administrator. Responses
 are `no-store`; an unavailable database returns `503`, never an empty healthy
@@ -67,3 +90,22 @@ inventory on the next heartbeat.
 
 Frontend pods, desired replica counts, network packet rates, and machine
 health that the application has not observed are not fabricated.
+
+## Browser regression checks
+
+The opt-in integration check starts an isolated PostgreSQL fixture, signed
+test identities and an ephemeral frontend. Controlled fixture assignments
+and real registry heartbeats verify the UI; this is not a VM failover or
+physical-task execution test.
+
+```powershell
+$env:WF_SYSTEM_BROWSER = 'true'
+$env:WF_FRONTEND_ROOT = (Resolve-Path .\frontend).Path
+dotnet test .\backend\tests\Wf.Integration.Tests\Wf.Integration.Tests.csproj `
+  -c AgentValidation --filter FullyQualifiedName~System_inventory_browser_real
+```
+
+Existing frontend dependencies and installed Playwright Chromium, Firefox
+and WebKit engines are required. Checks include Admin/Viewer boundaries,
+automatic updates, pause/resume, reduced motion, responsive containment,
+light/dark contrast, and hiding cached health on an API outage.

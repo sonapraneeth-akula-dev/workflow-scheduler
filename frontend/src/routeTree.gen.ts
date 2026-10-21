@@ -14,6 +14,7 @@ import { Route as MachinesRouteImport } from './routes/machines'
 import { Route as RecurringJobsRouteImport } from './routes/recurring-jobs'
 import { Route as ServiceHistoryRouteImport } from './routes/service-history'
 import { Route as AdminAuditRouteImport } from './routes/admin.audit'
+import { Route as AdminSystemRouteImport } from './routes/admin.system'
 import { Route as MachinesIdRouteImport } from './routes/machines.$id'
 import { Route as RunsIndexRouteImport } from './routes/runs/index'
 import { Route as RunsIdRouteImport } from './routes/runs.$id'
@@ -57,6 +58,11 @@ const ServiceHistoryRoute = ServiceHistoryRouteImport.update({
 const AdminAuditRoute = AdminAuditRouteImport.update({
   id: '/admin/audit',
   path: '/admin/audit',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminSystemRoute = AdminSystemRouteImport.update({
+  id: '/admin/system',
+  path: '/admin/system',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MachinesIdRoute = MachinesIdRouteImport.update({
@@ -163,6 +169,7 @@ export interface FileRoutesByFullPath {
   '/recurring-jobs': typeof RecurringJobsRoute
   '/service-history': typeof ServiceHistoryRoute
   '/admin/audit': typeof AdminAuditRoute
+  '/admin/system': typeof AdminSystemRoute
   '/machines/$id': typeof MachinesIdRoute
   '/runs/$id': typeof RunsIdRoute
   '/schedules/$id': typeof SchedulesIdRoute
@@ -189,6 +196,7 @@ export interface FileRoutesByTo {
   '/recurring-jobs': typeof RecurringJobsRoute
   '/service-history': typeof ServiceHistoryRoute
   '/admin/audit': typeof AdminAuditRoute
+  '/admin/system': typeof AdminSystemRoute
   '/machines/$id': typeof MachinesIdRoute
   '/runs/$id': typeof RunsIdRoute
   '/schedules/$id': typeof SchedulesIdRoute
@@ -215,6 +223,7 @@ export interface FileRoutesById {
   '/recurring-jobs': typeof RecurringJobsRoute
   '/service-history': typeof ServiceHistoryRoute
   '/admin/audit': typeof AdminAuditRoute
+  '/admin/system': typeof AdminSystemRoute
   '/machines/$id': typeof MachinesIdRoute
   '/runs/$id': typeof RunsIdRoute
   '/schedules/$id': typeof SchedulesIdRoute
@@ -243,6 +252,7 @@ export interface FileRouteTypes {
     | '/recurring-jobs'
     | '/service-history'
     | '/admin/audit'
+    | '/admin/system'
     | '/machines/$id'
     | '/runs/$id'
     | '/schedules/$id'
@@ -269,6 +279,7 @@ export interface FileRouteTypes {
     | '/recurring-jobs'
     | '/service-history'
     | '/admin/audit'
+    | '/admin/system'
     | '/machines/$id'
     | '/runs/$id'
     | '/schedules/$id'
@@ -294,6 +305,7 @@ export interface FileRouteTypes {
     | '/recurring-jobs'
     | '/service-history'
     | '/admin/audit'
+    | '/admin/system'
     | '/machines/$id'
     | '/runs/$id'
     | '/schedules/$id'
@@ -321,6 +333,7 @@ export interface RootRouteChildren {
   RecurringJobsRoute: typeof RecurringJobsRoute
   ServiceHistoryRoute: typeof ServiceHistoryRoute
   AdminAuditRoute: typeof AdminAuditRoute
+  AdminSystemRoute: typeof AdminSystemRoute
   RunsIdRoute: typeof RunsIdRoute
   SchedulesIdRoute: typeof SchedulesIdRoute
   SchedulesNewRoute: typeof SchedulesNewRoute
@@ -373,6 +386,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/audit'
       fullPath: '/admin/audit'
       preLoaderRoute: typeof AdminAuditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/system': {
+      id: '/admin/system'
+      path: '/admin/system'
+      fullPath: '/admin/system'
+      preLoaderRoute: typeof AdminSystemRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/machines/$id': {
@@ -545,6 +565,7 @@ const rootRouteChildren: RootRouteChildren = {
   RecurringJobsRoute: RecurringJobsRoute,
   ServiceHistoryRoute: ServiceHistoryRoute,
   AdminAuditRoute: AdminAuditRoute,
+  AdminSystemRoute: AdminSystemRoute,
   RunsIdRoute: RunsIdRoute,
   SchedulesIdRoute: SchedulesIdRoute,
   SchedulesNewRoute: SchedulesNewRoute,

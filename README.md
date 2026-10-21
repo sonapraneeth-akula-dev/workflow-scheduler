@@ -557,6 +557,8 @@ a stale heartbeat reports `Unhealthy` even before the next sweep.
 Inventory and edits reuse the existing global Admin authorization boundary.
 The explicit loopback development profile remains login-free.
 
+**Live system** (`/admin/system`) is the global-Admin topology and per-worker
+work view, with observed-activity pulses, pause/resume and reduced-motion support.
 Admin `GET /api/v1/admin/system` adds observed API/controller instances, current
 database lease leadership, and per-worker assigned task, parent DAG-node, run
 and workflow counts. Five-second heartbeats expire after 15 seconds; crashes

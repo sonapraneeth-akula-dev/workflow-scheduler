@@ -277,11 +277,12 @@ public sealed partial class AuthorizationMatrixTests
         }
     }
 
-    private Task<Server> SystemServer() => Server.Start(database.DataSource, configure: app =>
+    private Task<Server> SystemServer(Action<WebApplication>? configure = null, bool reporting = false) => Server.Start(database.DataSource, configure: app =>
     {
         app.UseRuntimeActivity();
         app.MapSystemEndpoints();
         app.MapGet("/healthz", () => Results.Ok()).AllowAnonymous();
+        configure?.Invoke(app);
     }, configureServices: services =>
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -294,6 +295,7 @@ public sealed partial class AuthorizationMatrixTests
         services.AddSingleton(RuntimeInstance.Read(configuration, true));
         services.AddSingleton<RuntimeActivity>();
         services.AddSingleton<RuntimeInstanceReporter>();
+        if (reporting) services.AddHostedService(services => services.GetRequiredService<RuntimeInstanceReporter>());
     });
 
     private static async Task<SystemSnapshotResponse> SystemSnapshot(HttpResponseMessage response)

@@ -16,7 +16,9 @@ const subscriptionOrigin = process.env.WF_SUBSCRIPTION_ORIGIN
 const jsonDataflowOrigin = process.env.WF_JSON_DATAFLOW_ORIGIN
 const graphLayoutOrigin = process.env.WF_GRAPH_LAYOUT_ORIGIN
 const signOffOrigin = process.env.WF_SIGNOFF_ORIGIN
+const systemOrigin = process.env.WF_SYSTEM_ORIGIN
 const fixtureOrigin =
+  systemOrigin ??
   signOffOrigin ??
   graphLayoutOrigin ??
   jsonDataflowOrigin ??
@@ -38,6 +40,7 @@ const fixtureOrigin =
 export default defineConfig({
   testDir: "./e2e",
   testIgnore: [
+    ...(!systemOrigin ? ["**/system.spec.ts"] : []),
     ...(!signOffOrigin ? ["**/signoff.spec.ts"] : []),
     ...(!graphLayoutOrigin ? ["**/run-graph-layout.spec.ts"] : []),
     ...(!process.env.WF_FAILURE_RUNS ? ["**/run-failures.spec.ts"] : []),

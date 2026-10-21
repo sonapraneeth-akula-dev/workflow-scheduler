@@ -38,6 +38,15 @@ export function AppHeader({ children }: { children: ReactNode }) {
             Machines
           </Link>
           <Link
+            to="/admin/system"
+            className="inline-flex min-h-10 items-center px-2"
+            activeProps={{
+              className: "bg-secondary text-secondary-foreground",
+            }}
+          >
+            Live system
+          </Link>
+          <Link
             to="/admin/audit"
             className="inline-flex min-h-10 items-center px-2"
             activeProps={{
