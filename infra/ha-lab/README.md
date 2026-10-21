@@ -65,3 +65,57 @@ Sources: Canonical's Ubuntu cloud-image artifact and checksum documentation,
 cloud-init's NoCloud datasource reference, and K3s's HA embedded-etcd and server
 configuration references. Do not use this local lab as a production Azure
 profile; this script creates no cloud resources.
+
+## Shared lab data
+
+After starting the VMs, run in PowerShell **7.4 or newer**, with Azure CLI installed:
+
+```powershell
+.\infra\ha-lab\data.ps1
+```
+
+Creates only the `kardia-ha-lab-data` Docker Compose project: PostgreSQL
+`18.6-alpine`, Azurite `3.37.0`, and Caddy `2.11.7-alpine`. Existing same-named
+resources must carry this lab's identity label; foreign resources are refused.
+PostgreSQL and blobs use named durable volumes outside the VM failure domain.
+**The Windows host and Docker remain storage single points of failure.** This
+tests application/VM failover, not database or storage HA. Production uses managed
+PostgreSQL and Azure Blob Storage instead of this profile.
+
+PostgreSQL port `55432` and blob HTTPS port `55443` bind only loopback and the
+existing Default Switch host address. No host firewall or NAT rules are changed.
+All remote PostgreSQL connections require TLS and SCRAM authentication. The
+`kardia` application login owns `workflow`, allowing application migrations and
+partition maintenance, but has no superuser, role-creation, or database-creation
+privileges. Its password differs from the bootstrap administrator's password.
+Blob authentication uses a private local emulator account, not an Azure account.
+The CLI contacts only the explicit local HTTPS endpoint; no cloud login or
+resource provisioning occurs.
+
+Secrets, private CA, leaf certificates, Compose environment, and application
+environment remain in ACL-protected, Git-ignored `.wf\ha-lab\data`. The CA private
+key is **never** mounted into containers. Application containers need only the
+CA certificate, protected `application.env`, and a `kardia-lab-data` host alias
+pointing at the Default Switch host address. Database clients use `VerifyFull`;
+blob clients must trust that CA. Emulator configuration requires an explicit
+Development application environment; it is not a production authentication
+shortcut.
+
+Rerunning preserves credentials, volumes, and CA identity. It refreshes host
+bindings and renews the 30-day server certificate when needed, recreating only
+this data project's containers during certificate renewal. Do this before
+application work or during a maintenance window. After a host networking change,
+rerun the script and refresh application host aliases. Missing credentials or CA
+for existing data fail closed; restore protected state rather than regenerate it.
+This script provides neither backups nor an automatic trust/key rotation system.
+
+Inspect this project's services without printing secret configuration:
+
+```powershell
+docker compose --project-name kardia-ha-lab-data `
+  --env-file .\.wf\ha-lab\data\compose.env `
+  --file .\infra\ha-lab\data.compose.yml ps
+```
+
+PostgreSQL TLS configuration follows its version 18 SSL and `pg_hba.conf`
+references; Azurite path-style account handling follows its official README.
