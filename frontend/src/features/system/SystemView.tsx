@@ -538,6 +538,12 @@ export function SystemView() {
   const frame =
     permitted && !query.error && (!stale || paused) ? query.data : undefined
   const totals = frame?.snapshot.totals
+  const currentInstances =
+    frame?.snapshot.instances.filter(currentProcess) ?? []
+  const apiReplicas = currentInstances.filter((row) => row.role === "Api")
+  const controllers = currentInstances.filter(
+    (row) => row.role === "ApiController" && row.status === "Healthy"
+  )
   return (
     <section aria-label="Live system inventory" className="min-w-0 space-y-5">
       <div className="flex flex-wrap items-center gap-3">
@@ -605,8 +611,13 @@ export function SystemView() {
           </p>
           <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
             {Object.entries({
-              "API processes (healthy / observed)": `${frame.snapshot.instances.filter((row) => row.status === "Healthy").length} / ${frame.snapshot.instances.length}`,
-              "Controllers (healthy / observed)": `${frame.snapshot.instances.filter((row) => row.role === "ApiController" && row.status === "Healthy").length} / ${frame.snapshot.instances.filter((row) => row.role === "ApiController").length}`,
+              "API-only replicas (healthy / current)": `${apiReplicas.filter((row) => row.status === "Healthy").length} / ${apiReplicas.length}`,
+              "Controllers (active / passive)": `${controllers.filter((row) => row.isLeader).length} / ${controllers.filter((row) => !row.isLeader).length}`,
+              "Draining processes": currentInstances.filter(
+                (row) => row.status === "Draining"
+              ).length,
+              "Inactive process observations":
+                frame.snapshot.instances.length - currentInstances.length,
               "Workers (healthy / registered)": `${frame.snapshot.workers.filter((row) => row.status === "Healthy").length} / ${frame.snapshot.workers.length}`,
               "Active workflows": totals.activeWorkflows,
               "Queued / running / aborting runs": `${totals.queuedRuns} / ${totals.runningRuns} / ${totals.abortingRuns}`,

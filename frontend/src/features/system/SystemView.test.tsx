@@ -245,6 +245,15 @@ describe("live admin system view", () => {
     })
     expect(within(inventory).getAllByRole("row")).toHaveLength(4)
     expect(within(inventory).getByText("Passive standby")).toBeVisible()
+    expect(
+      screen.getByText("API-only replicas (healthy / current)").closest("div")
+    ).toHaveTextContent("1 / 1")
+    expect(
+      screen.getByText("Controllers (active / passive)").closest("div")
+    ).toHaveTextContent("1 / 1")
+    expect(
+      screen.getByText("Inactive process observations").closest("div")
+    ).toHaveTextContent("12")
     const history = screen.getByRole("group", {
       name: "Inactive process observations (12)",
     })
