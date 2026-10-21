@@ -8,6 +8,7 @@ import { ErrorNotice } from "@/components/ErrorNotice"
 import { getSession, signIn, signOut } from "@/lib/auth/session"
 import { useThemePreference } from "@/lib/useThemePreference"
 import { ServiceHistoryPreferences } from "@/lib/ServiceHistoryPreferences"
+import { SystemNoticeBar } from "@/features/notices/SystemNoticeBar"
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   {
@@ -51,6 +52,7 @@ function RootLayout() {
       >
         Skip to content
       </a>
+      {session.data ? <SystemNoticeBar /> : null}
       <AppHeader>
         <ThemeToggle
           dark={theme.dark}

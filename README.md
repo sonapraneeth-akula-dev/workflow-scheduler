@@ -591,6 +591,13 @@ missing readings are not zero. See the
 [live system inventory guide](docs/operations/live-system-inventory.md) for
 placement metadata, activity-counter semantics and migration ordering.
 
+Global Admins can also publish one persistent **System notice** from Live system:
+information, warning or critical, with optional expiry. The plain-text bar appears
+above navigation on every signed-in page until cleared or expired. Shared
+PostgreSQL storage, optimistic concurrency and atomic before/after audit protect
+updates across replicas. This is manual communication, not automatic incident
+detection or an all-clear health indicator.
+
 Admin `PATCH /api/v1/machines/{id}` accepts a nonempty JSON object containing
 `labels`, `pool` and/or `manualCapacity`; labels replace the whole map, and `{ "labels": {} }`
 clears it. Omitted fields stay unchanged; explicit nulls, duplicate/unknown

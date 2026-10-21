@@ -146,6 +146,62 @@ Non-Kubernetes VM/native deployments leave this optional integration disabled;
 the RAM panel reports that it is not configured rather than claiming K3s
 measurements exist. Application process/work counts continue independently.
 
+## Global system notice
+
+Global Admins manage **System notice** on this page, independently of topology
+polling and animation controls. Choose **Create system notice** or **Edit system
+notice**, enter a plain-text message (1-2000 characters), select Information,
+Warning or Critical, optionally choose a future expiry in your browser's local
+time, then **Publish notice**. Blank expiry keeps the notice until cleared.
+**Clear notice** requires confirmation. Changes appear immediately in the
+publishing browser and within 30 seconds on other active, online signed-in pages.
+
+The bar sits above navigation on every signed-in page. It is not dismissible
+per user; HTML and URLs remain literal text. Information and warning updates use
+a polite status region; critical updates use an alert without taking keyboard
+focus. No default or test incident is published. An absent notice does not mean
+the system is healthy; there is no automatic incident detection, scheduled start,
+email delivery or independent external status page.
+
+`GET /api/v1/system-notice` requires authentication, including for non-Admin
+users. It returns a decimal-string `revision`, `notice` (or `null` when cleared
+or expired), `canManage` (global Admin only), and a strong `ETag`. Writes require
+global `Admin` and a valid principal object ID:
+
+```http
+PUT /api/v1/admin/system-notice
+Content-Type: application/json
+If-Match: "0"
+
+{"message":"Describe the actual issue or maintenance.","severity":"Warning","expiresAt":null}
+```
+
+`DELETE /api/v1/admin/system-notice` uses the same `If-Match` header and no body.
+Use the exact ETag from the current read, not the example value. Missing
+preconditions return `428`; stale revisions return `412` without mutation.
+The editor preserves a conflicting draft. Review the current bar, then explicitly
+**Reload latest notice (keep draft)** before retrying. PUT requires all three
+properties, rejects duplicate/unknown fields, invalid control characters and
+past expiry, and limits JSON to 16 KiB. All routes reject query parameters and
+return `no-store`.
+
+Apply additive migration `0050_system_notice.sql` through the normal migration
+job before the new API image. One empty singleton lives in shared PostgreSQL,
+not process memory or browser storage. Each publish/clear increments its revision
+under a row lock and commits the notice together with an audit event
+(`system_notice.publish` / `system_notice.clear`, target `SystemNotice/global`,
+actor, before/after, revision). Audit failure rolls back the change. Expiry hides
+the message on reads and in already-open browsers without requiring a cleanup
+job; it does not create a synthetic administrator audit event.
+
+Database failure is an explicit `503`, never a healthy empty response. Browsers
+keep an unexpired last-received notice during a refresh failure, while labeling
+it unverified and offering **Retry notices**. Offline or stalled snapshots older
+than 90 seconds are also labeled; an unavailable initial read reports unknown
+notice status. A page that is closed, suspended or cannot reach this application
+cannot receive a new notice. Keep a separate out-of-band communication channel
+for a full application outage.
+
 ## Browser regression checks
 
 The opt-in integration check starts an isolated PostgreSQL fixture, signed
