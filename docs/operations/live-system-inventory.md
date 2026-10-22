@@ -148,6 +148,10 @@ measurements exist. Application process/work counts continue independently.
 
 ## Deployment transparency
 
+For the fixed-worker constraints, long-task limitations and proposed maintenance
+policies, see the [deployment review](deployment-review.md). That document
+records open decisions; it does not change the release behavior described here.
+
 **Live system -> Deployments** (`/admin/deployments`) is a separate Global
 Admin-only, read-only view. It never executes a deployment, rollback, pod
 replacement or worker drain. Actual system retains its topology, RAM and notice
